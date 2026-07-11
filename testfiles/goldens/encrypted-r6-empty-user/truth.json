@@ -1,0 +1,136 @@
+{
+  "file": "encrypted-r6-empty-user.pdf",
+  "sha256": "c5289e2d4674da9663dc0854f3632bf54bbe2705fc22b042fc53e4771dd44028",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 2
+    },
+    {
+      "password": "owner",
+      "status": 4
+    },
+    {
+      "password": "invalid-password",
+      "status": 0
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "Hello"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        400,
+        300
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "Hello": [
+          [
+            40,
+            24.199999,
+            94.67201,
+            24.199999,
+            40,
+            57.176,
+            94.67201,
+            57.176
+          ],
+          [
+            40,
+            128.816,
+            76,
+            128.816,
+            40,
+            143.804,
+            76,
+            143.804
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 556,
+          "height": 417,
+          "stride": 2224,
+          "links": [],
+          "search": {
+            "Hello": [
+              [
+                55,
+                33,
+                132,
+                80
+              ],
+              [
+                55,
+                178,
+                106,
+                200
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 834,
+          "height": 625,
+          "stride": 3336,
+          "links": [],
+          "search": {
+            "Hello": [
+              [
+                83,
+                50,
+                198,
+                120
+              ],
+              [
+                83,
+                268,
+                159,
+                300
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 400,
+          "height": 300,
+          "stride": 1600,
+          "links": [],
+          "search": {
+            "Hello": [
+              [
+                40,
+                24,
+                95,
+                58
+              ],
+              [
+                40,
+                128,
+                76,
+                144
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

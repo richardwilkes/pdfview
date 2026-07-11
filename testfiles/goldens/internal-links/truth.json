@@ -1,0 +1,184 @@
+{
+  "file": "internal-links.pdf",
+  "sha256": "c174e0de438f2fdddfee99e24df72dac9919ff60353affc6dafccdcae2598433",
+  "mupdf": "1.27.2",
+  "pageCount": 2,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        200,
+        200
+      ],
+      "linksRaw": [
+        {
+          "uri": "#page=2\u0026zoom=100,30,50",
+          "external": false,
+          "rect": [
+            10,
+            170,
+            90,
+            190
+          ],
+          "page": 1,
+          "destX": 30,
+          "destY": 50
+        },
+        {
+          "uri": "#nameddest=Chapter2",
+          "external": false,
+          "rect": [
+            10,
+            140,
+            90,
+            160
+          ],
+          "page": 1
+        }
+      ],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 278,
+          "height": 278,
+          "stride": 1112,
+          "links": [
+            {
+              "page": 1,
+              "bounds": [
+                13,
+                236,
+                125,
+                264
+              ],
+              "destX": 41,
+              "destY": 69
+            },
+            {
+              "page": 1,
+              "bounds": [
+                13,
+                194,
+                125,
+                223
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ]
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 417,
+          "height": 417,
+          "stride": 1668,
+          "links": [
+            {
+              "page": 1,
+              "bounds": [
+                20,
+                354,
+                188,
+                396
+              ],
+              "destX": 62,
+              "destY": 104
+            },
+            {
+              "page": 1,
+              "bounds": [
+                20,
+                291,
+                188,
+                334
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ]
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 200,
+          "height": 200,
+          "stride": 800,
+          "links": [
+            {
+              "page": 1,
+              "bounds": [
+                10,
+                170,
+                90,
+                190
+              ],
+              "destX": 30,
+              "destY": 50
+            },
+            {
+              "page": 1,
+              "bounds": [
+                10,
+                140,
+                90,
+                160
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "page": 1,
+      "bounds": [
+        0,
+        0,
+        200,
+        200
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page1-100.png",
+          "width": 278,
+          "height": 278,
+          "stride": 1112,
+          "links": []
+        },
+        "150": {
+          "png": "page1-150.png",
+          "width": 417,
+          "height": 417,
+          "stride": 1668,
+          "links": []
+        },
+        "72": {
+          "png": "page1-72.png",
+          "width": 200,
+          "height": 200,
+          "stride": 800,
+          "links": []
+        }
+      }
+    }
+  ]
+}

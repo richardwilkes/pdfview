@@ -5,3 +5,4 @@
 
 # Binary test fixtures must never be line-ending converted.
 *.pdf binary
+*.png binary

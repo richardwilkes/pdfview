@@ -1,0 +1,5896 @@
+{
+  "file": "glaive.pdf",
+  "sha256": "f7952022fac1caeac970d65413addbda49c25acc565be93c95df213043c1fe72",
+  "mupdf": "1.27.2",
+  "pageCount": 2,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "GURPS",
+    "the",
+    "of the",
+    "Glaive"
+  ],
+  "tocRaw": [
+    {
+      "title": "GLAIVE Mini (GMi) is a simple melee weapon creation system for GURPS 4e, yielding quick dam and ST for a Giant's club, a PC blacksmith's invention, or any other design. Like GURPS, it doesn't address how to set length for that Giant's club, or how to calculate a weapon’s cost, or why this sword gets a U Parry and that sword doesn't. Its output isn't carefully calculated from complex inputs or physics formulae. But its results do mesh very well with existing Basic Set (and great with Low-Tech) weapon stats!",
+      "uri": "#page=1\u0026zoom=nan,50,118",
+      "page": 0,
+      "x": 50,
+      "y": 118
+    },
+    {
+      "title": "Find the row for the weapon weight on the GMT. (Use the next lower value: 8 and 9 lbs. use the 8 lb. row.)",
+      "uri": "#page=1\u0026zoom=nan,58.50394,239",
+      "page": 0,
+      "x": 58.50394,
+      "y": 239
+    },
+    {
+      "title": "For each appropriate item on the Modifier Table below, modify the weight row to find each of three stats: thr Dam Add, sw Dam Add, and ST. (Row mods are cumulative: +2 rows and -1 row combine to +1 row.)",
+      "uri": "#page=1\u0026zoom=nan,58.50394,261",
+      "page": 0,
+      "x": 58.50394,
+      "y": 261
+    },
+    {
+      "title": "With a few short notes (below), that's the whole system!",
+      "uri": "#page=1\u0026zoom=nan,50,302",
+      "page": 0,
+      "x": 50,
+      "y": 302
+    },
+    {
+      "title": "Example: Let’s make a sledgehammer weighing 11 lbs. That's the 10-lb. row on the GMT, which suggests Dam Add +4 and ST 13. But first we add a few modifiers:",
+      "uri": "#page=1\u0026zoom=nan,50,314",
+      "page": 0,
+      "x": 50,
+      "y": 314
+    },
+    {
+      "title": "Long (-1 Dam Add row, as it's a Reach 2 weapon)",
+      "uri": "#page=1\u0026zoom=nan,58.50394,346",
+      "page": 0,
+      "x": 58.50394,
+      "y": 346
+    },
+    {
+      "title": "Two-handed (+1 Dam Add row, -2 ST rows)",
+      "uri": "#page=1\u0026zoom=nan,58.50394,358",
+      "page": 0,
+      "x": 58.50394,
+      "y": 358
+    },
+    {
+      "title": "Unbalanced (+2 Dam Add rows for swings, +1 ST row)",
+      "uri": "#page=1\u0026zoom=nan,58.50394,370",
+      "page": 0,
+      "x": 58.50394,
+      "y": 370
+    },
+    {
+      "title": "Net mods are +2 (sw) Dam Add rows and -1 ST row. Treat weight as unchanged for thr dam, 2 rows heavier (15 lbs.) for sw dam, and 1 row lighter (8 lbs.) for ST.",
+      "uri": "#page=1\u0026zoom=nan,50,382",
+      "page": 0,
+      "x": 50,
+      "y": 382
+    },
+    {
+      "title": "Final stats: thr+4, sw+5, and ST 12‡. Done!",
+      "uri": "#page=1\u0026zoom=nan,50,413",
+      "page": 0,
+      "x": 50,
+      "y": 413
+    },
+    {
+      "title": "Use the notes in the Modifier Table, plus the following:",
+      "uri": "#page=1\u0026zoom=nan,50,447",
+      "page": 0,
+      "x": 50,
+      "y": 447
+    },
+    {
+      "title": "Unbalanced: Intended for true unbalanced weapons using appropriate skills, not balanced weapons with an odd U on Parry (e.g., 1-hnd bastard sword).",
+      "uri": "#page=1\u0026zoom=nan,58.50394,459",
+      "page": 0,
+      "x": 58.50394,
+      "y": 459
+    },
+    {
+      "title": "Semibalanced: A new (not official GURPS!) option for tip-heavy swords, agile polearms, and other designs \"in between\" balanced and unbalanced (page 2).",
+      "uri": "#page=1\u0026zoom=nan,58.50394,490",
+      "page": 0,
+      "x": 58.50394,
+      "y": 490
+    },
+    {
+      "title": "Center Grip: A one-hand grip near the weapon's center, or a wide, two-hand grip, for easier wielding.",
+      "uri": "#page=1\u0026zoom=nan,58.50394,522",
+      "page": 0,
+      "x": 58.50394,
+      "y": 522
+    },
+    {
+      "title": "Thruster and Long Thruster: For balanced weapons specialized for thrusts but not swings. Good for knives, spears, rapiers, or any \"thrust-only\" weapon.",
+      "uri": "#page=1\u0026zoom=nan,58.50394,544",
+      "page": 0,
+      "x": 58.50394,
+      "y": 544
+    },
+    {
+      "title": "Stabber: For swords and knives with exceptional impaling ability. Suggested criteria: thr Reach equals max Reach only (no closer); usable 1-hnd but with U Parry if max Reach 2+; can’t combine with Thruster/Long Thruster if 2+ lbs.; min. cost $600 if 3+ lbs.",
+      "uri": "#page=1\u0026zoom=nan,58.50394,575",
+      "page": 0,
+      "x": 58.50394,
+      "y": 575
+    },
+    {
+      "title": "Blackjack: Use Thruster (as damage is thr, even if swung).",
+      "uri": "#page=1\u0026zoom=nan,348.6614,133",
+      "page": 0,
+      "x": 348.6614,
+      "y": 133
+    },
+    {
+      "title": "Dagger: Use Stabber and Thruster.",
+      "uri": "#page=1\u0026zoom=nan,348.6614,145",
+      "page": 0,
+      "x": 348.6614,
+      "y": 145
+    },
+    {
+      "title": "Lance: Use Very Long, Long Thruster, and a special Braced mod: +1 thr Dam Add row, +1 ST row, no Parry.",
+      "uri": "#page=1\u0026zoom=nan,348.6614,157",
+      "page": 0,
+      "x": 348.6614,
+      "y": 157
+    },
+    {
+      "title": "Kusari: Use Very Long and Unbalanced.",
+      "uri": "#page=1\u0026zoom=nan,348.6614,178",
+      "page": 0,
+      "x": 348.6614,
+      "y": 178
+    },
+    {
+      "title": "Whips: As kusari, plus a special rule: Apply -3 ST rows, and get Dam Add using only one-fourth weight.",
+      "uri": "#page=1\u0026zoom=nan,348.6614,190",
+      "page": 0,
+      "x": 348.6614,
+      "y": 190
+    },
+    {
+      "title": "Touch weapons (stun gun, force sword, cattle prod): Use GURPS rules for damage. To get ST from the GMT, halve weight, find ST, then halve ST (e.g., a 2-lb. prod halves weight to get ST 6, then halves ST 6 to get final ST 3).",
+      "uri": "#page=1\u0026zoom=nan,348.6614,212",
+      "page": 0,
+      "x": 348.6614,
+      "y": 212
+    },
+    {
+      "title": "Differences: GMi re-creates many GURPS BS designs right on the nose, but differences crop up. (Examples: With GMi, the BS katana gains +1 thr dam, greatsword sheds 1 ST, and spear/long spear each shed 2 ST if used 2-handed.)",
+      "uri": "#page=1\u0026zoom=nan,347.4176,275",
+      "page": 0,
+      "x": 347.4176,
+      "y": 275
+    },
+    {
+      "title": "Cost: How mods affect cost is up to you. (At the least, Stabber and Poor Stabber suggest modified blade costs.)",
+      "uri": "#page=1\u0026zoom=nan,347.4176,317",
+      "page": 0,
+      "x": 347.4176,
+      "y": 317
+    },
+    {
+      "title": "Versatility: For any rigid weapon, GMi offers both thr and sw dam, even if usage or skill typically ignores one of these.",
+      "uri": "#page=1\u0026zoom=nan,347.4176,338",
+      "page": 0,
+      "x": 347.4176,
+      "y": 338
+    },
+    {
+      "title": "Example: A rapier uses Long and Long Thruster for thr+1 imp, sw-2 cr, and ST 9. An axe uses Unbalanced for thr+1 cr, sw+2 cut, and ST 11. Normal usage notwithstanding, GM willing, you can swing with a rapier and thrust with an axe!",
+      "uri": "#page=1\u0026zoom=nan,347.4176,360",
+      "page": 0,
+      "x": 347.4176,
+      "y": 360
+    },
+    {
+      "title": "Martial Arts (MA) and Low-Tech (LT) offer more weapons to play with. (Some may call for new mods!) LT also gives a few BS weapons new stats – which work great with GMi:",
+      "uri": "#page=1\u0026zoom=nan,344.2667,422",
+      "page": 0,
+      "x": 344.2667,
+      "y": 422
+    },
+    {
+      "title": "The shortsword and cutlass are candidates for Stabber. This would give them +1 thr dam, matching their new stats in LT.",
+      "uri": "#page=1\u0026zoom=nan,347.4176,454",
+      "page": 0,
+      "x": 347.4176,
+      "y": 454
+    },
+    {
+      "title": "LT offers new stats for an axe used with two hands. GMi recreates BS and LT stats, for 1-hnd and new 2-hnd use.",
+      "uri": "#page=1\u0026zoom=nan,347.4176,476",
+      "page": 0,
+      "x": 347.4176,
+      "y": 476
+    },
+    {
+      "title": "LT and GMi both grant the maul, great axe, and scythe +1 sw dam. (GMi, but not LT, also gives the glaive +1 sw dam.)",
+      "uri": "#page=1\u0026zoom=nan,347.4176,498",
+      "page": 0,
+      "x": 347.4176,
+      "y": 498
+    },
+    {
+      "title": "A GMi-built warhammer sheds 1 ST. (But boosting weight to 8 lbs. gives it BS’s ST 12‡ and LT’s new higher dam.)",
+      "uri": "#page=1\u0026zoom=nan,347.4176,519",
+      "page": 0,
+      "x": 347.4176,
+      "y": 519
+    },
+    {
+      "title": "MA and LT Companion 2 offer hooks, hammerheads, and other add-ons that modify weapon weight and cost. Ignoring those books’ methods for determining ST, you can use GMi as-is to get dam and ST, using the modified weapons’ final weights. (At your discretion, weapon balance may also change. Heavy add-ons at the tip could shift balanced to semibalanced, or semibalanced to unbalanced. Add-ons near the hilt could do the opposite, even while adding weight.)",
+      "uri": "#page=1\u0026zoom=nan,347.4176,541",
+      "page": 0,
+      "x": 347.4176,
+      "y": 541
+    },
+    {
+      "title": "Below is a summary of the apparent effects of balance and length in BS, as gathered from its weapon tables and rules:",
+      "uri": "#page=2\u0026zoom=nan,50,145",
+      "page": 1,
+      "x": 50,
+      "y": 145
+    },
+    {
+      "title": "An unbalanced weapon (except the hatchet) takes a U on Parry.",
+      "uri": "#page=2\u0026zoom=nan,58.50394,167",
+      "page": 1,
+      "x": 58.50394,
+      "y": 167
+    },
+    {
+      "title": "A balanced Reach 2+ weapon (except the rapier) uses two hands: mark ST with †. (Some can also be used 1-hnd, often with drawbacks: reduced Reach for the spear and U Parry for the bastard sword and long spear, though no 1-hnd drawback for the katana.)",
+      "uri": "#page=2\u0026zoom=nan,58.50394,179",
+      "page": 1,
+      "x": 58.50394,
+      "y": 179
+    },
+    {
+      "title": "An unbalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to ‡ for sw ST.",
+      "uri": "#page=2\u0026zoom=nan,58.50394,220",
+      "page": 1,
+      "x": 58.50394,
+      "y": 220
+    },
+    {
+      "title": "High wielder ST (BS 270) can eliminate unreadiness (though not U Parry) and even 2-hnd requirements. The Table below summarizes this and adds (1) conditions for 1-hnd but unready use of ‡ weapons (a detail missing in BS) and (2) an original semibalanced (SB) option.",
+      "uri": "#page=2\u0026zoom=nan,50,242",
+      "page": 1,
+      "x": 50,
+      "y": 242
+    },
+    {
+      "title": "Use the Semibalanced (SB) modifier ( for +1 (sw) Dam Add row).",
+      "uri": "#page=2\u0026zoom=nan,58.50394,424",
+      "page": 1,
+      "x": 58.50394,
+      "y": 424
+    },
+    {
+      "title": "A semibalanced weapon takes an S on Parry. An S Parry weapon can Parry and attack on the same turn, but at -2 on the Parry (or -4 on the attack, should attack follow Parry that turn).",
+      "uri": "#page=2\u0026zoom=nan,58.50394,436",
+      "page": 1,
+      "x": 58.50394,
+      "y": 436
+    },
+    {
+      "title": "A semibalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to § for sw ST.",
+      "uri": "#page=2\u0026zoom=nan,58.50394,467",
+      "page": 1,
+      "x": 58.50394,
+      "y": 467
+    },
+    {
+      "title": "Apply the normal U and S to a Parry used with swings. Lessen each by a level with thrusts: U becomes S, and S becomes normal.",
+      "uri": "#page=2\u0026zoom=nan,50,505",
+      "page": 1,
+      "x": 50,
+      "y": 505
+    },
+    {
+      "title": "Example: In the same turn, an unbalanced axe can’t swing and Parry (0U), but using this option can thrust and Parry (0S; see penalties above). In the same turn, a semibalanced axe can swing and Parry with penalties (0S), or can thrust and Parry without penalties (0). Whichever axe you use, this option gives axe thrusts a reason!",
+      "uri": "#page=2\u0026zoom=nan,50,527",
+      "page": 1,
+      "x": 50,
+      "y": 527
+    },
+    {
+      "title": "Decide whether a semibalanced design’s natural handling uses a balanced or unbalanced skill, with the other defaulting at -2. For example, choose Two-Handed Axe/Mace or Two-Handed Sword, or choose Polearm or Spear, and so on, with the other skill at -2.",
+      "uri": "#page=2\u0026zoom=nan,50,600",
+      "page": 1,
+      "x": 50,
+      "y": 600
+    },
+    {
+      "title": "GM willing, buy off the -2 defaulting skill penalty with an Average technique. (Alternately, as a kludge to ignore defaults entirely, add +1 ST row to the build and rule that, with a little extra muscle, this particular semibalanced design is freely usable with either of the skills.)",
+      "uri": "#page=2\u0026zoom=nan,50,641",
+      "page": 1,
+      "x": 50,
+      "y": 641
+    },
+    {
+      "title": "Set a design’s balance as you like. Use SB for \"chopping\" swords and knives, more agile polearms and axes, or any existing GURPS weapon with apparent \"in-between\" balance, like the hatchet (which has no U on Parry) and the naginata (see example below).",
+      "uri": "#page=2\u0026zoom=nan,58.50394,704",
+      "page": 1,
+      "x": 58.50394,
+      "y": 704
+    },
+    {
+      "title": "Out of combat, consider a damage bonus for unbalanced weapons vs objects (doors, tree limbs, etc.), and use a lesser bonus for SB.",
+      "uri": "#page=2\u0026zoom=nan,58.50394,746",
+      "page": 1,
+      "x": 58.50394,
+      "y": 746
+    },
+    {
+      "title": "Optionally, apply other sensible-sounding effects to SB: Allow +2 on ST rolls to unstick a SB pick; apply -2 TH (not -4 TH) to use a broken-off SB weapon head as a clumsy axe/mace (BS 485); etc.",
+      "uri": "#page=2\u0026zoom=nan,58.50394,768",
+      "page": 1,
+      "x": 58.50394,
+      "y": 768
+    },
+    {
+      "title": "As SB weapons, these examples all have Parry 0S. (If you use the above Thrust! Parry! Option, they have sw Parry 0S, thr Parry 0.)",
+      "uri": "#page=2\u0026zoom=nan,313,75",
+      "page": 1,
+      "x": 313,
+      "y": 75
+    },
+    {
+      "title": "A 2.5-lb. machete is a simple build, using Poor Stabber and SB for net -2 (thr) and +1 (sw) Dam Add rows. Final stats: thr-1, sw+1, ST 9. Use Shortsword skill, or Axe/Mace -2. (Make that Axe/Mace, or Shortsword -2, for a machete with more axe-like handling.)",
+      "uri": "#page=2\u0026zoom=nan,321.5039,97",
+      "page": 1,
+      "x": 321.5039,
+      "y": 97
+    },
+    {
+      "title": "Rebuild a 6-lb. naginata using Long, Two-handed, Center Grip (not with sword form!), and SB (to explain the lack of ‡) for net +0 (thr) and +1 (sw) Dam Add rows, -4 ST rows. Final stats: thr+2, sw+3, ST 9† (sw ST 9§). Use Polearm skill, or Spear or Staff at -2.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,138",
+      "page": 1,
+      "x": 321.5039,
+      "y": 138
+    },
+    {
+      "title": "An 8-lb. glaive with SB uses the same build as the above naginata but replaces Long with Very Long, for net -1 (thr) and +0 (sw) Dam Add rows. Final stats: thr+3, sw+3, ST 10† (sw ST 10§).",
+      "uri": "#page=2\u0026zoom=nan,321.5039,180",
+      "page": 1,
+      "x": 321.5039,
+      "y": 180
+    },
+    {
+      "title": "Both polearms become unready after a swing unless wielded with x1.25 ST (a modest ST 12 for the naginata, ST 13 for the glaive).",
+      "uri": "#page=2\u0026zoom=nan,321.5039,212",
+      "page": 1,
+      "x": 321.5039,
+      "y": 212
+    },
+    {
+      "title": "Experiment with all mods, rules, and even the GMT – but be prepared for very different results, especially with large weapons! Some ideas:",
+      "uri": "#page=2\u0026zoom=nan,313,254",
+      "page": 1,
+      "x": 313,
+      "y": 254
+    },
+    {
+      "title": "Two-handed offers a scant +1 Dam Add rows, to match BS' modest damage for such weapons. Try +2 instead for more oomph.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,276",
+      "page": 1,
+      "x": 321.5039,
+      "y": 276
+    },
+    {
+      "title": "Stabber’s complex criteria are set to include the noted weapons while excluding katana, greatsword, rapier, saber, and cavalry saber, all to match BS. Include shortsword and cutlass if you like (see page 1), or tweak criteria to encompass even more weapons.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,298",
+      "page": 1,
+      "x": 321.5039,
+      "y": 298
+    },
+    {
+      "title": "Poor Stabber could be given a variable (thr) Dam Add row, from a modest -1 up to -3 or more (for a low-cost point barely fit to poke).",
+      "uri": "#page=2\u0026zoom=nan,321.5039,339",
+      "page": 1,
+      "x": 321.5039,
+      "y": 339
+    },
+    {
+      "title": "Long and Very Long exist to rein in dam for long weapons (which  are hard to swing fast). Likewise, Long Thruster, Poor Stabber, Pick, Chuk, and Stick exist to achieve BS stats for the appropriate weapons. Experiment with dropping some of these, or set new criteria (such as a minimum $10 cost for Stick – no cheap clubs!).",
+      "uri": "#page=2\u0026zoom=nan,321.5039,361",
+      "page": 1,
+      "x": 321.5039,
+      "y": 361
+    },
+    {
+      "title": "Unbalanced, Semibalanced, Center Grip, and Thruster feel right to the author as they are – but these, too, are at your whim.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,412",
+      "page": 1,
+      "x": 321.5039,
+      "y": 412
+    },
+    {
+      "title": "Oddities: A few BS (and LT) weapons raise questions, including:",
+      "uri": "#page=2\u0026zoom=nan,313,455",
+      "page": 1,
+      "x": 313,
+      "y": 455
+    },
+    {
+      "title": "GURPS' 2-hnd flail lacks the expected ‡. Is this a special effect of whirling? Or should you redesign the weapon with SB and add §? Or stick with Unbalanced and just add the missing ‡? It's your call.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,467",
+      "page": 1,
+      "x": 321.5039,
+      "y": 467
+    },
+    {
+      "title": "What's that odd U Parry on the 1-hnd bastard sword? You could change it to sw Parry 0U and thr Parry 0S. Or sw Parry 0S and thr Parry 0. Or just use a sword-like Parry 0 all around. It's your call.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,498",
+      "page": 1,
+      "x": 321.5039,
+      "y": 498
+    },
+    {
+      "title": "Future work: Shields, futuristic whips, and chainsaws aren't covered in GLAIVE Mini. Apologies to all Viking dominatrix lumberjacks hewing the zombie hordes. (Why is this not a movie?)",
+      "uri": "#page=2\u0026zoom=nan,313,562",
+      "page": 1,
+      "x": 313,
+      "y": 562
+    },
+    {
+      "title": "Is GLAIVE Mini still not quick \u0026 easy enough for you? Try this:",
+      "uri": "#page=2\u0026zoom=nan,313,633",
+      "page": 1,
+      "x": 313,
+      "y": 633
+    },
+    {
+      "title": "Really instant weapons: Get Dam Add and ST from the GMT, as above. Just tweak dam by feel from there: +1 sw for smashy stuff (a mace), +1 thr for stabby stuff (a sword), etc. Do the same for ST: +1 if unbalanced, -1 if thrust only, -1 if Range includes C, -2 or so for using two hands. Or otherwise just wing it. Now go fight!",
+      "uri": "#page=2\u0026zoom=nan,321.5039,645",
+      "page": 1,
+      "x": 321.5039,
+      "y": 645
+    },
+    {
+      "title": "Lost your GMT?: Use GURPS' Size and Speed/Range Table in a pinch. Read Linear Measurement as weapon weight in lbs. and read Size as Dam Add. Set ST to 6 + weight if 1-hnd, or 6 + two-thirds weight if 2-hnd. Tweak dam and ST if you like, as above. Done.",
+      "uri": "#page=2\u0026zoom=nan,321.5039,697",
+      "page": 1,
+      "x": 321.5039,
+      "y": 697
+    },
+    {
+      "title": "GLAIVE for GURPS 3e, an old predecessor to GMi, is a full system for designing melee and ranged low-tech weapons of any size. It generates stats for Min ST, thr/sw dam, readying time, and more. While not updated for 4e, it may hold some good ideas for tinkerers.",
+      "uri": "#page=2\u0026zoom=nan,313,760",
+      "page": 1,
+      "x": 313,
+      "y": 760
+    }
+  ],
+  "toc": {
+    "100": [
+      {
+        "title": "GLAIVE Mini (GMi) is a simple melee weapon creation system for GURPS 4e, yielding quick dam and ST for a Giant's club, a PC blacksmith's invention, or any other design. Like GURPS, it doesn't address how to set length for that Giant's club, or how to calculate a weapon’s cost, or why this sword gets a U Parry and that sword doesn't. Its output isn't carefully calculated from complex inputs or physics formulae. But its results do mesh very well with existing Basic Set (and great with Low-Tech) weapon stats!",
+        "page": 0,
+        "x": 69,
+        "y": 163
+      },
+      {
+        "title": "Find the row for the weapon weight on the GMT. (Use the next lower value: 8 and 9 lbs. use the 8 lb. row.)",
+        "page": 0,
+        "x": 81,
+        "y": 331
+      },
+      {
+        "title": "For each appropriate item on the Modifier Table below, modify the weight row to find each of three stats: thr Dam Add, sw Dam Add, and ST. (Row mods are cumulative: +2 rows and -1 row combine to +1 row.)",
+        "page": 0,
+        "x": 81,
+        "y": 362
+      },
+      {
+        "title": "With a few short notes (below), that's the whole system!",
+        "page": 0,
+        "x": 69,
+        "y": 419
+      },
+      {
+        "title": "Example: Let’s make a sledgehammer weighing 11 lbs. That's the 10-lb. row on the GMT, which suggests Dam Add +4 and ST 13. But first we add a few modifiers:",
+        "page": 0,
+        "x": 69,
+        "y": 436
+      },
+      {
+        "title": "Long (-1 Dam Add row, as it's a Reach 2 weapon)",
+        "page": 0,
+        "x": 81,
+        "y": 480
+      },
+      {
+        "title": "Two-handed (+1 Dam Add row, -2 ST rows)",
+        "page": 0,
+        "x": 81,
+        "y": 497
+      },
+      {
+        "title": "Unbalanced (+2 Dam Add rows for swings, +1 ST row)",
+        "page": 0,
+        "x": 81,
+        "y": 513
+      },
+      {
+        "title": "Net mods are +2 (sw) Dam Add rows and -1 ST row. Treat weight as unchanged for thr dam, 2 rows heavier (15 lbs.) for sw dam, and 1 row lighter (8 lbs.) for ST.",
+        "page": 0,
+        "x": 69,
+        "y": 530
+      },
+      {
+        "title": "Final stats: thr+4, sw+5, and ST 12‡. Done!",
+        "page": 0,
+        "x": 69,
+        "y": 573
+      },
+      {
+        "title": "Use the notes in the Modifier Table, plus the following:",
+        "page": 0,
+        "x": 69,
+        "y": 620
+      },
+      {
+        "title": "Unbalanced: Intended for true unbalanced weapons using appropriate skills, not balanced weapons with an odd U on Parry (e.g., 1-hnd bastard sword).",
+        "page": 0,
+        "x": 81,
+        "y": 637
+      },
+      {
+        "title": "Semibalanced: A new (not official GURPS!) option for tip-heavy swords, agile polearms, and other designs \"in between\" balanced and unbalanced (page 2).",
+        "page": 0,
+        "x": 81,
+        "y": 680
+      },
+      {
+        "title": "Center Grip: A one-hand grip near the weapon's center, or a wide, two-hand grip, for easier wielding.",
+        "page": 0,
+        "x": 81,
+        "y": 724
+      },
+      {
+        "title": "Thruster and Long Thruster: For balanced weapons specialized for thrusts but not swings. Good for knives, spears, rapiers, or any \"thrust-only\" weapon.",
+        "page": 0,
+        "x": 81,
+        "y": 755
+      },
+      {
+        "title": "Stabber: For swords and knives with exceptional impaling ability. Suggested criteria: thr Reach equals max Reach only (no closer); usable 1-hnd but with U Parry if max Reach 2+; can’t combine with Thruster/Long Thruster if 2+ lbs.; min. cost $600 if 3+ lbs.",
+        "page": 0,
+        "x": 81,
+        "y": 798
+      },
+      {
+        "title": "Blackjack: Use Thruster (as damage is thr, even if swung).",
+        "page": 0,
+        "x": 484,
+        "y": 184
+      },
+      {
+        "title": "Dagger: Use Stabber and Thruster.",
+        "page": 0,
+        "x": 484,
+        "y": 201
+      },
+      {
+        "title": "Lance: Use Very Long, Long Thruster, and a special Braced mod: +1 thr Dam Add row, +1 ST row, no Parry.",
+        "page": 0,
+        "x": 484,
+        "y": 218
+      },
+      {
+        "title": "Kusari: Use Very Long and Unbalanced.",
+        "page": 0,
+        "x": 484,
+        "y": 247
+      },
+      {
+        "title": "Whips: As kusari, plus a special rule: Apply -3 ST rows, and get Dam Add using only one-fourth weight.",
+        "page": 0,
+        "x": 484,
+        "y": 263
+      },
+      {
+        "title": "Touch weapons (stun gun, force sword, cattle prod): Use GURPS rules for damage. To get ST from the GMT, halve weight, find ST, then halve ST (e.g., a 2-lb. prod halves weight to get ST 6, then halves ST 6 to get final ST 3).",
+        "page": 0,
+        "x": 484,
+        "y": 294
+      },
+      {
+        "title": "Differences: GMi re-creates many GURPS BS designs right on the nose, but differences crop up. (Examples: With GMi, the BS katana gains +1 thr dam, greatsword sheds 1 ST, and spear/long spear each shed 2 ST if used 2-handed.)",
+        "page": 0,
+        "x": 482,
+        "y": 381
+      },
+      {
+        "title": "Cost: How mods affect cost is up to you. (At the least, Stabber and Poor Stabber suggest modified blade costs.)",
+        "page": 0,
+        "x": 482,
+        "y": 440
+      },
+      {
+        "title": "Versatility: For any rigid weapon, GMi offers both thr and sw dam, even if usage or skill typically ignores one of these.",
+        "page": 0,
+        "x": 482,
+        "y": 469
+      },
+      {
+        "title": "Example: A rapier uses Long and Long Thruster for thr+1 imp, sw-2 cr, and ST 9. An axe uses Unbalanced for thr+1 cr, sw+2 cut, and ST 11. Normal usage notwithstanding, GM willing, you can swing with a rapier and thrust with an axe!",
+        "page": 0,
+        "x": 482,
+        "y": 499
+      },
+      {
+        "title": "Martial Arts (MA) and Low-Tech (LT) offer more weapons to play with. (Some may call for new mods!) LT also gives a few BS weapons new stats – which work great with GMi:",
+        "page": 0,
+        "x": 478,
+        "y": 586
+      },
+      {
+        "title": "The shortsword and cutlass are candidates for Stabber. This would give them +1 thr dam, matching their new stats in LT.",
+        "page": 0,
+        "x": 482,
+        "y": 630
+      },
+      {
+        "title": "LT offers new stats for an axe used with two hands. GMi recreates BS and LT stats, for 1-hnd and new 2-hnd use.",
+        "page": 0,
+        "x": 482,
+        "y": 661
+      },
+      {
+        "title": "LT and GMi both grant the maul, great axe, and scythe +1 sw dam. (GMi, but not LT, also gives the glaive +1 sw dam.)",
+        "page": 0,
+        "x": 482,
+        "y": 691
+      },
+      {
+        "title": "A GMi-built warhammer sheds 1 ST. (But boosting weight to 8 lbs. gives it BS’s ST 12‡ and LT’s new higher dam.)",
+        "page": 0,
+        "x": 482,
+        "y": 720
+      },
+      {
+        "title": "MA and LT Companion 2 offer hooks, hammerheads, and other add-ons that modify weapon weight and cost. Ignoring those books’ methods for determining ST, you can use GMi as-is to get dam and ST, using the modified weapons’ final weights. (At your discretion, weapon balance may also change. Heavy add-ons at the tip could shift balanced to semibalanced, or semibalanced to unbalanced. Add-ons near the hilt could do the opposite, even while adding weight.)",
+        "page": 0,
+        "x": 482,
+        "y": 751
+      },
+      {
+        "title": "Below is a summary of the apparent effects of balance and length in BS, as gathered from its weapon tables and rules:",
+        "page": 1,
+        "x": 69,
+        "y": 201
+      },
+      {
+        "title": "An unbalanced weapon (except the hatchet) takes a U on Parry.",
+        "page": 1,
+        "x": 81,
+        "y": 231
+      },
+      {
+        "title": "A balanced Reach 2+ weapon (except the rapier) uses two hands: mark ST with †. (Some can also be used 1-hnd, often with drawbacks: reduced Reach for the spear and U Parry for the bastard sword and long spear, though no 1-hnd drawback for the katana.)",
+        "page": 1,
+        "x": 81,
+        "y": 248
+      },
+      {
+        "title": "An unbalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to ‡ for sw ST.",
+        "page": 1,
+        "x": 81,
+        "y": 305
+      },
+      {
+        "title": "High wielder ST (BS 270) can eliminate unreadiness (though not U Parry) and even 2-hnd requirements. The Table below summarizes this and adds (1) conditions for 1-hnd but unready use of ‡ weapons (a detail missing in BS) and (2) an original semibalanced (SB) option.",
+        "page": 1,
+        "x": 69,
+        "y": 336
+      },
+      {
+        "title": "Use the Semibalanced (SB) modifier ( for +1 (sw) Dam Add row).",
+        "page": 1,
+        "x": 81,
+        "y": 588
+      },
+      {
+        "title": "A semibalanced weapon takes an S on Parry. An S Parry weapon can Parry and attack on the same turn, but at -2 on the Parry (or -4 on the attack, should attack follow Parry that turn).",
+        "page": 1,
+        "x": 81,
+        "y": 605
+      },
+      {
+        "title": "A semibalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to § for sw ST.",
+        "page": 1,
+        "x": 81,
+        "y": 648
+      },
+      {
+        "title": "Apply the normal U and S to a Parry used with swings. Lessen each by a level with thrusts: U becomes S, and S becomes normal.",
+        "page": 1,
+        "x": 69,
+        "y": 701
+      },
+      {
+        "title": "Example: In the same turn, an unbalanced axe can’t swing and Parry (0U), but using this option can thrust and Parry (0S; see penalties above). In the same turn, a semibalanced axe can swing and Parry with penalties (0S), or can thrust and Parry without penalties (0). Whichever axe you use, this option gives axe thrusts a reason!",
+        "page": 1,
+        "x": 69,
+        "y": 731
+      },
+      {
+        "title": "Decide whether a semibalanced design’s natural handling uses a balanced or unbalanced skill, with the other defaulting at -2. For example, choose Two-Handed Axe/Mace or Two-Handed Sword, or choose Polearm or Spear, and so on, with the other skill at -2.",
+        "page": 1,
+        "x": 69,
+        "y": 833
+      },
+      {
+        "title": "GM willing, buy off the -2 defaulting skill penalty with an Average technique. (Alternately, as a kludge to ignore defaults entirely, add +1 ST row to the build and rule that, with a little extra muscle, this particular semibalanced design is freely usable with either of the skills.)",
+        "page": 1,
+        "x": 69,
+        "y": 890
+      },
+      {
+        "title": "Set a design’s balance as you like. Use SB for \"chopping\" swords and knives, more agile polearms and axes, or any existing GURPS weapon with apparent \"in-between\" balance, like the hatchet (which has no U on Parry) and the naginata (see example below).",
+        "page": 1,
+        "x": 81,
+        "y": 977
+      },
+      {
+        "title": "Out of combat, consider a damage bonus for unbalanced weapons vs objects (doors, tree limbs, etc.), and use a lesser bonus for SB.",
+        "page": 1,
+        "x": 81,
+        "y": 1036
+      },
+      {
+        "title": "Optionally, apply other sensible-sounding effects to SB: Allow +2 on ST rolls to unstick a SB pick; apply -2 TH (not -4 TH) to use a broken-off SB weapon head as a clumsy axe/mace (BS 485); etc.",
+        "page": 1,
+        "x": 81,
+        "y": 1066
+      },
+      {
+        "title": "As SB weapons, these examples all have Parry 0S. (If you use the above Thrust! Parry! Option, they have sw Parry 0S, thr Parry 0.)",
+        "page": 1,
+        "x": 434,
+        "y": 104
+      },
+      {
+        "title": "A 2.5-lb. machete is a simple build, using Poor Stabber and SB for net -2 (thr) and +1 (sw) Dam Add rows. Final stats: thr-1, sw+1, ST 9. Use Shortsword skill, or Axe/Mace -2. (Make that Axe/Mace, or Shortsword -2, for a machete with more axe-like handling.)",
+        "page": 1,
+        "x": 446,
+        "y": 134
+      },
+      {
+        "title": "Rebuild a 6-lb. naginata using Long, Two-handed, Center Grip (not with sword form!), and SB (to explain the lack of ‡) for net +0 (thr) and +1 (sw) Dam Add rows, -4 ST rows. Final stats: thr+2, sw+3, ST 9† (sw ST 9§). Use Polearm skill, or Spear or Staff at -2.",
+        "page": 1,
+        "x": 446,
+        "y": 191
+      },
+      {
+        "title": "An 8-lb. glaive with SB uses the same build as the above naginata but replaces Long with Very Long, for net -1 (thr) and +0 (sw) Dam Add rows. Final stats: thr+3, sw+3, ST 10† (sw ST 10§).",
+        "page": 1,
+        "x": 446,
+        "y": 249
+      },
+      {
+        "title": "Both polearms become unready after a swing unless wielded with x1.25 ST (a modest ST 12 for the naginata, ST 13 for the glaive).",
+        "page": 1,
+        "x": 446,
+        "y": 294
+      },
+      {
+        "title": "Experiment with all mods, rules, and even the GMT – but be prepared for very different results, especially with large weapons! Some ideas:",
+        "page": 1,
+        "x": 434,
+        "y": 352
+      },
+      {
+        "title": "Two-handed offers a scant +1 Dam Add rows, to match BS' modest damage for such weapons. Try +2 instead for more oomph.",
+        "page": 1,
+        "x": 446,
+        "y": 383
+      },
+      {
+        "title": "Stabber’s complex criteria are set to include the noted weapons while excluding katana, greatsword, rapier, saber, and cavalry saber, all to match BS. Include shortsword and cutlass if you like (see page 1), or tweak criteria to encompass even more weapons.",
+        "page": 1,
+        "x": 446,
+        "y": 413
+      },
+      {
+        "title": "Poor Stabber could be given a variable (thr) Dam Add row, from a modest -1 up to -3 or more (for a low-cost point barely fit to poke).",
+        "page": 1,
+        "x": 446,
+        "y": 470
+      },
+      {
+        "title": "Long and Very Long exist to rein in dam for long weapons (which  are hard to swing fast). Likewise, Long Thruster, Poor Stabber, Pick, Chuk, and Stick exist to achieve BS stats for the appropriate weapons. Experiment with dropping some of these, or set new criteria (such as a minimum $10 cost for Stick – no cheap clubs!).",
+        "page": 1,
+        "x": 446,
+        "y": 501
+      },
+      {
+        "title": "Unbalanced, Semibalanced, Center Grip, and Thruster feel right to the author as they are – but these, too, are at your whim.",
+        "page": 1,
+        "x": 446,
+        "y": 572
+      },
+      {
+        "title": "Oddities: A few BS (and LT) weapons raise questions, including:",
+        "page": 1,
+        "x": 434,
+        "y": 631
+      },
+      {
+        "title": "GURPS' 2-hnd flail lacks the expected ‡. Is this a special effect of whirling? Or should you redesign the weapon with SB and add §? Or stick with Unbalanced and just add the missing ‡? It's your call.",
+        "page": 1,
+        "x": 446,
+        "y": 648
+      },
+      {
+        "title": "What's that odd U Parry on the 1-hnd bastard sword? You could change it to sw Parry 0U and thr Parry 0S. Or sw Parry 0S and thr Parry 0. Or just use a sword-like Parry 0 all around. It's your call.",
+        "page": 1,
+        "x": 446,
+        "y": 691
+      },
+      {
+        "title": "Future work: Shields, futuristic whips, and chainsaws aren't covered in GLAIVE Mini. Apologies to all Viking dominatrix lumberjacks hewing the zombie hordes. (Why is this not a movie?)",
+        "page": 1,
+        "x": 434,
+        "y": 780
+      },
+      {
+        "title": "Is GLAIVE Mini still not quick \u0026 easy enough for you? Try this:",
+        "page": 1,
+        "x": 434,
+        "y": 879
+      },
+      {
+        "title": "Really instant weapons: Get Dam Add and ST from the GMT, as above. Just tweak dam by feel from there: +1 sw for smashy stuff (a mace), +1 thr for stabby stuff (a sword), etc. Do the same for ST: +1 if unbalanced, -1 if thrust only, -1 if Range includes C, -2 or so for using two hands. Or otherwise just wing it. Now go fight!",
+        "page": 1,
+        "x": 446,
+        "y": 895
+      },
+      {
+        "title": "Lost your GMT?: Use GURPS' Size and Speed/Range Table in a pinch. Read Linear Measurement as weapon weight in lbs. and read Size as Dam Add. Set ST to 6 + weight if 1-hnd, or 6 + two-thirds weight if 2-hnd. Tweak dam and ST if you like, as above. Done.",
+        "page": 1,
+        "x": 446,
+        "y": 968
+      },
+      {
+        "title": "GLAIVE for GURPS 3e, an old predecessor to GMi, is a full system for designing melee and ranged low-tech weapons of any size. It generates stats for Min ST, thr/sw dam, readying time, and more. While not updated for 4e, it may hold some good ideas for tinkerers.",
+        "page": 1,
+        "x": 434,
+        "y": 1055
+      }
+    ],
+    "150": [
+      {
+        "title": "GLAIVE Mini (GMi) is a simple melee weapon creation system for GURPS 4e, yielding quick dam and ST for a Giant's club, a PC blacksmith's invention, or any other design. Like GURPS, it doesn't address how to set length for that Giant's club, or how to calculate a weapon’s cost, or why this sword gets a U Parry and that sword doesn't. Its output isn't carefully calculated from complex inputs or physics formulae. But its results do mesh very well with existing Basic Set (and great with Low-Tech) weapon stats!",
+        "page": 0,
+        "x": 104,
+        "y": 245
+      },
+      {
+        "title": "Find the row for the weapon weight on the GMT. (Use the next lower value: 8 and 9 lbs. use the 8 lb. row.)",
+        "page": 0,
+        "x": 121,
+        "y": 497
+      },
+      {
+        "title": "For each appropriate item on the Modifier Table below, modify the weight row to find each of three stats: thr Dam Add, sw Dam Add, and ST. (Row mods are cumulative: +2 rows and -1 row combine to +1 row.)",
+        "page": 0,
+        "x": 121,
+        "y": 543
+      },
+      {
+        "title": "With a few short notes (below), that's the whole system!",
+        "page": 0,
+        "x": 104,
+        "y": 629
+      },
+      {
+        "title": "Example: Let’s make a sledgehammer weighing 11 lbs. That's the 10-lb. row on the GMT, which suggests Dam Add +4 and ST 13. But first we add a few modifiers:",
+        "page": 0,
+        "x": 104,
+        "y": 654
+      },
+      {
+        "title": "Long (-1 Dam Add row, as it's a Reach 2 weapon)",
+        "page": 0,
+        "x": 121,
+        "y": 720
+      },
+      {
+        "title": "Two-handed (+1 Dam Add row, -2 ST rows)",
+        "page": 0,
+        "x": 121,
+        "y": 745
+      },
+      {
+        "title": "Unbalanced (+2 Dam Add rows for swings, +1 ST row)",
+        "page": 0,
+        "x": 121,
+        "y": 770
+      },
+      {
+        "title": "Net mods are +2 (sw) Dam Add rows and -1 ST row. Treat weight as unchanged for thr dam, 2 rows heavier (15 lbs.) for sw dam, and 1 row lighter (8 lbs.) for ST.",
+        "page": 0,
+        "x": 104,
+        "y": 795
+      },
+      {
+        "title": "Final stats: thr+4, sw+5, and ST 12‡. Done!",
+        "page": 0,
+        "x": 104,
+        "y": 860
+      },
+      {
+        "title": "Use the notes in the Modifier Table, plus the following:",
+        "page": 0,
+        "x": 104,
+        "y": 931
+      },
+      {
+        "title": "Unbalanced: Intended for true unbalanced weapons using appropriate skills, not balanced weapons with an odd U on Parry (e.g., 1-hnd bastard sword).",
+        "page": 0,
+        "x": 121,
+        "y": 956
+      },
+      {
+        "title": "Semibalanced: A new (not official GURPS!) option for tip-heavy swords, agile polearms, and other designs \"in between\" balanced and unbalanced (page 2).",
+        "page": 0,
+        "x": 121,
+        "y": 1020
+      },
+      {
+        "title": "Center Grip: A one-hand grip near the weapon's center, or a wide, two-hand grip, for easier wielding.",
+        "page": 0,
+        "x": 121,
+        "y": 1087
+      },
+      {
+        "title": "Thruster and Long Thruster: For balanced weapons specialized for thrusts but not swings. Good for knives, spears, rapiers, or any \"thrust-only\" weapon.",
+        "page": 0,
+        "x": 121,
+        "y": 1133
+      },
+      {
+        "title": "Stabber: For swords and knives with exceptional impaling ability. Suggested criteria: thr Reach equals max Reach only (no closer); usable 1-hnd but with U Parry if max Reach 2+; can’t combine with Thruster/Long Thruster if 2+ lbs.; min. cost $600 if 3+ lbs.",
+        "page": 0,
+        "x": 121,
+        "y": 1197
+      },
+      {
+        "title": "Blackjack: Use Thruster (as damage is thr, even if swung).",
+        "page": 0,
+        "x": 726,
+        "y": 277
+      },
+      {
+        "title": "Dagger: Use Stabber and Thruster.",
+        "page": 0,
+        "x": 726,
+        "y": 302
+      },
+      {
+        "title": "Lance: Use Very Long, Long Thruster, and a special Braced mod: +1 thr Dam Add row, +1 ST row, no Parry.",
+        "page": 0,
+        "x": 726,
+        "y": 327
+      },
+      {
+        "title": "Kusari: Use Very Long and Unbalanced.",
+        "page": 0,
+        "x": 726,
+        "y": 370
+      },
+      {
+        "title": "Whips: As kusari, plus a special rule: Apply -3 ST rows, and get Dam Add using only one-fourth weight.",
+        "page": 0,
+        "x": 726,
+        "y": 395
+      },
+      {
+        "title": "Touch weapons (stun gun, force sword, cattle prod): Use GURPS rules for damage. To get ST from the GMT, halve weight, find ST, then halve ST (e.g., a 2-lb. prod halves weight to get ST 6, then halves ST 6 to get final ST 3).",
+        "page": 0,
+        "x": 726,
+        "y": 441
+      },
+      {
+        "title": "Differences: GMi re-creates many GURPS BS designs right on the nose, but differences crop up. (Examples: With GMi, the BS katana gains +1 thr dam, greatsword sheds 1 ST, and spear/long spear each shed 2 ST if used 2-handed.)",
+        "page": 0,
+        "x": 723,
+        "y": 572
+      },
+      {
+        "title": "Cost: How mods affect cost is up to you. (At the least, Stabber and Poor Stabber suggest modified blade costs.)",
+        "page": 0,
+        "x": 723,
+        "y": 660
+      },
+      {
+        "title": "Versatility: For any rigid weapon, GMi offers both thr and sw dam, even if usage or skill typically ignores one of these.",
+        "page": 0,
+        "x": 723,
+        "y": 704
+      },
+      {
+        "title": "Example: A rapier uses Long and Long Thruster for thr+1 imp, sw-2 cr, and ST 9. An axe uses Unbalanced for thr+1 cr, sw+2 cut, and ST 11. Normal usage notwithstanding, GM willing, you can swing with a rapier and thrust with an axe!",
+        "page": 0,
+        "x": 723,
+        "y": 749
+      },
+      {
+        "title": "Martial Arts (MA) and Low-Tech (LT) offer more weapons to play with. (Some may call for new mods!) LT also gives a few BS weapons new stats – which work great with GMi:",
+        "page": 0,
+        "x": 717,
+        "y": 879
+      },
+      {
+        "title": "The shortsword and cutlass are candidates for Stabber. This would give them +1 thr dam, matching their new stats in LT.",
+        "page": 0,
+        "x": 723,
+        "y": 945
+      },
+      {
+        "title": "LT offers new stats for an axe used with two hands. GMi recreates BS and LT stats, for 1-hnd and new 2-hnd use.",
+        "page": 0,
+        "x": 723,
+        "y": 991
+      },
+      {
+        "title": "LT and GMi both grant the maul, great axe, and scythe +1 sw dam. (GMi, but not LT, also gives the glaive +1 sw dam.)",
+        "page": 0,
+        "x": 723,
+        "y": 1037
+      },
+      {
+        "title": "A GMi-built warhammer sheds 1 ST. (But boosting weight to 8 lbs. gives it BS’s ST 12‡ and LT’s new higher dam.)",
+        "page": 0,
+        "x": 723,
+        "y": 1081
+      },
+      {
+        "title": "MA and LT Companion 2 offer hooks, hammerheads, and other add-ons that modify weapon weight and cost. Ignoring those books’ methods for determining ST, you can use GMi as-is to get dam and ST, using the modified weapons’ final weights. (At your discretion, weapon balance may also change. Heavy add-ons at the tip could shift balanced to semibalanced, or semibalanced to unbalanced. Add-ons near the hilt could do the opposite, even while adding weight.)",
+        "page": 0,
+        "x": 723,
+        "y": 1127
+      },
+      {
+        "title": "Below is a summary of the apparent effects of balance and length in BS, as gathered from its weapon tables and rules:",
+        "page": 1,
+        "x": 104,
+        "y": 302
+      },
+      {
+        "title": "An unbalanced weapon (except the hatchet) takes a U on Parry.",
+        "page": 1,
+        "x": 121,
+        "y": 347
+      },
+      {
+        "title": "A balanced Reach 2+ weapon (except the rapier) uses two hands: mark ST with †. (Some can also be used 1-hnd, often with drawbacks: reduced Reach for the spear and U Parry for the bastard sword and long spear, though no 1-hnd drawback for the katana.)",
+        "page": 1,
+        "x": 121,
+        "y": 372
+      },
+      {
+        "title": "An unbalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to ‡ for sw ST.",
+        "page": 1,
+        "x": 121,
+        "y": 458
+      },
+      {
+        "title": "High wielder ST (BS 270) can eliminate unreadiness (though not U Parry) and even 2-hnd requirements. The Table below summarizes this and adds (1) conditions for 1-hnd but unready use of ‡ weapons (a detail missing in BS) and (2) an original semibalanced (SB) option.",
+        "page": 1,
+        "x": 104,
+        "y": 504
+      },
+      {
+        "title": "Use the Semibalanced (SB) modifier ( for +1 (sw) Dam Add row).",
+        "page": 1,
+        "x": 121,
+        "y": 883
+      },
+      {
+        "title": "A semibalanced weapon takes an S on Parry. An S Parry weapon can Parry and attack on the same turn, but at -2 on the Parry (or -4 on the attack, should attack follow Parry that turn).",
+        "page": 1,
+        "x": 121,
+        "y": 908
+      },
+      {
+        "title": "A semibalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to § for sw ST.",
+        "page": 1,
+        "x": 121,
+        "y": 972
+      },
+      {
+        "title": "Apply the normal U and S to a Parry used with swings. Lessen each by a level with thrusts: U becomes S, and S becomes normal.",
+        "page": 1,
+        "x": 104,
+        "y": 1052
+      },
+      {
+        "title": "Example: In the same turn, an unbalanced axe can’t swing and Parry (0U), but using this option can thrust and Parry (0S; see penalties above). In the same turn, a semibalanced axe can swing and Parry with penalties (0S), or can thrust and Parry without penalties (0). Whichever axe you use, this option gives axe thrusts a reason!",
+        "page": 1,
+        "x": 104,
+        "y": 1097
+      },
+      {
+        "title": "Decide whether a semibalanced design’s natural handling uses a balanced or unbalanced skill, with the other defaulting at -2. For example, choose Two-Handed Axe/Mace or Two-Handed Sword, or choose Polearm or Spear, and so on, with the other skill at -2.",
+        "page": 1,
+        "x": 104,
+        "y": 1249
+      },
+      {
+        "title": "GM willing, buy off the -2 defaulting skill penalty with an Average technique. (Alternately, as a kludge to ignore defaults entirely, add +1 ST row to the build and rule that, with a little extra muscle, this particular semibalanced design is freely usable with either of the skills.)",
+        "page": 1,
+        "x": 104,
+        "y": 1335
+      },
+      {
+        "title": "Set a design’s balance as you like. Use SB for \"chopping\" swords and knives, more agile polearms and axes, or any existing GURPS weapon with apparent \"in-between\" balance, like the hatchet (which has no U on Parry) and the naginata (see example below).",
+        "page": 1,
+        "x": 121,
+        "y": 1466
+      },
+      {
+        "title": "Out of combat, consider a damage bonus for unbalanced weapons vs objects (doors, tree limbs, etc.), and use a lesser bonus for SB.",
+        "page": 1,
+        "x": 121,
+        "y": 1554
+      },
+      {
+        "title": "Optionally, apply other sensible-sounding effects to SB: Allow +2 on ST rolls to unstick a SB pick; apply -2 TH (not -4 TH) to use a broken-off SB weapon head as a clumsy axe/mace (BS 485); etc.",
+        "page": 1,
+        "x": 121,
+        "y": 1599
+      },
+      {
+        "title": "As SB weapons, these examples all have Parry 0S. (If you use the above Thrust! Parry! Option, they have sw Parry 0S, thr Parry 0.)",
+        "page": 1,
+        "x": 652,
+        "y": 156
+      },
+      {
+        "title": "A 2.5-lb. machete is a simple build, using Poor Stabber and SB for net -2 (thr) and +1 (sw) Dam Add rows. Final stats: thr-1, sw+1, ST 9. Use Shortsword skill, or Axe/Mace -2. (Make that Axe/Mace, or Shortsword -2, for a machete with more axe-like handling.)",
+        "page": 1,
+        "x": 669,
+        "y": 202
+      },
+      {
+        "title": "Rebuild a 6-lb. naginata using Long, Two-handed, Center Grip (not with sword form!), and SB (to explain the lack of ‡) for net +0 (thr) and +1 (sw) Dam Add rows, -4 ST rows. Final stats: thr+2, sw+3, ST 9† (sw ST 9§). Use Polearm skill, or Spear or Staff at -2.",
+        "page": 1,
+        "x": 669,
+        "y": 287
+      },
+      {
+        "title": "An 8-lb. glaive with SB uses the same build as the above naginata but replaces Long with Very Long, for net -1 (thr) and +0 (sw) Dam Add rows. Final stats: thr+3, sw+3, ST 10† (sw ST 10§).",
+        "page": 1,
+        "x": 669,
+        "y": 374
+      },
+      {
+        "title": "Both polearms become unready after a swing unless wielded with x1.25 ST (a modest ST 12 for the naginata, ST 13 for the glaive).",
+        "page": 1,
+        "x": 669,
+        "y": 441
+      },
+      {
+        "title": "Experiment with all mods, rules, and even the GMT – but be prepared for very different results, especially with large weapons! Some ideas:",
+        "page": 1,
+        "x": 652,
+        "y": 529
+      },
+      {
+        "title": "Two-handed offers a scant +1 Dam Add rows, to match BS' modest damage for such weapons. Try +2 instead for more oomph.",
+        "page": 1,
+        "x": 669,
+        "y": 574
+      },
+      {
+        "title": "Stabber’s complex criteria are set to include the noted weapons while excluding katana, greatsword, rapier, saber, and cavalry saber, all to match BS. Include shortsword and cutlass if you like (see page 1), or tweak criteria to encompass even more weapons.",
+        "page": 1,
+        "x": 669,
+        "y": 620
+      },
+      {
+        "title": "Poor Stabber could be given a variable (thr) Dam Add row, from a modest -1 up to -3 or more (for a low-cost point barely fit to poke).",
+        "page": 1,
+        "x": 669,
+        "y": 706
+      },
+      {
+        "title": "Long and Very Long exist to rein in dam for long weapons (which  are hard to swing fast). Likewise, Long Thruster, Poor Stabber, Pick, Chuk, and Stick exist to achieve BS stats for the appropriate weapons. Experiment with dropping some of these, or set new criteria (such as a minimum $10 cost for Stick – no cheap clubs!).",
+        "page": 1,
+        "x": 669,
+        "y": 752
+      },
+      {
+        "title": "Unbalanced, Semibalanced, Center Grip, and Thruster feel right to the author as they are – but these, too, are at your whim.",
+        "page": 1,
+        "x": 669,
+        "y": 858
+      },
+      {
+        "title": "Oddities: A few BS (and LT) weapons raise questions, including:",
+        "page": 1,
+        "x": 652,
+        "y": 947
+      },
+      {
+        "title": "GURPS' 2-hnd flail lacks the expected ‡. Is this a special effect of whirling? Or should you redesign the weapon with SB and add §? Or stick with Unbalanced and just add the missing ‡? It's your call.",
+        "page": 1,
+        "x": 669,
+        "y": 972
+      },
+      {
+        "title": "What's that odd U Parry on the 1-hnd bastard sword? You could change it to sw Parry 0U and thr Parry 0S. Or sw Parry 0S and thr Parry 0. Or just use a sword-like Parry 0 all around. It's your call.",
+        "page": 1,
+        "x": 669,
+        "y": 1037
+      },
+      {
+        "title": "Future work: Shields, futuristic whips, and chainsaws aren't covered in GLAIVE Mini. Apologies to all Viking dominatrix lumberjacks hewing the zombie hordes. (Why is this not a movie?)",
+        "page": 1,
+        "x": 652,
+        "y": 1170
+      },
+      {
+        "title": "Is GLAIVE Mini still not quick \u0026 easy enough for you? Try this:",
+        "page": 1,
+        "x": 652,
+        "y": 1318
+      },
+      {
+        "title": "Really instant weapons: Get Dam Add and ST from the GMT, as above. Just tweak dam by feel from there: +1 sw for smashy stuff (a mace), +1 thr for stabby stuff (a sword), etc. Do the same for ST: +1 if unbalanced, -1 if thrust only, -1 if Range includes C, -2 or so for using two hands. Or otherwise just wing it. Now go fight!",
+        "page": 1,
+        "x": 669,
+        "y": 1343
+      },
+      {
+        "title": "Lost your GMT?: Use GURPS' Size and Speed/Range Table in a pinch. Read Linear Measurement as weapon weight in lbs. and read Size as Dam Add. Set ST to 6 + weight if 1-hnd, or 6 + two-thirds weight if 2-hnd. Tweak dam and ST if you like, as above. Done.",
+        "page": 1,
+        "x": 669,
+        "y": 1452
+      },
+      {
+        "title": "GLAIVE for GURPS 3e, an old predecessor to GMi, is a full system for designing melee and ranged low-tech weapons of any size. It generates stats for Min ST, thr/sw dam, readying time, and more. While not updated for 4e, it may hold some good ideas for tinkerers.",
+        "page": 1,
+        "x": 652,
+        "y": 1583
+      }
+    ],
+    "72": [
+      {
+        "title": "GLAIVE Mini (GMi) is a simple melee weapon creation system for GURPS 4e, yielding quick dam and ST for a Giant's club, a PC blacksmith's invention, or any other design. Like GURPS, it doesn't address how to set length for that Giant's club, or how to calculate a weapon’s cost, or why this sword gets a U Parry and that sword doesn't. Its output isn't carefully calculated from complex inputs or physics formulae. But its results do mesh very well with existing Basic Set (and great with Low-Tech) weapon stats!",
+        "page": 0,
+        "x": 50,
+        "y": 118
+      },
+      {
+        "title": "Find the row for the weapon weight on the GMT. (Use the next lower value: 8 and 9 lbs. use the 8 lb. row.)",
+        "page": 0,
+        "x": 58,
+        "y": 239
+      },
+      {
+        "title": "For each appropriate item on the Modifier Table below, modify the weight row to find each of three stats: thr Dam Add, sw Dam Add, and ST. (Row mods are cumulative: +2 rows and -1 row combine to +1 row.)",
+        "page": 0,
+        "x": 58,
+        "y": 261
+      },
+      {
+        "title": "With a few short notes (below), that's the whole system!",
+        "page": 0,
+        "x": 50,
+        "y": 302
+      },
+      {
+        "title": "Example: Let’s make a sledgehammer weighing 11 lbs. That's the 10-lb. row on the GMT, which suggests Dam Add +4 and ST 13. But first we add a few modifiers:",
+        "page": 0,
+        "x": 50,
+        "y": 314
+      },
+      {
+        "title": "Long (-1 Dam Add row, as it's a Reach 2 weapon)",
+        "page": 0,
+        "x": 58,
+        "y": 346
+      },
+      {
+        "title": "Two-handed (+1 Dam Add row, -2 ST rows)",
+        "page": 0,
+        "x": 58,
+        "y": 358
+      },
+      {
+        "title": "Unbalanced (+2 Dam Add rows for swings, +1 ST row)",
+        "page": 0,
+        "x": 58,
+        "y": 370
+      },
+      {
+        "title": "Net mods are +2 (sw) Dam Add rows and -1 ST row. Treat weight as unchanged for thr dam, 2 rows heavier (15 lbs.) for sw dam, and 1 row lighter (8 lbs.) for ST.",
+        "page": 0,
+        "x": 50,
+        "y": 382
+      },
+      {
+        "title": "Final stats: thr+4, sw+5, and ST 12‡. Done!",
+        "page": 0,
+        "x": 50,
+        "y": 413
+      },
+      {
+        "title": "Use the notes in the Modifier Table, plus the following:",
+        "page": 0,
+        "x": 50,
+        "y": 447
+      },
+      {
+        "title": "Unbalanced: Intended for true unbalanced weapons using appropriate skills, not balanced weapons with an odd U on Parry (e.g., 1-hnd bastard sword).",
+        "page": 0,
+        "x": 58,
+        "y": 459
+      },
+      {
+        "title": "Semibalanced: A new (not official GURPS!) option for tip-heavy swords, agile polearms, and other designs \"in between\" balanced and unbalanced (page 2).",
+        "page": 0,
+        "x": 58,
+        "y": 490
+      },
+      {
+        "title": "Center Grip: A one-hand grip near the weapon's center, or a wide, two-hand grip, for easier wielding.",
+        "page": 0,
+        "x": 58,
+        "y": 522
+      },
+      {
+        "title": "Thruster and Long Thruster: For balanced weapons specialized for thrusts but not swings. Good for knives, spears, rapiers, or any \"thrust-only\" weapon.",
+        "page": 0,
+        "x": 58,
+        "y": 544
+      },
+      {
+        "title": "Stabber: For swords and knives with exceptional impaling ability. Suggested criteria: thr Reach equals max Reach only (no closer); usable 1-hnd but with U Parry if max Reach 2+; can’t combine with Thruster/Long Thruster if 2+ lbs.; min. cost $600 if 3+ lbs.",
+        "page": 0,
+        "x": 58,
+        "y": 575
+      },
+      {
+        "title": "Blackjack: Use Thruster (as damage is thr, even if swung).",
+        "page": 0,
+        "x": 348,
+        "y": 133
+      },
+      {
+        "title": "Dagger: Use Stabber and Thruster.",
+        "page": 0,
+        "x": 348,
+        "y": 145
+      },
+      {
+        "title": "Lance: Use Very Long, Long Thruster, and a special Braced mod: +1 thr Dam Add row, +1 ST row, no Parry.",
+        "page": 0,
+        "x": 348,
+        "y": 157
+      },
+      {
+        "title": "Kusari: Use Very Long and Unbalanced.",
+        "page": 0,
+        "x": 348,
+        "y": 178
+      },
+      {
+        "title": "Whips: As kusari, plus a special rule: Apply -3 ST rows, and get Dam Add using only one-fourth weight.",
+        "page": 0,
+        "x": 348,
+        "y": 190
+      },
+      {
+        "title": "Touch weapons (stun gun, force sword, cattle prod): Use GURPS rules for damage. To get ST from the GMT, halve weight, find ST, then halve ST (e.g., a 2-lb. prod halves weight to get ST 6, then halves ST 6 to get final ST 3).",
+        "page": 0,
+        "x": 348,
+        "y": 212
+      },
+      {
+        "title": "Differences: GMi re-creates many GURPS BS designs right on the nose, but differences crop up. (Examples: With GMi, the BS katana gains +1 thr dam, greatsword sheds 1 ST, and spear/long spear each shed 2 ST if used 2-handed.)",
+        "page": 0,
+        "x": 347,
+        "y": 275
+      },
+      {
+        "title": "Cost: How mods affect cost is up to you. (At the least, Stabber and Poor Stabber suggest modified blade costs.)",
+        "page": 0,
+        "x": 347,
+        "y": 317
+      },
+      {
+        "title": "Versatility: For any rigid weapon, GMi offers both thr and sw dam, even if usage or skill typically ignores one of these.",
+        "page": 0,
+        "x": 347,
+        "y": 338
+      },
+      {
+        "title": "Example: A rapier uses Long and Long Thruster for thr+1 imp, sw-2 cr, and ST 9. An axe uses Unbalanced for thr+1 cr, sw+2 cut, and ST 11. Normal usage notwithstanding, GM willing, you can swing with a rapier and thrust with an axe!",
+        "page": 0,
+        "x": 347,
+        "y": 360
+      },
+      {
+        "title": "Martial Arts (MA) and Low-Tech (LT) offer more weapons to play with. (Some may call for new mods!) LT also gives a few BS weapons new stats – which work great with GMi:",
+        "page": 0,
+        "x": 344,
+        "y": 422
+      },
+      {
+        "title": "The shortsword and cutlass are candidates for Stabber. This would give them +1 thr dam, matching their new stats in LT.",
+        "page": 0,
+        "x": 347,
+        "y": 454
+      },
+      {
+        "title": "LT offers new stats for an axe used with two hands. GMi recreates BS and LT stats, for 1-hnd and new 2-hnd use.",
+        "page": 0,
+        "x": 347,
+        "y": 476
+      },
+      {
+        "title": "LT and GMi both grant the maul, great axe, and scythe +1 sw dam. (GMi, but not LT, also gives the glaive +1 sw dam.)",
+        "page": 0,
+        "x": 347,
+        "y": 498
+      },
+      {
+        "title": "A GMi-built warhammer sheds 1 ST. (But boosting weight to 8 lbs. gives it BS’s ST 12‡ and LT’s new higher dam.)",
+        "page": 0,
+        "x": 347,
+        "y": 519
+      },
+      {
+        "title": "MA and LT Companion 2 offer hooks, hammerheads, and other add-ons that modify weapon weight and cost. Ignoring those books’ methods for determining ST, you can use GMi as-is to get dam and ST, using the modified weapons’ final weights. (At your discretion, weapon balance may also change. Heavy add-ons at the tip could shift balanced to semibalanced, or semibalanced to unbalanced. Add-ons near the hilt could do the opposite, even while adding weight.)",
+        "page": 0,
+        "x": 347,
+        "y": 541
+      },
+      {
+        "title": "Below is a summary of the apparent effects of balance and length in BS, as gathered from its weapon tables and rules:",
+        "page": 1,
+        "x": 50,
+        "y": 145
+      },
+      {
+        "title": "An unbalanced weapon (except the hatchet) takes a U on Parry.",
+        "page": 1,
+        "x": 58,
+        "y": 167
+      },
+      {
+        "title": "A balanced Reach 2+ weapon (except the rapier) uses two hands: mark ST with †. (Some can also be used 1-hnd, often with drawbacks: reduced Reach for the spear and U Parry for the bastard sword and long spear, though no 1-hnd drawback for the katana.)",
+        "page": 1,
+        "x": 58,
+        "y": 179
+      },
+      {
+        "title": "An unbalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to ‡ for sw ST.",
+        "page": 1,
+        "x": 58,
+        "y": 220
+      },
+      {
+        "title": "High wielder ST (BS 270) can eliminate unreadiness (though not U Parry) and even 2-hnd requirements. The Table below summarizes this and adds (1) conditions for 1-hnd but unready use of ‡ weapons (a detail missing in BS) and (2) an original semibalanced (SB) option.",
+        "page": 1,
+        "x": 50,
+        "y": 242
+      },
+      {
+        "title": "Use the Semibalanced (SB) modifier ( for +1 (sw) Dam Add row).",
+        "page": 1,
+        "x": 58,
+        "y": 424
+      },
+      {
+        "title": "A semibalanced weapon takes an S on Parry. An S Parry weapon can Parry and attack on the same turn, but at -2 on the Parry (or -4 on the attack, should attack follow Parry that turn).",
+        "page": 1,
+        "x": 58,
+        "y": 436
+      },
+      {
+        "title": "A semibalanced Reach 2+ weapon requires two hands: mark ST with †. If swung, it becomes unready: change † to § for sw ST.",
+        "page": 1,
+        "x": 58,
+        "y": 467
+      },
+      {
+        "title": "Apply the normal U and S to a Parry used with swings. Lessen each by a level with thrusts: U becomes S, and S becomes normal.",
+        "page": 1,
+        "x": 50,
+        "y": 505
+      },
+      {
+        "title": "Example: In the same turn, an unbalanced axe can’t swing and Parry (0U), but using this option can thrust and Parry (0S; see penalties above). In the same turn, a semibalanced axe can swing and Parry with penalties (0S), or can thrust and Parry without penalties (0). Whichever axe you use, this option gives axe thrusts a reason!",
+        "page": 1,
+        "x": 50,
+        "y": 527
+      },
+      {
+        "title": "Decide whether a semibalanced design’s natural handling uses a balanced or unbalanced skill, with the other defaulting at -2. For example, choose Two-Handed Axe/Mace or Two-Handed Sword, or choose Polearm or Spear, and so on, with the other skill at -2.",
+        "page": 1,
+        "x": 50,
+        "y": 600
+      },
+      {
+        "title": "GM willing, buy off the -2 defaulting skill penalty with an Average technique. (Alternately, as a kludge to ignore defaults entirely, add +1 ST row to the build and rule that, with a little extra muscle, this particular semibalanced design is freely usable with either of the skills.)",
+        "page": 1,
+        "x": 50,
+        "y": 641
+      },
+      {
+        "title": "Set a design’s balance as you like. Use SB for \"chopping\" swords and knives, more agile polearms and axes, or any existing GURPS weapon with apparent \"in-between\" balance, like the hatchet (which has no U on Parry) and the naginata (see example below).",
+        "page": 1,
+        "x": 58,
+        "y": 704
+      },
+      {
+        "title": "Out of combat, consider a damage bonus for unbalanced weapons vs objects (doors, tree limbs, etc.), and use a lesser bonus for SB.",
+        "page": 1,
+        "x": 58,
+        "y": 746
+      },
+      {
+        "title": "Optionally, apply other sensible-sounding effects to SB: Allow +2 on ST rolls to unstick a SB pick; apply -2 TH (not -4 TH) to use a broken-off SB weapon head as a clumsy axe/mace (BS 485); etc.",
+        "page": 1,
+        "x": 58,
+        "y": 768
+      },
+      {
+        "title": "As SB weapons, these examples all have Parry 0S. (If you use the above Thrust! Parry! Option, they have sw Parry 0S, thr Parry 0.)",
+        "page": 1,
+        "x": 313,
+        "y": 75
+      },
+      {
+        "title": "A 2.5-lb. machete is a simple build, using Poor Stabber and SB for net -2 (thr) and +1 (sw) Dam Add rows. Final stats: thr-1, sw+1, ST 9. Use Shortsword skill, or Axe/Mace -2. (Make that Axe/Mace, or Shortsword -2, for a machete with more axe-like handling.)",
+        "page": 1,
+        "x": 321,
+        "y": 97
+      },
+      {
+        "title": "Rebuild a 6-lb. naginata using Long, Two-handed, Center Grip (not with sword form!), and SB (to explain the lack of ‡) for net +0 (thr) and +1 (sw) Dam Add rows, -4 ST rows. Final stats: thr+2, sw+3, ST 9† (sw ST 9§). Use Polearm skill, or Spear or Staff at -2.",
+        "page": 1,
+        "x": 321,
+        "y": 138
+      },
+      {
+        "title": "An 8-lb. glaive with SB uses the same build as the above naginata but replaces Long with Very Long, for net -1 (thr) and +0 (sw) Dam Add rows. Final stats: thr+3, sw+3, ST 10† (sw ST 10§).",
+        "page": 1,
+        "x": 321,
+        "y": 180
+      },
+      {
+        "title": "Both polearms become unready after a swing unless wielded with x1.25 ST (a modest ST 12 for the naginata, ST 13 for the glaive).",
+        "page": 1,
+        "x": 321,
+        "y": 212
+      },
+      {
+        "title": "Experiment with all mods, rules, and even the GMT – but be prepared for very different results, especially with large weapons! Some ideas:",
+        "page": 1,
+        "x": 313,
+        "y": 254
+      },
+      {
+        "title": "Two-handed offers a scant +1 Dam Add rows, to match BS' modest damage for such weapons. Try +2 instead for more oomph.",
+        "page": 1,
+        "x": 321,
+        "y": 276
+      },
+      {
+        "title": "Stabber’s complex criteria are set to include the noted weapons while excluding katana, greatsword, rapier, saber, and cavalry saber, all to match BS. Include shortsword and cutlass if you like (see page 1), or tweak criteria to encompass even more weapons.",
+        "page": 1,
+        "x": 321,
+        "y": 298
+      },
+      {
+        "title": "Poor Stabber could be given a variable (thr) Dam Add row, from a modest -1 up to -3 or more (for a low-cost point barely fit to poke).",
+        "page": 1,
+        "x": 321,
+        "y": 339
+      },
+      {
+        "title": "Long and Very Long exist to rein in dam for long weapons (which  are hard to swing fast). Likewise, Long Thruster, Poor Stabber, Pick, Chuk, and Stick exist to achieve BS stats for the appropriate weapons. Experiment with dropping some of these, or set new criteria (such as a minimum $10 cost for Stick – no cheap clubs!).",
+        "page": 1,
+        "x": 321,
+        "y": 361
+      },
+      {
+        "title": "Unbalanced, Semibalanced, Center Grip, and Thruster feel right to the author as they are – but these, too, are at your whim.",
+        "page": 1,
+        "x": 321,
+        "y": 412
+      },
+      {
+        "title": "Oddities: A few BS (and LT) weapons raise questions, including:",
+        "page": 1,
+        "x": 313,
+        "y": 455
+      },
+      {
+        "title": "GURPS' 2-hnd flail lacks the expected ‡. Is this a special effect of whirling? Or should you redesign the weapon with SB and add §? Or stick with Unbalanced and just add the missing ‡? It's your call.",
+        "page": 1,
+        "x": 321,
+        "y": 467
+      },
+      {
+        "title": "What's that odd U Parry on the 1-hnd bastard sword? You could change it to sw Parry 0U and thr Parry 0S. Or sw Parry 0S and thr Parry 0. Or just use a sword-like Parry 0 all around. It's your call.",
+        "page": 1,
+        "x": 321,
+        "y": 498
+      },
+      {
+        "title": "Future work: Shields, futuristic whips, and chainsaws aren't covered in GLAIVE Mini. Apologies to all Viking dominatrix lumberjacks hewing the zombie hordes. (Why is this not a movie?)",
+        "page": 1,
+        "x": 313,
+        "y": 562
+      },
+      {
+        "title": "Is GLAIVE Mini still not quick \u0026 easy enough for you? Try this:",
+        "page": 1,
+        "x": 313,
+        "y": 633
+      },
+      {
+        "title": "Really instant weapons: Get Dam Add and ST from the GMT, as above. Just tweak dam by feel from there: +1 sw for smashy stuff (a mace), +1 thr for stabby stuff (a sword), etc. Do the same for ST: +1 if unbalanced, -1 if thrust only, -1 if Range includes C, -2 or so for using two hands. Or otherwise just wing it. Now go fight!",
+        "page": 1,
+        "x": 321,
+        "y": 645
+      },
+      {
+        "title": "Lost your GMT?: Use GURPS' Size and Speed/Range Table in a pinch. Read Linear Measurement as weapon weight in lbs. and read Size as Dam Add. Set ST to 6 + weight if 1-hnd, or 6 + two-thirds weight if 2-hnd. Tweak dam and ST if you like, as above. Done.",
+        "page": 1,
+        "x": 321,
+        "y": 697
+      },
+      {
+        "title": "GLAIVE for GURPS 3e, an old predecessor to GMi, is a full system for designing melee and ranged low-tech weapons of any size. It generates stats for Min ST, thr/sw dam, readying time, and more. While not updated for 4e, it may hold some good ideas for tinkerers.",
+        "page": 1,
+        "x": 313,
+        "y": 760
+      }
+    ]
+  },
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        595.2,
+        841.8
+      ],
+      "linksRaw": [
+        {
+          "uri": "http://www.gamesdiner.com/glaive_mini",
+          "external": true,
+          "rect": [
+            50,
+            118,
+            107.1875,
+            129
+          ],
+          "page": -1
+        },
+        {
+          "uri": "http://www.gamesdiner.com",
+          "external": true,
+          "rect": [
+            340.125,
+            812.8125,
+            434.3438,
+            823.8125
+          ],
+          "page": -1
+        }
+      ],
+      "searchRaw": {
+        "GURPS": [
+          [
+            109.563965,
+            130.04999,
+            138.71317,
+            130.04999,
+            109.563965,
+            139.04999,
+            138.71317,
+            139.04999
+          ],
+          [
+            117.06259,
+            150.04999,
+            146.21179,
+            150.04999,
+            117.06259,
+            159.04999,
+            146.21179,
+            159.04999
+          ],
+          [
+            190.8985,
+            493.05,
+            220.0477,
+            493.05,
+            190.8985,
+            502.05,
+            220.0477,
+            502.05
+          ],
+          [
+            349,
+            224.04999,
+            378.1492,
+            224.04999,
+            349,
+            233.04999,
+            378.1492,
+            233.04999
+          ],
+          [
+            482.9436,
+            277.05,
+            512.09283,
+            277.05,
+            482.9436,
+            286.05,
+            512.09283,
+            286.05
+          ],
+          [
+            432.01367,
+            408.56,
+            474.68808,
+            408.56,
+            432.01367,
+            420.56,
+            474.68808,
+            420.56
+          ],
+          [
+            130.02441,
+            814.87,
+            162.03021,
+            814.87,
+            130.02441,
+            823.87,
+            162.03021,
+            823.87
+          ],
+          [
+            50,
+            91.32999,
+            89.5472,
+            91.32999,
+            50,
+            102.32999,
+            89.5472,
+            102.32999
+          ],
+          [
+            306,
+            62.174988,
+            330.58652,
+            62.174988,
+            306,
+            69.67499,
+            330.58652,
+            69.67499
+          ]
+        ],
+        "Glaive": [
+          [
+            194.4802,
+            37.639988,
+            223.38258,
+            37.639988,
+            194.4802,
+            45.639988,
+            223.38258,
+            45.639988
+          ],
+          [
+            271.3826,
+            37.639988,
+            300.28497,
+            37.639988,
+            271.3826,
+            45.639988,
+            300.28497,
+            45.639988
+          ],
+          [
+            50,
+            120.04999,
+            85.046,
+            120.04999,
+            50,
+            129.04999,
+            85.046,
+            129.04999
+          ],
+          [
+            491.1405,
+            510.05,
+            512.6865,
+            510.05,
+            491.1405,
+            519.05,
+            512.6865,
+            519.05
+          ],
+          [
+            49,
+            63.31999,
+            139.528,
+            63.31999,
+            49,
+            87.319984,
+            139.528,
+            87.319984
+          ],
+          [
+            271,
+            120.639984,
+            301.176,
+            120.639984,
+            271,
+            128.63998,
+            301.176,
+            128.63998
+          ]
+        ],
+        "of the": [
+          [
+            526.5524,
+            351.05,
+            546.85645,
+            351.05,
+            526.5524,
+            360.05,
+            546.85645,
+            360.05
+          ]
+        ],
+        "the": [
+          [
+            54.41,
+            150.04999,
+            65.228004,
+            150.04999,
+            54.41,
+            159.04999,
+            65.228004,
+            159.04999
+          ],
+          [
+            77.387,
+            242.04999,
+            88.2086,
+            242.04999,
+            77.387,
+            251.04999,
+            88.2086,
+            251.04999
+          ],
+          [
+            118.7906,
+            242.04999,
+            129.6122,
+            242.04999,
+            118.7906,
+            251.04999,
+            129.6122,
+            251.04999
+          ],
+          [
+            198.71239,
+            242.04999,
+            209.534,
+            242.04999,
+            198.71239,
+            251.04999,
+            209.534,
+            251.04999
+          ],
+          [
+            59,
+            251.04999,
+            69.8144,
+            251.04999,
+            59,
+            260.05,
+            69.8144,
+            260.05
+          ],
+          [
+            191.47275,
+            251.04999,
+            202.29076,
+            251.04999,
+            191.47275,
+            260.05,
+            202.29076,
+            260.05
+          ],
+          [
+            169.0592,
+            263.05,
+            179.8808,
+            263.05,
+            169.0592,
+            272.05,
+            179.8808,
+            272.05
+          ],
+          [
+            104.1404,
+            273.05,
+            114.9548,
+            273.05,
+            104.1404,
+            282.05,
+            114.9548,
+            282.05
+          ],
+          [
+            183.33234,
+            305.05,
+            194.15575,
+            305.05,
+            183.33234,
+            314.05,
+            194.15575,
+            314.05
+          ],
+          [
+            74.4296,
+            327.05,
+            85.251205,
+            327.05,
+            74.4296,
+            336.05,
+            85.251205,
+            336.05
+          ],
+          [
+            140.21599,
+            327.05,
+            151.0376,
+            327.05,
+            140.21599,
+            336.05,
+            151.0376,
+            336.05
+          ],
+          [
+            95.556,
+            434.09998,
+            110.554,
+            434.09998,
+            95.556,
+            444.09998,
+            110.554,
+            444.09998
+          ],
+          [
+            65.892204,
+            449.05,
+            76.713806,
+            449.05,
+            65.892204,
+            458.05,
+            76.713806,
+            458.05
+          ],
+          [
+            108.4946,
+            449.05,
+            119.3162,
+            449.05,
+            108.4946,
+            458.05,
+            119.3162,
+            458.05
+          ],
+          [
+            195.23659,
+            449.05,
+            206.0582,
+            449.05,
+            195.23659,
+            458.05,
+            206.0582,
+            458.05
+          ],
+          [
+            222.76402,
+            503.05,
+            233.58203,
+            503.05,
+            222.76402,
+            512.05,
+            233.58203,
+            512.05
+          ],
+          [
+            188.29297,
+            524.05,
+            199.10558,
+            524.05,
+            188.29297,
+            533.05,
+            199.10558,
+            533.05
+          ],
+          [
+            503.87512,
+            224.04999,
+            514.6931,
+            224.04999,
+            503.87512,
+            233.04999,
+            514.6931,
+            233.04999
+          ],
+          [
+            412.87662,
+            234.04999,
+            423.6982,
+            234.04999,
+            412.87662,
+            243.04999,
+            423.6982,
+            243.04999
+          ],
+          [
+            418.075,
+            244.04999,
+            428.8966,
+            244.04999,
+            418.075,
+            253.04999,
+            428.8966,
+            253.04999
+          ],
+          [
+            351.778,
+            263.09998,
+            366.776,
+            263.09998,
+            351.778,
+            273.09998,
+            366.776,
+            273.09998
+          ],
+          [
+            375.482,
+            287.05,
+            386.30002,
+            287.05,
+            375.482,
+            296.05,
+            386.30002,
+            296.05
+          ],
+          [
+            366.32,
+            297.05,
+            377.1416,
+            297.05,
+            366.32,
+            306.05,
+            377.1416,
+            306.05
+          ],
+          [
+            526.51074,
+            319.05,
+            537.32513,
+            319.05,
+            526.51074,
+            328.05,
+            537.32513,
+            328.05
+          ],
+          [
+            536.03485,
+            351.05,
+            546.85645,
+            351.05,
+            536.03485,
+            360.05,
+            546.85645,
+            360.05
+          ],
+          [
+            406.00882,
+            408.56,
+            424.0064,
+            408.56,
+            406.00882,
+            420.56,
+            424.0064,
+            420.56
+          ],
+          [
+            349.1105,
+            457.05,
+            362.9255,
+            457.05,
+            349.1105,
+            466.05,
+            362.9255,
+            466.05
+          ],
+          [
+            385.5278,
+            466.05,
+            396.3494,
+            466.05,
+            385.5278,
+            475.05,
+            396.3494,
+            475.05
+          ],
+          [
+            483.3056,
+            466.05,
+            494.1272,
+            466.05,
+            483.3056,
+            475.05,
+            494.1272,
+            475.05
+          ],
+          [
+            436.5652,
+            500.05,
+            447.37958,
+            500.05,
+            436.5652,
+            509.05,
+            447.37958,
+            509.05
+          ],
+          [
+            536.77484,
+            500.05,
+            547.58923,
+            500.05,
+            536.77484,
+            509.05,
+            547.58923,
+            509.05
+          ],
+          [
+            478.2525,
+            510.05,
+            489.07053,
+            510.05,
+            478.2525,
+            519.05,
+            489.07053,
+            519.05
+          ],
+          [
+            348.41,
+            554.05,
+            359.228,
+            554.05,
+            348.41,
+            563.05,
+            359.228,
+            563.05
+          ],
+          [
+            459.01926,
+            573.05,
+            469.83365,
+            573.05,
+            459.01926,
+            582.05,
+            469.83365,
+            582.05
+          ],
+          [
+            445.92603,
+            593.05,
+            456.74045,
+            593.05,
+            445.92603,
+            602.05,
+            456.74045,
+            602.05
+          ],
+          [
+            345,
+            613.05,
+            355.8144,
+            613.05,
+            345,
+            622.05,
+            355.8144,
+            622.05
+          ],
+          [
+            404.3496,
+            613.05,
+            415.164,
+            613.05,
+            404.3496,
+            622.05,
+            415.164,
+            622.05
+          ],
+          [
+            187.05339,
+            814.87,
+            199.56339,
+            814.87,
+            187.05339,
+            823.87,
+            199.56339,
+            823.87
+          ],
+          [
+            386.4735,
+            76.17499,
+            395.637,
+            76.17499,
+            386.4735,
+            83.67499,
+            395.637,
+            83.67499
+          ],
+          [
+            324.951,
+            90.17499,
+            334.1145,
+            90.17499,
+            324.951,
+            97.67499,
+            334.1145,
+            97.67499
+          ],
+          [
+            405.768,
+            90.17499,
+            414.9315,
+            90.17499,
+            405.768,
+            97.67499,
+            414.9315,
+            97.67499
+          ],
+          [
+            280.928,
+            674.56,
+            292.048,
+            674.56,
+            280.928,
+            683.496,
+            292.048,
+            683.496
+          ],
+          [
+            384.9776,
+            718.56,
+            396.0976,
+            718.56,
+            384.9776,
+            727.496,
+            396.0976,
+            727.496
+          ],
+          [
+            294.42145,
+            637.102,
+            304.85547,
+            637.102,
+            294.42145,
+            644.502,
+            304.85547,
+            644.502
+          ],
+          [
+            356.8923,
+            637.102,
+            367.32632,
+            637.102,
+            356.8923,
+            644.502,
+            367.32632,
+            644.502
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 827,
+          "height": 1170,
+          "stride": 3308,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive_mini",
+              "page": -1,
+              "bounds": [
+                69,
+                163,
+                149,
+                180
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                472,
+                1128,
+                604,
+                1145
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                152,
+                180,
+                193,
+                194
+              ],
+              [
+                162,
+                208,
+                204,
+                221
+              ],
+              [
+                265,
+                684,
+                306,
+                698
+              ],
+              [
+                484,
+                311,
+                526,
+                324
+              ],
+              [
+                670,
+                384,
+                712,
+                398
+              ],
+              [
+                600,
+                567,
+                660,
+                585
+              ],
+              [
+                180,
+                1131,
+                226,
+                1145
+              ],
+              [
+                69,
+                126,
+                125,
+                143
+              ],
+              [
+                425,
+                86,
+                460,
+                97
+              ]
+            ],
+            "Glaive": [
+              [
+                270,
+                52,
+                311,
+                64
+              ],
+              [
+                376,
+                52,
+                418,
+                64
+              ],
+              [
+                69,
+                166,
+                119,
+                180
+              ],
+              [
+                682,
+                708,
+                713,
+                721
+              ],
+              [
+                68,
+                87,
+                194,
+                122
+              ],
+              [
+                376,
+                167,
+                419,
+                179
+              ]
+            ],
+            "of the": [
+              [
+                731,
+                487,
+                760,
+                501
+              ]
+            ],
+            "the": [
+              [
+                75,
+                208,
+                91,
+                221
+              ],
+              [
+                107,
+                336,
+                123,
+                349
+              ],
+              [
+                164,
+                336,
+                181,
+                349
+              ],
+              [
+                275,
+                336,
+                292,
+                349
+              ],
+              [
+                81,
+                348,
+                97,
+                362
+              ],
+              [
+                265,
+                348,
+                281,
+                362
+              ],
+              [
+                234,
+                365,
+                250,
+                378
+              ],
+              [
+                144,
+                379,
+                160,
+                392
+              ],
+              [
+                254,
+                423,
+                270,
+                437
+              ],
+              [
+                103,
+                454,
+                119,
+                467
+              ],
+              [
+                194,
+                454,
+                210,
+                467
+              ],
+              [
+                132,
+                602,
+                154,
+                617
+              ],
+              [
+                91,
+                623,
+                107,
+                637
+              ],
+              [
+                150,
+                623,
+                166,
+                637
+              ],
+              [
+                271,
+                623,
+                287,
+                637
+              ],
+              [
+                309,
+                698,
+                325,
+                712
+              ],
+              [
+                261,
+                727,
+                277,
+                741
+              ],
+              [
+                699,
+                311,
+                715,
+                324
+              ],
+              [
+                573,
+                325,
+                589,
+                338
+              ],
+              [
+                580,
+                338,
+                596,
+                352
+              ],
+              [
+                488,
+                365,
+                510,
+                380
+              ],
+              [
+                521,
+                398,
+                537,
+                412
+              ],
+              [
+                508,
+                412,
+                524,
+                426
+              ],
+              [
+                731,
+                443,
+                747,
+                456
+              ],
+              [
+                744,
+                487,
+                760,
+                501
+              ],
+              [
+                563,
+                567,
+                589,
+                585
+              ],
+              [
+                484,
+                634,
+                505,
+                648
+              ],
+              [
+                535,
+                647,
+                551,
+                660
+              ],
+              [
+                671,
+                647,
+                687,
+                660
+              ],
+              [
+                606,
+                694,
+                622,
+                708
+              ],
+              [
+                745,
+                694,
+                761,
+                708
+              ],
+              [
+                664,
+                708,
+                680,
+                721
+              ],
+              [
+                483,
+                769,
+                499,
+                783
+              ],
+              [
+                637,
+                795,
+                653,
+                809
+              ],
+              [
+                619,
+                823,
+                635,
+                837
+              ],
+              [
+                479,
+                851,
+                495,
+                864
+              ],
+              [
+                561,
+                851,
+                577,
+                864
+              ],
+              [
+                259,
+                1131,
+                278,
+                1145
+              ],
+              [
+                536,
+                105,
+                550,
+                117
+              ],
+              [
+                451,
+                125,
+                465,
+                136
+              ],
+              [
+                563,
+                125,
+                577,
+                136
+              ],
+              [
+                390,
+                936,
+                406,
+                950
+              ],
+              [
+                534,
+                997,
+                551,
+                1011
+              ],
+              [
+                408,
+                884,
+                424,
+                896
+              ],
+              [
+                495,
+                884,
+                511,
+                896
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 1240,
+          "height": 1754,
+          "stride": 4960,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive_mini",
+              "page": -1,
+              "bounds": [
+                104,
+                245,
+                224,
+                269
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                708,
+                1693,
+                905,
+                1717
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                228,
+                270,
+                289,
+                290
+              ],
+              [
+                243,
+                312,
+                305,
+                332
+              ],
+              [
+                397,
+                1027,
+                459,
+                1046
+              ],
+              [
+                727,
+                466,
+                788,
+                486
+              ],
+              [
+                1006,
+                577,
+                1067,
+                596
+              ],
+              [
+                900,
+                851,
+                989,
+                877
+              ],
+              [
+                270,
+                1697,
+                338,
+                1717
+              ],
+              [
+                104,
+                190,
+                187,
+                214
+              ],
+              [
+                637,
+                129,
+                689,
+                146
+              ]
+            ],
+            "Glaive": [
+              [
+                405,
+                78,
+                466,
+                96
+              ],
+              [
+                565,
+                78,
+                626,
+                96
+              ],
+              [
+                104,
+                250,
+                178,
+                269
+              ],
+              [
+                1023,
+                1062,
+                1069,
+                1082
+              ],
+              [
+                102,
+                131,
+                291,
+                182
+              ],
+              [
+                564,
+                251,
+                628,
+                268
+              ]
+            ],
+            "of the": [
+              [
+                1096,
+                731,
+                1140,
+                751
+              ]
+            ],
+            "the": [
+              [
+                113,
+                312,
+                136,
+                332
+              ],
+              [
+                161,
+                504,
+                184,
+                524
+              ],
+              [
+                247,
+                504,
+                271,
+                524
+              ],
+              [
+                413,
+                504,
+                437,
+                524
+              ],
+              [
+                122,
+                523,
+                146,
+                542
+              ],
+              [
+                398,
+                523,
+                422,
+                542
+              ],
+              [
+                352,
+                548,
+                375,
+                567
+              ],
+              [
+                216,
+                568,
+                240,
+                588
+              ],
+              [
+                381,
+                635,
+                405,
+                655
+              ],
+              [
+                155,
+                681,
+                178,
+                701
+              ],
+              [
+                292,
+                681,
+                315,
+                701
+              ],
+              [
+                199,
+                904,
+                231,
+                926
+              ],
+              [
+                137,
+                935,
+                160,
+                955
+              ],
+              [
+                226,
+                935,
+                249,
+                955
+              ],
+              [
+                406,
+                935,
+                430,
+                955
+              ],
+              [
+                464,
+                1048,
+                487,
+                1067
+              ],
+              [
+                392,
+                1091,
+                415,
+                1111
+              ],
+              [
+                1049,
+                466,
+                1073,
+                486
+              ],
+              [
+                860,
+                487,
+                883,
+                507
+              ],
+              [
+                870,
+                508,
+                894,
+                528
+              ],
+              [
+                732,
+                548,
+                765,
+                569
+              ],
+              [
+                782,
+                598,
+                805,
+                617
+              ],
+              [
+                763,
+                618,
+                786,
+                638
+              ],
+              [
+                1096,
+                664,
+                1120,
+                684
+              ],
+              [
+                1116,
+                731,
+                1140,
+                751
+              ],
+              [
+                845,
+                851,
+                884,
+                877
+              ],
+              [
+                727,
+                952,
+                757,
+                971
+              ],
+              [
+                803,
+                970,
+                826,
+                990
+              ],
+              [
+                1006,
+                970,
+                1030,
+                990
+              ],
+              [
+                909,
+                1041,
+                933,
+                1061
+              ],
+              [
+                1118,
+                1041,
+                1141,
+                1061
+              ],
+              [
+                996,
+                1062,
+                1019,
+                1082
+              ],
+              [
+                725,
+                1154,
+                749,
+                1174
+              ],
+              [
+                956,
+                1193,
+                979,
+                1213
+              ],
+              [
+                929,
+                1235,
+                952,
+                1255
+              ],
+              [
+                718,
+                1277,
+                742,
+                1296
+              ],
+              [
+                842,
+                1277,
+                865,
+                1296
+              ],
+              [
+                389,
+                1697,
+                416,
+                1717
+              ],
+              [
+                805,
+                158,
+                825,
+                175
+              ],
+              [
+                676,
+                187,
+                697,
+                204
+              ],
+              [
+                845,
+                187,
+                865,
+                204
+              ],
+              [
+                585,
+                1405,
+                609,
+                1424
+              ],
+              [
+                802,
+                1496,
+                826,
+                1516
+              ],
+              [
+                613,
+                1327,
+                636,
+                1343
+              ],
+              [
+                743,
+                1327,
+                766,
+                1343
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 596,
+          "height": 842,
+          "stride": 2384,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive_mini",
+              "page": -1,
+              "bounds": [
+                50,
+                118,
+                108,
+                129
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                340,
+                812,
+                435,
+                824
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                109,
+                130,
+                139,
+                140
+              ],
+              [
+                117,
+                150,
+                147,
+                160
+              ],
+              [
+                190,
+                493,
+                221,
+                503
+              ],
+              [
+                349,
+                224,
+                379,
+                234
+              ],
+              [
+                482,
+                277,
+                513,
+                287
+              ],
+              [
+                432,
+                408,
+                475,
+                421
+              ],
+              [
+                130,
+                814,
+                163,
+                824
+              ],
+              [
+                50,
+                91,
+                90,
+                103
+              ],
+              [
+                306,
+                62,
+                331,
+                70
+              ]
+            ],
+            "Glaive": [
+              [
+                194,
+                37,
+                224,
+                46
+              ],
+              [
+                271,
+                37,
+                301,
+                46
+              ],
+              [
+                50,
+                120,
+                86,
+                130
+              ],
+              [
+                491,
+                510,
+                513,
+                520
+              ],
+              [
+                49,
+                63,
+                140,
+                88
+              ],
+              [
+                271,
+                120,
+                302,
+                129
+              ]
+            ],
+            "of the": [
+              [
+                526,
+                351,
+                547,
+                361
+              ]
+            ],
+            "the": [
+              [
+                54,
+                150,
+                66,
+                160
+              ],
+              [
+                77,
+                242,
+                89,
+                252
+              ],
+              [
+                118,
+                242,
+                130,
+                252
+              ],
+              [
+                198,
+                242,
+                210,
+                252
+              ],
+              [
+                59,
+                251,
+                70,
+                261
+              ],
+              [
+                191,
+                251,
+                203,
+                261
+              ],
+              [
+                169,
+                263,
+                180,
+                273
+              ],
+              [
+                104,
+                273,
+                115,
+                283
+              ],
+              [
+                183,
+                305,
+                195,
+                315
+              ],
+              [
+                74,
+                327,
+                86,
+                337
+              ],
+              [
+                140,
+                327,
+                152,
+                337
+              ],
+              [
+                95,
+                434,
+                111,
+                445
+              ],
+              [
+                65,
+                449,
+                77,
+                459
+              ],
+              [
+                108,
+                449,
+                120,
+                459
+              ],
+              [
+                195,
+                449,
+                207,
+                459
+              ],
+              [
+                222,
+                503,
+                234,
+                513
+              ],
+              [
+                188,
+                524,
+                200,
+                534
+              ],
+              [
+                503,
+                224,
+                515,
+                234
+              ],
+              [
+                412,
+                234,
+                424,
+                244
+              ],
+              [
+                418,
+                244,
+                429,
+                254
+              ],
+              [
+                351,
+                263,
+                367,
+                274
+              ],
+              [
+                375,
+                287,
+                387,
+                297
+              ],
+              [
+                366,
+                297,
+                378,
+                307
+              ],
+              [
+                526,
+                319,
+                538,
+                329
+              ],
+              [
+                536,
+                351,
+                547,
+                361
+              ],
+              [
+                406,
+                408,
+                425,
+                421
+              ],
+              [
+                349,
+                457,
+                363,
+                467
+              ],
+              [
+                385,
+                466,
+                397,
+                476
+              ],
+              [
+                483,
+                466,
+                495,
+                476
+              ],
+              [
+                436,
+                500,
+                448,
+                510
+              ],
+              [
+                536,
+                500,
+                548,
+                510
+              ],
+              [
+                478,
+                510,
+                490,
+                520
+              ],
+              [
+                348,
+                554,
+                360,
+                564
+              ],
+              [
+                459,
+                573,
+                470,
+                583
+              ],
+              [
+                445,
+                593,
+                457,
+                603
+              ],
+              [
+                345,
+                613,
+                356,
+                623
+              ],
+              [
+                404,
+                613,
+                416,
+                623
+              ],
+              [
+                187,
+                814,
+                200,
+                824
+              ],
+              [
+                386,
+                76,
+                396,
+                84
+              ],
+              [
+                324,
+                90,
+                335,
+                98
+              ],
+              [
+                405,
+                90,
+                415,
+                98
+              ],
+              [
+                280,
+                674,
+                293,
+                684
+              ],
+              [
+                384,
+                718,
+                397,
+                728
+              ],
+              [
+                294,
+                637,
+                305,
+                645
+              ],
+              [
+                356,
+                637,
+                368,
+                645
+              ]
+            ]
+          }
+        }
+      }
+    },
+    {
+      "page": 1,
+      "bounds": [
+        0,
+        0,
+        595.2,
+        841.8
+      ],
+      "linksRaw": [
+        {
+          "uri": "http://www.gamesdiner.com/glaive",
+          "external": true,
+          "rect": [
+            313,
+            760.2,
+            407.125,
+            771.2
+          ],
+          "page": -1
+        },
+        {
+          "uri": "http://www.gamesdiner.com",
+          "external": true,
+          "rect": [
+            340.125,
+            812.79376,
+            434.3438,
+            823.79376
+          ],
+          "page": -1
+        }
+      ],
+      "searchRaw": {
+        "GURPS": [
+          [
+            268.4412,
+            717.05,
+            297.5904,
+            717.05,
+            268.4412,
+            726.05,
+            297.5904,
+            726.05
+          ],
+          [
+            322,
+            469.05,
+            351.1492,
+            469.05,
+            322,
+            478.05,
+            351.1492,
+            478.05
+          ],
+          [
+            408.9703,
+            699.05,
+            438.1195,
+            699.05,
+            408.9703,
+            708.05,
+            438.1195,
+            708.05
+          ],
+          [
+            369.11328,
+            747.1,
+            404.6753,
+            747.1,
+            369.11328,
+            757.1,
+            404.6753,
+            757.1
+          ],
+          [
+            365.37372,
+            762.05,
+            395.87473,
+            762.05,
+            365.37372,
+            771.05,
+            395.87473,
+            771.05
+          ],
+          [
+            130.02441,
+            814.87,
+            162.03021,
+            814.87,
+            130.02441,
+            823.87,
+            162.03021,
+            823.87
+          ]
+        ],
+        "Glaive": [
+          [
+            194.4802,
+            37.639988,
+            223.38258,
+            37.639988,
+            194.4802,
+            45.639988,
+            223.38258,
+            45.639988
+          ],
+          [
+            271.3826,
+            37.639988,
+            300.28497,
+            37.639988,
+            271.3826,
+            45.639988,
+            300.28497,
+            45.639988
+          ],
+          [
+            50,
+            63.939987,
+            117.00681,
+            63.939987,
+            50,
+            81.93999,
+            117.00681,
+            81.93999
+          ],
+          [
+            353.62466,
+            182.04999,
+            375.17065,
+            182.04999,
+            353.62466,
+            191.04999,
+            375.17065,
+            191.04999
+          ],
+          [
+            522.0665,
+            224.04999,
+            543.6035,
+            224.04999,
+            522.0665,
+            233.04999,
+            543.6035,
+            233.04999
+          ],
+          [
+            388.3264,
+            239.55998,
+            432.9976,
+            239.55998,
+            388.3264,
+            251.55998,
+            432.9976,
+            251.55998
+          ],
+          [
+            313,
+            440.56,
+            357.6712,
+            440.56,
+            313,
+            452.56,
+            357.6712,
+            452.56
+          ],
+          [
+            323.7406,
+            574.05,
+            356.7706,
+            574.05,
+            323.7406,
+            583.05,
+            356.7706,
+            583.05
+          ],
+          [
+            433.7848,
+            599.56,
+            477.8728,
+            599.56,
+            433.7848,
+            611.56,
+            477.8728,
+            611.56
+          ],
+          [
+            313,
+            621.1,
+            350.226,
+            621.1,
+            313,
+            631.1,
+            350.226,
+            631.1
+          ],
+          [
+            321.478,
+            636.05,
+            354.517,
+            636.05,
+            321.478,
+            645.05,
+            354.517,
+            645.05
+          ],
+          [
+            313,
+            747.1,
+            350.226,
+            747.1,
+            313,
+            757.1,
+            350.226,
+            757.1
+          ],
+          [
+            313,
+            762.05,
+            348.5086,
+            762.05,
+            313,
+            771.05,
+            348.5086,
+            771.05
+          ]
+        ],
+        "of the": [
+          [
+            127.04,
+            148.04999,
+            148.019,
+            148.04999,
+            127.04,
+            157.04999,
+            148.019,
+            157.04999
+          ],
+          [
+            245.30461,
+            673.05,
+            265.59964,
+            673.05,
+            245.30461,
+            682.05,
+            265.59964,
+            682.05
+          ],
+          [
+            483.9352,
+            393.05,
+            506.41724,
+            393.05,
+            483.9352,
+            402.05,
+            506.41724,
+            402.05
+          ]
+        ],
+        "the": [
+          [
+            137.20099,
+            148.04999,
+            148.019,
+            148.04999,
+            137.20099,
+            157.04999,
+            148.019,
+            157.04999
+          ],
+          [
+            82.9413,
+            158.04999,
+            93.75931,
+            158.04999,
+            82.9413,
+            167.04999,
+            93.75931,
+            167.04999
+          ],
+          [
+            175.38312,
+            169.04999,
+            186.20113,
+            169.04999,
+            175.38312,
+            178.04999,
+            186.20113,
+            178.04999
+          ],
+          [
+            201.21867,
+            181.04999,
+            212.02765,
+            181.04999,
+            201.21867,
+            190.04999,
+            212.02765,
+            190.04999
+          ],
+          [
+            156.91098,
+            201.04999,
+            167.72899,
+            201.04999,
+            156.91098,
+            210.04999,
+            167.72899,
+            210.04999
+          ],
+          [
+            257.58508,
+            201.04999,
+            268.4031,
+            201.04999,
+            257.58508,
+            210.04999,
+            268.4031,
+            210.04999
+          ],
+          [
+            247.10182,
+            211.04999,
+            257.92343,
+            211.04999,
+            247.10182,
+            220.04999,
+            257.92343,
+            220.04999
+          ],
+          [
+            188.99779,
+            255.04999,
+            202.81639,
+            255.04999,
+            188.99779,
+            264.05,
+            202.81639,
+            264.05
+          ],
+          [
+            74.892204,
+            426.05,
+            85.713806,
+            426.05,
+            74.892204,
+            435.05,
+            85.713806,
+            435.05
+          ],
+          [
+            145.81625,
+            448.05,
+            156.63788,
+            448.05,
+            145.81625,
+            457.05,
+            156.63788,
+            457.05
+          ],
+          [
+            242.22957,
+            448.05,
+            253.05115,
+            448.05,
+            242.22957,
+            457.05,
+            253.05115,
+            457.05
+          ],
+          [
+            69.979996,
+            458.05,
+            80.798004,
+            458.05,
+            69.979996,
+            467.05,
+            80.798004,
+            467.05
+          ],
+          [
+            74.9048,
+            508.05,
+            85.7264,
+            508.05,
+            74.9048,
+            517.05,
+            85.7264,
+            517.05
+          ],
+          [
+            97.17804,
+            529.05,
+            107.987045,
+            529.05,
+            97.17804,
+            538.05,
+            107.987045,
+            538.05
+          ],
+          [
+            89.942,
+            549.05,
+            100.759995,
+            549.05,
+            89.942,
+            558.05,
+            100.759995,
+            558.05
+          ],
+          [
+            92.498,
+            602.05,
+            103.3196,
+            602.05,
+            92.498,
+            611.05,
+            103.3196,
+            611.05
+          ],
+          [
+            165.28357,
+            612.041,
+            176.11598,
+            612.041,
+            165.28357,
+            621.053,
+            176.11598,
+            621.053
+          ],
+          [
+            183.20238,
+            612.041,
+            194.0348,
+            612.041,
+            183.20238,
+            621.053,
+            194.0348,
+            621.053
+          ],
+          [
+            197.92886,
+            632.05,
+            208.74687,
+            632.05,
+            197.92886,
+            641.05,
+            208.74687,
+            641.05
+          ],
+          [
+            215.22688,
+            632.05,
+            226.04489,
+            632.05,
+            215.22688,
+            641.05,
+            226.04489,
+            641.05
+          ],
+          [
+            127.43599,
+            644.05,
+            138.2576,
+            644.05,
+            127.43599,
+            653.05,
+            138.2576,
+            653.05
+          ],
+          [
+            89.06,
+            664.05,
+            99.88161,
+            664.05,
+            89.06,
+            673.05,
+            99.88161,
+            673.05
+          ],
+          [
+            229.0063,
+            673.05,
+            239.82071,
+            673.05,
+            229.0063,
+            682.05,
+            239.82071,
+            682.05
+          ],
+          [
+            254.78162,
+            673.05,
+            265.59964,
+            673.05,
+            254.78162,
+            682.05,
+            265.59964,
+            682.05
+          ],
+          [
+            255.71844,
+            726.05,
+            266.54007,
+            726.05,
+            255.71844,
+            735.05,
+            266.54007,
+            735.05
+          ],
+          [
+            169.025,
+            736.05,
+            179.843,
+            736.05,
+            169.025,
+            745.05,
+            179.843,
+            745.05
+          ],
+          [
+            128.11656,
+            770.041,
+            138.94539,
+            770.041,
+            128.11656,
+            779.053,
+            138.94539,
+            779.053
+          ],
+          [
+            377.116,
+            77.04999,
+            387.9376,
+            77.04999,
+            377.116,
+            86.04999,
+            387.9376,
+            86.04999
+          ],
+          [
+            549.3508,
+            77.04999,
+            560.1724,
+            77.04999,
+            549.3508,
+            86.04999,
+            560.1724,
+            86.04999
+          ],
+          [
+            416.91583,
+            87.04999,
+            427.73026,
+            87.04999,
+            416.91583,
+            96.04999,
+            427.73026,
+            96.04999
+          ],
+          [
+            475.189,
+            151.04999,
+            486.007,
+            151.04999,
+            475.189,
+            160.04999,
+            486.007,
+            160.04999
+          ],
+          [
+            426.19366,
+            182.04999,
+            437.01166,
+            182.04999,
+            426.19366,
+            191.04999,
+            437.01166,
+            191.04999
+          ],
+          [
+            491.9477,
+            182.04999,
+            502.76572,
+            182.04999,
+            491.9477,
+            191.04999,
+            502.76572,
+            191.04999
+          ],
+          [
+            426.03284,
+            224.04999,
+            436.84726,
+            224.04999,
+            426.03284,
+            233.04999,
+            436.84726,
+            233.04999
+          ],
+          [
+            509.18567,
+            224.04999,
+            520.00006,
+            224.04999,
+            509.18567,
+            233.04999,
+            520.00006,
+            233.04999
+          ],
+          [
+            463.86346,
+            256.05,
+            474.6779,
+            256.05,
+            463.86346,
+            265.05,
+            474.6779,
+            265.05
+          ],
+          [
+            492.02667,
+            300.05,
+            502.85007,
+            300.05,
+            492.02667,
+            309.05,
+            502.85007,
+            309.05
+          ],
+          [
+            507.30542,
+            383.05,
+            518.118,
+            383.05,
+            507.30542,
+            392.05,
+            518.118,
+            392.05
+          ],
+          [
+            495.59564,
+            393.05,
+            506.41724,
+            393.05,
+            495.59564,
+            402.05,
+            506.41724,
+            402.05
+          ],
+          [
+            349.693,
+            425.05,
+            360.51102,
+            425.05,
+            349.693,
+            434.05,
+            360.51102,
+            434.05
+          ],
+          [
+            396.673,
+            425.05,
+            407.491,
+            425.05,
+            396.673,
+            434.05,
+            407.491,
+            434.05
+          ],
+          [
+            446.812,
+            425.05,
+            457.63004,
+            425.05,
+            446.812,
+            434.05,
+            457.63004,
+            434.05
+          ],
+          [
+            417.354,
+            469.05,
+            428.16476,
+            469.05,
+            417.354,
+            478.05,
+            428.16476,
+            478.05
+          ],
+          [
+            445.46738,
+            479.05,
+            456.28897,
+            479.05,
+            445.46738,
+            488.05,
+            456.28897,
+            488.05
+          ],
+          [
+            458.87738,
+            489.05,
+            469.699,
+            489.05,
+            458.87738,
+            498.05,
+            469.699,
+            498.05
+          ],
+          [
+            423.94843,
+            501.05,
+            434.76282,
+            501.05,
+            423.94843,
+            510.05,
+            434.76282,
+            510.05
+          ],
+          [
+            384.8031,
+            533.05,
+            398.6127,
+            533.05,
+            384.8031,
+            542.05,
+            398.6127,
+            542.05
+          ],
+          [
+            533.5425,
+            542.05,
+            544.3604,
+            542.05,
+            533.5425,
+            551.05,
+            544.3604,
+            551.05
+          ],
+          [
+            463.02106,
+            552.05,
+            473.83905,
+            552.05,
+            463.02106,
+            561.05,
+            473.83905,
+            561.05
+          ],
+          [
+            341.116,
+            584.05,
+            351.934,
+            584.05,
+            341.116,
+            593.05,
+            351.934,
+            593.05
+          ],
+          [
+            515.57874,
+            648.05,
+            526.3949,
+            648.05,
+            515.57874,
+            657.05,
+            526.3949,
+            657.05
+          ],
+          [
+            454.30005,
+            658.05,
+            465.11444,
+            658.05,
+            454.30005,
+            667.05,
+            465.11444,
+            667.05
+          ],
+          [
+            502.27905,
+            668.05,
+            513.09705,
+            668.05,
+            502.27905,
+            677.05,
+            513.09705,
+            677.05
+          ],
+          [
+            411.739,
+            687.05,
+            422.557,
+            687.05,
+            411.739,
+            696.05,
+            422.557,
+            696.05
+          ],
+          [
+            187.05339,
+            814.87,
+            199.56339,
+            814.87,
+            187.05339,
+            823.87,
+            199.56339,
+            823.87
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page1-100.png",
+          "width": 827,
+          "height": 1170,
+          "stride": 3308,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive",
+              "page": -1,
+              "bounds": [
+                434,
+                1055,
+                566,
+                1072
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                472,
+                1128,
+                604,
+                1145
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                372,
+                995,
+                414,
+                1009
+              ],
+              [
+                447,
+                651,
+                488,
+                664
+              ],
+              [
+                568,
+                970,
+                609,
+                984
+              ],
+              [
+                512,
+                1037,
+                563,
+                1052
+              ],
+              [
+                507,
+                1058,
+                550,
+                1071
+              ],
+              [
+                180,
+                1131,
+                226,
+                1145
+              ]
+            ],
+            "Glaive": [
+              [
+                270,
+                52,
+                311,
+                64
+              ],
+              [
+                376,
+                52,
+                418,
+                64
+              ],
+              [
+                69,
+                88,
+                163,
+                114
+              ],
+              [
+                491,
+                252,
+                522,
+                266
+              ],
+              [
+                725,
+                311,
+                756,
+                324
+              ],
+              [
+                539,
+                332,
+                602,
+                350
+              ],
+              [
+                434,
+                611,
+                497,
+                629
+              ],
+              [
+                449,
+                797,
+                496,
+                810
+              ],
+              [
+                602,
+                832,
+                664,
+                850
+              ],
+              [
+                434,
+                862,
+                487,
+                877
+              ],
+              [
+                446,
+                883,
+                493,
+                896
+              ],
+              [
+                434,
+                1037,
+                487,
+                1052
+              ],
+              [
+                434,
+                1058,
+                485,
+                1071
+              ]
+            ],
+            "of the": [
+              [
+                176,
+                205,
+                206,
+                219
+              ],
+              [
+                340,
+                934,
+                369,
+                948
+              ],
+              [
+                672,
+                545,
+                704,
+                559
+              ]
+            ],
+            "the": [
+              [
+                190,
+                205,
+                206,
+                219
+              ],
+              [
+                115,
+                219,
+                131,
+                233
+              ],
+              [
+                243,
+                234,
+                259,
+                248
+              ],
+              [
+                279,
+                251,
+                295,
+                264
+              ],
+              [
+                217,
+                279,
+                233,
+                292
+              ],
+              [
+                357,
+                279,
+                373,
+                292
+              ],
+              [
+                343,
+                293,
+                359,
+                306
+              ],
+              [
+                262,
+                354,
+                282,
+                367
+              ],
+              [
+                104,
+                591,
+                120,
+                605
+              ],
+              [
+                202,
+                622,
+                218,
+                635
+              ],
+              [
+                336,
+                622,
+                352,
+                635
+              ],
+              [
+                97,
+                636,
+                113,
+                649
+              ],
+              [
+                104,
+                705,
+                120,
+                719
+              ],
+              [
+                134,
+                734,
+                150,
+                748
+              ],
+              [
+                124,
+                762,
+                140,
+                776
+              ],
+              [
+                128,
+                836,
+                144,
+                849
+              ],
+              [
+                229,
+                850,
+                245,
+                863
+              ],
+              [
+                254,
+                850,
+                270,
+                863
+              ],
+              [
+                274,
+                877,
+                290,
+                891
+              ],
+              [
+                298,
+                877,
+                314,
+                891
+              ],
+              [
+                176,
+                894,
+                193,
+                908
+              ],
+              [
+                123,
+                922,
+                139,
+                935
+              ],
+              [
+                318,
+                934,
+                334,
+                948
+              ],
+              [
+                353,
+                934,
+                369,
+                948
+              ],
+              [
+                355,
+                1008,
+                371,
+                1021
+              ],
+              [
+                234,
+                1022,
+                250,
+                1035
+              ],
+              [
+                177,
+                1069,
+                193,
+                1083
+              ],
+              [
+                523,
+                107,
+                539,
+                120
+              ],
+              [
+                762,
+                107,
+                779,
+                120
+              ],
+              [
+                579,
+                120,
+                595,
+                134
+              ],
+              [
+                659,
+                209,
+                676,
+                223
+              ],
+              [
+                591,
+                252,
+                607,
+                266
+              ],
+              [
+                683,
+                252,
+                699,
+                266
+              ],
+              [
+                591,
+                311,
+                607,
+                324
+              ],
+              [
+                707,
+                311,
+                723,
+                324
+              ],
+              [
+                644,
+                355,
+                660,
+                369
+              ],
+              [
+                683,
+                416,
+                699,
+                430
+              ],
+              [
+                704,
+                532,
+                720,
+                545
+              ],
+              [
+                688,
+                545,
+                704,
+                559
+              ],
+              [
+                485,
+                590,
+                501,
+                603
+              ],
+              [
+                550,
+                590,
+                566,
+                603
+              ],
+              [
+                620,
+                590,
+                636,
+                603
+              ],
+              [
+                579,
+                651,
+                595,
+                664
+              ],
+              [
+                618,
+                665,
+                634,
+                678
+              ],
+              [
+                637,
+                679,
+                653,
+                692
+              ],
+              [
+                588,
+                695,
+                604,
+                709
+              ],
+              [
+                534,
+                740,
+                554,
+                753
+              ],
+              [
+                741,
+                752,
+                757,
+                766
+              ],
+              [
+                643,
+                766,
+                659,
+                780
+              ],
+              [
+                473,
+                811,
+                489,
+                824
+              ],
+              [
+                716,
+                900,
+                732,
+                913
+              ],
+              [
+                630,
+                913,
+                646,
+                927
+              ],
+              [
+                697,
+                927,
+                713,
+                941
+              ],
+              [
+                571,
+                954,
+                587,
+                967
+              ],
+              [
+                259,
+                1131,
+                278,
+                1145
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page1-150.png",
+          "width": 1240,
+          "height": 1754,
+          "stride": 4960,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive",
+              "page": -1,
+              "bounds": [
+                652,
+                1583,
+                849,
+                1607
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                708,
+                1693,
+                905,
+                1717
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                559,
+                1493,
+                620,
+                1513
+              ],
+              [
+                670,
+                977,
+                732,
+                996
+              ],
+              [
+                852,
+                1456,
+                913,
+                1476
+              ],
+              [
+                768,
+                1556,
+                844,
+                1578
+              ],
+              [
+                761,
+                1587,
+                825,
+                1607
+              ],
+              [
+                270,
+                1697,
+                338,
+                1717
+              ]
+            ],
+            "Glaive": [
+              [
+                405,
+                78,
+                466,
+                96
+              ],
+              [
+                565,
+                78,
+                626,
+                96
+              ],
+              [
+                104,
+                133,
+                244,
+                171
+              ],
+              [
+                736,
+                379,
+                782,
+                399
+              ],
+              [
+                1087,
+                466,
+                1133,
+                486
+              ],
+              [
+                809,
+                499,
+                903,
+                525
+              ],
+              [
+                652,
+                917,
+                746,
+                943
+              ],
+              [
+                674,
+                1195,
+                744,
+                1215
+              ],
+              [
+                903,
+                1249,
+                996,
+                1275
+              ],
+              [
+                652,
+                1293,
+                730,
+                1315
+              ],
+              [
+                669,
+                1325,
+                739,
+                1344
+              ],
+              [
+                652,
+                1556,
+                730,
+                1578
+              ],
+              [
+                652,
+                1587,
+                727,
+                1607
+              ]
+            ],
+            "of the": [
+              [
+                264,
+                308,
+                309,
+                328
+              ],
+              [
+                511,
+                1402,
+                554,
+                1421
+              ],
+              [
+                1008,
+                818,
+                1056,
+                838
+              ]
+            ],
+            "the": [
+              [
+                285,
+                308,
+                309,
+                328
+              ],
+              [
+                172,
+                329,
+                196,
+                349
+              ],
+              [
+                365,
+                352,
+                388,
+                371
+              ],
+              [
+                419,
+                377,
+                442,
+                396
+              ],
+              [
+                326,
+                418,
+                350,
+                438
+              ],
+              [
+                536,
+                418,
+                560,
+                438
+              ],
+              [
+                514,
+                439,
+                538,
+                459
+              ],
+              [
+                393,
+                531,
+                423,
+                551
+              ],
+              [
+                156,
+                887,
+                179,
+                907
+              ],
+              [
+                303,
+                933,
+                327,
+                953
+              ],
+              [
+                504,
+                933,
+                528,
+                953
+              ],
+              [
+                145,
+                954,
+                169,
+                974
+              ],
+              [
+                156,
+                1058,
+                179,
+                1078
+              ],
+              [
+                202,
+                1102,
+                225,
+                1121
+              ],
+              [
+                187,
+                1143,
+                210,
+                1163
+              ],
+              [
+                192,
+                1254,
+                216,
+                1274
+              ],
+              [
+                344,
+                1275,
+                367,
+                1294
+              ],
+              [
+                381,
+                1275,
+                405,
+                1294
+              ],
+              [
+                412,
+                1316,
+                435,
+                1336
+              ],
+              [
+                448,
+                1316,
+                471,
+                1336
+              ],
+              [
+                265,
+                1341,
+                289,
+                1361
+              ],
+              [
+                185,
+                1383,
+                209,
+                1403
+              ],
+              [
+                477,
+                1402,
+                500,
+                1421
+              ],
+              [
+                530,
+                1402,
+                554,
+                1421
+              ],
+              [
+                532,
+                1512,
+                556,
+                1532
+              ],
+              [
+                352,
+                1533,
+                375,
+                1553
+              ],
+              [
+                266,
+                1604,
+                290,
+                1624
+              ],
+              [
+                785,
+                160,
+                809,
+                180
+              ],
+              [
+                1144,
+                160,
+                1168,
+                180
+              ],
+              [
+                868,
+                181,
+                892,
+                201
+              ],
+              [
+                989,
+                314,
+                1013,
+                334
+              ],
+              [
+                887,
+                379,
+                911,
+                399
+              ],
+              [
+                1024,
+                379,
+                1048,
+                399
+              ],
+              [
+                887,
+                466,
+                911,
+                486
+              ],
+              [
+                1060,
+                466,
+                1084,
+                486
+              ],
+              [
+                966,
+                533,
+                989,
+                553
+              ],
+              [
+                1025,
+                625,
+                1048,
+                644
+              ],
+              [
+                1056,
+                798,
+                1080,
+                817
+              ],
+              [
+                1032,
+                818,
+                1056,
+                838
+              ],
+              [
+                728,
+                885,
+                752,
+                905
+              ],
+              [
+                826,
+                885,
+                849,
+                905
+              ],
+              [
+                930,
+                885,
+                954,
+                905
+              ],
+              [
+                869,
+                977,
+                893,
+                996
+              ],
+              [
+                928,
+                998,
+                951,
+                1017
+              ],
+              [
+                955,
+                1018,
+                979,
+                1038
+              ],
+              [
+                883,
+                1043,
+                906,
+                1063
+              ],
+              [
+                801,
+                1110,
+                831,
+                1130
+              ],
+              [
+                1111,
+                1129,
+                1135,
+                1149
+              ],
+              [
+                964,
+                1150,
+                988,
+                1169
+              ],
+              [
+                710,
+                1216,
+                734,
+                1236
+              ],
+              [
+                1074,
+                1350,
+                1097,
+                1369
+              ],
+              [
+                946,
+                1370,
+                969,
+                1390
+              ],
+              [
+                1046,
+                1391,
+                1069,
+                1411
+              ],
+              [
+                857,
+                1431,
+                881,
+                1451
+              ],
+              [
+                389,
+                1697,
+                416,
+                1717
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page1-72.png",
+          "width": 596,
+          "height": 842,
+          "stride": 2384,
+          "links": [
+            {
+              "uri": "http://www.gamesdiner.com/glaive",
+              "page": -1,
+              "bounds": [
+                313,
+                760,
+                408,
+                772
+              ],
+              "destX": 0,
+              "destY": 0
+            },
+            {
+              "uri": "http://www.gamesdiner.com",
+              "page": -1,
+              "bounds": [
+                340,
+                812,
+                435,
+                824
+              ],
+              "destX": 0,
+              "destY": 0
+            }
+          ],
+          "search": {
+            "GURPS": [
+              [
+                268,
+                717,
+                298,
+                727
+              ],
+              [
+                322,
+                469,
+                352,
+                479
+              ],
+              [
+                408,
+                699,
+                439,
+                709
+              ],
+              [
+                369,
+                747,
+                405,
+                758
+              ],
+              [
+                365,
+                762,
+                396,
+                772
+              ],
+              [
+                130,
+                814,
+                163,
+                824
+              ]
+            ],
+            "Glaive": [
+              [
+                194,
+                37,
+                224,
+                46
+              ],
+              [
+                271,
+                37,
+                301,
+                46
+              ],
+              [
+                50,
+                63,
+                118,
+                82
+              ],
+              [
+                353,
+                182,
+                376,
+                192
+              ],
+              [
+                522,
+                224,
+                544,
+                234
+              ],
+              [
+                388,
+                239,
+                433,
+                252
+              ],
+              [
+                313,
+                440,
+                358,
+                453
+              ],
+              [
+                323,
+                574,
+                357,
+                584
+              ],
+              [
+                433,
+                599,
+                478,
+                612
+              ],
+              [
+                313,
+                621,
+                351,
+                632
+              ],
+              [
+                321,
+                636,
+                355,
+                646
+              ],
+              [
+                313,
+                747,
+                351,
+                758
+              ],
+              [
+                313,
+                762,
+                349,
+                772
+              ]
+            ],
+            "of the": [
+              [
+                127,
+                148,
+                149,
+                158
+              ],
+              [
+                245,
+                673,
+                266,
+                683
+              ],
+              [
+                483,
+                393,
+                507,
+                403
+              ]
+            ],
+            "the": [
+              [
+                137,
+                148,
+                149,
+                158
+              ],
+              [
+                82,
+                158,
+                94,
+                168
+              ],
+              [
+                175,
+                169,
+                187,
+                179
+              ],
+              [
+                201,
+                181,
+                213,
+                191
+              ],
+              [
+                156,
+                201,
+                168,
+                211
+              ],
+              [
+                257,
+                201,
+                269,
+                211
+              ],
+              [
+                247,
+                211,
+                258,
+                221
+              ],
+              [
+                188,
+                255,
+                203,
+                265
+              ],
+              [
+                74,
+                426,
+                86,
+                436
+              ],
+              [
+                145,
+                448,
+                157,
+                458
+              ],
+              [
+                242,
+                448,
+                254,
+                458
+              ],
+              [
+                69,
+                458,
+                81,
+                468
+              ],
+              [
+                74,
+                508,
+                86,
+                518
+              ],
+              [
+                97,
+                529,
+                108,
+                539
+              ],
+              [
+                89,
+                549,
+                101,
+                559
+              ],
+              [
+                92,
+                602,
+                104,
+                612
+              ],
+              [
+                165,
+                612,
+                177,
+                622
+              ],
+              [
+                183,
+                612,
+                195,
+                622
+              ],
+              [
+                197,
+                632,
+                209,
+                642
+              ],
+              [
+                215,
+                632,
+                227,
+                642
+              ],
+              [
+                127,
+                644,
+                139,
+                654
+              ],
+              [
+                89,
+                664,
+                100,
+                674
+              ],
+              [
+                229,
+                673,
+                240,
+                683
+              ],
+              [
+                254,
+                673,
+                266,
+                683
+              ],
+              [
+                255,
+                726,
+                267,
+                736
+              ],
+              [
+                169,
+                736,
+                180,
+                746
+              ],
+              [
+                128,
+                770,
+                139,
+                780
+              ],
+              [
+                377,
+                77,
+                388,
+                87
+              ],
+              [
+                549,
+                77,
+                561,
+                87
+              ],
+              [
+                416,
+                87,
+                428,
+                97
+              ],
+              [
+                475,
+                151,
+                487,
+                161
+              ],
+              [
+                426,
+                182,
+                438,
+                192
+              ],
+              [
+                491,
+                182,
+                503,
+                192
+              ],
+              [
+                426,
+                224,
+                437,
+                234
+              ],
+              [
+                509,
+                224,
+                521,
+                234
+              ],
+              [
+                463,
+                256,
+                475,
+                266
+              ],
+              [
+                492,
+                300,
+                503,
+                310
+              ],
+              [
+                507,
+                383,
+                519,
+                393
+              ],
+              [
+                495,
+                393,
+                507,
+                403
+              ],
+              [
+                349,
+                425,
+                361,
+                435
+              ],
+              [
+                396,
+                425,
+                408,
+                435
+              ],
+              [
+                446,
+                425,
+                458,
+                435
+              ],
+              [
+                417,
+                469,
+                429,
+                479
+              ],
+              [
+                445,
+                479,
+                457,
+                489
+              ],
+              [
+                458,
+                489,
+                470,
+                499
+              ],
+              [
+                423,
+                501,
+                435,
+                511
+              ],
+              [
+                384,
+                533,
+                399,
+                543
+              ],
+              [
+                533,
+                542,
+                545,
+                552
+              ],
+              [
+                463,
+                552,
+                474,
+                562
+              ],
+              [
+                341,
+                584,
+                352,
+                594
+              ],
+              [
+                515,
+                648,
+                527,
+                658
+              ],
+              [
+                454,
+                658,
+                466,
+                668
+              ],
+              [
+                502,
+                668,
+                514,
+                678
+              ],
+              [
+                411,
+                687,
+                423,
+                697
+              ],
+              [
+                187,
+                814,
+                200,
+                824
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+{
+  "file": "damaged-bad-offsets.pdf",
+  "sha256": "ac9fee8a1e8d9ee079475f03f644d6d131933751365742ab8181656e291e3ac1",
+  "mupdf": "1.27.2",
+  "pageCount": 2,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "Repaired",
+    "Second"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        300,
+        100
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "Repaired": [
+          [
+            30,
+            18.5,
+            111.140015,
+            18.5,
+            30,
+            45.98,
+            111.140015,
+            45.98
+          ]
+        ],
+        "Second": []
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 417,
+          "height": 139,
+          "stride": 1668,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                41,
+                25,
+                155,
+                64
+              ]
+            ],
+            "Second": []
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 625,
+          "height": 209,
+          "stride": 2500,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                62,
+                38,
+                232,
+                96
+              ]
+            ],
+            "Second": []
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 300,
+          "height": 100,
+          "stride": 1200,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                30,
+                18,
+                112,
+                46
+              ]
+            ],
+            "Second": []
+          }
+        }
+      }
+    },
+    {
+      "page": 1,
+      "bounds": [
+        0,
+        0,
+        300,
+        100
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "Repaired": [],
+        "Second": [
+          [
+            30,
+            18.5,
+            97.82001,
+            18.5,
+            30,
+            45.98,
+            97.82001,
+            45.98
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page1-100.png",
+          "width": 417,
+          "height": 139,
+          "stride": 1668,
+          "links": [],
+          "search": {
+            "Repaired": [],
+            "Second": [
+              [
+                41,
+                25,
+                136,
+                64
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page1-150.png",
+          "width": 625,
+          "height": 209,
+          "stride": 2500,
+          "links": [],
+          "search": {
+            "Repaired": [],
+            "Second": [
+              [
+                62,
+                38,
+                204,
+                96
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page1-72.png",
+          "width": 300,
+          "height": 100,
+          "stride": 1200,
+          "links": [],
+          "search": {
+            "Repaired": [],
+            "Second": [
+              [
+                30,
+                18,
+                98,
+                46
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

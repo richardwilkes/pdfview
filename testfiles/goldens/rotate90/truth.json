@@ -1,0 +1,104 @@
+{
+  "file": "rotate90.pdf",
+  "sha256": "79b1145282c8d71df7407119aae4a54ef22d53dc9f521f0aa35db1875272ef18",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "Rotated"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        200,
+        300
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "Rotated": [
+          [
+            125.8,
+            60,
+            125.8,
+            144.048,
+            92.824,
+            60,
+            92.824,
+            144.048
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 278,
+          "height": 417,
+          "stride": 1112,
+          "links": [],
+          "search": {
+            "Rotated": [
+              [
+                128,
+                83,
+                175,
+                201
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 417,
+          "height": 625,
+          "stride": 1668,
+          "links": [],
+          "search": {
+            "Rotated": [
+              [
+                193,
+                125,
+                263,
+                301
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 200,
+          "height": 300,
+          "stride": 800,
+          "links": [],
+          "search": {
+            "Rotated": [
+              [
+                92,
+                60,
+                126,
+                145
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

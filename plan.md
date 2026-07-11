@@ -1,9 +1,11 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M0 (in progress).**
+**Current milestone: M0 checklist complete (2026-07-11); exit contingent on CI. M1 is next.**
 
-> **Next session start here:** M0 continues — build the `oracle/` dump tool against `../pdf`, then seed
-> `testfiles/corpus/` and generate + commit the first goldens. See the M0 checklist below.
+> **Next session start here:** confirm the 4 CI runners went green on the M0 corpus/goldens commit (fix anything
+> that didn't), then begin M1: COS lexer + object model (first M1 box). The corpus, goldens, and parity harness
+> from M0 are in place — `oracle/regen.sh` regenerates goldens locally (needs cgo + `../pdf`), and TestParity's
+> per-capability comparisons activate automatically as `gates_test.go`'s milestone const advances.
 
 ## Session protocol
 
@@ -259,15 +261,18 @@ Rough total: ~35–45 sessions, ~30–35k LOC (excluding embedded font data). Ea
 - [x] CI rewrite: matrix → ubuntu-22.04, ubuntu-22.04-arm, macos-26, windows-2022; drop CGO_ENABLED + llvm-mingw
       step; add explicit `CGO_ENABLED=0 go build ./...` check (2026-07-11)
 - [x] `.gitattributes` trim; `.claude/CLAUDE.md` interim banner pointing here (2026-07-11)
-- [ ] `oracle/` module (own go.mod + `replace github.com/richardwilkes/pdf => ../../pdf`): `dump` command producing
+- [x] `oracle/` module (own go.mod + `replace github.com/richardwilkes/pdf => ../../pdf`): `dump` command producing
       `truth.json` + PNGs per corpus file at dpi 72/100/150 with per-password auth attempts and per-needle search
-      quads; `regen.sh`
-- [ ] Seed `testfiles/corpus/`: GLAIVE + internalLinkPDF (extracted to a file) + handcrafted minimal PDFs (vectors,
-      text-std14, rotate90, damaged-xref set to start; more added per milestone as needed)
-- [ ] Encrypted variants (R2/R3/R4-RC4/R4-AES/R6) generated offline and committed
-- [ ] 2–3 vetted public-domain real-world PDFs (license noted in a corpus README)
-- [ ] Generate + commit first goldens; `internal/testsupport` + a pure-Go parity test skeleton that walks
-      `testfiles/goldens/`
+      quads; `regen.sh` (2026-07-11)
+- [x] Seed `testfiles/corpus/`: GLAIVE + internalLinkPDF (extracted to a file) + handcrafted minimal PDFs (vectors,
+      text-std14, rotate90, damaged-xref set to start; more added per milestone as needed) (2026-07-11)
+- [x] Encrypted variants (R2/R3/R4-RC4/R4-AES/R6) generated offline and committed (2026-07-11: qpdf 12.3.2, user/owner
+      passwords "user"/"owner", plus an R6 empty-user-password variant for the auto-auth semantics)
+- [x] 2–3 vetted public-domain real-world PDFs (license noted in a corpus README) (2026-07-11: IRS f1040 + fw9,
+      US-government works, PD under 17 U.S.C. §105)
+- [x] Generate + commit first goldens; `internal/testsupport` + a pure-Go parity test skeleton that walks
+      `testfiles/goldens/` (2026-07-11: 16 corpus files, 16 goldens — 75 PNGs, ~10.4 MB total; regen verified
+      byte-identical across two runs; GLAIVE golden reproduces every exact literal in TestPDF)
 
 Exit: build+lint green on all 4 CI runners; TestMalformedPDF green; goldens regenerate locally via `regen.sh`.
 
@@ -382,6 +387,32 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
 - 2026-07-11: float32 funnel rule encoded in the pdf.go engine-seam types (bounds/quads/links/outline coords are
   float32).
 - 2026-07-11: committing + pushing this repo at session end is user-authorized (sibling repos never).
+- 2026-07-11: the oracle gets the raw unscaled page-space floats (outline x/y, link rects, resolved dest points,
+  search quads, page bounds) through a small module-local cgo shim (`oracle/raw.go`) compiled against `../pdf`'s
+  vendored MuPDF headers/libs, adapting that binding's own fz_try/fz_catch wrapper pattern; `../pdf` itself is
+  never modified. Everything the public API exposes (auth bits, TOC ints, links, hit rects, pixels) is recorded
+  from the public API, since that is the contract pdfview must match. Non-finite floats encode as JSON null.
+- 2026-07-11: auth truth protocol: every Authenticate attempt runs on its own fresh document; the table always
+  includes "" and "invalid-password" plus the per-file passwords. Captured semantics to match at M2: unencrypted
+  documents return status 1 for ANY password (even a wrong one); an encrypted document with an empty user password
+  reports RequiresAuthentication false yet Authenticate("") returns 2 (user), owner password 4 — not 1.
+- 2026-07-11: truth.json/PNG determinism: struct-ordered JSON via MarshalIndent (maps sort keys), float32 fields
+  marshal at 32-bit shortest-round-trip precision, no timestamps; PNGs pinned to png.BestCompression. Determinism
+  holds per Go release (flate/png output could shift across releases; regen diffs are reviewed at commit time).
+  regen.sh wipes testfiles/goldens first so corpus removals cannot leave orphaned goldens.
+- 2026-07-11: TestParity gates per capability on gates_test.go's milestone const: M1 open+PageCount, M2 auth bits,
+  M3 TOC, M4 render success/dims/stride/links, M7 search rects, M8 pixel thresholds. Pixel comparison deliberately
+  waits for M8 (full-parity exit) because M4–M7 render real content incrementally (no text before M6, etc.);
+  mid-milestone pixel enforcement would violate the main-stays-green invariant. M4+ sessions verify pixels within
+  their milestone scope (vector corpus at M4, images at M5, ...) and may tighten via per-file thresholds.json.
+- 2026-07-11: the oracle module is checked with gofmt + go vet, not golangci-lint: the root config's fieldalignment
+  rule would dictate schema struct order and thus truth.json field order, hurting golden readability (the root
+  module's read-side mirror in internal/testsupport is fieldalignment-clean; LoadTruth rejects unknown fields so
+  the two schemas cannot drift silently). Compiled oracle binaries are gitignored; only source, regen.sh, corpus,
+  and goldens are committed.
+- 2026-07-11: glaive.pdf is a byte-identical copy of the original fixture rather than a symlink (Windows checkout
+  safety; git stores one blob for both). internal-links.pdf byte-matches the internalLinkPDF constant in
+  pdf_test.go, verified via go/ast extraction.
 
 ## Verification
 

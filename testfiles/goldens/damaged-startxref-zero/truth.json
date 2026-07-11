@@ -1,0 +1,104 @@
+{
+  "file": "damaged-startxref-zero.pdf",
+  "sha256": "5bc1a52c443dda1aad844bab7f2c83167d075b0aee5923ababed19d3841721d4",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "Repaired"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        300,
+        100
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "Repaired": [
+          [
+            30,
+            18.5,
+            111.140015,
+            18.5,
+            30,
+            45.98,
+            111.140015,
+            45.98
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 417,
+          "height": 139,
+          "stride": 1668,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                41,
+                25,
+                155,
+                64
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 625,
+          "height": 209,
+          "stride": 2500,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                62,
+                38,
+                232,
+                96
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 300,
+          "height": 100,
+          "stride": 1200,
+          "links": [],
+          "search": {
+            "Repaired": [
+              [
+                30,
+                18,
+                112,
+                46
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
