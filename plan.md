@@ -1,11 +1,14 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M0 checklist complete (2026-07-11); exit contingent on CI. M1 is next.**
+**Current milestone: M1 complete (2026-07-11). M2 (encryption) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M0 corpus/goldens commit (fix anything
-> that didn't), then begin M1: COS lexer + object model (first M1 box). The corpus, goldens, and parity harness
-> from M0 are in place — `oracle/regen.sh` regenerates goldens locally (needs cgo + `../pdf`), and TestParity's
-> per-capability comparisons activate automatically as `gates_test.go`'s milestone const advances.
+> **Next session start here:** confirm the 4 CI runners went green on the M1 commit (fix anything that didn't),
+> then begin M2: standard security handler R2/R3/R4 (RC4 + AESV2)/R5/R6 (AESV3) — the first M2 box. The exact
+> Authenticate bit semantics to match are recorded per corpus file in `testfiles/goldens/*/truth.json` (see the
+> auth-truth decision log entry below); when `gates_test.go`'s milestone const reaches "M2", TestParity starts
+> comparing RequiresAuthentication, the Authenticate table, and encrypted-document PageCount automatically.
+> String/stream decryption hooks belong in `internal/cos` (its `StreamData`/`filterSpecs` already reject non-Identity
+> crypt filters with `errCryptFilter`, marking the seam).
 
 ## Session protocol
 
@@ -82,7 +85,7 @@ and convert coordinates; milestones only fill in the `engineDocument` stub metho
 | Test | Gate | Status |
 | --- | --- | --- |
 | TestMalformedPDF | M0 | passing |
-| TestUseAfterRelease | M1 | gated |
+| TestUseAfterRelease | M1 | passing |
 | TestInternalLinks | M3 | gated |
 | TestRenderPageForSizeLimits | M4 | gated |
 | TestPDF | M7 | gated |
@@ -277,17 +280,26 @@ Rough total: ~35–45 sessions, ~30–35k LOC (excluding embedded font data). Ea
 
 Exit: build+lint green on all 4 CI runners; TestMalformedPDF green; goldens regenerate locally via `regen.sh`.
 
-### M1 — COS layer (4–6 sessions)
+### M1 — COS layer (4–6 sessions; done in 1, 2026-07-11)
 
-- [ ] Lexer + object model (Null/Bool/Int/Real/String/Name/Array/Dict/Stream/Ref)
-- [ ] `internal/filter` core now (xref streams need Flate + PNG predictors): Flate, LZW, AHx, A85, RL, predictors
-- [ ] Classic xref + /Prev chains + hybrid; xref streams; object streams
-- [ ] Repair scan (`N G obj` sweep) when startxref/xref is broken or inconsistent
-- [ ] Resolver with cycle guard; text-string decoding (UTF-16BE/UTF-8 BOM/PDFDocEncoding)
-- [ ] Page-tree walk for `pageCount`; wire `openEngine`/`pageCount`/`loadPage` existence checks
-- [ ] FuzzOpen + FuzzFilters; recover() guards in New
+- [x] Lexer + object model (Null/Bool/Int/Real/String/Name/Array/Dict/Stream/Ref) (2026-07-11)
+- [x] `internal/filter` core now (xref streams need Flate + PNG predictors): Flate, LZW, AHx, A85, RL, predictors
+      (2026-07-11: LZW EarlyChange both modes verified against the ISO 32000-2 7.4.4.2 example plus a test-only
+      encoder round trip; PNG predictors all five filter types; TIFF predictor 8/16-bit)
+- [x] Classic xref + /Prev chains + hybrid; xref streams; object streams (2026-07-11: first-seen-wins merge gives
+      incremental-update precedence; hybrid order classic > /XRefStm > /Prev)
+- [x] Repair scan (`N G obj` sweep) when startxref/xref is broken or inconsistent (2026-07-11: triggered by
+      unreadable xref at open, unusable /Root, or any object-load failure — bad offset, wrong header — once per
+      document)
+- [x] Resolver with cycle guard; text-string decoding (UTF-16BE/UTF-8 BOM/PDFDocEncoding) (2026-07-11)
+- [x] Page-tree walk for `pageCount`; wire `openEngine`/`pageCount`/`loadPage` existence checks (2026-07-11)
+- [x] FuzzOpen + FuzzFilters; recover() guards in New (2026-07-11: FuzzOpen found a real zero-length-stream slice
+      underflow in `captureRawStream` before the fix; the crasher is committed as a regression seed under
+      internal/doc/testdata/fuzz)
 
-Exit: TestUseAfterRelease green (bump gate const to "M1"); PageCount parity across corpus incl. damaged set.
+Exit: TestUseAfterRelease green (bump gate const to "M1") — done; PageCount parity across corpus incl. damaged set
+— done (TestParity at M1 plus internal/doc's TestCorpusPageCounts, which checks all 16 files including the
+encrypted set against truth.json).
 
 ### M2 — Encryption (3–4 sessions)
 
@@ -418,6 +430,30 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
 - 2026-07-11: user-directed: the duplicate `testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf` was removed;
   `testfiles/corpus/glaive.pdf` is the canonical fixture and `pdf_test.go` now reads it. This relaxes the M8
   "pdf_test.go byte-identical" criterion to "identical apart from the three fixture-path literals".
+- 2026-07-11 (M1): references to free or absent objects resolve to Null per ISO 32000-2 7.3.10 and are NOT load
+  failures; only actual failures (offset out of range, wrong header at offset, unparseable content) trigger the
+  once-per-document repair scan and retry. `cos.Document.Resolve` swallows failures into Null so broken refs
+  degrade instead of poisoning callers.
+- 2026-07-11 (M1): `pageCount` counts actual page-tree leaves via the walk (depth cap 64 + global visited set,
+  skipping duplicate/cyclic kids) rather than trusting `/Count`, for robustness on repaired files. Matches the
+  oracle on all 16 corpus files (including pre-auth counting of the encrypted set, whose tree dictionaries are
+  not encrypted); if a future corpus file exposes a Count-vs-walk divergence, recalibrate against MuPDF then.
+- 2026-07-11 (M1): repair precedence: later-in-file object definitions win (incremental-update semantics); object
+  streams found by the sweep register their contents only for numbers not directly swept; xref-stream dictionaries
+  found by the sweep join the trailer candidates (they carry /Root for xref-stream-only files, which have no
+  `trailer` keyword); the pre-repair trailer, when one was readable, is the final fallback.
+- 2026-07-11 (M1): filter fault-tolerance contract: corrupt input that still yields some output returns the
+  partial output without an error (the warn-and-continue analog of deployed readers); resource-cap violations
+  (chain > 8, output > max(64 MB, 256×input) per stage) are always hard errors. Stream /Length is trusted only
+  when direct, plausible, and endstream-confirmed; otherwise the payload is recovered by scanning for
+  `endstream` (which also covers indirect /Length during xref bootstrap without resolver recursion).
+- 2026-07-11 (M1): `openEngine` copies the caller's buffer (`bytes.Clone`) because the engine holds subslices of
+  it for the document's lifetime — callers may reuse their buffer, matching the old implementation's C.CBytes
+  copy. The recover() guard of invariant 6 lives in `openEngine` (New's only engine call), keeping the frozen
+  public section of pdf.go untouched.
+- 2026-07-11 (M1): FuzzOpen lives in `internal/doc` (not internal/cos as once sketched) so one target covers
+  doc.Open, the page-tree walk, and — via the `COS()` accessor — resolution of every xref'd object plus stream
+  decoding. Corpus files are its seeds. FuzzFilters lives in `internal/filter`.
 
 ## Verification
 

@@ -2,8 +2,9 @@
 // also handles password-protected documents.
 //
 // The package is a pure-Go PDF engine with rasterization delegated to github.com/richardwilkes/canvas. It is being
-// built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. Until
-// the COS layer lands (milestone M1), New rejects every document with ErrUnableToOpenPDF.
+// built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. With
+// the COS layer in place (milestone M1), New parses documents — including damaged ones, via a repair scan — and
+// PageCount is real; navigation, rendering, and search still return their zero values until their milestones land.
 package pdfview
 
 import (
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/richardwilkes/pdfview/internal/doc"
 )
 
 // Possible error values
@@ -427,7 +430,9 @@ func (d *document) release() {
 
 // engineDocument holds the engine-side state for an open document. It is created by openEngine and discarded by
 // release().
-type engineDocument struct{}
+type engineDocument struct {
+	doc *doc.Document
+}
 
 // page is the engine-side handle for a loaded page. Its concrete content (geometry, resources, content streams)
 // arrives with the navigation and graphics milestones (M3/M4).
@@ -463,9 +468,23 @@ type pageLinkInfo struct {
 }
 
 // openEngine parses the raw PDF bytes into the engine's document state, honoring maxCacheSize as the resource-cache
-// budget (0 = unlimited). The COS layer lands at M1; until then every document is reported as unopenable.
-func openEngine(_ []byte, _ uint64) (*engineDocument, error) {
-	return nil, ErrUnableToOpenPDF
+// budget (0 = unlimited, honored from M6). Any parse failure — and, per plan.md invariant 6, any panic provoked by
+// hostile input — surfaces as ErrUnableToOpenPDF rather than escaping to the caller.
+func openEngine(buffer []byte, _ uint64) (eng *engineDocument, err error) {
+	defer func() {
+		if recover() != nil {
+			eng = nil
+			err = ErrUnableToOpenPDF
+		}
+	}()
+	// The engine retains and slices into the document bytes for the life of the Document, so take a private copy;
+	// callers remain free to reuse their buffer, exactly as with the previous MuPDF-based implementation (which
+	// copied into C memory).
+	d, derr := doc.Open(bytes.Clone(buffer))
+	if derr != nil {
+		return nil, ErrUnableToOpenPDF
+	}
+	return &engineDocument{doc: d}, nil
 }
 
 // needsPassword reports whether the document is encrypted and the empty user password does not grant access. The
@@ -480,14 +499,18 @@ func (e *engineDocument) authenticate(_ string) AuthenticationStatus {
 	return 0
 }
 
-// pageCount returns the number of pages in the document, or 0 when it cannot be determined. The page tree lands at M1.
+// pageCount returns the number of pages in the document, or 0 when it cannot be determined.
 func (e *engineDocument) pageCount() int {
-	return 0
+	return e.doc.PageCount()
 }
 
-// loadPage loads the given 0-based page. The page tree lands at M1/M3; page content at M4.
-func (e *engineDocument) loadPage(_ int) (*page, error) {
-	return nil, ErrUnableToLoadPage
+// loadPage loads the given 0-based page. At M1 this verifies the page exists in the page tree; the page's
+// geometry and content arrive at M3/M4.
+func (e *engineDocument) loadPage(pageNumber int) (*page, error) {
+	if _, err := e.doc.Page(pageNumber); err != nil {
+		return nil, ErrUnableToLoadPage
+	}
+	return &page{}, nil
 }
 
 // outline returns the root of the document outline, or nil when there is none. Navigation lands at M3.
