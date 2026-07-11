@@ -370,8 +370,8 @@ var blendNames = map[cos.Name]device.Blend{
 	"Saturation": device.BlendSaturation, "Color": device.BlendColor, "Luminosity": device.BlendLuminosity,
 }
 
-// opDo implements Do. Image XObjects draw at M5; form XObjects execute now, under the recursion depth cap and
-// a cycle set so self-referential forms terminate.
+// opDo implements Do. Image XObjects decode through internal/imaging and draw; form XObjects execute under the
+// recursion depth cap and a cycle set so self-referential forms terminate.
 func (in *interp) opDo() {
 	name, ok := in.name1()
 	if !ok {
@@ -386,8 +386,12 @@ func (in *interp) opDo() {
 		return
 	}
 	subtype, _ := in.doc.GetName(stream.Dict, "Subtype")
+	if subtype == "Image" {
+		in.drawImageXObject(raw, stream)
+		return
+	}
 	if subtype != "Form" {
-		return // Images (and anything else) are no-ops until M5.
+		return // /PS and anything unrecognized draw nothing.
 	}
 	if in.formDepth >= maxFormDepth {
 		return

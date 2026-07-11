@@ -55,6 +55,38 @@ user password (it opens without authentication) and owner password `owner`.
 | `encrypted-r6-aes.pdf` | `--encrypt user owner 256 --` | R6, AESV3 |
 | `encrypted-r6-empty-user.pdf` | `--encrypt "" owner 256 --` | R6, AESV3, empty user password |
 
+## Image corpus (M5)
+
+Ten single-page files generated 2026-07-11 by a throwaway dev-time Go program (same convention as the other
+handcrafted files: only the outputs are committed; classic xref tables with mechanically computed offsets;
+uncompressed content streams). Raw sample payloads are ASCIIHexDecode-encoded for readability; the codec payloads
+are binary with exact /Length values. Payload provenance:
+
+- JPEG payloads: grayscale and RGB baseline JPEGs encoded with Go's `image/jpeg` at quality 100. The CMYK JPEG
+  was produced by macOS `sips --matchTo '/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc' -s format
+  jpeg` from an RGB PNG (Adobe APP14, transform 0, inverted CMYK storage), then its APP1/APP2/APP13 metadata
+  segments were stripped so no embedded ICC profile overrides the PDF-declared /DeviceCMYK in any reader.
+- CCITT payload: a handwritten uncompressed bilevel TIFF (a 2-pixel border box plus 4×4 diagonal stripes,
+  PhotometricInterpretation MinIsWhite) re-encoded with libtiff's `tiffcp -c g4` into a single strip, whose raw
+  MMR bytes are exactly a CCITTFaxDecode K<0 payload.
+- The JBIG2 payload is a deliberately truncated segment header and the JPX payload lacks the JP2 signature box,
+  so every decoder rejects them cleanly; MuPDF warns and the JPX page renders with the image absent. MuPDF's
+  jbig2 path instead pads the failed decode into a black square, which the pure-Go stub intentionally does not
+  reproduce (blank per plan.md) — see TestImageCorpusPixels for how that file is pinned.
+
+| File | Contents |
+| --- | --- |
+| `images-dct.pdf` | Gray, RGB, and CMYK (Adobe APP14) DCTDecode XObjects |
+| `images-raw.pdf` | Uncompressed samples: gray at 1/2/4/8/16 bpc, RGB and CMYK at 8 bpc, /Decode [1 0], and a 3×3 4-bpc RGB image whose rows need bit padding |
+| `images-indexed.pdf` | Indexed palettes over DeviceRGB/DeviceGray at 1/2/4/8 bpc, including out-of-range indices that clamp to hival |
+| `images-imagemask.pdf` | ImageMask stencils over a colored background: default /Decode, /Decode [1 0], and an inline (BI/ID/EI) mask |
+| `images-inline.pdf` | Inline images: raw binary with /L, ASCIIHexDecode, a named colorspace from page resources, FlateDecode with /L, and /D [1 0] |
+| `images-smask.pdf` | /SMask alpha (mask dimensions differ from the base image), a stencil /Mask stream, and a color-key /Mask array |
+| `images-ccitt.pdf` | The G4 payload twice: default decoding and /BlackIs1 true |
+| `images-jbig2.pdf` | JBIG2Decode stub coverage (truncated payload; see above) |
+| `images-jpx.pdf` | JPXDecode stub coverage (invalid payload; see above) |
+| `images-interpolate.pdf` | The same checkerboard drawn magnified with and without /Interpolate, pinning the sampling-filter mapping |
+
 ## Public-domain real-world PDFs
 
 Both are works of the United States federal government and therefore in the public domain in the United States

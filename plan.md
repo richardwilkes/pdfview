@@ -1,19 +1,20 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M4 complete (2026-07-11). M5 (images) is next.**
+**Current milestone: M5 complete (2026-07-11). M6 (fonts + text) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M4 commit (fix anything that didn't),
-> then begin M5: `internal/imaging` — DCT (+CMYK/YCCK/APP14 via image/jpeg), CCITT (x/image/ccitt), JBIG2 stub,
-> JPX stub, bpc 1/2/4/8/16 unpack, Decode arrays, Indexed — then ImageMask→Alpha8 stencils, SMask/Mask/color-key,
-> and inline images (the tokenizer already skips BI/ID/EI safely in internal/content/inline.go; M5 replaces the
-> skip with decode+draw and its length handling is already /L-aware). The device seam is final: implement
-> render.Device's FillImage/FillImageMask/ClipImageMask (currently stack-preserving no-ops) with
-> imagecore.NewRasterData + DrawImageRect under Concat(ctm), Alpha8 for stencils; /Interpolate maps to sampling
-> filter Nearest/Linear — calibrate which against the oracle. The interpreter's opDo dispatches subtype /Image
-> to a no-op today (internal/content/ops.go); route it to imaging + the device instead. The irs-f1040/irs-fw9
-> corpus files carry real images; the M5 exit likely also needs 1–2 handcrafted image PDFs (imagemask, CCITT)
-> per the corpus list. Full-corpus pixel numbers as of M4 are recorded at the end of the M4 section — images
-> are NOT the dominant remaining diff (text is, M6), so keep M5's pixel expectations image-scoped.
+> **Next session start here:** confirm the 4 CI runners went green on the M5 commit (fix anything that didn't),
+> then begin M6 with the **quad-parity spike** (first M6 box): decode GLAIVE page-0 text, compute char quads
+> from our metrics, and diff against the oracle's stext quads (truth.json's `searchRaw` page-space quads are the
+> reference) BEFORE building any glyph rendering — it de-risks M7's nine exact GURPS rects. Then internal/type1
+> (container only — go-text's psinterpreter provides the charstring VM, see "Verified building blocks"),
+> internal/font (descriptors, encodings, widths), the embedded font bundle (Liberation ×12 + Noto symbols subset
+> still need to be fetched locally, subset, and committed under internal/font/data with license texts — user
+> already approved the set), Type0/CID, Type3 via interpreter recursion, and the text operators (BT..ET are
+> recognized no-ops in internal/content/ops.go) emitting device.TextRun/Glyph with fully composed Trm matrices;
+> render.FillText fills cached glyph-space outlines via AddPathMatrix(outline, trm), glyph cache in
+> internal/store with maxCacheSize honored. Full-corpus dpi-72 numbers as of M5 sit at the end of the M5 section
+> — text is essentially everything that remains (glaive ~17–19%, irs ~8–20%, text-std14 3.4%, rotate90's only
+> failure is its 24pt text).
 
 ## Session protocol
 
@@ -383,13 +384,35 @@ internal-links exact (Δ0 — blank pages); rotate90 1.18% over Δ24 / mean Δ2.
 byte-identically); damaged set ~2.7–3.8%; glaive 17.5–18.9%; irs-f1040 10.2–11.7%; irs-fw9 7.8–19.8% — all text
 (M6) and images (M5).
 
-### M5 — Images (4–5 sessions)
+### M5 — Images (4–5 sessions; done in 1, 2026-07-11)
 
-- [ ] `internal/imaging`: DCT (+CMYK/YCCK/APP14), CCITT, JBIG2 stub, JPX stub, bpc unpack, Decode arrays, Indexed
-- [ ] ImageMask → Alpha8 stencil tinting; SMask/Mask/color-key; inline images (BI/ID/EI)
-- [ ] /Interpolate → sampling mapping calibrated vs oracle; FuzzImaging
+- [x] `internal/imaging`: DCT (+CMYK/YCCK/APP14), CCITT, JBIG2 stub, JPX stub, bpc unpack, Decode arrays, Indexed
+      (2026-07-11: DCT via stdlib image/jpeg with the CMYK samples reconstructed to libjpeg's stored form — see
+      the decision log on the inversion; CCITT via x/image/ccitt, BlackIs1→Invert, K>0 degrades to Group3;
+      cos.ImageFilterSplit applies the non-image filter prefix and honors the inline /F /DP abbreviations;
+      allocation caps run before any pixel buffer exists)
+- [x] ImageMask → Alpha8 stencil tinting; SMask/Mask/color-key; inline images (BI/ID/EI) (2026-07-11: stencil
+      coverage planes tint through canvas's alpha-only image lane (paint color); SMask decodes to a raw alpha
+      plane — never through the painting gray curve — resampled nearest onto the base and overriding any /Mask;
+      inline images decode+draw with /L and EI-scan payload isolation and named /CS resource lookup)
+- [x] /Interpolate → sampling mapping calibrated vs oracle; FuzzImaging (2026-07-11: absent→FilterNearest,
+      true→FilterLinear, both under the outward gridfit of rectilinear image transforms (decision log) — pinned
+      by images-interpolate at 0% over Δ24 at all three DPIs; FuzzImaging 30s clean at ~5.3M execs, plus the
+      decode-postcondition checks it enforces)
 
-Exit: image corpus within thresholds; JBIG2/JPX corpus files render blank-not-error.
+Exit: image corpus within thresholds — done (TestImageCorpusPixels, ungated from M5 on, enforces ten new image
+corpus files at dpi 72/100/150); JBIG2/JPX corpus files render blank-not-error — done (images-jpx matches its
+golden — MuPDF also drops the image — and images-jbig2 is compared against the images-jpx golden because MuPDF
+pads a failed JBIG2 decode into a black square the blank stub deliberately does not reproduce; see the decision
+log).
+
+Image-corpus pixel status at M5 (% over Δ24 at dpi 72/100/150): images-indexed and images-ccitt byte-exact
+(mean Δ0, max Δ0 at all DPIs); images-raw 0/0/0.07 (max Δ1 at 72/100); images-inline 0/0/0 (max Δ1);
+images-imagemask 0/0/0; images-smask 0/0.51/0; images-dct 0/0/0.18 (JPEG decoder differences mean Δ≈1);
+images-interpolate 0/0/0; images-jpx and images-jbig2(-vs-jpx-golden) 0/0.15/0 (the nonzero bits are the blue
+rect's AA edges). Full corpus at dpi 72 after M5: vectors/rotate90 unchanged from M4; glaive 17.37/18.89;
+irs-f1040 10.22/11.71; irs-fw9 7.77–19.82; text-std14 3.41 — images were a minor slice of the real-world diff,
+text (M6) is the rest, exactly as the M4 note predicted.
 
 ### M6 — Fonts + text rendering (8–12 sessions, the long pole)
 
@@ -622,6 +645,50 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   dpi 72/100/150 ungated — the real render path must keep passing it from M4 on — while rotate90.pdf is reported
   unenforced until M6 supplies its text. TestParity's role is unchanged (dims/stride/links; full pixel
   enforcement waits for M8 per the earlier decision).
+- 2026-07-11 (M5): CMYK DCT inversion, oracle-pinned: MuPDF consumes libjpeg's raw output, which leaves Adobe
+  CMYK (APP14 transform 0) and YCCK (transform 2) samples in their stored, INVERTED form, and applies no
+  inversion of its own — the transform-0 corpus JPEG renders near-black under an identity /Decode, and files
+  that intend true ink values carry /Decode [1 0 1 0 1 0 1 0]. Go's image/jpeg undoes the inversion in both
+  cases, so internal/imaging reconstructs the stored bytes (255−v per channel, equivalent for both transforms)
+  before /Decode, color-key comparison, and the M4 behavioral CMYK table. One accepted divergence: a
+  4-component JPEG with no Adobe marker is rejected by Go's decoder (renders blank); libjpeg-based readers
+  treat it as non-inverted CMYK. No corpus coverage; revisit only if a real file surfaces.
+- 2026-07-11 (M5): image gridfit, pinned behaviorally against golden edge probes (never MuPDF source): a
+  rectilinear image transform (axis-aligned in either axis order) has its device extent snapped OUTWARD per
+  axis — floor(min edge), ceil(max edge), computed on the float32 matrix values (a 425.0 edge that float32
+  arithmetic produces as 424.99997 snaps to 424; a 154.166 max edge to 155; a 187.5 max edge to 188) — before
+  drawing, which reproduces MuPDF's hard, pixel-snapped image edges and eliminated the AA-edge seam rows/columns
+  that dominated the first-pass diffs at fractional scales. Non-rectilinear (rotated/skewed) image transforms
+  are not snapped and keep antialiased edges; no corpus file exercises them yet.
+- 2026-07-11 (M5): /Interpolate maps absent/false→FilterNearest, true→FilterLinear (canvas sampling), calibrated
+  by images-interpolate.pdf: 0% over Δ24 at all DPIs with this mapping, and the alternative (nearest for both)
+  would fail catastrophically on the /Interpolate true half, so the goldens pin it. MuPDF's smoothing formula is
+  not bit-identical to canvas bilinear (means ≈1.2, max Δ≈21 on the smoothed half) but sits far inside
+  thresholds. Minification-heavy content (where MuPDF box-subsamples regardless of /Interpolate) has no corpus
+  coverage yet; the image corpus deliberately magnifies.
+- 2026-07-11 (M5): stub-codec semantics: imaging returns ErrUnsupportedCodec for JBIG2Decode/JPXDecode (with an
+  slog.Debug note), the interpreter skips the draw, and the page renders blank where the image would be — never
+  an error. MuPDF drops a failed JPX image the same way (its golden is the blank page), but PADS a failed JBIG2
+  decode into a black square; the blank stub deliberately does not emulate that, so TestImageCorpusPixels pins
+  images-jbig2 against the images-jpx golden, whose page content is byte-identical apart from the codec name.
+  The corpus payloads are crafted so both decoders fail cleanly in MuPDF too (truncated JBIG2 segment header;
+  JPX bytes without a signature box) — a longer arbitrary JBIG2 payload can PARSE and produce junk pixels, which
+  is why the truncation matters.
+- 2026-07-11 (M5): image resource caps (documented at their consts, per "Resource limits & robustness"):
+  decoded pixels ≤ maxImagePixels (2^26, sized for 600-dpi letter scans) AND ≤ max(2^22, 8192×payload bytes) —
+  the proportional term stops hostile dictionaries from claiming huge dimensions over a few bytes (truncated
+  payloads read as zero samples, so such claims only amplify allocation), while the floor and multiplier
+  accommodate CCITT-class extreme compression (an all-white fax row is a few bytes). Both run before any
+  allocation, including for /SMask and /Mask sub-decodes and the DCT path (jpeg.DecodeConfig first). Truncated
+  CCITT output is completed with white, matching viewer degradation. The interpreter caches decoded images
+  per Run keyed by resource ref (failures cached too), capped at 32 entries; the budgeted store arrives at M6.
+- 2026-07-11 (M5): image sample conversion rides the M4 behavioral color tables (a CMYK JPEG pixel converts
+  exactly like a k operator's operands). Two sub-Δ8 residuals accepted: MuPDF converts gray/CMYK IMAGE pixmaps
+  through lcms's 8-bit-optimized transforms, which round ±1 differently from the float fill path the M4 tables
+  captured (some gray samples land one off); and DeviceRGB 8-bit samples pass through byte-identical in both
+  engines (trunc(float32(s)/255×255) is the identity for every byte, verified exhaustively). Single-component
+  spaces at bpc ≤ 8 convert through a precomputed sample→NRGBA LUT; multi-component and 16-bpc images convert
+  per pixel.
 
 ## Verification
 

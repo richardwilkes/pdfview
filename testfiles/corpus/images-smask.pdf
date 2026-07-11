@@ -1,0 +1,93 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 360 140] /Contents 4 0 R /Resources << /XObject << /SM 6 0 R /ST 8 0 R /CK 9 0 R >> >> >>
+endobj
+4 0 obj
+<<  /Length 125 >>
+stream
+0.3 0.3 0.8 rg 0 0 360 140 re f
+q 128 0 0 96 10 22 cm /SM Do Q
+q 96 0 0 96 148 22 cm /ST Do Q
+q 96 0 0 96 254 22 cm /CK Do Q
+
+endstream
+endobj
+5 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 6 /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /ASCIIHexDecode /Length 98 >>
+stream
+0024486c90b4d8fc0024486c90b4d8fc0024486c90b4d8fc0024486c90b4d8fc0024486c
+90b4d8fc0024486c90b4d8fc>
+endstream
+endobj
+6 0 obj
+<< /Type /XObject /Subtype /Image /Width 16 /Height 12 /BitsPerComponent 8 /ColorSpace /DeviceRGB /SMask 5 0 R /Filter /ASCIIHexDecode /Length 1168 >>
+stream
+3cc85a48c85a54c85a60c85a6cc85a78c85a84c85a90c85a9cc85aa8c85ab4c85ac0c85a
+ccc85ad8c85ae4c85af0c85a3cbc5a48bc5a54bc5a60bc5a6cbc5a78bc5a84bc5a90bc5a
+9cbc5aa8bc5ab4bc5ac0bc5accbc5ad8bc5ae4bc5af0bc5a3cb05a48b05a54b05a60b05a
+6cb05a78b05a84b05a90b05a9cb05aa8b05ab4b05ac0b05accb05ad8b05ae4b05af0b05a
+3ca45a48a45a54a45a60a45a6ca45a78a45a84a45a90a45a9ca45aa8a45ab4a45ac0a45a
+cca45ad8a45ae4a45af0a45a3c985a48985a54985a60985a6c985a78985a84985a90985a
+9c985aa8985ab4985ac0985acc985ad8985ae4985af0985a3c8c5a488c5a548c5a608c5a
+6c8c5a788c5a848c5a908c5a9c8c5aa88c5ab48c5ac08c5acc8c5ad88c5ae48c5af08c5a
+3c805a48805a54805a60805a6c805a78805a84805a90805a9c805aa8805ab4805ac0805a
+cc805ad8805ae4805af0805a3c745a48745a54745a60745a6c745a78745a84745a90745a
+9c745aa8745ab4745ac0745acc745ad8745ae4745af0745a3c685a48685a54685a60685a
+6c685a78685a84685a90685a9c685aa8685ab4685ac0685acc685ad8685ae4685af0685a
+3c5c5a485c5a545c5a605c5a6c5c5a785c5a845c5a905c5a9c5c5aa85c5ab45c5ac05c5a
+cc5c5ad85c5ae45c5af05c5a3c505a48505a54505a60505a6c505a78505a84505a90505a
+9c505aa8505ab4505ac0505acc505ad8505ae4505af0505a3c445a48445a54445a60445a
+6c445a78445a84445a90445a9c445aa8445ab4445ac0445acc445ad8445ae4445af0445a>
+endstream
+endobj
+7 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /ImageMask true /Filter /ASCIIHexDecode /Length 17 >>
+stream
+e7c381000081c3e7>
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask 7 0 R /Filter /ASCIIHexDecode /Length 390 >>
+stream
+ff00a0ff18a0ff30a0ff48a0ff60a0ff78a0ff90a0ffa8a0e700a0e718a0e730a0e748a0
+e760a0e778a0e790a0e7a8a0cf00a0cf18a0cf30a0cf48a0cf60a0cf78a0cf90a0cfa8a0
+b700a0b718a0b730a0b748a0b760a0b778a0b790a0b7a8a09f00a09f18a09f30a09f48a0
+9f60a09f78a09f90a09fa8a08700a08718a08730a08748a08760a08778a08790a087a8a0
+6f00a06f18a06f30a06f48a06f60a06f78a06f90a06fa8a05700a05718a05730a05748a0
+5760a05778a05790a057a8a0>
+endstream
+endobj
+9 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask [30 50 70 90 190 210] /Filter /ASCIIHexDecode /Length 390 >>
+stream
+2850c82850c82850c82850c82850c82850c82850c82850c82850c82850c82850c82850c8
+2850c82850c82850c82850c82850c82850c8c83232c83232c83232c832322850c82850c8
+2850c82850c8c83232c83232c83232c832322850c82850c82850c82850c8c83232c83232
+c83232c832322850c82850c82850c82850c8c83232c83232c83232c832322850c82850c8
+2850c82850c82850c82850c82850c82850c82850c82850c82850c82850c82850c82850c8
+2850c82850c82850c82850c8>
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000264 00000 n 
+0000000441 00000 n 
+0000000707 00000 n 
+0000002059 00000 n 
+0000002216 00000 n 
+0000002786 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+3372
+%%EOF

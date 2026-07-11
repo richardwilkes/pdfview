@@ -1,0 +1,57 @@
+{
+  "file": "images-jbig2.pdf",
+  "sha256": "40ad485b8ad36bbc1eca0b77ff13f9e2dd8ad532538c2a7b6de3ffc50404a7a1",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        200,
+        100
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 278,
+          "height": 139,
+          "stride": 1112,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 417,
+          "height": 209,
+          "stride": 1668,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 200,
+          "height": 100,
+          "stride": 800,
+          "links": []
+        }
+      }
+    }
+  ]
+}

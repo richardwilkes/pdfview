@@ -42,5 +42,15 @@ dump encrypted-r6-aes -password user -password owner -search Hello
 dump encrypted-r6-empty-user -password owner -search Hello
 dump irs-f1040 -search 'Filing Status' -search Income
 dump irs-fw9 -search taxpayer -search 'backup withholding'
+dump images-dct
+dump images-raw
+dump images-indexed
+dump images-imagemask
+dump images-inline
+dump images-smask
+dump images-ccitt
+dump images-jbig2
+dump images-jpx
+dump images-interpolate
 
 echo -e "\033[32mDone.\033[0m"

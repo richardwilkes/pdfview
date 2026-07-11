@@ -368,3 +368,54 @@ func TestOpenCorpus(t *testing.T) {
 		})
 	}
 }
+
+func TestImageFilterSplit(t *testing.T) {
+	const hello = "Hello"
+	const filterKey cos.Name = "Filter"
+	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
+	d := mustOpen(t, []byte(pdf))
+	hexPayload := []byte("48656c6c6f>")
+	// A non-image prefix filter is applied; the split stops at the codec and hands back its parms.
+	dict := cos.Dict{
+		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), cos.Name("DCTDecode")},
+		"DecodeParms": cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
+	}
+	data, codec, parms, err := d.ImageFilterSplit(dict, hexPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != hello || codec != "DCTDecode" {
+		t.Fatalf("data %q codec %q", data, codec)
+	}
+	if v, _ := d.GetInt(parms, "ColorTransform"); v != 0 || parms == nil {
+		t.Fatalf("parms: %v", parms)
+	}
+	// The inline abbreviations /F and /DP are honored.
+	dict = cos.Dict{
+		"F":  cos.Array{cos.Name("AHx"), cos.Name("CCF")},
+		"DP": cos.Array{cos.Null{}, cos.Dict{"K": cos.Integer(-1)}},
+	}
+	if data, codec, parms, err = d.ImageFilterSplit(dict, hexPayload); err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != hello || codec != "CCF" {
+		t.Fatalf("abbreviated: data %q codec %q", data, codec)
+	}
+	if v, _ := d.GetInt(parms, "K"); v != -1 {
+		t.Fatalf("abbreviated parms: %v", parms)
+	}
+	// No image codec: the chain fully decodes and the codec is empty.
+	dict = cos.Dict{filterKey: cos.Name("ASCIIHexDecode")}
+	if data, codec, _, err = d.ImageFilterSplit(dict, hexPayload); err != nil || string(data) != hello || codec != "" {
+		t.Fatalf("plain chain: %q %q %v", data, codec, err)
+	}
+	// Filters listed after the codec are unreachable and ignored.
+	dict = cos.Dict{filterKey: cos.Array{cos.Name("JPXDecode"), cos.Name("FlateDecode")}}
+	if data, codec, _, err = d.ImageFilterSplit(dict, []byte{1, 2}); err != nil || codec != "JPXDecode" || len(data) != 2 {
+		t.Fatalf("post-codec filters: %q %q %v", data, codec, err)
+	}
+	// No filters at all: raw samples pass through.
+	if data, codec, _, err = d.ImageFilterSplit(cos.Dict{}, []byte{9}); err != nil || codec != "" || len(data) != 1 {
+		t.Fatalf("no filters: %q %q %v", data, codec, err)
+	}
+}

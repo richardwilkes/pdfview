@@ -200,6 +200,66 @@ func (d *Document) StreamData(s *Stream) ([]byte, error) {
 	return filter.DecodeChain(specs, s.Raw)
 }
 
+// imageFilterName reports whether name is one of the image-codec filters that internal/filter rejects and
+// internal/imaging decodes at rasterization time, including the abbreviated inline-image forms.
+func imageFilterName(name Name) bool {
+	switch name {
+	case "DCTDecode", "DCT", "CCITTFaxDecode", "CCF", "JBIG2Decode", "JPXDecode":
+		return true
+	default:
+		return false
+	}
+}
+
+// ImageFilterSplit applies dict's leading non-image filters to raw — an image XObject's raw stream payload or
+// an inline image's data between ID and EI — and stops at the first image-codec filter (DCTDecode,
+// CCITTFaxDecode, JBIG2Decode, JPXDecode, or an abbreviated form), returning the processed data, the codec's
+// name, and its resolved decode-parms dictionary (possibly nil). The inline-image abbreviations /F and /DP are
+// honored alongside /Filter and /DecodeParms (only here — on ordinary streams /F means an external file). When
+// the chain contains no image codec, the returned codec is empty and data holds fully decoded sample bytes.
+// Filters listed after an image codec are impossible to apply (the codec ends the byte-stream pipeline) and are
+// ignored, matching deployed viewers.
+func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
+	lookup := Dict{"Filter": dict["Filter"], "DecodeParms": dict["DecodeParms"]}
+	if lookup["Filter"] == nil {
+		lookup["Filter"] = dict["F"]
+	}
+	if lookup["DecodeParms"] == nil {
+		lookup["DecodeParms"] = dict["DP"]
+	}
+	names, parmsArr, err := d.filterNamesAndParms(lookup)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	specs := make([]filter.Spec, 0, len(names))
+	for i, name := range names {
+		var parmDict Dict
+		if i < len(parmsArr) {
+			parmDict, _ = AsDict(d.Resolve(parmsArr[i]))
+		}
+		if imageFilterName(name) {
+			data, err = filter.DecodeChain(specs, raw)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			return data, name, parmDict, nil
+		}
+		if name == "Crypt" {
+			cryptName, ok := d.GetName(parmDict, "Name")
+			if !ok || cryptName == "Identity" {
+				continue
+			}
+			return nil, "", nil, errCryptFilter
+		}
+		specs = append(specs, filter.Spec{Name: string(name), Params: d.filterParams(parmDict)})
+	}
+	data, err = filter.DecodeChain(specs, raw)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return data, "", nil, nil
+}
+
 // filterSpecs converts a stream dictionary's /Filter and /DecodeParms entries into filter.Specs. A /Crypt filter
 // whose /Name is /Identity (or absent, the default) is dropped from the chain, since Identity is a no-op; any
 // other crypt filter is an error until M2.

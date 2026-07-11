@@ -2,13 +2,34 @@ package content
 
 import "github.com/richardwilkes/pdfview/internal/cos"
 
-// skipInlineImage consumes a BI … ID … EI inline image (ISO 32000-2 8.9.7), leaving the lexer positioned just
-// past the EI keyword. The dictionary entries between BI and ID are parsed with the ordinary operand
-// machinery; the binary payload after ID is skipped by length when the dictionary supplies a usable /L (or
-// /Length), and otherwise by scanning for the EI keyword delimited the way real encoders emit it. Decoding
-// the image arrives with M5; at M4 the whole construct is a safe no-op whose only obligation is not to
-// desynchronize the tokenizer.
-func skipInlineImage(lex *cos.Lexer, data []byte) {
+// opInlineImage consumes a BI … ID … EI inline image (ISO 32000-2 8.9.7), decodes it, draws it, and leaves the
+// lexer positioned just past the EI keyword. The dictionary entries between BI and ID are parsed with the
+// ordinary operand machinery; the binary payload after ID is isolated by length when the dictionary supplies a
+// usable /L (or /Length), and otherwise by scanning for the EI keyword delimited the way real encoders emit it.
+// Malformed constructs degrade to drawing nothing; the only hard obligation is not to desynchronize the
+// tokenizer, exactly as the M4 skip-only version guaranteed.
+func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
+	dict, ok := parseInlineDict(lex)
+	if !ok {
+		return
+	}
+	pos := lex.Pos()
+	// Exactly one whitespace byte separates ID from the payload (the spec's rule; its absence is tolerated).
+	if pos < len(data) && cos.IsWhitespaceByte(data[pos]) {
+		pos++
+	}
+	payload, end := isolatePayload(dict, data, pos)
+	lex.SetPos(end)
+	img, err := in.decodeInline(dict, payload)
+	if err != nil {
+		return
+	}
+	in.drawImage(img)
+}
+
+// parseInlineDict parses the key/value entries between BI and ID. It reports false when the stream ends before
+// ID arrives (nothing to draw, nothing left to position past).
+func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 	dict := cos.Dict{}
 	for {
 		tok, ok := lex.Next()
@@ -16,10 +37,10 @@ func skipInlineImage(lex *cos.Lexer, data []byte) {
 			continue
 		}
 		if tok.Kind == cos.TokenEOF {
-			return
+			return nil, false
 		}
 		if tok.Kind == cos.TokenKeyword && string(tok.Bytes) == "ID" {
-			break
+			return dict, true
 		}
 		if tok.Kind == cos.TokenName {
 			key := cos.Name(tok.Bytes)
@@ -28,26 +49,27 @@ func skipInlineImage(lex *cos.Lexer, data []byte) {
 				continue
 			}
 			if valTok.Kind == cos.TokenEOF {
-				return
+				return nil, false
 			}
 			if obj, objOK := parseOperand(lex, valTok, 0); objOK {
 				dict[key] = obj
 			}
 		}
 	}
-	pos := lex.Pos()
-	// Exactly one whitespace byte separates ID from the payload (the spec's rule; its absence is tolerated).
-	if pos < len(data) && cos.IsWhitespaceByte(data[pos]) {
-		pos++
-	}
-	// A direct /L (or /Length) skips the payload without inspection when the claimed extent lands at an EI.
+}
+
+// isolatePayload returns the payload bytes starting at pos and the offset just past the terminating EI. A
+// direct /L (or /Length) delimits the payload without inspection when the claimed extent lands at an EI;
+// otherwise the payload ends at the first plausible EI keyword, with the single separating whitespace byte
+// before it excluded.
+func isolatePayload(dict cos.Dict, data []byte, pos int) (payload []byte, end int) {
 	if length := inlineLength(dict); length >= 0 && pos+length <= len(data) {
-		if end, ok := eiAt(data, pos+length); ok {
-			lex.SetPos(end)
-			return
+		if eiEnd, ok := eiAt(data, pos+length); ok {
+			return data[pos : pos+length], eiEnd
 		}
 	}
-	lex.SetPos(scanForEI(data, pos))
+	payloadEnd, end := scanForEI(data, pos)
+	return data[pos:payloadEnd], end
 }
 
 // inlineLength returns the payload length claimed by /L or /Length, or -1.
@@ -75,10 +97,11 @@ func eiAt(data []byte, pos int) (end int, ok bool) {
 
 // scanForEI finds the first plausible EI keyword at or after pos: preceded by whitespace (or the payload
 // start) and followed by whitespace, a delimiter, or end of input. Binary payloads can contain the letters
-// "EI", so the delimiting requirements matter; a payload byte pair that still satisfies them ends the skip
+// "EI", so the delimiting requirements matter; a payload byte pair that still satisfies them ends the payload
 // early, which is the standard failure mode every reader shares for undeclared-length inline images. With no
-// EI at all, everything to the end of input is consumed.
-func scanForEI(data []byte, pos int) int {
+// EI at all, everything to the end of input is consumed. The returned payloadEnd excludes the single
+// whitespace byte separating the payload from the EI keyword; end is just past the keyword.
+func scanForEI(data []byte, pos int) (payloadEnd, end int) {
 	for i := pos; i+2 <= len(data); i++ {
 		if data[i] != 'E' || data[i+1] != 'I' {
 			continue
@@ -87,8 +110,12 @@ func scanForEI(data []byte, pos int) int {
 			continue
 		}
 		if i+2 == len(data) || cos.IsWhitespaceByte(data[i+2]) || cos.IsDelimiterByte(data[i+2]) {
-			return i + 2
+			payloadEnd = i
+			if i > pos {
+				payloadEnd = i - 1 // Exclude the separator byte the match required.
+			}
+			return payloadEnd, i + 2
 		}
 	}
-	return len(data)
+	return len(data), len(data)
 }

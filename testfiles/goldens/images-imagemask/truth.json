@@ -1,0 +1,57 @@
+{
+  "file": "images-imagemask.pdf",
+  "sha256": "67fe14658cfad8573fec4d7239bbfdbba52efd35ffa398ad06ab9ac946248ab9",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        340,
+        160
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 473,
+          "height": 223,
+          "stride": 1892,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 709,
+          "height": 334,
+          "stride": 2836,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 340,
+          "height": 160,
+          "stride": 1360,
+          "links": []
+        }
+      }
+    }
+  ]
+}

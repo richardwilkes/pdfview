@@ -17,11 +17,32 @@ import (
 // rotated page CTM but contains text, which renders nothing until M6, so its numbers are reported without
 // being enforced until then.
 func TestVectorCorpusPixels(t *testing.T) {
-	comparePixelsToGolden(t, "vectors", true)
-	comparePixelsToGolden(t, "rotate90", false)
+	comparePixelsToGolden(t, "vectors", "vectors", true)
+	comparePixelsToGolden(t, "rotate90", "rotate90", false)
 }
 
-func comparePixelsToGolden(t *testing.T, name string, enforce bool) {
+// TestImageCorpusPixels is milestone M5's pixel-scope check, following the M4 pattern: the image corpus —
+// content the imaging pipeline must reproduce — is enforced against the goldens at every recorded DPI.
+//
+// The two stub-codec files pin the plan's blank-not-error contract. For images-jpx that is the golden itself:
+// MuPDF's openjpeg rejects the payload and MuPDF drops the image, so its golden is the page with a blank image
+// area — exactly the stub's output. For images-jbig2 MuPDF instead pads the failed decode into a black square
+// (see the decision log), which a blank-rendering stub must not match; its render is compared against the
+// images-jpx golden instead, which is byte-identical page content (same MediaBox, same vector marks, same image
+// placement) with the image correctly absent.
+func TestImageCorpusPixels(t *testing.T) {
+	for _, name := range []string{
+		"images-dct", "images-raw", "images-indexed", "images-imagemask", "images-inline",
+		"images-smask", "images-ccitt", "images-jpx", "images-interpolate",
+	} {
+		comparePixelsToGolden(t, name, name, true)
+	}
+	comparePixelsToGolden(t, "images-jbig2", "images-jpx", true)
+}
+
+// comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
+// pixels. goldenName equals name except for the stub-codec cross-check described on TestImageCorpusPixels.
+func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", name+".pdf"))
 	if err != nil {
@@ -32,7 +53,7 @@ func comparePixelsToGolden(t *testing.T, name string, enforce bool) {
 		t.Fatal(err)
 	}
 	defer doc.Release()
-	goldenDir := filepath.Join("testfiles", "goldens", name)
+	goldenDir := filepath.Join("testfiles", "goldens", goldenName)
 	truth, err := testsupport.LoadTruth(filepath.Join(goldenDir, "truth.json"))
 	if err != nil {
 		t.Fatal(err)

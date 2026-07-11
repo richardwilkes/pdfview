@@ -4,14 +4,16 @@
 // the root package's unpremultiply loop converts them to the straight alpha image.NRGBA the public API promises
 // (reading back premultiplied is deliberate — see the 2026-07-11 decision-log entry on rounding parity).
 //
-// Milestone M4 implements path fills, strokes (with dashing), and clips. The text methods land with M6, images
-// with M5, and shadings/groups/masks with M8; until then those calls are no-ops except for their stack
-// obligations, which are always honored so the interpreter's push/pop pairing holds.
+// Milestone M4 implemented path fills, strokes (with dashing), and clips; M5 added images (RGBA draws and
+// Alpha8 stencil tinting under the image CTM). The text methods land with M6 and shadings/groups/masks with M8;
+// until then those calls are no-ops except for their stack obligations, which are always honored so the
+// interpreter's push/pop pairing holds.
 package render
 
 import (
 	"errors"
 	stdcolor "image/color"
+	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
 	"github.com/richardwilkes/canvas/geom"
@@ -19,6 +21,7 @@ import (
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/patheffect"
 	"github.com/richardwilkes/canvas/raster"
+	"github.com/richardwilkes/canvas/shaders"
 	"github.com/richardwilkes/canvas/skcolor"
 	"github.com/richardwilkes/canvas/surface"
 
@@ -273,16 +276,120 @@ func (d *Device) ClipText(*device.TextRun) {}
 // IgnoreText implements device.Device.
 func (d *Device) IgnoreText(*device.TextRun) {}
 
-// FillImage implements device.Device (images land at M5).
-func (d *Device) FillImage(*imaging.Image, gfx.Matrix, float64) {}
+// rasterImage wraps a decoded image's pixels as a canvas image: straight-alpha RGBA for ordinary images
+// (the sampling pipeline premultiplies), Alpha8 for stencils (which the pipeline tints with the paint color —
+// exactly PDF's image-mask semantics). Returns nil for empty or inconsistent pixel data.
+func rasterImage(img *imaging.Image) *imagecore.Image {
+	if img == nil || img.Width <= 0 || img.Height <= 0 {
+		return nil
+	}
+	info := imagecore.ImageInfo{Width: int32(img.Width), Height: int32(img.Height)}
+	rowBytes := img.Width
+	switch {
+	case img.Stencil:
+		info.ColorType = imagecore.ColorTypeAlpha8
+		info.AlphaType = imagecore.AlphaTypePremul
+	case img.HasAlpha:
+		info.ColorType = imagecore.ColorTypeRGBA8888
+		info.AlphaType = imagecore.AlphaTypeUnpremul
+		rowBytes *= 4
+	default:
+		info.ColorType = imagecore.ColorTypeRGBA8888
+		info.AlphaType = imagecore.AlphaTypeOpaque
+		rowBytes *= 4
+	}
+	return imagecore.NewRasterData(info, img.Pix, rowBytes)
+}
 
-// FillImageMask implements device.Device (images land at M5).
-func (d *Device) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) {}
+// drawImage draws ci across the unit square of the ctm's source space: PDF image space puts the first sample
+// row at the top of that square (ISO 32000-2 8.9.5.2), so the image's pixel grid is flipped into the square
+// before the ctm applies. /Interpolate selects linear sampling; without it samples stay unfiltered (nearest),
+// the mapping calibrated against the oracle's renders.
+func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matrix, paint *canvas.Paint) {
+	w, h := float32(img.Width), float32(img.Height)
+	ctm = gridfit(ctm)
+	m := matrix(ctm)
+	var flip geom.Matrix
+	flip.SetAll(1/w, 0, 0, 0, -1/h, 1, 0, 0, 1)
+	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
+	if img.Interpolate {
+		sampling.Filter = shaders.FilterLinear
+	}
+	count := d.c.Save()
+	d.c.Concat(&m)
+	d.c.Concat(&flip)
+	d.c.DrawImageRect(ci, geom.RectWH(w, h), geom.RectWH(w, h), sampling, paint, canvas.ConstraintFast)
+	d.c.RestoreToCount(count)
+}
 
-// ClipImageMask implements device.Device (images land at M5). It must still push a level for its guaranteed
-// PopClip; without decoded mask bits there is nothing to restrict, so it pushes an unrestricted save.
-func (d *Device) ClipImageMask(*imaging.Image, gfx.Matrix) {
-	d.clipStack = append(d.clipStack, d.c.Save())
+// gridfit snaps a rectilinear image transform outward to whole device pixels — the unit square's device
+// extent becomes floor(min)…ceil(max) per axis — reproducing the oracle's hard, pixel-aligned image edges
+// (pinned against the image goldens at fractional scales: a 425.0 edge computed as 424.99997 in float32 snaps
+// to 424, a 154.166 max edge to 155). Skew and rotation pass through untouched: only axis-aligned transforms
+// (in either axis order) can snap without shearing, matching the oracle's behavior of antialiasing rotated
+// images' edges.
+func gridfit(m gfx.Matrix) gfx.Matrix {
+	switch {
+	case m.B == 0 && m.C == 0 && m.A != 0 && m.D != 0:
+		m.A, m.E = snapSpan(m.A, m.E)
+		m.D, m.F = snapSpan(m.D, m.F)
+	case m.A == 0 && m.D == 0 && m.B != 0 && m.C != 0:
+		// A 90/270-degree transform: x comes from the C/F pair, y from the B/E pair.
+		m.C, m.E = snapSpan(m.C, m.E)
+		m.B, m.F = snapSpan(m.B, m.F)
+	}
+	return m
+}
+
+// snapSpan snaps one axis of a rectilinear transform: the interval [off, off+extent] (in either direction)
+// expands to floor(min)…ceil(max), keeping the extent's sign.
+func snapSpan(extent, off float32) (newExtent, newOff float32) {
+	lo, hi := float64(off), float64(off+extent)
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	lo, hi = math.Floor(lo), math.Ceil(hi)
+	if extent < 0 {
+		return float32(lo - hi), float32(hi)
+	}
+	return float32(hi - lo), float32(lo)
+}
+
+// FillImage implements device.Device. alpha is the folded constant fill alpha; it modulates the image through
+// the paint's alpha channel.
+func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
+	ci := rasterImage(img)
+	if ci == nil {
+		return
+	}
+	if alpha < 0 {
+		alpha = 0
+	} else if alpha > 1 {
+		alpha = 1
+	}
+	paint := canvas.NewPaint()
+	paint.AntiAlias = true
+	paint.Color = skcolor.ARGB(uint8(alpha*255+0.5), 255, 255, 255)
+	d.drawImage(ci, img, ctm, paint)
+}
+
+// FillImageMask implements device.Device: the stencil's Alpha8 pixels are tinted by the fill paint's color
+// (with its folded alpha), PDF's image-mask stencil semantics.
+func (d *Device) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {
+	ci := rasterImage(img)
+	if ci == nil {
+		return
+	}
+	d.drawImage(ci, img, ctm, paintFor(paint))
+}
+
+// ClipImageMask implements device.Device. No producer exists until tiling patterns and Type3 glyphs recurse
+// (M6/M8), so the mask bits are not yet consulted: the clip is the mask's unit square under the ctm, a correct
+// outer bound (a mask can only mark inside its square).
+func (d *Device) ClipImageMask(_ *imaging.Image, ctm gfx.Matrix) {
+	square := &gfx.Path{}
+	square.Rect(0, 0, 1, 1)
+	d.ClipPath(square, false, ctm)
 }
 
 // BeginGroup implements device.Device (transparency groups land at M8). The layer indirection already exists

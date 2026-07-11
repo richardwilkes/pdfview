@@ -1,0 +1,60 @@
+%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 340 120] /Contents 4 0 R /Resources << /XObject << /I2 5 0 R /I4 6 0 R /I1 7 0 R /I8 8 0 R >> >> >>
+endobj
+4 0 obj
+<<  /Length 122 >>
+stream
+q 64 0 0 64 10 30 cm /I2 Do Q
+q 64 0 0 64 84 30 cm /I4 Do Q
+q 64 0 0 64 158 30 cm /I1 Do Q
+q 64 0 0 64 232 30 cm /I8 Do Q
+
+endstream
+endobj
+5 0 obj
+<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /BitsPerComponent 2 /ColorSpace [/Indexed /DeviceRGB 3 <ff000000ff000000ffffff00>] /Filter /ASCIIHexDecode /Length 9 >>
+stream
+1b4eb1e4>
+endstream
+endobj
+6 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 4 /ColorSpace [/Indexed /DeviceRGB 15 <00ff0011ee2822dd5033cc7844bba055aac86699f0778818887740996668aa5590bb44b8cc33e0dd2208ee1130ff0058>] /Filter /ASCIIHexDecode /Length 65 >>
+stream
+0123456723456789456789ab6789abcd89abcdefabcdef01cdef0123ef012345>
+endstream
+endobj
+7 0 obj
+<< /Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 1 /ColorSpace [/Indexed /DeviceGray 1 <00ff>] /Filter /ASCIIHexDecode /Length 17 >>
+stream
+f0f0f0f00f0f0f0f>
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Image /Width 4 /Height 4 /BitsPerComponent 8 /ColorSpace [/Indexed /DeviceRGB 5 <ff000000ff000000ffffff00ff00ff00ffff>] /Filter /ASCIIHexDecode /Length 33 >>
+stream
+000102030405c8ff0504030201000906>
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000274 00000 n 
+0000000448 00000 n 
+0000000663 00000 n 
+0000001008 00000 n 
+0000001213 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1465
+%%EOF

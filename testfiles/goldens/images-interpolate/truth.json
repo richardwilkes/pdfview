@@ -1,0 +1,57 @@
+{
+  "file": "images-interpolate.pdf",
+  "sha256": "60059085bcbd57139fa47f07e883c143e868c6d74f0caa816678f326424c9cbe",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        240,
+        120
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 334,
+          "height": 167,
+          "stride": 1336,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 500,
+          "height": 250,
+          "stride": 2000,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 240,
+          "height": 120,
+          "stride": 960,
+          "links": []
+        }
+      }
+    }
+  ]
+}

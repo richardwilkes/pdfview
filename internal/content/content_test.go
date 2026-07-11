@@ -15,10 +15,12 @@ import (
 
 // Recorded operation names.
 const (
-	opFill    = "fill"
-	opStroke  = "stroke"
-	opClip    = "clip"
-	opPopClip = "popclip"
+	opFill      = "fill"
+	opStroke    = "stroke"
+	opClip      = "clip"
+	opPopClip   = "popclip"
+	opFillImage = "fillimage"
+	opFillMask  = "fillimagemask"
 )
 
 // Resource names shared across the tests and the fuzz harness.
@@ -33,9 +35,11 @@ const (
 type call struct {
 	op      string
 	path    *gfx.Path
+	img     *imaging.Image
 	paint   device.Paint
 	sp      gfx.StrokeParams
 	ctm     gfx.Matrix
+	alpha   float64
 	evenOdd bool
 }
 
@@ -78,8 +82,14 @@ func (r *recorder) FillText(*device.TextRun, device.Paint)                      
 func (r *recorder) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint) {}
 func (r *recorder) ClipText(*device.TextRun)                                    {}
 func (r *recorder) IgnoreText(*device.TextRun)                                  {}
-func (r *recorder) FillImage(*imaging.Image, gfx.Matrix, float64)               {}
-func (r *recorder) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint)      {}
+
+func (r *recorder) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
+	r.add(&call{op: opFillImage, img: img, ctm: ctm, alpha: alpha})
+}
+
+func (r *recorder) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {
+	r.add(&call{op: opFillMask, img: img, ctm: ctm, paint: paint})
+}
 
 func (r *recorder) ClipImageMask(*imaging.Image, gfx.Matrix) {
 	r.depth++
@@ -276,15 +286,82 @@ func TestTextObjectSkippedSafely(t *testing.T) {
 	wantOps(t, rec, opFill)
 }
 
-func TestInlineImageSkipped(t *testing.T) {
+func TestInlineImageDecodesAndDraws(t *testing.T) {
 	// Without /L: the payload contains a lone EI-lookalike inside binary that lacks the delimiters, then a
-	// real EI. With /L: length-led skip.
+	// real EI. The lexer must stay in sync and the image must decode from the scan-delimited payload.
 	rec := run(t, nil, nil, "BI /W 2 /H 2 /BPC 8 /CS /G ID \x00EIx\xff\x01 EI 0 0 1 1 re f")
-	wantOps(t, rec, opFill)
+	wantOps(t, rec, opFillImage, opFill)
+	img := rec.calls[0].img
+	if img.Width != 2 || img.Height != 2 || img.Stencil || len(img.Pix) != 16 {
+		t.Fatalf("inline image decoded wrong: %+v", img)
+	}
+	// The four gray samples are the first four payload bytes: 0x00, 'E', 'I', 'x'.
+	if img.Pix[0] != 0 || img.Pix[4] == 0 || img.Pix[8] == 0 || img.Pix[12] == 0 {
+		t.Errorf("inline image samples wrong: %v", img.Pix)
+	}
+	// With /L: length-led payload isolation; content afterwards must lex normally.
 	rec = run(t, nil, nil, "BI /W 1 /H 1 /BPC 8 /CS /G /L 4 ID \x00EI\x01 EI 0 0 2 2 re f")
-	wantOps(t, rec, opFill)
-	if rec.calls[0].path.Points[2] != (gfx.Point{X: 2, Y: 2}) {
+	wantOps(t, rec, opFillImage, opFill)
+	if rec.calls[1].path.Points[2] != (gfx.Point{X: 2, Y: 2}) {
 		t.Error("content after length-led inline image mis-lexed")
+	}
+	// An inline image mask stencils with the current fill paint; /D [1 0] flips its polarity.
+	rec = run(t, nil, nil, "1 0 0 rg BI /IM true /W 8 /H 1 /D [1 0] /F /AHx ID f0> EI")
+	wantOps(t, rec, opFillMask)
+	mask := rec.calls[0].img
+	if !mask.Stencil || len(mask.Pix) != 8 {
+		t.Fatalf("stencil decoded wrong: %+v", mask)
+	}
+	// Bits 11110000 with Decode [1 0]: the 1 bits paint (inverted polarity).
+	for i, want := range []byte{255, 255, 255, 255, 0, 0, 0, 0} {
+		if mask.Pix[i] != want {
+			t.Fatalf("stencil polarity: got %v", mask.Pix)
+		}
+	}
+	if got := rec.calls[0].paint.Color; got.R != 255 || got.G != 0 {
+		t.Errorf("stencil paint should be the fill color: %v", got)
+	}
+	// A broken inline image (unusable dict) draws nothing and does not desynchronize the stream.
+	rec = run(t, nil, nil, "BI /W 0 /H 2 /BPC 8 /CS /G ID \x00\x01 EI 0 0 3 3 re f")
+	wantOps(t, rec, opFill)
+}
+
+func TestImageXObjectDo(t *testing.T) {
+	pdf := minimalPDF(
+		"<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Length 6 >>\nstream\n\x10\x20\x30\x40\x50\x60\nendstream",
+		"<< /Type /XObject /Subtype /Image /Width 4 /Height 1 /ImageMask true /Length 2 >>\nstream\n\x50\x00\nendstream",
+		"<< /Type /ExtGState /ca 0.75 >>",
+	)
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{
+		catXObject:   cos.Dict{"ImC": cos.Ref{Num: 1}, "ImM": cos.Ref{Num: 2}},
+		catExtGState: cos.Dict{resGSName: cos.Ref{Num: 3}},
+	}
+	rec := run(t, d, res, "q 5 0 0 5 0 0 cm /GS0 gs /ImC Do Q 0 0 1 rg /ImM Do /ImC Do /Missing Do")
+	wantOps(t, rec, opFillImage, opFillMask, opFillImage)
+	if got := rec.calls[0]; got.img.Width != 2 || got.img.Height != 1 || got.alpha != 0.75 {
+		t.Fatalf("image draw: %+v alpha %v", got.img, got.alpha)
+	}
+	// DeviceRGB 8-bit samples pass through byte-identical.
+	if pix := rec.calls[0].img.Pix; pix[0] != 0x10 || pix[1] != 0x20 || pix[2] != 0x30 || pix[4] != 0x40 {
+		t.Errorf("rgb samples: %v", pix)
+	}
+	// The mask stencils with the current fill color; bits 0101 0000: 0 bits paint under the default decode.
+	mask := rec.calls[1]
+	if !mask.img.Stencil || mask.paint.Color.B != 255 {
+		t.Fatalf("mask draw: %+v paint %v", mask.img, mask.paint)
+	}
+	for i, want := range []byte{255, 0, 255, 0} {
+		if mask.img.Pix[i] != want {
+			t.Fatalf("mask bits: got %v", mask.img.Pix)
+		}
+	}
+	// The same reference drawn twice must hand the device the same decoded image (per-Run cache).
+	if rec.calls[0].img != rec.calls[2].img {
+		t.Error("image cache did not reuse the decoded image")
 	}
 }
 

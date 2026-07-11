@@ -1,8 +1,9 @@
 // Package content tokenizes and interprets PDF content streams (ISO 32000-2 8–9), driving a device.Device.
-// Milestone M4 covers the graphics core: path construction and painting, graphics-state management (q/Q/cm,
-// the ExtGState subset below), clipping (W/W*), color operators, and form XObject recursion. Text objects,
-// image XObjects, inline images, and shadings are recognized and skipped safely — the tokenizer stays in sync
-// across them — with their real handling arriving at M6, M5, M5, and M8 respectively.
+// Milestone M4 covered the graphics core: path construction and painting, graphics-state management (q/Q/cm,
+// the ExtGState subset below), clipping (W/W*), color operators, and form XObject recursion. M5 added image
+// XObjects and inline images (decoded by internal/imaging). Text objects and shadings are recognized and
+// skipped safely — the tokenizer stays in sync across them — with their real handling arriving at M6 and M8
+// respectively.
 //
 // Robustness contract (plan.md "Resource limits & robustness"): unknown operators are skipped with the operand
 // list reset (the convention every deployed viewer follows); operators with missing or mistyped operands are
@@ -19,6 +20,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/imaging"
 )
 
 // Limits. maxQDepth matches the q/Q cap in plan.md; pushes beyond it are ignored (with their matching Qs
@@ -80,9 +82,11 @@ type interp struct {
 	operands []cos.Object
 	path     *gfx.Path
 	active   map[cos.Ref]bool
-	gs       gstate
-	cur      gfx.Point
-	start    gfx.Point
+	// images caches decoded image XObjects (nil for failed decodes) for this Run, capped at maxCachedImages.
+	images map[cos.Ref]*imaging.Image
+	gs     gstate
+	cur    gfx.Point
+	start  gfx.Point
 	// qFloor is the gsStack depth below which Q may not pop — the boundary of the executing stream (form
 	// content cannot pop its caller's states).
 	qFloor int
@@ -119,6 +123,7 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 		},
 		path:   &gfx.Path{},
 		active: make(map[cos.Ref]bool),
+		images: make(map[cos.Ref]*imaging.Image),
 		budget: maxTotalOps,
 	}
 	in.exec(data)
@@ -150,11 +155,11 @@ func (in *interp) exec(data []byte) {
 			break
 		}
 		// Keywords other than the three object keywords are operators (BI hands off to the inline-image
-		// skipper, which keeps the tokenizer in sync across the binary payload).
+		// handler, which keeps the tokenizer in sync across the binary payload while decoding and drawing it).
 		if word, isOp := operatorWord(tok); isOp {
 			in.budget--
 			if word == "BI" {
-				skipInlineImage(lex, data)
+				in.opInlineImage(lex, data)
 			} else {
 				in.op(word)
 			}
