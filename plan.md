@@ -1,23 +1,23 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M6 (fonts + text) COMPLETE (2026-07-11) — gate const is "M6". M7 (structured text +
-search) is next.**
+**Current milestone: M7 (structured text + search) COMPLETE (2026-07-11) — gate const is "M7". M8 (advanced
+graphics, hardening, cutover) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M6-completion commit (fix anything
-> that didn't). M6 closed with: internal/type1 (full container + charstring handler on go-text's
-> psinterpreter — flex, seac, othersubrs, div all exercised by the new text-type1 corpus file),
-> internal/store wired end-to-end (New's maxCacheSize is honored; fonts/images/glyph-paths share one
-> budgeted LRU; TestCacheBudget pins byte-identical output at any budget), Type0/CID (embedded CMaps,
-> Identity-H/V incl. vertical metrics, CIDToGIDMap, CID-keyed CFF charset/FDSelect, and a direct glyf
-> walker so cmap-less CID TrueType subsets render), Type3 CharProcs via interpreter recursion (d0/d1),
-> ToUnicode (precedence over AGL), FuzzCMap + FuzzType1, five new corpus files with goldens (all
-> quad-EXACT; four inside default pixel thresholds), and the M6-exit threshold decision: per-golden
-> thresholds.json ratchets (loaded by testsupport, preserved by regen.sh) now make EVERY text corpus file
-> enforced — see the 2026-07-11 M6-exit decision-log entry for each file's measured numbers. Two deferred
-> items are decision-logged: the Noto symbols/dingbats bundle (ZapfDingbats still renders blank inside
-> std14-styles' ratchet) and predefined non-Identity CMaps (corpus-driven). M7's first box is
-> **internal/stext** — the spike matcher in textquads_test.go and its quad/line/space rules are the
-> starting material, and the M7 exit needs TestPDF's 9 exact GURPS rects (gate → "M7").
+> **Next session start here:** confirm the 4 CI runners went green on the M7-completion commit (fix anything
+> that didn't). M7 closed with: internal/stext (the M6 spike's capture device + matcher productionized behind
+> the device seam — run-identity dedup across text verbs, unclipped recording incl. IgnoreText, and the
+> fz-search-compatible matcher with exact quad-budget truncation), the `search()` seam live in pdf.go via a
+> dedicated scale-1 stext pass (the "Tee render+stext in one pass" box was resolved OTHERWISE — a shared pass
+> at render scale breaks the float32 exact-rect funnel; see the M7 decision log), **TestPDF green with all 9
+> exact GURPS rects on the first run** (no re-baseline), TestTextQuadParity tightened to POSITIONAL order at
+> 0.01 pt (277 quads over 21 goldens, worst corner 0.0022 pt), TestParity's M7 search arm exact for every
+> needle × page × dpi {72,100,150} across all 34 goldens, and FuzzStext (ninth fuzz target, hostile
+> needles × synthetic layouts). Three unpinned edges are decision-logged for future corpus coverage
+> (vertical-writing quads, Type 3 proc-internal text, pattern-space text). M8's first box is
+> **internal/shading** types 2/3 — new corpus files + goldens needed (regen.sh is local/manual); then
+> patterns, groups/soft masks/blends, /AP streams, veraPDF soak + perf numbers, DrawPage, gate removal
+> (delete gates_test.go and every gate line; check the pdf_test.go diff criterion in invariant 5), README +
+> .claude/CLAUDE.md rewrite, first release tag.
 
 ## Session protocol
 
@@ -101,7 +101,7 @@ and convert coordinates; milestones only fill in the `engineDocument` stub metho
 | TestUseAfterRelease | M1 | passing |
 | TestInternalLinks | M3 | passing |
 | TestRenderPageForSizeLimits | M4 | passing |
-| TestPDF | M7 | gated |
+| TestPDF | M7 | passing |
 
 `gates_test.go` holds `const milestone`; bump it only when a milestone's full exit criteria are met. All gate lines
 and `gates_test.go` itself are deleted at M8.
@@ -254,7 +254,7 @@ log entry) — never a tolerance in the test.
   initial gate: ≤2% of pixels with Δ>24 AND ≤10% with Δ>8 AND mean Δ≤2; per-file overrides in
   `goldens/<name>/thresholds.json`, only ever tightened; achieved numbers recorded per milestone here.
 - Fuzz targets (seeds from corpus): FuzzOpen, FuzzFilters, FuzzCrypt, FuzzContent, FuzzCMap, FuzzType1, FuzzImaging,
-  FuzzShading. CI runs a short fuzz smoke; long runs are local.
+  FuzzShading, plus FuzzFontProgram (M6) and FuzzStext (M7). CI runs a short fuzz smoke; long runs are local.
 
 ## Resource limits & robustness
 
@@ -510,14 +510,32 @@ RESOLVED at M6 exit (2026-07-11): per-file thresholds.json ratchets with exactly
 "M6 exit, per-file pixel thresholds" decision-log entry records each file's measured worst and its gate, and
 every text corpus file is enforced from M6 on.
 
-### M7 — Structured text + search (4–6 sessions)
+### M7 — Structured text + search (4–6 sessions; done in 1, 2026-07-11)
 
-- [ ] `internal/stext`: chars with quads, line/word assembly, space inference, emission order preserved
-- [ ] Search per the compatibility spec above; wire `search()` seam with `min(maxHits, OverallMaxHits)`
-- [ ] Tee render+stext in one pass per render call
+- [x] `internal/stext`: chars with quads, line/word assembly, space inference, emission order preserved
+      (2026-07-11: the M6 spike's capture device and matcher graduated into internal/stext essentially
+      unchanged — Device records every run ONCE by run identity across FillText/StrokeText/ClipText/IgnoreText
+      deliveries, with quads Trm × [0..advance, desc..asc]; clips/groups/masks are ignored via device.Null
+      (search is unclipped, and Tr 3 text is searchable); unit tests pin folding, gap spaces, wraps,
+      extent splits, emission order, non-overlap, and budget truncation, and FuzzStext hammers the matcher
+      with hostile needles × synthetic layouts incl. zero sizes and non-finite geometry)
+- [x] Search per the compatibility spec above; wire `search()` seam with `min(maxHits, OverallMaxHits)`
+      (2026-07-11: Device.Search implements the full spec — simple case folding, needle whitespace elastic
+      over space chars / ≥0.2 em gaps / line breaks, no silent wraps, non-overlapping matches, per-line quads
+      with the 1/9 extent-split rule — and truncates at its quad budget exactly like the original binding's
+      fixed fz_quad buffer; pdf.go's seam runs the stext pass at scale 1 under a recover() guard and feeds
+      page-space float32 quads to the frozen quadToRect funnel; budget min(maxHits, OverallMaxHits) was
+      already in searchPage)
+- [x] Tee render+stext in one pass per render call (2026-07-11: RESOLVED OTHERWISE — search runs a dedicated
+      scale-1 interpreter pass instead; a Tee'd shared pass at render scale cannot reproduce the exact-rect
+      float32 funnel. See the M7 decision log; device.Tee stays for future same-space multi-device needs.)
 
 Exit: **TestPDF green including the 9 exact GURPS rects** (gate → "M7"); search-quad parity across corpus × dpi
-{72,100,150} × needle set.
+{72,100,150} × needle set. — ALL MET 2026-07-11: TestPDF passes with all 9 GURPS rects exact on the first run
+(no re-baseline; the funnel held); TestTextQuadParity is now POSITIONAL (count + emission order + corners) at
+0.01 pt over 277 quads across the 21 goldens with needles (worst corner glaive's 0.0022 pt, all others 0.0000);
+TestParity's M7 arm compares the public API's scaled hit rects for every needle × page × dpi against the
+goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
 
 ### M8 — Advanced graphics, hardening, cutover (6–8 sessions)
 
@@ -1002,6 +1020,37 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   begins with the standard Richard A. Wilkes MPL-2.0 header; the `goheader` linter enforces it (template in
   `.golangci.yml`), and `internal/font/data/gen` emits it into generated output. This adds the header block to the
   allowed `pdf_test.go` diff vs 26de8a9 (invariant 5 and the M8 gate-removal box updated accordingly).
+- 2026-07-11 (M7 stext/search): the M6 spike matcher was productionized into internal/stext with its behavior
+  unchanged; the semantics now permanently encoded there: the device records chars for every text verb
+  (fill/stroke/clip/ignore) once per run by POINTER identity — the interpreter dispatches one *TextRun through
+  several verbs per render mode — and ignores all clip state (MuPDF search is unclipped). Search's budget counts
+  QUADS, not matches, truncating mid-match and stopping (the original binding passed a fixed fz_quad[hit_max]
+  buffer to fz_search_display_list, whose count is quads). Needle whitespace elasticity was generalized from the
+  spike's literal ' ' to any unicode.IsSpace rune; a needle with no non-space rune returns no hits (behaviorally
+  unpinned — no golden covers it). Hit ORDER is MuPDF's stext emission order, now verified positionally by
+  TestTextQuadParity and TestParity across the whole corpus — glaive pins it hard, since its hits 7 and 8 sit at
+  the page TOP yet are reported last (their runs appear late in the content stream), ruling out spatial sorting.
+- 2026-07-11 (M7 seam, supersedes "Tee render+stext in one pass per render call"): search() runs its own
+  interpreter pass at scale 1 against the stext device alone. The quads the seam returns must be scale-1
+  page-space float32 corners bit-identical to MuPDF's stext output, because the frozen public wiring
+  (quadToRect) widens them to float64, multiplies by the render scale, and floor/ceils — the exact funnel the
+  9 GURPS literals and the goldens' per-dpi search ints were baselined against. A Tee'd shared pass at render
+  scale S would compose every corner in scaled float32 from the page CTM up; recovering page space (÷S) or
+  comparing at S shifts corners by float32 ulps, which flips floor/ceil anywhere a scaled corner is exactly
+  integral — the probe corpus is full of round page coordinates, so this is not hypothetical. The cgo binding
+  only avoided a second content pass via its display list, which the no-display-list decision already traded
+  away; the extra pass is interpreter-only (no rasterization) and the public API is unchanged. device.Tee
+  remains for future same-space multi-device work (M8 DrawPage); a per-page stext cache in internal/store is a
+  possible M8 perf item if the perf box's measurements demand it (it would need invalidation on Authenticate,
+  like the object cache).
+- 2026-07-11 (M7 unpinned edges, recorded for future corpus coverage): (1) vertical-writing (Identity-V) char
+  quads keep the horizontal formula Trm × [0..advance, desc..asc] over the vertical advance and remain
+  behaviorally unpinned — the corpus's vertical line has no needle; pin with a regenerated golden before
+  relying on them. (2) A Type 3 charproc that itself shows text would have that inner text recorded and
+  searchable (the procs recurse through the same interpreter/device); MuPDF's behavior is unpinned — no corpus
+  Type 3 proc contains text. (3) Text painted in a non-marking color space (/Pattern until M8 wires patterns,
+  /Separation /None always) emits no device calls and is therefore invisible to search, whereas MuPDF's stext
+  records it; the /Pattern half self-resolves when M8 makes patterns mark.
 
 ## Verification
 

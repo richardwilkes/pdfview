@@ -12,11 +12,11 @@
 //
 // The package is a pure-Go PDF engine with rasterization delegated to github.com/richardwilkes/canvas. It is being
 // built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. With
-// the COS layer (M1), encryption (M2), navigation (M3), and the graphics core (M4) in place, New parses documents —
-// including damaged ones, via a repair scan — PageCount, authentication, TableOfContents, page bounds, and links are
-// real, and RenderPage/RenderPageForSize rasterize each page's vector content (paths, clips, colors, form XObjects)
-// through the content-stream interpreter. Images render at M5, text at M6, and shadings/patterns at M8; search
-// returns no hits until structured text lands (M7).
+// the COS layer (M1), encryption (M2), navigation (M3), the graphics core (M4), images (M5), fonts and text (M6),
+// and structured text + search (M7) in place, New parses documents — including damaged ones, via a repair scan —
+// PageCount, authentication, TableOfContents, page bounds, and links are real, RenderPage/RenderPageForSize
+// rasterize each page's content (paths, clips, colors, form XObjects, images, text) through the content-stream
+// interpreter, and text search returns MuPDF-compatible hit rectangles. Shadings and patterns render at M8.
 package pdfview
 
 import (
@@ -31,6 +31,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/content"
 	"github.com/richardwilkes/pdfview/internal/doc"
 	"github.com/richardwilkes/pdfview/internal/render"
+	"github.com/richardwilkes/pdfview/internal/stext"
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
@@ -645,8 +646,38 @@ func (p *page) bounds() (width, height float32) {
 	return p.width, p.height
 }
 
-// search returns the quads of up to maxHits text matches on the page. Structured text extraction and search land at
-// M7.
-func (e *engineDocument) search(_ *page, _ string, _ int) []quad {
-	return nil
+// search returns the quads of up to maxHits text matches on the page, in the emission order MuPDF's search
+// reports them (the exact-value tests index hits positionally). The page's content runs through the interpreter
+// once more against the structured-text device at scale 1, so the quads come back in top-left/y-down page space
+// — the same space MuPDF's fz_search_stext_page reported them in through the C float funnel — and quadToRect
+// applies the render scale in float64 exactly as the original implementation did. Running the pass at the
+// render scale instead (sharing the rasterize pass via device.Tee) would compose every quad corner in scaled
+// float32 and break that funnel; see the M7 decision log. Per plan.md invariant 6, a panic provoked by hostile
+// content surfaces as no hits rather than escaping the public API.
+func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []quad) {
+	defer func() {
+		if recover() != nil {
+			hits = nil
+		}
+	}()
+	ctm, err := e.doc.PageCTM(pg.number, 1)
+	if err != nil {
+		return nil
+	}
+	dev := stext.New()
+	if data := e.doc.PageContents(pg.number); len(data) > 0 {
+		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
+	}
+	found := dev.Search(needle, maxHits)
+	if len(found) == 0 {
+		return nil
+	}
+	hits = make([]quad, len(found))
+	for i, q := range found {
+		hits[i] = quad{
+			ulX: q.UL.X, ulY: q.UL.Y, urX: q.UR.X, urY: q.UR.Y,
+			llX: q.LL.X, llY: q.LL.Y, lrX: q.LR.X, lrY: q.LR.Y,
+		}
+	}
+	return hits
 }
