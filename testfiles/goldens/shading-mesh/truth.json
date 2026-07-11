@@ -1,0 +1,57 @@
+{
+  "file": "shading-mesh.pdf",
+  "sha256": "16e718721b447e51ae28709ad8594632628d21039a39e4997b5a60515f7f909d",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        400,
+        400
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 556,
+          "height": 556,
+          "stride": 2224,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 834,
+          "height": 834,
+          "stride": 3336,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 400,
+          "height": 400,
+          "stride": 1600,
+          "links": []
+        }
+      }
+    }
+  ]
+}

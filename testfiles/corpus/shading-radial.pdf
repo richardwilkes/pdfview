@@ -1,0 +1,66 @@
+%PDF-1.7
+1 0 obj
+<< /FunctionType 2 /Domain [0 1] /C0 [1 0.9 0.3] /C1 [0.5 0 0.5] /N 1 >>
+endobj
+2 0 obj
+<< /Length 25 /Filter /ASCIIHexDecode /FunctionType 0 /Domain [0 1] /Range [0 1 0 1 0 1] /Size [4] /BitsPerSample 8 >>
+stream
+ff0000ffff0000c8000000ff>
+endstream
+endobj
+3 0 obj
+<< /FunctionType 2 /Domain [0 1] /C0 [0 0.7 0.9] /C1 [0.9 0.1 0.1] /N 1 >>
+endobj
+4 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [110 190 15 150 150 90] /Function 1 0 R /Extend [true true] >>
+endobj
+5 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [75 55 10 75 55 45] /Function 2 0 R /Extend [false false] >>
+endobj
+6 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [130 55 35 160 55 20] /Function 3 0 R /Extend [false true] >>
+endobj
+7 0 obj
+<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [245 55 40 245 55 5] /Function 1 0 R /Extend [true false] >>
+endobj
+8 0 obj
+<< /PatternType 2 /Shading 5 0 R >>
+endobj
+9 0 obj
+<< /Length 136 >>
+stream
+q 10 105 280 185 re W n /R1 sh Q
+q /Pattern cs /P2 scn 20 10 110 90 re f Q
+q 105 10 90 90 re W n /R5 sh Q
+q 200 10 90 90 re W n /R3 sh Q
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 300 300] /Contents 9 0 R /Resources << /Shading << /R1 4 0 R /R5 6 0 R /R3 7 0 R >> /Pattern << /P2 8 0 R >> >> >>
+endobj
+11 0 obj
+<< /Type /Pages /Kids [10 0 R] /Count 1 >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 11 0 R >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000009 00000 n 
+0000000097 00000 n 
+0000000274 00000 n 
+0000000364 00000 n 
+0000000491 00000 n 
+0000000616 00000 n 
+0000000742 00000 n 
+0000000867 00000 n 
+0000000918 00000 n 
+0000001105 00000 n 
+0000001281 00000 n 
+0000001340 00000 n 
+trailer
+<< /Size 13 /Root 12 0 R >>
+startxref
+1391
+%%EOF

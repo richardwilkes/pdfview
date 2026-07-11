@@ -1,22 +1,23 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M7 (structured text + search) COMPLETE (2026-07-11) — gate const is "M7". M8 (advanced
-graphics, hardening, cutover) is next.**
+**Current milestone: M8 (advanced graphics, hardening, cutover) IN PROGRESS — gate const is "M7". Box 1
+(shadings 1-7 + shading/tiling patterns) landed 2026-07-11.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M7-completion commit (fix anything
-> that didn't). M7 closed with: internal/stext (the M6 spike's capture device + matcher productionized behind
-> the device seam — run-identity dedup across text verbs, unclipped recording incl. IgnoreText, and the
-> fz-search-compatible matcher with exact quad-budget truncation), the `search()` seam live in pdf.go via a
-> dedicated scale-1 stext pass (the "Tee render+stext in one pass" box was resolved OTHERWISE — a shared pass
-> at render scale breaks the float32 exact-rect funnel; see the M7 decision log), **TestPDF green with all 9
-> exact GURPS rects on the first run** (no re-baseline), TestTextQuadParity tightened to POSITIONAL order at
-> 0.01 pt (277 quads over 21 goldens, worst corner 0.0022 pt), TestParity's M7 search arm exact for every
-> needle × page × dpi {72,100,150} across all 34 goldens, and FuzzStext (ninth fuzz target, hostile
-> needles × synthetic layouts). Three unpinned edges are decision-logged for future corpus coverage
-> (vertical-writing quads, Type 3 proc-internal text, pattern-space text). M8's first box is
-> **internal/shading** types 2/3 — new corpus files + goldens needed (regen.sh is local/manual); then
-> patterns, groups/soft masks/blends, /AP streams, veraPDF soak + perf numbers, DrawPage, gate removal
-> (delete gates_test.go and every gate line; check the pdf_test.go diff criterion in invariant 5), README +
+> **Next session start here:** confirm the 4 CI runners went green on the M8-shadings commit (fix anything
+> that didn't). The M7 CI run (29168015189) was confirmed green. M8 box 1 is COMPLETE: internal/shading
+> parses all seven shading types to the normalized form (sampled 256-stop ramps for axial/radial, an eval
+> closure for function-based, fair-budget flat tessellation for mesh types 4-7), the interpreter wires `sh`
+> and /Pattern paints (shading + tiling, colored + uncolored) through the device seam with pattern space
+> anchored to the selecting stream's default CTM, and the raster device realizes them as canvas shaders /
+> replayed tiles / non-AA triangles under MuPDF's shade-painter half-pixel offset and floored tile blitting
+> (all behaviorally pinned — see the M8 decision-log entries). Five new corpus files + goldens
+> (shading-axial/radial/function/mesh, pattern-tiling) are enforced by TestShadingCorpusPixels (three carry
+> ratchets); FuzzShading is the tenth fuzz target and FuzzContent now fuzzes sh/scn patterns and the tiling
+> replay closure. NEXT BOX: **transparency groups, soft masks, blend modes** (BeginGroup/BeginMask/EndMask/
+> PopMask in render via SaveLayer + BlendDstIn + colorfilter.NewLuma; /G XObjects + gs /SMask /BM /ca /CA in
+> the interpreter) — needs new corpus probes (blend modes, group alpha, luminosity + alpha soft masks) per
+> the regen.sh pattern; then /AP streams, veraPDF soak + perf numbers, DrawPage, gate removal (delete
+> gates_test.go and every gate line; check the pdf_test.go diff criterion in invariant 5), README +
 > .claude/CLAUDE.md rewrite, first release tag.
 
 ## Session protocol
@@ -539,7 +540,14 @@ goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
 
 ### M8 — Advanced graphics, hardening, cutover (6–8 sessions)
 
-- [ ] `internal/shading` types 1–7 + shading/tiling patterns
+- [x] `internal/shading` types 1–7 + shading/tiling patterns (2026-07-11: parser + mesh tessellation in
+      internal/shading (FuzzShading is the tenth fuzz target); `sh` + pattern paints (PatternType 1 colored/
+      uncolored + PatternType 2) live in the interpreter with per-frame caches, stream-anchored pattern space,
+      and a budget/cycle-sharing tiling replay closure; render realizes gradients as canvas shaders (mixed
+      /Extend via one-draw parametric extension), function shadings as domain-grid image shaders, meshes as
+      non-AA flat triangles, and tiling as per-tile replay with floored device offsets — all under MuPDF's
+      shade-painter half-pixel offset, behaviorally pinned. Five corpus files + goldens enforced by
+      TestShadingCorpusPixels; per-file numbers in the status note below.)
 - [ ] Transparency groups, soft masks, blend modes; knockout/isolated as SaveLayer allows
 - [ ] Annotation appearance streams (/AP) rendered like the oracle does
 - [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
@@ -556,6 +564,15 @@ goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
 - [ ] Tag first release
 
 Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build ./...`; example output matches oracle.
+
+Shading-corpus pixel status at M8 box 1 (2026-07-11; % over Δ24 / % over Δ8 / mean Δ at dpi 72|100|150):
+shading-mesh 0.06/0.06/0.86 | 0.04/0.04/0.80 | 0.05/0.05/0.80 (inside the default gate — interiors within Δ8,
+edges pinned by the half-pixel offset); shading-function 0.00/0.00/0.41 | 0.45/0.45/1.05 | 0.26/0.26/0.74
+(default gate); shading-axial 0.39/0.72/1.04 | 1.33/1.59/2.54 | 0.58/0.84/1.34 and shading-radial
+0.05/1.98/1.02 | 1.10/2.07/2.27 | 0.73/0.90/1.91 (ratchets 2/10/3.2 and 2/10/2.9: only the mean at dpi 100
+exceeds the default, all of it fractional-scale edge AA — interiors within Δ8); pattern-tiling
+1.20/3.78/2.31 | 2.03/5.64/2.88 | 1.13/2.29/1.67 (ratchet 2.6/10/3.6: per-cell AA of glyph-scale features,
+placement floored-blit-exact per the dpi-150 pass).
 
 ## Decision log (append-only, dated)
 
@@ -1051,6 +1068,60 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   Type 3 proc contains text. (3) Text painted in a non-marking color space (/Pattern until M8 wires patterns,
   /Separation /None always) emits no device calls and is therefore invisible to search, whereas MuPDF's stext
   records it; the /Pattern half self-resolves when M8 makes patterns mark.
+
+- 2026-07-11 (M8 shadings, normalized form): internal/shading resolves everything to RGB at parse time —
+  axial/radial sample their function into a 256-stop ramp (MuPDF's own resolution) and mesh vertex colors
+  convert to RGB before interpolation (MuPDF likewise interpolates mesh colors in the destination space), so
+  the raster device never sees colorspaces or functions; function-based shadings carry a ColorAt closure the
+  device evaluates over a device-resolution domain grid (capped 512×512 / 2^18 evals) into a decal image
+  shader. Mesh tessellation subdivides Gouraud triangles at midpoints until ΔRGB < 1 (8-bit step) under a FAIR
+  budget: input primitives are collected first and maxTriangles (2^19) is split evenly, so a contrasting first
+  triangle cannot starve later ones (the bug the first cut had); Coons patches promote to tensor form via the
+  spec formula and tessellate on a color-delta-sized grid (floor 12, cap 96 per axis). /Background and
+  /AntiAlias are parsed-and-ignored (no corpus pin; MuPDF's Background handling is unobserved — revisit if a
+  real file surfaces).
+- 2026-07-11 (M8 shadings, device seam changes): `FillShading` now takes a Paint (alpha + blend — sh honors
+  the fill alpha, pinned by shading-function's ca 0.5 arm); `Paint` gained `PatternCTM` (pattern/shading space
+  → device, the pattern /Matrix composed with the SELECTING stream's default CTM); `Tiling.Replay` became
+  `func(dev Device, ctm gfx.Matrix)` and Tiling.Matrix was dropped (PatternCTM carries it). Pattern space
+  anchors to the CTM at the start of the content stream whose resources named the pattern (interp.streamCTM,
+  ISO 32000-2 8.7.3.1) — NOT the CTM at scn or paint time; pinned by pattern-tiling's rotated-CTM fill, where
+  the oracle keeps the diamonds axis-aligned. The M7 "pattern-space text invisible to search" unpinned edge is
+  half-resolved: /Pattern paints now mark, so pattern-painted text reaches stext (the corpus still lacks a
+  text-in-pattern-space needle).
+- 2026-07-11 (M8 shadings, extend realization): /Extend maps to TileClamp (both true) or TileDecal (both
+  false); MIXED extend is ONE decal draw over parametrically extended geometry — endpoints/circles pushed out
+  by a coverage-derived factor with the boundary color duplicated over the extension — rather than the plan
+  table's two draws (behaviorally identical, one code path; radial extension honors the ISO 8.7.4.5.4 r→0
+  cutoff, pinned by shading-radial's cone-tip arm). Degenerate axes (p0==p1, non-invertible pattern matrices)
+  skip the paint.
+- 2026-07-11 (M8 shadings, MuPDF's shade-painter geometry, behaviorally pinned — never from source): MuPDF
+  paints ALL shading kinds through a rasterizer that (a) does not antialias and (b) tests each pixel at what
+  amounts to its top-right device corner, where Skia's non-AA fill and our shaders sample the center. The
+  goldens pin this hard at integer boundaries (dpi 72: MuPDF's mesh coverage sits exactly one pixel left/down
+  of center sampling on each axis). Render therefore shifts all shading geometry — mesh triangles AND
+  gradient/function shader matrices — by (-0.5, +0.5) device pixels (mesh with a ±0.001 nudge so on-boundary
+  centers resolve like MuPDF's inclusive/exclusive edges). This took shading-mesh from 13.8% over Δ24 to
+  0.06% and is the single most load-bearing calibration of the box. Mesh triangles draw with AA OFF (shared
+  edges neither seam nor double-blend under pixel-center sampling; outer boundaries get their edge treatment
+  from the offset, matching MuPDF's hard mesh edges).
+- 2026-07-11 (M8 tiling patterns): fills replay the cell content once per lattice position at full device
+  resolution (clip to path, clip each copy to /BBox, run the cell through a child interpreter that shares the
+  parent's cycle set and operator budget; uncolored cells run under suppressColor with the scn color as the
+  initial fill/stroke, mirroring the Type 3 d1 guard), with each copy's device translation FLOORED to integers
+  — MuPDF rasterizes one tile and blits it at integer offsets, and floor-vs-round was pinned empirically
+  (floor took dpi-100 from 8.15% to 2.03% over Δ24; round only to 8.15%). Beyond maxReplayTiles (4096) — and
+  for strokes/text/image-mask paints — a rasterized-cell image shader (TileRepeat, nearest) takes over, with
+  neighbor-copy replays covering BBox-over-step spill. Group alpha/blend wrap the whole tiled fill in a
+  SaveLayer so cells composite as one object. Mesh-shading paints on strokes/stencils composite through a
+  SaveLayer + BlendDstIn coverage mask (no clip path exists for those regions); gradient/tiling paints stroke
+  directly through their shaders.
+- 2026-07-11 (M8 shadings, enforcement): TestShadingCorpusPixels enforces the five new files from this session
+  on (per-file numbers in the M8 status note). Three carry thresholds.json ratchets ~25% above measured worst:
+  shading-axial (2/10/3.2) and shading-radial (2/10/2.9) exceed ONLY the default mean and only at dpi 100 —
+  fractional-scale edge AA on clip/decal/circle boundaries, interiors within Δ8; pattern-tiling (2.6/10/3.6) —
+  per-cell AA of glyph-scale cell art against MuPDF's blitted scanline-AA tile (the M6 letterform-ratchet
+  argument at tile scale), placement itself pinned by the clean dpi-150 pass.
 
 ## Verification
 

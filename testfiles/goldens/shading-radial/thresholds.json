@@ -1,0 +1,6 @@
+{
+  "justification": "Radial gradients: ramp interiors match within d8; the divergence is edge coverage on circle boundaries (annulus rims, the r->0 cone tip, clip edges) — MuPDF's scanline AA vs canvas analytic AA at fractional scales. Measured worst (2026-07-11, @100dpi): 1.10% over d24, 2.07% over d8, mean 2.27; mean bound ~25% above so real regressions still trip.",
+  "maxOver24Pct": 2,
+  "maxOver8Pct": 10,
+  "maxMeanDelta": 2.9
+}

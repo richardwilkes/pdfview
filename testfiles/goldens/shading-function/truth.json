@@ -1,0 +1,57 @@
+{
+  "file": "shading-function.pdf",
+  "sha256": "a7cbc6bb83dd9145d9602609108e64441a1342d763176b76a65a00aff3f79642",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        300,
+        300
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 417,
+          "height": 417,
+          "stride": 1668,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 625,
+          "height": 625,
+          "stride": 2500,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 300,
+          "height": 300,
+          "stride": 1200,
+          "links": []
+        }
+      }
+    }
+  ]
+}

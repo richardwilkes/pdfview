@@ -71,6 +71,11 @@ dump images-ccitt
 dump images-jbig2
 dump images-jpx
 dump images-interpolate
+dump shading-axial
+dump shading-radial
+dump shading-function
+dump shading-mesh
+dump pattern-tiling
 
 if [ -s "$THRESH_STASH/thresholds.tar" ]; then
   tar -xf "$THRESH_STASH/thresholds.tar" -C "$GOLDENS"

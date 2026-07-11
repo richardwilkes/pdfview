@@ -1,0 +1,53 @@
+%PDF-1.7
+1 0 obj
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 20 20] /XStep 25 /YStep 25 /Matrix [0.8 0 0 0.8 5 3] /Resources << >> /Length 103 >>
+stream
+0.9 0.1 0.1 rg 2 2 8 8 re f 0.1 0.2 0.9 rg 10 10 m 18 18 l 18 10 l h f 0 0.5 0 RG 1.5 w 2 18 m 18 2 l S
+endstream
+endobj
+2 0 obj
+<< /PatternType 1 /PaintType 2 /TilingType 1 /BBox [0 0 15 15] /XStep 15 /YStep 15 /Resources << >> /Length 34 >>
+stream
+3 3 9 9 re f 0.8 w 1 14 m 14 1 l S
+endstream
+endobj
+3 0 obj
+<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 30 30] /XStep 20 /YStep 20 /Resources << >> /Length 48 >>
+stream
+0.2 0.6 0.9 rg 15 0 m 30 15 l 15 30 l 0 15 l h f
+endstream
+endobj
+4 0 obj
+<< /Length 299 >>
+stream
+q /Pattern cs /P1 scn 15 200 270 85 re f Q
+q /CS2 cs 0 0.6 0.2 /P2 scn 15 145 130 50 re f 0.85 0.1 0.1 /P2 scn 155 145 130 50 re f Q
+q /Pattern cs /P3 scn 15 80 270 55 re f Q
+q /Pattern CS /P1 SCN 10 w 20 25 m 130 65 l S Q
+q 0.9397 0.342 -0.342 0.9397 160 10 cm /Pattern cs /P3 scn 0 0 100 50 re f Q
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 6 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources << /Pattern << /P1 1 0 R /P2 2 0 R /P3 3 0 R >> /ColorSpace << /CS2 [/Pattern /DeviceRGB] >> >> >>
+endobj
+6 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 6 0 R >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000286 00000 n 
+0000000467 00000 n 
+0000000662 00000 n 
+0000001012 00000 n 
+0000001206 00000 n 
+0000001263 00000 n 
+trailer
+<< /Size 8 /Root 7 0 R >>
+startxref
+1312
+%%EOF

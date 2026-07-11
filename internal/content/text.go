@@ -279,10 +279,10 @@ func (in *interp) emitRun(run *device.TextRun) {
 		in.emitType3Run(run, fill || stroke, mode)
 		return
 	}
-	if fill && in.marks(in.gs.fillSpace) {
+	if fill && in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 		in.dev.FillText(run, in.fillPaint())
 	}
-	if stroke && in.marks(in.gs.strokeSpace) {
+	if stroke && in.marks(in.gs.strokeSpace, in.gs.strokePattern) {
 		in.dev.StrokeText(run, &in.gs.sp, in.strokePaint())
 	}
 	if mode == 3 {
@@ -305,7 +305,7 @@ func (in *interp) emitType3Run(run *device.TextRun, paint bool, mode int) {
 		in.dev.IgnoreText(run)
 		return
 	}
-	if !paint || !in.marks(in.gs.fillSpace) {
+	if !paint || !in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 		return
 	}
 	in.dev.FillText(run, in.fillPaint())
@@ -339,7 +339,7 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 		resources = t3res
 	}
 	in.res = append(in.res, resources)
-	in.spaces = append(in.spaces, map[cos.Name]pdfcolor.Space{})
+	in.frames = append(in.frames, resFrame{spaces: map[cos.Name]pdfcolor.Space{}})
 	savedPath, savedCur, savedStart, savedHasCur, savedPending := in.path, in.cur, in.start, in.hasCur, in.pending
 	savedShape := in.t3Shape
 	in.path, in.hasCur, in.pending, in.t3Shape = &gfx.Path{}, false, clipNone, t3Colored
@@ -348,7 +348,7 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 	in.formDepth--
 	in.t3Shape = savedShape
 	in.path, in.cur, in.start, in.hasCur, in.pending = savedPath, savedCur, savedStart, savedHasCur, savedPending
-	in.spaces = in.spaces[:len(in.spaces)-1]
+	in.frames = in.frames[:len(in.frames)-1]
 	in.res = in.res[:len(in.res)-1]
 	in.opRestore()
 }

@@ -1,0 +1,6 @@
+{
+  "justification": "Axial gradients: ramp interiors match within d8 (256-stop sampling on both sides); the divergence is edge coverage at fractional-scale boundaries — MuPDF's scanline AA vs canvas analytic AA on the sh clip edges, the un-extended decal boundary, and the shading-pattern stroke/triangle outlines. Measured worst (2026-07-11, @100dpi): 1.33% over d24, 1.59% over d8, mean 2.54; mean bound ~25% above so real regressions still trip.",
+  "maxOver24Pct": 2,
+  "maxOver8Pct": 10,
+  "maxMeanDelta": 3.2
+}

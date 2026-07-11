@@ -77,4 +77,4 @@ func (Null) EndMask() {}
 func (Null) PopMask() {}
 
 // FillShading implements Device.
-func (Null) FillShading(*shading.Shading, gfx.Matrix, float64) {}
+func (Null) FillShading(*shading.Shading, gfx.Matrix, Paint) {}

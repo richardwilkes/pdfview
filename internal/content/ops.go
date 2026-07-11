@@ -22,9 +22,10 @@ import (
 //
 //nolint:gocyclo // A flat dispatch table over the content operator set; a map of closures would just hide the same fan-out.
 func (in *interp) op(word string) {
-	if in.t3Shape == t3Mask {
+	if in.t3Shape == t3Mask || in.suppressColor {
 		// After d1, a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill
-		// color paints the glyph (ISO 32000-2 9.6.4).
+		// color paints the glyph (ISO 32000-2 9.6.4). An uncolored tiling pattern's cell is likewise a
+		// stencil painted with the pattern color (8.7.3.3), so its color operators are suppressed too.
 		switch word {
 		case "g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN":
 			return
@@ -133,30 +134,31 @@ func (in *interp) op(word string) {
 	// ---- color ----
 	case "g":
 		if v, ok := in.floats(1); ok {
-			in.gs.fillSpace, in.gs.fillComps = pdfcolor.DeviceGray, v
+			in.gs.fillSpace, in.gs.fillComps, in.gs.fillPattern = pdfcolor.DeviceGray, v, nil
 		}
 	case "G":
 		if v, ok := in.floats(1); ok {
-			in.gs.strokeSpace, in.gs.strokeComps = pdfcolor.DeviceGray, v
+			in.gs.strokeSpace, in.gs.strokeComps, in.gs.strokePattern = pdfcolor.DeviceGray, v, nil
 		}
 	case "rg":
 		if v, ok := in.floats(3); ok {
-			in.gs.fillSpace, in.gs.fillComps = pdfcolor.DeviceRGB, v
+			in.gs.fillSpace, in.gs.fillComps, in.gs.fillPattern = pdfcolor.DeviceRGB, v, nil
 		}
 	case "RG":
 		if v, ok := in.floats(3); ok {
-			in.gs.strokeSpace, in.gs.strokeComps = pdfcolor.DeviceRGB, v
+			in.gs.strokeSpace, in.gs.strokeComps, in.gs.strokePattern = pdfcolor.DeviceRGB, v, nil
 		}
 	case "k":
 		if v, ok := in.floats(4); ok {
-			in.gs.fillSpace, in.gs.fillComps = pdfcolor.DeviceCMYK, v
+			in.gs.fillSpace, in.gs.fillComps, in.gs.fillPattern = pdfcolor.DeviceCMYK, v, nil
 		}
 	case "K":
 		if v, ok := in.floats(4); ok {
-			in.gs.strokeSpace, in.gs.strokeComps = pdfcolor.DeviceCMYK, v
+			in.gs.strokeSpace, in.gs.strokeComps, in.gs.strokePattern = pdfcolor.DeviceCMYK, v, nil
 		}
 	case "cs":
 		if name, ok := in.name1(); ok {
+			in.gs.fillPattern = nil // A fresh space has no selected pattern until an scn names one.
 			if space, spaceOK := in.colorSpace(name); spaceOK {
 				in.gs.fillSpace, in.gs.fillComps = space, space.Initial()
 			} else {
@@ -166,6 +168,7 @@ func (in *interp) op(word string) {
 		}
 	case "CS":
 		if name, ok := in.name1(); ok {
+			in.gs.strokePattern = nil
 			if space, spaceOK := in.colorSpace(name); spaceOK {
 				in.gs.strokeSpace, in.gs.strokeComps = space, space.Initial()
 			} else {
@@ -174,14 +177,16 @@ func (in *interp) op(word string) {
 		}
 	case "sc", "scn":
 		in.gs.fillComps = in.componentsFor(in.gs.fillSpace)
+		in.gs.fillPattern, in.gs.fillPatCTM = in.patternFor(in.gs.fillSpace)
 	case "SC", "SCN":
 		in.gs.strokeComps = in.componentsFor(in.gs.strokeSpace)
+		in.gs.strokePattern, in.gs.strokePatCTM = in.patternFor(in.gs.strokeSpace)
 
 	// ---- XObjects and shadings ----
 	case "Do":
 		in.opDo()
 	case "sh":
-		// Shadings paint at M8; recognized and skipped until then.
+		in.opShading()
 
 	// ---- text objects and text state ----
 	case "BT":
@@ -286,10 +291,10 @@ func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 		in.cur = in.start
 	}
 	if !in.path.IsEmpty() {
-		if fill && in.marks(in.gs.fillSpace) {
+		if fill && in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 			in.dev.FillPath(in.path, evenOdd, in.gs.ctm, in.fillPaint())
 		}
-		if stroke && in.marks(in.gs.strokeSpace) {
+		if stroke && in.marks(in.gs.strokeSpace, in.gs.strokePattern) {
 			in.dev.StrokePath(in.path, &in.gs.sp, in.gs.ctm, in.strokePaint())
 		}
 	}
@@ -303,33 +308,37 @@ func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 	in.hasCur = false
 }
 
-// marks reports whether painting with the space produces marks at this milestone. Pattern paints arrive with
-// M8; Separation /None never marks by definition.
-func (in *interp) marks(space pdfcolor.Space) bool {
+// marks reports whether painting with the space produces marks: a /Pattern space marks only once an scn has
+// selected a usable pattern; Separation /None never marks by definition (its color resolves transparent).
+func (in *interp) marks(space pdfcolor.Space, pat *patternRes) bool {
 	if _, isPattern := space.(*pdfcolor.Pattern); isPattern {
-		return false
+		return pat != nil
 	}
 	return true
 }
 
 func (in *interp) fillPaint() device.Paint {
-	return device.Paint{
+	p := device.Paint{
 		Color: in.gs.fillSpace.ToNRGBA(in.gs.fillComps),
 		Alpha: in.gs.fillAlpha,
 		Blend: in.gs.blend,
 	}
+	in.applyPattern(&p, in.gs.fillSpace, in.gs.fillPattern, in.gs.fillPatCTM, in.gs.fillComps)
+	return p
 }
 
 func (in *interp) strokePaint() device.Paint {
-	return device.Paint{
+	p := device.Paint{
 		Color: in.gs.strokeSpace.ToNRGBA(in.gs.strokeComps),
 		Alpha: in.gs.strokeAlpha,
 		Blend: in.gs.blend,
 	}
+	in.applyPattern(&p, in.gs.strokeSpace, in.gs.strokePattern, in.gs.strokePatCTM, in.gs.strokeComps)
+	return p
 }
 
 // componentsFor implements sc/scn/SC/SCN: the leading numeric operands, at most the space's component count
-// (uncolored-pattern operands may be followed by a pattern name, which M8 will consume; it is ignored here).
+// (uncolored-pattern operands are followed by the pattern name, which patternFor consumes).
 func (in *interp) componentsFor(space pdfcolor.Space) []float32 {
 	maxN := space.NComponents()
 	if maxN == 0 {
@@ -507,14 +516,14 @@ func (in *interp) opDo() {
 		resources = formRes
 	}
 	in.res = append(in.res, resources)
-	in.spaces = append(in.spaces, map[cos.Name]pdfcolor.Space{})
+	in.frames = append(in.frames, resFrame{spaces: map[cos.Name]pdfcolor.Space{}})
 	savedPath, savedCur, savedStart, savedHasCur, savedPending := in.path, in.cur, in.start, in.hasCur, in.pending
 	in.path, in.hasCur, in.pending = &gfx.Path{}, false, clipNone
 	in.formDepth++
 	in.exec(body)
 	in.formDepth--
 	in.path, in.cur, in.start, in.hasCur, in.pending = savedPath, savedCur, savedStart, savedHasCur, savedPending
-	in.spaces = in.spaces[:len(in.spaces)-1]
+	in.frames = in.frames[:len(in.frames)-1]
 	in.res = in.res[:len(in.res)-1]
 	in.opRestore()
 }

@@ -141,8 +141,8 @@ func (t tee) PopMask() {
 	}
 }
 
-func (t tee) FillShading(sh *shading.Shading, ctm gfx.Matrix, alpha float64) {
+func (t tee) FillShading(sh *shading.Shading, ctm gfx.Matrix, paint Paint) {
 	for _, d := range t {
-		d.FillShading(sh, ctm, alpha)
+		d.FillShading(sh, ctm, paint)
 	}
 }

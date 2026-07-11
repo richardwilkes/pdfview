@@ -78,7 +78,7 @@ func (in *interp) drawImage(img *imaging.Image) {
 		return
 	}
 	if img.Stencil {
-		if !in.marks(in.gs.fillSpace) {
+		if !in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 			return
 		}
 		in.dev.FillImageMask(img, in.gs.ctm, in.fillPaint())

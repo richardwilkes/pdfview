@@ -31,6 +31,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
+	"github.com/richardwilkes/pdfview/internal/shading"
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
@@ -69,13 +70,20 @@ const (
 type gstate struct {
 	fillSpace   pdfcolor.Space
 	strokeSpace pdfcolor.Space
-	fillComps   []float32
-	strokeComps []float32
-	sp          gfx.StrokeParams
-	text        textParams
-	ctm         gfx.Matrix
-	fillAlpha   float64
-	strokeAlpha float64
+	// fillPattern/strokePattern are the selected pattern resources when the respective space is a /Pattern
+	// space (nil until an scn/SCN names one); the *PatCTM matrices are the composed pattern-space→device
+	// matrices captured when the pattern was selected.
+	fillPattern   *patternRes
+	strokePattern *patternRes
+	fillComps     []float32
+	strokeComps   []float32
+	sp            gfx.StrokeParams
+	text          textParams
+	ctm           gfx.Matrix
+	fillPatCTM    gfx.Matrix
+	strokePatCTM  gfx.Matrix
+	fillAlpha     float64
+	strokeAlpha   float64
 	// clips counts device clips pushed while this state has been current; Q (or the auto-unwind) pops them.
 	clips int
 	blend device.Blend
@@ -104,6 +112,14 @@ func (g *gstate) clone() gstate {
 	return out
 }
 
+// resFrame holds the per-resource-frame parse caches (one frame per entry of the res stack), keyed by
+// resource name so repeated operators cannot force repeated stream decodes. Negative results cache as nil.
+type resFrame struct {
+	spaces   map[cos.Name]pdfcolor.Space
+	shadings map[cos.Name]*shading.Shading
+	patterns map[cos.Name]*patternRes
+}
+
 // interp interprets content streams for one Run call.
 type interp struct {
 	doc *cos.Document
@@ -113,9 +129,8 @@ type interp struct {
 	st *store.Store
 	// res is the resource-dictionary stack; lookups use only the top (form resources replace, not merge).
 	res []cos.Dict
-	// spaces caches parsed color spaces per resource frame, keyed by resource name, so repeated cs/scn
-	// operators cannot force repeated stream decodes.
-	spaces  []map[cos.Name]pdfcolor.Space
+	// frames are the per-resource-frame parse caches, parallel to res.
+	frames  []resFrame
 	gsStack []gstate
 	// operands is the pending operand list in content order (index 0 is the operator's first operand).
 	operands []cos.Object
@@ -141,13 +156,20 @@ type interp struct {
 	// textClipRuns counts the ClipText calls of the current text object; ET (or forced text-object end)
 	// finalizes them with one EndTextClip.
 	textClipRuns int
+	// streamCTM is the CTM in effect at the start of the currently executing stream — the "default space"
+	// that anchors pattern coordinates (ISO 32000-2 8.7.3.1). exec saves and sets it per stream body.
+	streamCTM gfx.Matrix
 	// t3Shape tracks Type 3 charproc execution: t3None outside procs, t3Colored inside a proc before d0/d1
 	// resolve it, t3Shape after d1 — which makes the proc a shape mask, so its own color operators are
 	// ignored and the caller's fill color paints (ISO 32000-2 9.6.4).
 	t3Shape uint8
-	hasCur  bool
-	inText  bool
-	pending uint8
+	// suppressColor blocks the color operators for the whole interpreter: set on the child interpreter that
+	// replays an uncolored tiling pattern's cell, whose content is a stencil painted with the pattern color
+	// (ISO 32000-2 8.7.3.3).
+	suppressColor bool
+	hasCur        bool
+	inText        bool
+	pending       uint8
 }
 
 // t3Shape states.
@@ -163,12 +185,25 @@ const (
 // skipped, never escalated — so Run does not fail; panics from truly hostile input are the caller's concern
 // (the public API wraps rendering in a recover guard per plan.md invariant 6).
 func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev device.Device, st *store.Store) {
+	in := newInterp(d, resources, ctm, dev, st)
+	in.exec(data)
+	// Auto-unwind whatever the stream left unbalanced, keeping the device's push/pop pairing intact.
+	for len(in.gsStack) > 0 {
+		in.restoreState()
+	}
+	in.popClips(0)
+}
+
+// newInterp builds a fresh interpreter with the default graphics state. Run uses it directly; a tiling
+// pattern's Replay closure uses it for the child interpreter that executes one cell's content (sharing the
+// parent's cycle set and budget by assignment after construction).
+func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.Device, st *store.Store) *interp {
 	in := &interp{
 		doc:    d,
 		dev:    dev,
 		st:     st,
 		res:    []cos.Dict{resources},
-		spaces: []map[cos.Name]pdfcolor.Space{{}},
+		frames: []resFrame{{spaces: map[cos.Name]pdfcolor.Space{}}},
 		gs: gstate{
 			ctm:         ctm,
 			fillSpace:   pdfcolor.DeviceGray,
@@ -189,12 +224,7 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 		budget: maxTotalOps,
 	}
 	in.gs.text.scale = 1
-	in.exec(data)
-	// Auto-unwind whatever the stream left unbalanced, keeping the device's push/pop pairing intact.
-	for len(in.gsStack) > 0 {
-		in.restoreState()
-	}
-	in.popClips(0)
+	return in
 }
 
 // exec runs one stream body (the page's content or one form XObject's). It restores the q/Q balance it is
@@ -204,8 +234,11 @@ func (in *interp) exec(data []byte) {
 	entryDepth := len(in.gsStack)
 	entryClips := in.gs.clips
 	savedOverflow := in.qOverflow
+	savedStreamCTM := in.streamCTM
 	in.qFloor = entryDepth
 	in.qOverflow = 0
+	// The CTM at stream entry is this stream's default space — the anchor for pattern coordinates.
+	in.streamCTM = in.gs.ctm
 	// Text objects are per-stream: a form invoked mid-text-object gets fresh matrices, and its own unclosed
 	// text object is force-closed at its end (so ClipText accumulations never leak across streams).
 	savedTm, savedTlm, savedInText, savedClipRuns := in.tm, in.tlm, in.inText, in.textClipRuns
@@ -252,6 +285,7 @@ func (in *interp) exec(data []byte) {
 	in.tm, in.tlm, in.inText, in.textClipRuns = savedTm, savedTlm, savedInText, savedClipRuns
 	in.qFloor = savedFloor
 	in.qOverflow = savedOverflow
+	in.streamCTM = savedStreamCTM
 	in.operands = in.operands[:0]
 }
 
@@ -351,14 +385,14 @@ func (in *interp) resource(category, name cos.Name) (cos.Object, bool) {
 // per-frame caching.
 func (in *interp) colorSpace(name cos.Name) (pdfcolor.Space, bool) {
 	switch name {
-	case "DeviceGray", "DeviceRGB", "DeviceCMYK", "Pattern":
+	case "DeviceGray", "DeviceRGB", "DeviceCMYK", namePattern:
 		space, err := pdfcolor.Parse(in.doc, name)
 		if err != nil {
 			return nil, false
 		}
 		return space, true
 	}
-	cache := in.spaces[len(in.spaces)-1]
+	cache := in.frames[len(in.frames)-1].spaces
 	if space, ok := cache[name]; ok {
 		return space, space != nil
 	}

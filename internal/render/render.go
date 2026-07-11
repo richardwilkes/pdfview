@@ -238,26 +238,60 @@ func dashIntervals(dash []float32) []float32 {
 	return append([]float32(nil), dash...)
 }
 
-// FillPath implements device.Device.
+// FillPath implements device.Device. Paints carrying a gradient/tiling pattern draw with the corresponding
+// shader; mesh-shading patterns clip to the path and draw their triangles.
 func (d *Device) FillPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix, paint device.Paint) {
 	cp := buildPath(p, evenOdd)
 	m := matrix(ctm)
-	count := d.c.Save()
-	d.c.Concat(&m)
-	d.c.DrawPath(cp, paintFor(paint))
-	d.c.RestoreToCount(count)
+	if isMesh(paint) {
+		cp.Transform(&m)
+		d.fillMeshInto(cp, paint)
+		return
+	}
+	if paint.Tiling != nil {
+		cp.Transform(&m)
+		d.fillTilingInto(cp, paint)
+		return
+	}
+	cpaint, ok := d.preparePaint(paint, &ctm)
+	if !ok {
+		return
+	}
+	d.withShadingBBox(paint, func() {
+		count := d.c.Save()
+		d.c.Concat(&m)
+		d.c.DrawPath(cp, cpaint)
+		d.c.RestoreToCount(count)
+	})
 }
 
 // StrokePath implements device.Device.
 func (d *Device) StrokePath(p *gfx.Path, sp *gfx.StrokeParams, ctm gfx.Matrix, paint device.Paint) {
 	cp := buildPath(p, false)
-	cpaint := paintFor(paint)
-	strokeInto(cpaint, sp)
 	m := matrix(ctm)
-	count := d.c.Save()
-	d.c.Concat(&m)
-	d.c.DrawPath(cp, cpaint)
-	d.c.RestoreToCount(count)
+	if isMesh(paint) {
+		// The stroked region cannot become a clip path directly; composite the mesh through the stroke's
+		// coverage in a layer instead.
+		d.maskedMesh(paint, func(mask *canvas.Paint) {
+			strokeInto(mask, sp)
+			count := d.c.Save()
+			d.c.Concat(&m)
+			d.c.DrawPath(cp, mask)
+			d.c.RestoreToCount(count)
+		})
+		return
+	}
+	cpaint, ok := d.preparePaint(paint, &ctm)
+	if !ok {
+		return
+	}
+	strokeInto(cpaint, sp)
+	d.withShadingBBox(paint, func() {
+		count := d.c.Save()
+		d.c.Concat(&m)
+		d.c.DrawPath(cp, cpaint)
+		d.c.RestoreToCount(count)
+	})
 }
 
 // ClipPath implements device.Device. The path is transformed to device space here (rather than concatenating
@@ -361,7 +395,21 @@ func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
 	if p.IsEmpty() {
 		return
 	}
-	d.c.DrawPath(p, paintFor(paint))
+	if isMesh(paint) {
+		d.fillMeshInto(p, paint)
+		return
+	}
+	if paint.Tiling != nil {
+		d.fillTilingInto(p, paint)
+		return
+	}
+	cpaint, ok := d.preparePaint(paint, nil) // The outline is device space; the shader anchors directly.
+	if !ok {
+		return
+	}
+	d.withShadingBBox(paint, func() {
+		d.c.DrawPath(p, cpaint)
+	})
 }
 
 // StrokeText implements device.Device. Stroke parameters are user-space quantities: the pen applies under
@@ -377,13 +425,29 @@ func (d *Device) StrokeText(run *device.TextRun, sp *gfx.StrokeParams, paint dev
 	if p.IsEmpty() {
 		return
 	}
-	cpaint := paintFor(paint)
-	strokeInto(cpaint, sp)
 	m := matrix(run.CTM)
-	count := d.c.Save()
-	d.c.Concat(&m)
-	d.c.DrawPath(p, cpaint)
-	d.c.RestoreToCount(count)
+	if isMesh(paint) {
+		d.maskedMesh(paint, func(mask *canvas.Paint) {
+			strokeInto(mask, sp)
+			count := d.c.Save()
+			d.c.Concat(&m)
+			d.c.DrawPath(p, mask)
+			d.c.RestoreToCount(count)
+		})
+		return
+	}
+	ctm := run.CTM
+	cpaint, okPaint := d.preparePaint(paint, &ctm)
+	if !okPaint {
+		return
+	}
+	strokeInto(cpaint, sp)
+	d.withShadingBBox(paint, func() {
+		count := d.c.Save()
+		d.c.Concat(&m)
+		d.c.DrawPath(p, cpaint)
+		d.c.RestoreToCount(count)
+	})
 }
 
 // ClipText implements device.Device: accumulate the run's device-space outline into the pending text clip,
@@ -509,13 +573,32 @@ func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 }
 
 // FillImageMask implements device.Device: the stencil's Alpha8 pixels are tinted by the fill paint's color
-// (with its folded alpha), PDF's image-mask stencil semantics.
+// (with its folded alpha), PDF's image-mask stencil semantics. A pattern paint tints through its shader
+// instead (an alpha-only image samples the paint's shader, exactly PDF's pattern-stenciling semantics);
+// mesh-shading patterns composite through the stencil's coverage in a layer.
 func (d *Device) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {
 	ci := rasterImage(img)
 	if ci == nil {
 		return
 	}
-	d.drawImage(ci, img, ctm, paintFor(paint))
+	if isMesh(paint) {
+		d.maskedMesh(paint, func(mask *canvas.Paint) {
+			d.drawImage(ci, img, ctm, mask)
+		})
+		return
+	}
+	// The image draw runs under gridfit(ctm) composed with the image-space flip; the shader local matrix
+	// must unwind that full transform, so compute it here exactly as drawImage will.
+	fit := gridfit(ctm)
+	flip := gfx.Matrix{A: 1 / float32(img.Width), D: -1 / float32(img.Height), F: 1}
+	total := flip.Mul(fit)
+	cpaint, ok := d.preparePaint(paint, &total)
+	if !ok {
+		return
+	}
+	d.withShadingBBox(paint, func() {
+		d.drawImage(ci, img, ctm, cpaint)
+	})
 }
 
 // ClipImageMask implements device.Device. No producer exists until tiling patterns and Type3 glyphs recurse
@@ -552,5 +635,28 @@ func (d *Device) EndMask() {}
 // PopMask implements device.Device (soft masks land at M8).
 func (d *Device) PopMask() {}
 
-// FillShading implements device.Device (shadings land at M8).
-func (d *Device) FillShading(*shading.Shading, gfx.Matrix, float64) {}
+// FillShading implements device.Device: paint the shading across the current clip (the sh operator). The
+// shading's own geometry — gradient extent under decal/clamp tiling, the function domain, mesh triangles —
+// bounds the painted area; the /BBox clip applies when present.
+func (d *Device) FillShading(sh *shading.Shading, ctm gfx.Matrix, paint device.Paint) {
+	p := device.Paint{Shading: sh, PatternCTM: ctm, Alpha: paint.Alpha, Blend: paint.Blend}
+	if isMesh(p) {
+		d.withShadingBBox(p, func() {
+			d.drawMesh(sh, ctm, p.Alpha, p.Blend)
+		})
+		return
+	}
+	cpaint, ok := d.preparePaint(p, nil)
+	if !ok {
+		return
+	}
+	full := path.New()
+	full.MoveTo(0, 0)
+	full.LineTo(float32(d.width), 0)
+	full.LineTo(float32(d.width), float32(d.height))
+	full.LineTo(0, float32(d.height))
+	full.Close()
+	d.withShadingBBox(p, func() {
+		d.c.DrawPath(full, cpaint)
+	})
+}

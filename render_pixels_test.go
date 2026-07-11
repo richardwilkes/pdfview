@@ -67,6 +67,17 @@ func TestImageCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "images-jbig2", "images-jpx", true)
 }
 
+// TestShadingCorpusPixels is milestone M8's first pixel-scope check, following the M4/M5/M6 pattern: the
+// shading/pattern corpus — gradients (axial/radial), function-based shadings, mesh types 4-7, and
+// shading/tiling patterns — is enforced against the goldens at every recorded DPI.
+func TestShadingCorpusPixels(t *testing.T) {
+	for _, name := range []string{
+		"shading-axial", "shading-radial", "shading-function", "shading-mesh", "pattern-tiling",
+	} {
+		comparePixelsToGolden(t, name, name, true)
+	}
+}
+
 // comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
 // pixels against the golden's gate (its thresholds.json when present, else the default). goldenName equals
 // name except for the stub-codec cross-check described on TestImageCorpusPixels.

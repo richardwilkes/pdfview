@@ -54,22 +54,28 @@ const (
 
 // Paint describes how a fill or stroke is painted. Exactly one of the three sources is active: a Shading or
 // Tiling pattern when the respective pointer is non-nil, otherwise the solid Color (already resolved to the
-// rendered RGB space by the interpreter via internal/color). Alpha is the folded constant alpha (the ca/CA
-// graphics-state parameter combined with any enclosing group's alpha), in [0, 1].
+// rendered RGB space by the interpreter via internal/color; for an uncolored tiling pattern the Color is the
+// scn-supplied pattern color the cell content paints with). Alpha is the folded constant alpha (the ca/CA
+// graphics-state parameter combined with any enclosing group's alpha), in [0, 1]. PatternCTM maps the active
+// pattern source's own space (pattern space for Tiling, shading target space for Shading) to device space —
+// the pattern /Matrix composed with the CTM in effect at the start of the content stream that selected the
+// pattern, so pattern geometry stays anchored while the drawing CTM changes (ISO 32000-2 8.7.3.1).
 type Paint struct {
-	Shading *shading.Shading
-	Tiling  *Tiling
-	Alpha   float64
-	Color   color.NRGBA
-	Blend   Blend
+	Shading    *shading.Shading
+	Tiling     *Tiling
+	Alpha      float64
+	PatternCTM gfx.Matrix
+	Color      color.NRGBA
+	Blend      Blend
 }
 
 // Tiling describes a tiling-pattern paint source (ISO 32000-2 8.7.3): the pattern cell's bounding box and
-// spacing in pattern space, the pattern-to-default-user-space matrix, and a replay function that renders one
-// cell's content into a device. Produced from M8 on.
+// spacing in pattern space, and a replay function that runs one cell's content against a device with the
+// given pattern-space→target CTM. Replay is only valid for the duration of the device call that received the
+// Paint; it honors the interpreter's recursion and work budgets (a cyclic or over-deep pattern replays
+// nothing).
 type Tiling struct {
-	Replay func(dev Device)
-	Matrix gfx.Matrix
+	Replay func(dev Device, ctm gfx.Matrix)
 	BBox   gfx.Rect
 	XStep  float32
 	YStep  float32
@@ -142,6 +148,7 @@ type Device interface {
 	EndMask()
 	// PopMask applies the mask to the content drawn since EndMask and pops it.
 	PopMask()
-	// FillShading paints sh across the current clip region under ctm.
-	FillShading(sh *shading.Shading, ctm gfx.Matrix, alpha float64)
+	// FillShading paints sh across the current clip region under ctm; paint supplies the folded alpha and
+	// blend mode (its color/pattern payloads are ignored — the shading is the color source).
+	FillShading(sh *shading.Shading, ctm gfx.Matrix, paint Paint)
 }

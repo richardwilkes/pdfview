@@ -24,12 +24,13 @@ import (
 
 // Recorded operation names.
 const (
-	opFill      = "fill"
-	opStroke    = "stroke"
-	opClip      = "clip"
-	opPopClip   = "popclip"
-	opFillImage = "fillimage"
-	opFillMask  = "fillimagemask"
+	opFill        = "fill"
+	opStroke      = "stroke"
+	opClip        = "clip"
+	opPopClip     = "popclip"
+	opFillImage   = "fillimage"
+	opFillMask    = "fillimagemask"
+	opFillShading = "fillshading"
 )
 
 // Resource names shared across the tests and the fuzz harness.
@@ -38,15 +39,17 @@ const (
 	resGSName    cos.Name = "GS0"
 	catXObject   cos.Name = "XObject"
 	catExtGState cos.Name = "ExtGState"
+	catColorSpc  cos.Name = "ColorSpace"
+	catPattern   cos.Name = "Pattern"
 )
 
 // call is one recorded device call.
 type call struct {
-	op      string
 	path    *gfx.Path
 	img     *imaging.Image
-	paint   device.Paint
+	op      string
 	sp      gfx.StrokeParams
+	paint   device.Paint
 	ctm     gfx.Matrix
 	alpha   float64
 	evenOdd bool
@@ -116,7 +119,9 @@ func (r *recorder) EndGroup()                                              {}
 func (r *recorder) BeginMask(gfx.Rect, bool, color.NRGBA)                  {}
 func (r *recorder) EndMask()                                               {}
 func (r *recorder) PopMask()                                               {}
-func (r *recorder) FillShading(*shading.Shading, gfx.Matrix, float64)      {}
+func (r *recorder) FillShading(_ *shading.Shading, ctm gfx.Matrix, paint device.Paint) {
+	r.add(&call{op: opFillShading, ctm: ctm, paint: paint, alpha: paint.Alpha})
+}
 
 // run interprets content against a fresh recorder, with an optional document/resources pair.
 func run(t *testing.T, d *cos.Document, resources cos.Dict, content string) *recorder {
@@ -428,7 +433,7 @@ func TestColorSpaceResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := cos.Dict{"ColorSpace": cos.Dict{"CS0": cos.Ref{Num: 1}}}
+	res := cos.Dict{catColorSpc: cos.Dict{"CS0": cos.Ref{Num: 1}}}
 	rec := run(t, d, res, "/CS0 cs 1 sc 0 0 1 1 re f 0 0 1 1 re f")
 	// First fill: index 1 -> green. Second fill: same color persists.
 	wantOps(t, rec, opFill, opFill)
@@ -538,4 +543,106 @@ func TestStrokeParamsIsolatedPerCall(t *testing.T) {
 func TestLineToWithoutCurrentPointIgnored(t *testing.T) {
 	rec := run(t, nil, nil, "10 10 l 20 20 l f 0 0 m 10 10 l S")
 	wantOps(t, rec, opStroke)
+}
+
+// patternPDF builds the shared document for the shading/pattern operator tests: an axial shading (1), its
+// function (2), a shading pattern over it with a non-identity matrix (3), a colored tiling pattern (4), and
+// an uncolored tiling pattern whose cell tries to set its own color (5).
+func patternPDF(t *testing.T) (*cos.Document, cos.Dict) {
+	t.Helper()
+	coloredCell := "1 0 0 rg 0 0 2 2 re f"
+	uncoloredCell := "0 1 0 rg 0 0 2 2 re f"
+	pdf := minimalPDF(
+		`<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 10 0] /Function 2 0 R >>`,
+		`<< /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>`,
+		`<< /PatternType 2 /Shading 1 0 R /Matrix [2 0 0 2 5 7] >>`,
+		fmt.Sprintf("<< /PatternType 1 /PaintType 1 /BBox [0 0 4 4] /XStep 6 /YStep 8 /Resources << >> /Length %d >>\nstream\n%s\nendstream", len(coloredCell), coloredCell),
+		fmt.Sprintf("<< /PatternType 1 /PaintType 2 /BBox [0 0 4 4] /XStep 4 /YStep 4 /Resources << >> /Length %d >>\nstream\n%s\nendstream", len(uncoloredCell), uncoloredCell),
+	)
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{
+		"Shading":   cos.Dict{"SH": cos.Ref{Num: 1}},
+		catPattern:  cos.Dict{"PS": cos.Ref{Num: 3}, "PT": cos.Ref{Num: 4}, "PU": cos.Ref{Num: 5}},
+		catColorSpc: cos.Dict{"CSP": cos.Array{catPattern, cos.Name("DeviceRGB")}},
+	}
+	return d, res
+}
+
+func TestShOperator(t *testing.T) {
+	d, res := patternPDF(t)
+	rec := run(t, d, res, "/GSnone gs 0.25 0.5 0.75 rg q 2 0 0 2 0 0 cm /SH sh Q /Nope sh")
+	wantOps(t, rec, opFillShading)
+	c := rec.calls[0]
+	if c.ctm.A != 2 || c.ctm.D != 2 {
+		t.Errorf("sh ctm %+v", c.ctm)
+	}
+	if c.alpha != 1 {
+		t.Errorf("sh alpha %v", c.alpha)
+	}
+}
+
+func TestShadingPatternPaint(t *testing.T) {
+	d, res := patternPDF(t)
+	// The pattern is selected INSIDE a modified CTM, but pattern space anchors to the stream's default
+	// space: PatternCTM must be the pattern /Matrix alone (page CTM is identity here), not scaled by the cm.
+	rec := run(t, d, res, "q 4 0 0 4 0 0 cm /Pattern cs /PS scn 0 0 5 5 re f Q")
+	wantOps(t, rec, opFill)
+	paint := rec.calls[0].paint
+	if paint.Shading == nil || paint.Tiling != nil {
+		t.Fatalf("expected shading payload: %+v", paint)
+	}
+	want := gfx.Matrix{A: 2, D: 2, E: 5, F: 7}
+	if paint.PatternCTM != want {
+		t.Errorf("PatternCTM %+v, want %+v", paint.PatternCTM, want)
+	}
+	// A pattern space with no selected pattern must not mark.
+	rec = run(t, d, res, "/Pattern cs 0 0 5 5 re f 0 0 5 5 re f")
+	wantOps(t, rec)
+}
+
+func TestTilingPatternPaint(t *testing.T) {
+	d, res := patternPDF(t)
+	rec := run(t, d, res, "/Pattern cs /PT scn 0 0 5 5 re f")
+	wantOps(t, rec, opFill)
+	paint := rec.calls[0].paint
+	if paint.Tiling == nil || paint.Shading != nil {
+		t.Fatalf("expected tiling payload: %+v", paint)
+	}
+	tl := paint.Tiling
+	if tl.XStep != 6 || tl.YStep != 8 || tl.BBox.X1 != 4 {
+		t.Errorf("tiling geometry %+v", tl)
+	}
+	// Replaying the cell against a fresh recorder yields the cell's own red fill under the given CTM.
+	cell := &recorder{t: t}
+	tl.Replay(cell, gfx.Matrix{A: 3, D: 3})
+	wantOps(t, cell, opFill)
+	if got := cell.calls[0].paint.Color; got.R != 255 || got.G != 0 {
+		t.Errorf("colored cell paint %+v", got)
+	}
+	if cell.calls[0].ctm.A != 3 {
+		t.Errorf("cell ctm %+v", cell.calls[0].ctm)
+	}
+}
+
+func TestUncoloredTilingPatternColor(t *testing.T) {
+	d, res := patternPDF(t)
+	rec := run(t, d, res, "/CSP cs 0 0 1 /PU scn 0 0 5 5 re f")
+	wantOps(t, rec, opFill)
+	paint := rec.calls[0].paint
+	if paint.Tiling == nil {
+		t.Fatal("expected tiling payload")
+	}
+	if paint.Color.B != 255 || paint.Color.R != 0 {
+		t.Errorf("uncolored pattern color %+v", paint.Color)
+	}
+	// The cell content's own rg must be suppressed: everything paints with the scn-supplied blue.
+	cell := &recorder{t: t}
+	paint.Tiling.Replay(cell, gfx.Identity())
+	wantOps(t, cell, opFill)
+	if got := cell.calls[0].paint.Color; got.B != 255 || got.G != 0 {
+		t.Errorf("uncolored cell should paint the pattern color, got %+v", got)
+	}
 }
