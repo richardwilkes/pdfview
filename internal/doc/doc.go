@@ -1,6 +1,9 @@
-// Package doc implements document-level PDF semantics on top of the COS layer. At milestone M1 that is the page
-// tree: opening a document builds the flat page list (honoring the tree structure with cycle and depth guards)
-// that PageCount and Page answer from. Destinations, outlines, and link annotations arrive at M3.
+// Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a
+// document builds the flat page list, honoring the tree structure with cycle and depth guards, that PageCount
+// and Page answer from), encryption setup, and — since milestone M3 — navigation: page geometry (the effective
+// box and rotation, and the top-left/y-down coordinate space derived from them), destinations (explicit arrays
+// and named, via both the old-style /Dests dictionary and the /Names name tree), the document outline, and link
+// annotations.
 package doc
 
 import (
@@ -33,11 +36,17 @@ type Document struct {
 	// crypt is the standard security handler when the document is encrypted with a scheme we support; nil
 	// otherwise (unencrypted, or encrypted with an unsupported handler).
 	crypt *crypt.Handler
+	// pageIndex maps each page's indirect reference to its 0-based page number; destination arrays name their
+	// target page by reference, and this is how those references resolve to page numbers.
+	pageIndex map[cos.Ref]int
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
 	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref
-	// otherwise); M3's destination resolution needs page-object identity.
+	// otherwise); pageIndex is its inverse.
 	pageRefs []cos.Ref
+	// geoms holds each page's effective display geometry (inherited /MediaBox ∩ /CropBox plus /Rotate),
+	// captured during the page-tree walk.
+	geoms []pageGeom
 	// encrypted records whether the trailer carried an /Encrypt dictionary, even if its handler is unsupported.
 	encrypted bool
 }
@@ -154,6 +163,8 @@ func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 func (d *Document) buildPageList() {
 	d.pages = nil
 	d.pageRefs = nil
+	d.geoms = nil
+	d.pageIndex = make(map[cos.Ref]int)
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
 		return
@@ -169,20 +180,25 @@ func (d *Document) buildPageList() {
 	if !ok {
 		return
 	}
-	d.walkPageTree(node, pagesRef, 0, visited)
+	d.walkPageTree(node, pagesRef, 0, visited, inheritedAttrs{})
 }
 
-func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited map[cos.Ref]bool) {
+func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited map[cos.Ref]bool, attrs inheritedAttrs) {
 	if depth > maxPageTreeDepth {
 		return
 	}
+	attrs = attrs.override(node)
 	typ, _ := d.cos.GetName(node, "Type")
 	kids, hasKids := d.cos.GetArray(node, "Kids")
 	// An explicit /Type /Page is a leaf even if it (incorrectly) carries /Kids; a node with kids is an interior
 	// node; a node with neither is treated as a page (leniency for repair-recovered trees with missing /Type).
 	if typ == "Page" || (!hasKids && typ != "Pages") {
+		if ref != (cos.Ref{}) {
+			d.pageIndex[ref] = len(d.pages)
+		}
 		d.pages = append(d.pages, node)
 		d.pageRefs = append(d.pageRefs, ref)
+		d.geoms = append(d.geoms, d.resolveGeom(attrs))
 		return
 	}
 	for _, kid := range kids {
@@ -198,6 +214,16 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 		if !ok {
 			continue
 		}
-		d.walkPageTree(kidDict, kidRef, depth+1, visited)
+		d.walkPageTree(kidDict, kidRef, depth+1, visited, attrs)
 	}
+}
+
+// PageSize returns the given 0-based page's displayed width and height in PDF points: the extent of its
+// effective box (inherited /MediaBox ∩ /CropBox) after /Rotate is applied, so 90/270 rotations swap the axes.
+func (d *Document) PageSize(pageNumber int) (width, height float32, err error) {
+	if pageNumber < 0 || pageNumber >= len(d.geoms) {
+		return 0, 0, errNoSuchPage
+	}
+	width, height = d.geoms[pageNumber].displaySize()
+	return width, height, nil
 }

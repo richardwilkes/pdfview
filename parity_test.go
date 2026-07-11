@@ -23,8 +23,9 @@ import (
 //
 //	M1  New succeeds; PageCount (for documents needing no authentication)
 //	M2  RequiresAuthentication; Authenticate status bits; PageCount for encrypted documents
-//	M3  TableOfContents at every recorded DPI
-//	M4  RenderPage succeeds; image dimensions and stride; links
+//	M3  TableOfContents at every recorded DPI; RenderPage succeeds with the final image dimensions, stride,
+//	    and links (navigation supplies real page bounds and the interim rasterizer sizes a blank image with
+//	    them, so everything but the pixel content is final; pixels stay untested until M8)
 //	M7  search hit rectangles
 //	M8  pixel comparison within thresholds
 //
@@ -145,7 +146,7 @@ func compareTOCLevel(t *testing.T, label string, got []*pdfview.TOCEntry, want [
 }
 
 func parityRenders(t *testing.T, golden *testsupport.Golden, doc *pdfview.Document) {
-	if !capabilityReached("M4") {
+	if !capabilityReached("M3") {
 		return
 	}
 	truth := golden.Truth

@@ -1,16 +1,15 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M2 complete (2026-07-11). M3 (navigation) is next.**
+**Current milestone: M3 complete (2026-07-11). M4 (graphics core + wiring) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M2 commit (fix anything that didn't),
-> then begin M3: destinations (all /XYZ,/Fit,… kinds) + named dests (/Dests dict + /Names name tree) — the first
-> M3 box. M3 fills the `outline`, `links`, and `page.bounds` engine-seam stubs in `pdf.go` and adds an
-> `internal/doc` navigation layer (page-space→top-left mapping with MediaBox ∩ CropBox + /Rotate + y-flip,
-> NaN for coordinate-less dests, the float32 funnel). When `gates_test.go`'s milestone const reaches "M3",
-> TestParity starts comparing TableOfContents at every recorded DPI and the gate promotes TestInternalLinks.
-> Note the M2 caveat carried forward: encrypted page dictionaries first captured pre-authentication are now
-> refreshed by re-walking the page tree after a successful `Authenticate` (see the M2 decision log); M3's
-> destination resolution reads through the same freshly-decrypted dicts.
+> **Next session start here:** confirm the 4 CI runners went green on the M3 commit (fix anything that didn't),
+> then begin M4: `internal/gfx` (Matrix/Point/Rect/Quad/Path/StrokeParams) plus the content-stream tokenizer +
+> interpreter — the first M4 box. Two things M3 already settled for M4: (1) `rasterize` in pdf.go is an interim
+> implementation returning a correctly-sized fully transparent image — replace its body with the real render
+> path but KEEP `renderExtent`'s pinned rounding (ceil(float32 extent × float32 scale − 0.001), verified against
+> all 78 recorded corpus render dimensions); (2) TestParity already enforces render success + dimensions +
+> stride + links from M3 on (see the M3 decision log), so the real render path must stay green against those
+> from its first session. The M4 gate promotes TestRenderPageForSizeLimits.
 
 ## Session protocol
 
@@ -88,7 +87,7 @@ and convert coordinates; milestones only fill in the `engineDocument` stub metho
 | --- | --- | --- |
 | TestMalformedPDF | M0 | passing |
 | TestUseAfterRelease | M1 | passing |
-| TestInternalLinks | M3 | gated |
+| TestInternalLinks | M3 | passing |
 | TestRenderPageForSizeLimits | M4 | gated |
 | TestPDF | M7 | gated |
 
@@ -320,17 +319,30 @@ Exit: auth-bits parity table (corpus × {"", user, owner, wrong}) equals oracle 
 internal/doc's TestAuthBitsMatchGoldens, 43 attempts across 16 files); encrypted docs parse (done — content streams
 of every R2–R6 file decrypt; TestCorpusPageCounts still green).
 
-### M3 — Navigation (3–4 sessions)
+### M3 — Navigation (3–4 sessions; done in 1, 2026-07-11)
 
-- [ ] Destination arrays (all /XYZ,/Fit,/FitH,/FitV,/FitR,/FitB,/FitBH,/FitBV kinds) + named dests (/Dests dict +
-      /Names name tree)
-- [ ] Outline walk feeding `outline()` (exact `buildTOCEntries` budget semantics already in pdf.go)
-- [ ] Link annotations + external-URI classification (`fz_is_external_link` semantics: URI scheme presence)
-- [ ] Page-space→top-left mapping (MediaBox ∩ CropBox + /Rotate + y-flip), NaN for coordinate-less dests
-- [ ] `page.bounds()` real; float32 funnel through the seam types
+- [x] Destination arrays (all /XYZ,/Fit,/FitH,/FitV,/FitR,/FitB,/FitBH,/FitBV kinds) + named dests (/Dests dict +
+      /Names name tree) (2026-07-11: internal/doc dest.go; per-kind coordinate slots, null/absent → NaN, integer
+      page indices accepted 0-based, name-tree kids/limits with depth cap + visited set, plus MuPDF's
+      "#page=/#nameddest=" URI-fragment forms)
+- [x] Outline walk feeding `outline()` (exact `buildTOCEntries` budget semantics already in pdf.go) (2026-07-11:
+      /First–/Next chains walked iteratively with visited set, depth cap 64, node cap 65536; /Dest or /A /GoTo;
+      items without a resolvable internal dest kept at page -1 like MuPDF)
+- [x] Link annotations + external-URI classification (`fz_is_external_link` semantics: URI scheme presence)
+      (2026-07-11: /Annots order preserved; unusable annots skipped entirely vs unresolvable dests emitted at
+      page -1; schemeless URI actions resolve as intra-document fragments; GoToR/Launch → file spec best-effort)
+- [x] Page-space→top-left mapping (MediaBox ∩ CropBox + /Rotate + y-flip), NaN for coordinate-less dests
+      (2026-07-11: inherited attributes captured in the page-tree walk; all four rotations pinned against oracle
+      probes with offset box origins; out-of-spec /Rotate rounds to nearest 90, ties up, in [0,360))
+- [x] `page.bounds()` real; float32 funnel through the seam types (2026-07-11: PageSize on internal/doc; every
+      geometry value is float32 end to end; interim blank `rasterize` sizes images with the pinned
+      fz_round_rect-compatible rounding so TestInternalLinks and dimension parity run now)
 
-Exit: TestInternalLinks green (gate → "M3"); fixture TOC 66 entries with exact spot x/y at dpi 100; TOC/link JSON
-parity at dpi 72+100.
+Exit: TestInternalLinks green (gate → "M3") — done; fixture TOC 66 entries with exact spot x/y at dpi 100 — done
+(TestParity compares all 66 entries at dpi 72/100/150; the three pdf_test.go spot literals verified directly);
+TOC/link JSON parity at dpi 72+100 — done (TestParity: scaled-int TOC + links + render dims/stride at all three
+recorded DPIs across all 16 goldens; internal/doc TestCorpusNavigation additionally pins the raw float32
+page-space outline coords, link rects, dest points, and page bounds against the goldens).
 
 ### M4 — Graphics core + wiring (5–7 sessions)
 
@@ -495,6 +507,47 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   hooks are total (no error channel deep in object loading): any shortfall — no key, bad key length, malformed
   ciphertext — returns the input unchanged rather than erroring or panicking. 30s smokes of FuzzCrypt, FuzzOpen,
   and FuzzFilters are clean.
+- 2026-07-11 (M3): page geometry model, pinned by running the oracle over scratch probe documents (allowed:
+  MuPDF is run-only): effective box = CropBox ∩ MediaBox, both normalized (corners sorted); empty intersection →
+  MediaBox; absent/degenerate/non-finite MediaBox → US Letter. /Rotate normalizes into [0,360) then rounds to
+  the NEAREST multiple of 90 with ties rounding up (probed: 45→90, 100→90, 315→0, -45→0, -90→270, -100→270,
+  -315→90, ±450 likewise) — not snap-down, not reject. The top-left mapping per rotation (u,v from PDF-space
+  x,y): 0: (x−x0, y1−y); 90: (y−y0, x−x0); 180: (x1−x, y−y0); 270: (y1−y, x1−x) — pinned with offset-origin
+  probes (link rects AND dest points). fz_bound_page always reports [0,0,w,h]; TestCorpusNavigation asserts the
+  recorded golden bounds start at the origin so a violation would surface. All probe expectations are embedded
+  in internal/doc/nav_unit_test.go so the pins survive without the probe files.
+- 2026-07-11 (M3): destination semantics (oracle-probed): coordinate slots per kind are XYZ (x,y), FitH/FitBH
+  (y), FitV/FitBV (x), FitR (left, top), Fit/FitB/unknown (none); null, absent, or non-numeric slots are NaN;
+  the point is mapped through the TARGET page's geometry (so NaN switches axes under 90/270 — inherent in the
+  transform); the array's first element may be a page ref or a 0-based integer index (out-of-range → page -1).
+  Named lookup order: old-style catalog /Dests dictionary first, then the /Names → /Dests tree; both stores
+  accept name and byte-string keys; tree leaves are scanned linearly and kids are pruned by /Limits only when
+  the limits are well-formed strings (lenient beyond MuPDF for broken files, untestable divergence). Chains of
+  name → dict(/D) → name indirections are capped at 8.
+- 2026-07-11 (M3): links: /Annots order is preserved (matches linksRaw). Annotations that are not /Subtype
+  /Link, or carry neither /Dest nor a usable action, produce no link at all — distinct from present-but-
+  unresolvable destinations, which are emitted at page -1 and dropped by pdf.go (both behaviors match the
+  goldens' linksRaw). URI actions: a scheme (RFC 3986 shape, fz_is_external_link semantics) makes the link
+  external with the URI kept verbatim (DecodeTextString-decoded); schemeless URIs resolve like the
+  intra-document fragments MuPDF synthesizes — "#page=N&zoom=z,x,y" (1-based N; x,y are ALREADY top-left values
+  and get no further mapping; "nan" parses to NaN) and "#nameddest=NAME" (percent-decoded) — else page -1.
+  GoToR/Launch degrade to their file specification (/UF over /F) as the URI, external iff it carries a scheme
+  (best effort; no corpus coverage). Internal links cross the seam with an empty URI; the oracle's synthesized
+  internal URIs are deliberately not reproduced since the public API never exposes them.
+- 2026-07-11 (M3): the M3 gate requires TestInternalLinks, which calls RenderPage, so `rasterize` gained an
+  interim implementation: a fully transparent image at the final dimensions. Extent rounding is
+  ceil(float64(float32(extent) × float32(scale)) − 0.001) per axis — float32 multiply (C float parity), then
+  MuPDF's fz_round_rect-style epsilon ceil — verified exactly against all 78 recorded corpus render dimensions
+  (26 pages × 3 DPIs), including the 595.2→596 @72 case that rules out round-to-nearest and the 625.0-exact
+  @150 case the epsilon exists for. Consequently TestParity now enforces render success, dimensions, stride,
+  and links from M3 (supersedes the earlier "M4 render success/dims/stride/links" gating note; search stays M7,
+  pixels stay M8). M4 replaces the rasterize body but must keep renderExtent.
+- 2026-07-11 (M3): outline items are kept even without a resolvable internal destination (page -1, NaN coords) —
+  MuPDF lists items whose action is an external URI or unsupported — and titles cross the seam raw
+  (DecodeTextString only; pdf.go sanitizes). Outline caps: depth 64, visited set across the whole walk, 65536
+  nodes total; page-link cap 65536 per page; name-tree depth 64 (all documented at their consts, per the
+  resource-limits section; the public OverallMax* budgets apply on top in pdf.go). FuzzOpen now also drives
+  Outline(), PageSize(i), and Links(i) for every page.
 
 ## Verification
 

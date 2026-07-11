@@ -10,10 +10,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/doc"
 )
 
-// FuzzOpen drives the whole M1 engine surface with arbitrary bytes: document open (xref parsing and the repair
-// scan), the page-tree walk, resolution of every cross-referenced object, and stream decoding through the filter
-// chain. Nothing here may panic or fail to terminate; errors are expected and fine. Every committed corpus file
-// is a seed, so the classic-xref, xref-stream, object-stream, damaged, and encrypted shapes all mutate.
+// FuzzOpen drives the whole non-cryptographic engine surface with arbitrary bytes: document open (xref parsing
+// and the repair scan), the page-tree walk (including geometry capture), the navigation layer (outline walk,
+// link annotations, and through them destination arrays, named-destination lookup in both stores, and URI
+// classification), resolution of every cross-referenced object, and stream decoding through the filter chain.
+// Nothing here may panic or fail to terminate; errors are expected and fine. Every committed corpus file is a
+// seed, so the classic-xref, xref-stream, object-stream, damaged, and encrypted shapes all mutate.
 func FuzzOpen(f *testing.F) {
 	corpusDir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(corpusDir)
@@ -37,6 +39,7 @@ func FuzzOpen(f *testing.F) {
 		if oerr != nil {
 			return
 		}
+		d.Outline()
 		n := min(d.PageCount(), 256)
 		for i := range n {
 			if _, perr := d.Page(i); perr != nil {
@@ -45,6 +48,10 @@ func FuzzOpen(f *testing.F) {
 			if _, rerr := d.PageRef(i); rerr != nil {
 				t.Errorf("PageRef(%d) failed within PageCount %d: %v", i, d.PageCount(), rerr)
 			}
+			if _, _, serr := d.PageSize(i); serr != nil {
+				t.Errorf("PageSize(%d) failed within PageCount %d: %v", i, d.PageCount(), serr)
+			}
+			d.Links(i)
 		}
 		c := d.COS()
 		for _, num := range c.ObjectNums() {

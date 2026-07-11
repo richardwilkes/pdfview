@@ -3,8 +3,10 @@
 //
 // The package is a pure-Go PDF engine with rasterization delegated to github.com/richardwilkes/canvas. It is being
 // built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. With
-// the COS layer in place (milestone M1), New parses documents — including damaged ones, via a repair scan — and
-// PageCount is real; navigation, rendering, and search still return their zero values until their milestones land.
+// the COS layer (M1), encryption (M2), and navigation (M3) in place, New parses documents — including damaged ones,
+// via a repair scan — and PageCount, authentication, TableOfContents, page bounds, and links are real; rendered
+// pages are blank placeholders of the final dimensions until rendering lands (M4), and search returns no hits until
+// structured text lands (M7).
 package pdfview
 
 import (
@@ -434,9 +436,13 @@ type engineDocument struct {
 	doc *doc.Document
 }
 
-// page is the engine-side handle for a loaded page. Its concrete content (geometry, resources, content streams)
-// arrives with the navigation and graphics milestones (M3/M4).
-type page struct{}
+// page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points
+// (the effective box after rotation, in float32 per the funnel below). Content (resources, content streams)
+// arrives at M4.
+type page struct {
+	width, height float32
+	number        int
+}
 
 // outlineNode is one node of the document outline (/Outlines tree), in the shape buildTOCEntries consumes: siblings
 // are linked through next, children hang off down, and x/y are the destination coordinate on the 0-based target page
@@ -504,35 +510,100 @@ func (e *engineDocument) pageCount() int {
 	return e.doc.PageCount()
 }
 
-// loadPage loads the given 0-based page. At M1 this verifies the page exists in the page tree; the page's
-// geometry and content arrive at M3/M4.
+// loadPage loads the given 0-based page, capturing its display geometry. The page's content arrives at M4.
 func (e *engineDocument) loadPage(pageNumber int) (*page, error) {
-	if _, err := e.doc.Page(pageNumber); err != nil {
+	w, h, err := e.doc.PageSize(pageNumber)
+	if err != nil {
 		return nil, ErrUnableToLoadPage
 	}
-	return &page{}, nil
+	return &page{width: w, height: h, number: pageNumber}, nil
 }
 
-// outline returns the root of the document outline, or nil when there is none. Navigation lands at M3.
+// outline returns the root of the document outline, or nil when there is none. The engine hands back its own
+// linked tree in the same shape; this conversion only re-labels it into the seam type. Sibling chains are
+// walked iteratively (their length is engine-capped but can be long); recursion depth equals the outline's
+// nesting depth, which the engine caps far below stack limits.
 func (e *engineDocument) outline() *outlineNode {
-	return nil
+	return convertOutline(e.doc.Outline())
 }
 
-// links returns the link annotations present on the page. Navigation lands at M3.
-func (e *engineDocument) links(_ *page) []pageLinkInfo {
-	return nil
+func convertOutline(item *doc.OutlineItem) *outlineNode {
+	var head *outlineNode
+	tail := &head
+	for ; item != nil; item = item.Next {
+		node := &outlineNode{
+			down:  convertOutline(item.Down),
+			title: item.Title,
+			page:  item.Page,
+			x:     item.X,
+			y:     item.Y,
+		}
+		*tail = node
+		tail = &node.next
+	}
+	return head
+}
+
+// links returns the link annotations present on the page, in /Annots order, with all geometry already in
+// top-left/y-down page space (the engine's navigation layer maps it).
+func (e *engineDocument) links(pg *page) []pageLinkInfo {
+	engineLinks := e.doc.Links(pg.number)
+	if len(engineLinks) == 0 {
+		return nil
+	}
+	links := make([]pageLinkInfo, len(engineLinks))
+	for i, link := range engineLinks {
+		links[i] = pageLinkInfo{
+			uri:      link.URI,
+			page:     link.Page,
+			x0:       link.X0,
+			y0:       link.Y0,
+			x1:       link.X1,
+			y1:       link.Y1,
+			destX:    link.DestX,
+			destY:    link.DestY,
+			external: link.External,
+		}
+	}
+	return links
 }
 
 // rasterize renders the page at the given scale into premultiplied RGBA pixels (4 bytes per pixel, stride bytes per
-// row). The raster device — internal/render on github.com/richardwilkes/canvas — lands at M4.
-func (e *engineDocument) rasterize(_ *page, _ float64) (pix []byte, width, height, stride int, err error) {
-	return nil, 0, 0, 0, ErrUnableToCreateImage
+// row). Until the raster device — internal/render on github.com/richardwilkes/canvas — lands at M4, it produces a
+// fully transparent image of the final dimensions, which is enough for the navigation results (links, search, TOC)
+// that ride along with a render. The output extent must round exactly as MuPDF's fz_round_rect does, since the
+// dimension goldens (and TestPDF's stride/bounds literals) were captured from it: the page extent is scaled in
+// float32, then the max corner is ceiled with a small epsilon so float slop just above a whole number does not
+// spill into an extra pixel row (pinned against all recorded corpus dimensions; see the M3 decision log).
+func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, height, stride int, err error) {
+	width = renderExtent(pg.width, scale)
+	height = renderExtent(pg.height, scale)
+	if width <= 0 || height <= 0 {
+		return nil, 0, 0, 0, ErrUnableToCreateImage
+	}
+	// Guard the allocation below; renderPage re-checks centrally.
+	if int64(width)*int64(height) > int64(OverallMaxPixels) {
+		return nil, 0, 0, 0, ErrImageTooLarge
+	}
+	stride = width * 4
+	return make([]byte, stride*height), width, height, stride, nil
 }
 
-// bounds returns the page's width and height in PDF points (the page's crop box extent after rotation), computed in
-// float32. Page geometry lands at M3/M4.
+// renderExtent converts one page-space extent to rendered pixels: float32 multiply (the engine's geometry
+// precision), then ceil with MuPDF's rounding epsilon. Non-finite and absurd values collapse to 0, which the
+// caller rejects.
+func renderExtent(extent float32, scale float64) int {
+	v := math.Ceil(float64(extent*float32(scale)) - 0.001)
+	if math.IsNaN(v) || v < 0 || v > math.MaxInt32 {
+		return 0
+	}
+	return int(v)
+}
+
+// bounds returns the page's width and height in PDF points (the page's effective box extent after rotation),
+// computed in float32.
 func (p *page) bounds() (width, height float32) {
-	return 0, 0
+	return p.width, p.height
 }
 
 // search returns the quads of up to maxHits text matches on the page. Structured text extraction and search land at
