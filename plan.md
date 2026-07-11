@@ -1,25 +1,24 @@
 # plan.md — pure-Go pdfview port
 
 **Current milestone: M8 (advanced graphics, hardening, cutover) IN PROGRESS — gate const is "M7". Box 1
-(shadings + patterns) and box 2 (transparency groups, soft masks, blend modes) landed 2026-07-11.**
+(shadings + patterns), box 2 (transparency), and box 3 (annotation /AP streams) landed 2026-07-11.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M8-transparency commit (fix
-> anything that didn't; the M8-shadings run 29170016930 was confirmed green). M8 box 2 is COMPLETE:
-> transparency groups (/G forms with /Group /S /Transparency — alpha/blend/mask reset inside, composite once
-> at the caller's ca/BM, isolation honored via non-isolated pass-through, knockout honored via BlendSrc for
-> solid interiors), ExtGState /SMask soft masks (luminosity + alpha subtypes, /BC backdrop, /TR sampled to a
-> 256 LUT, gs-time CTM anchoring), and all 16 /BM blend modes (near-exact vs the oracle, incl. the
-> non-separable four) are wired interpreter→seam→render; the luminosity conversion is a captured behavioral
-> model (weighted sum + neutral LUT, ±2 of the oracle). Four new corpus files + goldens
-> (transparency-blend/group/smask-lum/smask-alpha) are enforced by TestTransparencyCorpusPixels — three
-> inside the DEFAULT gate, smask-lum on a ratchet (letterforms + gradient-in-alpha; see the decision log).
-> All semantics were pinned by oracle probes BEFORE coding — read the five M8-transparency decision-log
-> entries before touching this area. NEXT BOX: **annotation /AP streams** (render like the oracle does —
-> check what MuPDF draws for widget/normal appearances, /AS state selection, /Off states, hidden/noview
-> flags; the IRS AcroForm files are the real-world regression net and their ratchets were set WITHOUT /AP
-> rendering, so expect them to TIGHTEN); then veraPDF soak + perf numbers, DrawPage, gate removal (delete
-> gates_test.go and every gate line; check the pdf_test.go diff criterion in invariant 5), README +
-> .claude/CLAUDE.md rewrite, first release tag.
+> **Next session start here:** confirm the 4 CI runners went green on the M8-annotations commit (fix anything
+> that didn't; the M8-transparency run 29171283124 was confirmed green). M8 box 3 is COMPLETE: annotation
+> /AP /N appearance streams render exactly like MuPDF's display path — internal/doc.Annotations applies the
+> probe-pinned gates (flags 1/2/32 hide; Link/Popup never; widgets need /FT via /Parent; /AS selects dict
+> states; /CA ignored) and the ISO 32000-2 12.5.5 placement, content.RunAnnot runs each appearance under full
+> form discipline with page-resource inheritance, and BOTH the raster and stext passes run them (appearance
+> text is searchable). annotations.pdf + golden are enforced by TestAnnotationCorpusPixels inside the DEFAULT
+> gate; the IRS ratchets were re-validated WITH /AP rendering (their widgets are unchecked checkboxes — no
+> ink) and tightened. MuPDF's appearance SYNTHESIS (AP-less markup annots, non-/Off missing states) is
+> deliberately out of scope — read the M8 /AP decision-log entries before touching this area. REMAINING
+> BOXES, in order: **veraPDF corpus soak** (checksum-pinned fetch script into a gitignored dir + soak runner;
+> see the recorded decision), **perf** (baseline measured this session: glaive @150 dpi renders at 40/43
+> ms/page pure vs 6.5/4.5 ms cgo, ~6-9x — target ≤2x; profile says canvas analytic-AA raster fills dominate,
+> GC is <5%; the promising avenue is glyph/raster caching, see the perf decision-log entry), long fuzz/soak
+> runs, DrawPage, gate removal (delete gates_test.go and every gate line; check the pdf_test.go diff
+> criterion in invariant 5), README + .claude/CLAUDE.md rewrite, first release tag.
 
 ## Session protocol
 
@@ -560,8 +559,15 @@ goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
       BlendDstIn — CPU-side, not colorfilter.NewLuma, so the captured MuPDF response could be reproduced.
       All semantics oracle-probe-pinned first; blend modes near-exact. Four corpus files + goldens enforced
       by TestTransparencyCorpusPixels; per-file numbers in the status note below.)
-- [ ] Annotation appearance streams (/AP) rendered like the oracle does
+- [x] Annotation appearance streams (/AP) rendered like the oracle does (2026-07-11: internal/doc.Annotations
+      selects and places appearances (probe-pinned gates + ISO 32000-2 12.5.5), content.RunAnnot executes them
+      under form discipline with page-resource inheritance, and the raster AND stext seams both run them after
+      page content; annotations.pdf + golden enforced by TestAnnotationCorpusPixels inside the default gate;
+      IRS ratchets re-validated with /AP live and tightened; appearance SYNTHESIS deliberately out of scope —
+      see the M8 /AP decision-log entries)
 - [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
+      (2026-07-11: baseline recorded — glaive @150 dpi pure 40/43 ms per page vs cgo 6.5/4.5 ms, cold
+      open+render-both 89 ms vs 22 ms, ~6-9x; see the perf-baseline decision-log entry for the profile)
 - [ ] veraPDF corpus soak (license verified CC BY 4.0; decision log 2026-07-11): a checksum-pinned fetch script
       downloading https://github.com/veraPDF/veraPDF-corpus into a gitignored directory plus a soak harness —
       open + render every file, assert no panic/hang, and compare open-success and PageCount against the oracle.
@@ -584,6 +590,15 @@ edges pinned by the half-pixel offset); shading-function 0.00/0.00/0.41 | 0.45/0
 exceeds the default, all of it fractional-scale edge AA — interiors within Δ8); pattern-tiling
 1.20/3.78/2.31 | 2.03/5.64/2.88 | 1.13/2.29/1.67 (ratchet 2.6/10/3.6: per-cell AA of glyph-scale features,
 placement floored-blit-exact per the dpi-150 pass).
+
+Annotation-corpus pixel status at M8 box 3 (2026-07-11; % over Δ24 / % over Δ8 / mean Δ at dpi 72|100|150):
+annotations 0.16/0.21/0.12 | 0.44/0.62/0.28 | 0.31/0.46/0.30 (default gate — the nonzero slices are the two
+substituted-Helvetica text arms' letterforms and box-edge AA; every geometry/flag/AS arm is near-exact, and both
+search needles are quad-EXACT in TestTextQuadParity). IRS files re-measured WITH /AP rendering: identical to the
+M6 numbers on their worst pages (their widgets are unchecked checkboxes whose /Off states carry no appearance —
+MuPDF draws nothing for them too), f1040 page 1's three filled appearances IMPROVE its diff (5.49/12.73/3.93 vs
+5.64/12.87/4.15 without /AP at dpi 72); ratchets tightened to the re-validated margins: irs-f1040
+8.5→8.3 / 18 / 6→5.8, irs-fw9 15→14.8 / 25→24.5 / 10→9.8.
 
 Transparency-corpus pixel status at M8 box 2 (2026-07-11; % over Δ24 / % over Δ8 / mean Δ at dpi 72|100|150):
 transparency-blend 0.00/0.00/0.34 | 0.05/0.52/0.47 | 0.00/0.32/0.41 (default gate — all 16 blend modes,
@@ -1203,6 +1218,47 @@ letterforms under a gradient mask plus the axial-ramp divergence carried into al
   comparison amplifies near-zero-alpha color quantization (alpha 2 vs 4 → unpremultiplied color 64 apart).
   FuzzContent gained luminosity/alpha-mask ExtGStates (one /G pointing at the self-referential form), a
   knockout group form, and /SMask /None seeds, plus group/mask phase-ordering checks in its balance device.
+
+- 2026-07-11 (M8 /AP semantics — all oracle-probe-pinned BEFORE coding, scratch probes annot-flags/-as/-geom/
+  -acroform/-geom2/-noacro): MuPDF's display path (fz_run_page, which the goldens and search results were
+  captured through) renders annotations AFTER page content in /Annots order, from /AP **/N** ONLY — /D and /R
+  never render, a /D-only /AP draws nothing, and a stray /AS on a stream-valued /N is ignored. A
+  dictionary-valued /N requires /AS to name one of its stream entries; no /AS → nothing (pinned with a
+  two-entry dict). /F bits Invisible (1), Hidden (2), and NoView (32) EACH suppress — Invisible hides known
+  subtypes too (Widget and Square probed), not just unrecognized ones as ISO suggests — while Print (4) is
+  irrelevant. /Link and /Popup never render even with an /AP. /Widget renders iff a field type /FT resolves on
+  the annotation or through its /Parent chain (the IRS kid-widget pattern): orphan fields NOT in /AcroForm
+  /Fields render, /FT-less widgets IN /Fields do not, and /AcroForm's existence is irrelevant (probed without
+  one). Placement is ISO 32000-2 12.5.5 exactly: /BBox through /Matrix, the resulting AABB translate/scaled
+  onto the normalized /Rect (reversed /Rect corners normalize; degenerate /BBox, /Rect, or transformed box →
+  skip); content clips to /BBox, nonzero-origin /BBox works, and NO ink escapes /Rect. An appearance without
+  /Resources inherits the PAGE's resources (pinned with a page-font text arm). Annotation opacity /CA is
+  IGNORED (drawn opaque; /CA 0.5 and 0.25 probed). Appearance text IS structured text — searchable with exact
+  quads — so pdf.go's stext seam runs the appearances too (engineDocument.runAnnots is shared by rasterize and
+  search).
+- 2026-07-11 (M8 /AP scope, synthesis excluded): MuPDF additionally SYNTHESIZES appearance streams where /AP is
+  missing or the /AS state is absent-and-not-/Off — probed: Square and Circle without /AP draw their /C border
+  plus /IC interior, a /FT /Btn whose /AS names a MISSING non-/Off state draws a synthesized check glyph, and
+  "cannot create appearance stream" warnings surface where synthesis fails (Highlight, /AP-less widgets).
+  Synthesis is deliberately OUT OF SCOPE for the port: annotations without a usable /AP /N draw nothing.
+  The one real-world-relevant case is safe: /AS /Off with no /Off entry (every unchecked IRS checkbox) draws
+  nothing in MuPDF too. annotations.pdf contains no synthesis arms, so the enforced suite is honest; if a real
+  file surfaces where AP-less synthesis matters visually, that is a new (polish) box, not a regression.
+- 2026-07-11 (M8 /AP, IRS ratchet re-validation): the cursor's expectation that the IRS ratchets would tighten
+  substantially once widgets drew was WRONG in an informative way — f1040/fw9's widgets are all unchecked
+  checkboxes (/AS /Off, /N holding only on-states) plus /AP-less text fields, so /AP rendering adds no ink on
+  their worst pages and the measured numbers are unchanged; the diffs were letterform/AA all along, exactly as
+  the M6 analysis said. f1040 page 1's three filled appearances improve its diff. Both ratchets were still
+  tightened to sit at the standard ~25% margin over the now-/AP-validated measurements (f1040 8.3/18/5.8,
+  fw9 14.8/24.5/9.8) and their justifications record the re-validation.
+- 2026-07-11 (M8 perf baseline): glaive @150 dpi, M4-era measurement protocol (10 warm renders per page,
+  darwin/arm64): pure 40.4/43.3 ms per page (pages 0/1) vs cgo oracle 6.5/4.5 ms; cold open+render-both 89 ms
+  vs 22 ms — ~6-9x against the ≤2x target. CPU profile: canvas raster analytic-AA fill machinery (AlphaRuns,
+  edge sort, blitTrapezoidRow) dominates; runtime.madvise ~24% of samples is fresh-surface page-fault cost,
+  and GOGC=off/400 moves nothing (GC <5%). The ≤2x target therefore needs algorithmic help, not tuning: the
+  most promising avenue is caching rendered glyph coverage (MuPDF caches glyph BITMAPS; we re-fill outline
+  paths every render), then reducing per-render surface allocation. Canvas-side optimization would land in
+  ../canvas (never modified from this repo's sessions — coordinate separately if needed).
 
 ## Verification
 

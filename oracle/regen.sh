@@ -80,6 +80,7 @@ dump transparency-blend
 dump transparency-group
 dump transparency-smask-lum
 dump transparency-smask-alpha
+dump annotations -search WIDGETXT -search INHERITX
 
 if [ -s "$THRESH_STASH/thresholds.tar" ]; then
   tar -xf "$THRESH_STASH/thresholds.tar" -C "$GOLDENS"

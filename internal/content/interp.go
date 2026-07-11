@@ -201,6 +201,20 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 	in.popClips(0)
 }
 
+// RunAnnot interprets one annotation appearance stream (a form XObject) against dev. ctm must already compose
+// the ISO 32000-2 12.5.5 placement matrix (internal/doc's Annot.Transform) with the page CTM; the form's own
+// /Matrix and /BBox clip apply inside, exactly as for a form invoked by Do. pageResources is the page's resource
+// dictionary: an appearance stream without /Resources of its own inherits it (probe-pinned — see the M8 /AP
+// decision-log entry). Malformed content degrades exactly as in Run.
+func RunAnnot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *cos.Stream, ctm gfx.Matrix, dev device.Device, st *store.Store) {
+	in := newInterp(d, pageResources, ctm, dev, st)
+	in.execForm(raw, stream)
+	for len(in.gsStack) > 0 {
+		in.restoreState()
+	}
+	in.popClips(0)
+}
+
 // newInterp builds a fresh interpreter with the default graphics state. Run uses it directly; a tiling
 // pattern's Replay closure uses it for the child interpreter that executes one cell's content (sharing the
 // parent's cycle set and budget by assignment after construction).

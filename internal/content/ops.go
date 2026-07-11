@@ -504,6 +504,14 @@ func (in *interp) opDo() {
 	if subtype != "Form" {
 		return // /PS and anything unrecognized draw nothing.
 	}
+	in.execForm(raw, stream)
+}
+
+// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle
+// set, q + /Matrix concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the
+// current graphics state. opDo dispatches here; RunAnnot enters here directly for annotation appearance streams
+// (which are form XObjects positioned by the caller's CTM).
+func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if in.formDepth >= maxFormDepth {
 		return
 	}

@@ -129,5 +129,10 @@ func extractText(t *testing.T, document *doc.Document, pageNumber int) *stext.De
 	if data := document.PageContents(pageNumber); len(data) > 0 {
 		content.Run(document.COS(), document.PageResources(pageNumber), data, ctm, dev, nil)
 	}
+	// Annotation appearance text is part of MuPDF's structured text; the engine's search seam runs the
+	// appearances after the page content, and so does this capture.
+	for _, a := range document.Annotations(pageNumber) {
+		content.RunAnnot(document.COS(), document.PageResources(pageNumber), a.Raw, a.Stream, a.Transform.Mul(ctm), dev, nil)
+	}
 	return dev
 }

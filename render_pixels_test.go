@@ -90,6 +90,16 @@ func TestTransparencyCorpusPixels(t *testing.T) {
 	}
 }
 
+// TestAnnotationCorpusPixels is milestone M8's third pixel-scope check, following the established pattern: the
+// annotation corpus — /AP /N appearance streams with widget /FT gating, /F flag suppression (Invisible/Hidden/
+// NoView), /AS state selection, the Link/Popup never-render gates, /CA-ignored, ISO 32000-2 12.5.5 placement
+// (Matrix rotation, BBox clipping, nonzero-origin BBox, reversed /Rect, degenerate skips), z-order after page
+// content, and page-resource inheritance for /Resources-less appearances — is enforced against the goldens at
+// every recorded DPI. All semantics were pinned by oracle probes first; see the M8 /AP decision-log entry.
+func TestAnnotationCorpusPixels(t *testing.T) {
+	comparePixelsToGolden(t, "annotations", "annotations", true)
+}
+
 // comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
 // pixels against the golden's gate (its thresholds.json when present, else the default). goldenName equals
 // name except for the stub-codec cross-check described on TestImageCorpusPixels.

@@ -1,6 +1,6 @@
 {
-  "justification": "Embedded bare-CFF text at small sizes: quad-exact layout; AA-model edge redistribution as for glaive. Measured worst (2026-07-11, page 0 @100dpi): 6.61% over d24, 14.41% over d8, mean 4.64.",
-  "maxOver24Pct": 8.5,
+  "justification": "Embedded bare-CFF text at small sizes: quad-exact layout; AA-model edge redistribution as for glaive. Measured worst (2026-07-11, page 0 @100dpi, re-validated after /AP rendering landed — the form's widgets are unchecked checkboxes whose /Off states carry no appearance, so appearances add no ink on the worst page; page 1's three filled appearances improve its diff): 6.61% over d24, 14.41% over d8, mean 4.64.",
+  "maxOver24Pct": 8.3,
   "maxOver8Pct": 18,
-  "maxMeanDelta": 6
+  "maxMeanDelta": 5.8
 }

@@ -29,7 +29,9 @@ import (
 	"unicode"
 
 	"github.com/richardwilkes/pdfview/internal/content"
+	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/doc"
+	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/render"
 	"github.com/richardwilkes/pdfview/internal/stext"
 	"github.com/richardwilkes/pdfview/internal/store"
@@ -622,11 +624,24 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 	if data := e.doc.PageContents(pg.number); len(data) > 0 {
 		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
 	}
+	e.runAnnots(pg, ctm, dev)
 	pix, stride, err = dev.Pixels()
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToCreateImage
 	}
 	return pix, width, height, stride, nil
+}
+
+// runAnnots draws the page's annotation appearance streams after the page content, in /Annots order — matching
+// MuPDF's fz_run_page, whose display list the goldens (and search results, since appearance text is searchable)
+// were captured from. internal/doc has already applied the selection gates (flags, subtype, /AS state) and
+// computed each appearance's ISO 32000-2 12.5.5 placement in page space; composing that with the page CTM
+// positions it in device space. Each appearance runs as its own interpreter pass with a fresh default graphics
+// state, inheriting the page's resources when it carries none of its own.
+func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) {
+	for _, a := range e.doc.Annotations(pg.number) {
+		content.RunAnnot(e.doc.COS(), e.doc.PageResources(pg.number), a.Raw, a.Stream, a.Transform.Mul(ctm), dev, e.store)
+	}
 }
 
 // renderExtent converts one page-space extent to rendered pixels: float32 multiply (the engine's geometry
@@ -668,6 +683,9 @@ func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []qu
 	if data := e.doc.PageContents(pg.number); len(data) > 0 {
 		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
 	}
+	// Annotation appearance text is part of MuPDF's structured text (probe-pinned: widget /AP text is
+	// searchable), so the stext pass runs the appearances exactly like the raster pass does.
+	e.runAnnots(pg, ctm, dev)
 	found := dev.Search(needle, maxHits)
 	if len(found) == 0 {
 		return nil

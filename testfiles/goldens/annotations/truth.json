@@ -1,0 +1,141 @@
+{
+  "file": "annotations.pdf",
+  "sha256": "b044abd6a0f57417c608499061440ce82399fe06f2d818f3c80cf451c4487d90",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "WIDGETXT",
+    "INHERITX"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        612,
+        792
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "INHERITX": [
+          [
+            302,
+            344.65,
+            386.006,
+            344.65,
+            302,
+            369.382,
+            386.006,
+            369.382
+          ]
+        ],
+        "WIDGETXT": [
+          [
+            38,
+            344.65,
+            133.00401,
+            344.65,
+            38,
+            369.382,
+            133.00401,
+            369.382
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 850,
+          "height": 1100,
+          "stride": 3400,
+          "links": [],
+          "search": {
+            "INHERITX": [
+              [
+                419,
+                478,
+                537,
+                514
+              ]
+            ],
+            "WIDGETXT": [
+              [
+                52,
+                478,
+                185,
+                514
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 1275,
+          "height": 1650,
+          "stride": 5100,
+          "links": [],
+          "search": {
+            "INHERITX": [
+              [
+                629,
+                718,
+                805,
+                770
+              ]
+            ],
+            "WIDGETXT": [
+              [
+                79,
+                718,
+                278,
+                770
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 612,
+          "height": 792,
+          "stride": 2448,
+          "links": [],
+          "search": {
+            "INHERITX": [
+              [
+                302,
+                344,
+                387,
+                370
+              ]
+            ],
+            "WIDGETXT": [
+              [
+                38,
+                344,
+                134,
+                370
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

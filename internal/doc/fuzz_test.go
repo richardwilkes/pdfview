@@ -64,6 +64,7 @@ func FuzzOpen(f *testing.F) {
 				t.Errorf("PageCTM(%d) failed within PageCount %d: %v", i, d.PageCount(), cerr)
 			}
 			d.Links(i)
+			d.Annotations(i)
 			d.PageResources(i)
 			d.PageContents(i)
 		}
