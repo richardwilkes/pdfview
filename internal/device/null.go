@@ -34,6 +34,9 @@ func (Null) StrokeText(*TextRun, *gfx.StrokeParams, Paint) {}
 // ClipText implements Device.
 func (Null) ClipText(*TextRun) {}
 
+// EndTextClip implements Device.
+func (Null) EndTextClip() {}
+
 // IgnoreText implements Device.
 func (Null) IgnoreText(*TextRun) {}
 

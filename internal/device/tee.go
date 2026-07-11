@@ -66,6 +66,12 @@ func (t tee) ClipText(run *TextRun) {
 	}
 }
 
+func (t tee) EndTextClip() {
+	for _, d := range t {
+		d.EndTextClip()
+	}
+}
+
 func (t tee) IgnoreText(run *TextRun) {
 	for _, d := range t {
 		d.IgnoreText(run)

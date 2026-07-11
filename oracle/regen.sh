@@ -30,6 +30,12 @@ dump glaive -search GURPS -search the -search 'of the' -search Glaive
 dump internal-links
 dump vectors
 dump text-std14 -search Hello -search 'hello world' -search 'brown fox' -search QUICK -search 'Spaced words' -search 'Kerned Text'
+dump std14-styles -search handgrip -search boldface -search obliquely -search chiseled -search romanesque \
+  -search duckweed -search italicize -search marbled -search typewriter -search keystroke -search slanting \
+  -search flywheel -search 'αβγδ' -search '✁✂✃'
+dump subst-metrics -search paxo -search qbxo -search rcxo -search sdxo -search texo -search ufxo \
+  -search vgxo -search wexo -search xfxo -search ygxo -search zhxo -search aixo
+dump hit-quad-split -search 'backup withholding' -search 'alpha beta'
 dump rotate90 -search Rotated
 dump damaged-startxref-zero -search Repaired
 dump damaged-bad-offsets -search Repaired -search Second

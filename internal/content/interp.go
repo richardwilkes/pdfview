@@ -19,6 +19,7 @@ import (
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 )
@@ -35,6 +36,9 @@ const (
 	maxOperands    = 64
 	maxDashEntries = 32
 	maxTotalOps    = 1 << 22
+	// maxCachedFonts caps the per-Run font cache (matching maxCachedImages' role for images); the budgeted
+	// cross-run store arrives later in M6.
+	maxCachedFonts = 64
 )
 
 // pendingClip states.
@@ -44,19 +48,34 @@ const (
 	clipEvenOdd
 )
 
-// gstate is the graphics state the q/Q stack manages — the subset milestone M4 uses.
+// gstate is the graphics state the q/Q stack manages.
 type gstate struct {
 	fillSpace   pdfcolor.Space
 	strokeSpace pdfcolor.Space
 	fillComps   []float32
 	strokeComps []float32
 	sp          gfx.StrokeParams
+	text        textParams
 	ctm         gfx.Matrix
 	fillAlpha   float64
 	strokeAlpha float64
 	// clips counts device clips pushed while this state has been current; Q (or the auto-unwind) pops them.
 	clips int
 	blend device.Blend
+}
+
+// textParams are the text-state parameters of the graphics state (ISO 32000-2 9.3.1). They persist across
+// BT/ET pairs and are saved/restored by q/Q like the rest of the graphics state; only the text and line
+// matrices (on interp, reset by BT) are scoped to the text object.
+type textParams struct {
+	font        *font.Font
+	size        float32
+	charSpacing float32 // Tc
+	wordSpacing float32 // Tw
+	scale       float32 // Tz operand / 100
+	leading     float32 // TL
+	rise        float32 // Ts
+	mode        int     // Tr, render modes 0-7
 }
 
 // clone returns a deep copy (the slices are mutated in place by the color and dash operators).
@@ -84,9 +103,14 @@ type interp struct {
 	active   map[cos.Ref]bool
 	// images caches decoded image XObjects (nil for failed decodes) for this Run, capped at maxCachedImages.
 	images map[cos.Ref]*imaging.Image
-	gs     gstate
-	cur    gfx.Point
-	start  gfx.Point
+	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference.
+	fonts map[cos.Ref]*font.Font
+	gs    gstate
+	cur   gfx.Point
+	start gfx.Point
+	// tm and tlm are the text and text-line matrices of the current text object (reset by BT).
+	tm  gfx.Matrix
+	tlm gfx.Matrix
 	// qFloor is the gsStack depth below which Q may not pop — the boundary of the executing stream (form
 	// content cannot pop its caller's states).
 	qFloor int
@@ -94,8 +118,12 @@ type interp struct {
 	qOverflow int
 	formDepth int
 	budget    int
-	hasCur    bool
-	pending   uint8
+	// textClipRuns counts the ClipText calls of the current text object; ET (or forced text-object end)
+	// finalizes them with one EndTextClip.
+	textClipRuns int
+	hasCur       bool
+	inText       bool
+	pending      uint8
 }
 
 // Run interprets a content stream against dev. resources is the page's resource dictionary (nil when the page
@@ -124,8 +152,10 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 		path:   &gfx.Path{},
 		active: make(map[cos.Ref]bool),
 		images: make(map[cos.Ref]*imaging.Image),
+		fonts:  make(map[cos.Ref]*font.Font),
 		budget: maxTotalOps,
 	}
+	in.gs.text.scale = 1
 	in.exec(data)
 	// Auto-unwind whatever the stream left unbalanced, keeping the device's push/pop pairing intact.
 	for len(in.gsStack) > 0 {
@@ -143,6 +173,10 @@ func (in *interp) exec(data []byte) {
 	savedOverflow := in.qOverflow
 	in.qFloor = entryDepth
 	in.qOverflow = 0
+	// Text objects are per-stream: a form invoked mid-text-object gets fresh matrices, and its own unclosed
+	// text object is force-closed at its end (so ClipText accumulations never leak across streams).
+	savedTm, savedTlm, savedInText, savedClipRuns := in.tm, in.tlm, in.inText, in.textClipRuns
+	in.tm, in.tlm, in.inText, in.textClipRuns = gfx.Identity(), gfx.Identity(), false, 0
 	// A fresh stream starts with no operands: a form's body must not see the Do operator's own operand list.
 	in.operands = in.operands[:0]
 	lex := cos.NewLexer(data, 0)
@@ -177,10 +211,12 @@ func (in *interp) exec(data []byte) {
 			in.operands = append(in.operands, obj)
 		}
 	}
+	in.opEndText() // Force-close a truncated text object, flushing any pending text clip before the unwind.
 	for len(in.gsStack) > entryDepth {
 		in.restoreState()
 	}
 	in.popClips(entryClips)
+	in.tm, in.tlm, in.inText, in.textClipRuns = savedTm, savedTlm, savedInText, savedClipRuns
 	in.qFloor = savedFloor
 	in.qOverflow = savedOverflow
 	in.operands = in.operands[:0]

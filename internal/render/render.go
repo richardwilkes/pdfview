@@ -267,11 +267,17 @@ func (d *Device) FillText(*device.TextRun, device.Paint) {}
 // StrokeText implements device.Device (text lands at M6).
 func (d *Device) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint) {}
 
-// ClipText implements device.Device (text lands at M6). The interpreter pushes the accumulated text clip as
-// one PopClip-able level at the end of the text object; since no glyphs accumulate yet, push nothing here —
-// the interpreter only emits the paired PopClip once it has emitted ClipText-bearing content, which M6 wires
-// together with this method.
+// ClipText implements device.Device. Glyph outlines have not landed yet, so nothing accumulates; the clip
+// pushed by EndTextClip is a no-op level until they do.
 func (d *Device) ClipText(*device.TextRun) {}
+
+// EndTextClip implements device.Device: push the text clip accumulated by ClipText since the last
+// EndTextClip as one clip level. Until glyph outlines land the level is pushed without a clip region (a
+// wrong-but-safe degrade: clipping to the glyphs' union would need the glyphs; clipping to nothing would
+// wrongly erase subsequent content), keeping the PopClip pairing intact.
+func (d *Device) EndTextClip() {
+	d.clipStack = append(d.clipStack, d.c.Save())
+}
 
 // IgnoreText implements device.Device.
 func (d *Device) IgnoreText(*device.TextRun) {}

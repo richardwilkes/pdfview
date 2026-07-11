@@ -4,15 +4,16 @@
 //
 // Contract (see plan.md "Device seam"): the interpreter owns all PDF semantics — colorspace and function
 // resolution, graphics-state tracking, recursion and resource limits — and guarantees balanced push/pop
-// pairing: every ClipPath/ClipStrokePath/ClipImageMask is matched by a later PopClip, every BeginGroup by an
-// EndGroup, and every BeginMask by an EndMask and then a PopMask, even when the content stream itself is
-// unbalanced or truncated. Devices therefore never need defensive stack checks. Geometry arrives in the
+// pairing: every ClipPath/ClipStrokePath/ClipImageMask/EndTextClip is matched by a later PopClip, every
+// BeginGroup by an EndGroup, and every BeginMask by an EndMask and then a PopMask, even when the content
+// stream itself is unbalanced or truncated. Devices therefore never need defensive stack checks. Geometry arrives in the
 // coordinate space of the ctm argument's source (user space); the ctm maps it to device space.
 package device
 
 import (
 	"image/color"
 
+	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
@@ -65,9 +66,10 @@ type Tiling struct {
 	YStep  float32
 }
 
-// Glyph is one positioned glyph in a text run. Trm is the fully composed glyph-space→device-space matrix for
-// this glyph (text-space parameters, text matrix, and ctm folded together); Advance is the glyph's advance in
-// text space. Produced from M6 on.
+// Glyph is one positioned glyph in a text run. Trm is the fully composed glyph-space→device-space matrix
+// for this glyph (text-space parameters, text matrix, and ctm folded together — glyph space here is the
+// em-normalized space where an advance of 1.0 is one em); Advance is the glyph's advance in that space.
+// Unicode is the extraction/search value (0 when unknown).
 type Glyph struct {
 	Trm     gfx.Matrix
 	GID     uint32
@@ -76,10 +78,9 @@ type Glyph struct {
 	Advance float32
 }
 
-// TextRun is a run of glyphs sharing one font and writing mode. The Font field is declared as any until
-// internal/font lands at M6, when it becomes that package's font type; no producer exists before then.
+// TextRun is a run of glyphs sharing one font and writing mode, produced by one show-text operator.
 type TextRun struct {
-	Font   any
+	Font   *font.Font
 	Glyphs []Glyph
 	WMode  uint8 // 0 horizontal, 1 vertical
 }
@@ -100,9 +101,13 @@ type Device interface {
 	FillText(run *TextRun, paint Paint)
 	// StrokeText strokes the glyphs of run.
 	StrokeText(run *TextRun, sp *gfx.StrokeParams, paint Paint)
-	// ClipText accumulates run into the pending text clip; the interpreter pushes it (as a single clip level,
-	// popped by one PopClip) when the enclosing text object ends.
+	// ClipText accumulates run into the pending text clip; the interpreter finalizes the accumulation with
+	// EndTextClip when the enclosing text object ends.
 	ClipText(run *TextRun)
+	// EndTextClip pushes the accumulated text clip as a single clip level, popped by one later PopClip. The
+	// interpreter emits it exactly once per text object that produced ClipText calls (including at forced
+	// text-object end when a stream truncates), so ClipText accumulations never span text objects.
+	EndTextClip()
 	// IgnoreText reports glyphs that paint nothing (text render mode 3): the structured-text device records
 	// them, the raster device ignores them.
 	IgnoreText(run *TextRun)

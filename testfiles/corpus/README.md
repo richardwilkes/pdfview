@@ -34,6 +34,24 @@ fonts, so nothing is embedded, and all content streams are stored uncompressed f
 - `rotate90.pdf` — one 300×200 page with `/Rotate 90` containing text and vector marks; rendered output is
   200×300 and the recorded search quads for "Rotated" are non-axis-aligned, pinning the all-four-corners
   quad-to-rectangle behavior.
+- `std14-styles.pdf` — one 612×792 page (generated 2026-07-11 by a dev-time script, same convention as the
+  rest) with one 50-pt line per standard-14 font, none embedded and none carrying /Widths, each line tagged
+  with a unique search token (the Symbol line spells αβγδ through its built-in encoding, the ZapfDingbats line
+  ✁✂✃). Its recorded search quads pin, per style, the substitute-font metrics MuPDF uses for non-embedded
+  standard-14 text: the AFM-compatible advances and — via the quad tops/bottoms — each substitute's
+  ascender/descender (see internal/font's nimbusMetrics).
+- `subst-metrics.pdf` — one 612×792 page (generated 2026-07-11, same convention): twelve 50-pt lines of
+  non-embedded fonts that DO carry font descriptors, covering the irs-fw9 HelveticaLTStd-Bold case, unknown
+  sans/serif/mono/bold/italic names across descriptor flags, comma-style names ("NoSuchSans,BoldItalic"),
+  descriptors with no /Ascent//Descent, zeroed ones, and one-sided ones, plus standard-14 names with
+  descriptors. Its quads pin the substituted-font quad-metric precedence: descriptor /Ascent//Descent when
+  nonzero, per-slot defaults 800/-200 otherwise — even for standard-14 BaseFonts (see internal/font's
+  substituteMetrics).
+- `hit-quad-split.pdf` — one 612×792 page (generated 2026-07-11, same convention) pinning MuPDF's search-hit
+  quad grouping: a match whose interior space sits in a slightly-taller bold font keeps ONE quad with the
+  FIRST character's vertical extent (the irs-fw9 case, distilled); a trailing space before a line wrap is
+  included in the first segment's quad; and a match crossing a hugely-taller character (a 40-pt space between
+  20-pt words) splits into three quads, the divergent character carrying its own extent.
 - `damaged-startxref-zero.pdf` — trailer present, no xref table, `startxref 0`; MuPDF repairs by scanning.
 - `damaged-bad-offsets.pdf` — two pages; structurally complete, but every xref offset is shifted by +7 bytes, so
   the table is present yet wrong and MuPDF repairs.

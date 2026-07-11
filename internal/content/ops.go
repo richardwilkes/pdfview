@@ -166,9 +166,61 @@ func (in *interp) op(word string) {
 	case "sh":
 		// Shadings paint at M8; recognized and skipped until then.
 
-	// ---- recognized no-ops: text objects (M6), type 3 glyph metrics, marked content, compatibility ----
-	case "BT", "ET", "Tc", "Tw", "Tz", "TL", "Tf", "Tr", "Ts", "Td", "TD", "Tm", "T*", "Tj", "TJ", "'", "\"",
-		"d0", "d1", "BMC", "BDC", "EMC", "MP", "DP", "BX", "EX":
+	// ---- text objects and text state ----
+	case "BT":
+		in.opBeginText()
+	case "ET":
+		in.opEndText()
+	case "Tc":
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) {
+			in.gs.text.charSpacing = v
+		}
+	case "Tw":
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) {
+			in.gs.text.wordSpacing = v
+		}
+	case "Tz":
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) {
+			in.gs.text.scale = v / 100
+		}
+	case "TL":
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) {
+			in.gs.text.leading = v
+		}
+	case "Tf":
+		in.opTf()
+	case "Tr":
+		if v, ok := in.int1(); ok && v >= 0 && v <= 7 {
+			in.gs.text.mode = int(v)
+		}
+	case "Ts":
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) {
+			in.gs.text.rise = v
+		}
+	case "Td":
+		if v, ok := in.floats(2); ok {
+			in.textMove(v[0], v[1])
+		}
+	case "TD":
+		if v, ok := in.floats(2); ok && isFinitePt(v[0], v[1]) {
+			in.gs.text.leading = -v[1]
+			in.textMove(v[0], v[1])
+		}
+	case "Tm":
+		in.opTm()
+	case "T*":
+		in.textMove(0, -in.gs.text.leading)
+	case "Tj":
+		in.opShowString()
+	case "TJ":
+		in.opTJ()
+	case "'":
+		in.opNextLineShow()
+	case "\"":
+		in.opSpacedShow()
+
+	// ---- recognized no-ops: type 3 glyph metrics, marked content, compatibility ----
+	case "d0", "d1", "BMC", "BDC", "EMC", "MP", "DP", "BX", "EX":
 
 	default:
 		// Unknown operator: skipped; the caller resets the operand list.

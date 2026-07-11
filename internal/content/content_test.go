@@ -81,7 +81,13 @@ func (r *recorder) PopClip() {
 func (r *recorder) FillText(*device.TextRun, device.Paint)                      {}
 func (r *recorder) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint) {}
 func (r *recorder) ClipText(*device.TextRun)                                    {}
-func (r *recorder) IgnoreText(*device.TextRun)                                  {}
+
+func (r *recorder) EndTextClip() {
+	r.depth++
+	r.add(&call{op: "endtextclip"})
+}
+
+func (r *recorder) IgnoreText(*device.TextRun) {}
 
 func (r *recorder) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 	r.add(&call{op: opFillImage, img: img, ctm: ctm, alpha: alpha})

@@ -1,20 +1,25 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M5 complete (2026-07-11). M6 (fonts + text) is next.**
+**Current milestone: M5 complete; M6 (fonts + text) in progress — quad-parity spike DONE (2026-07-11).**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M5 commit (fix anything that didn't),
-> then begin M6 with the **quad-parity spike** (first M6 box): decode GLAIVE page-0 text, compute char quads
-> from our metrics, and diff against the oracle's stext quads (truth.json's `searchRaw` page-space quads are the
-> reference) BEFORE building any glyph rendering — it de-risks M7's nine exact GURPS rects. Then internal/type1
-> (container only — go-text's psinterpreter provides the charstring VM, see "Verified building blocks"),
-> internal/font (descriptors, encodings, widths), the embedded font bundle (Liberation ×12 + Noto symbols subset
-> still need to be fetched locally, subset, and committed under internal/font/data with license texts — user
-> already approved the set), Type0/CID, Type3 via interpreter recursion, and the text operators (BT..ET are
-> recognized no-ops in internal/content/ops.go) emitting device.TextRun/Glyph with fully composed Trm matrices;
-> render.FillText fills cached glyph-space outlines via AddPathMatrix(outline, trm), glyph cache in
-> internal/store with maxCacheSize honored. Full-corpus dpi-72 numbers as of M5 sit at the end of the M5 section
-> — text is essentially everything that remains (glaive ~17–19%, irs ~8–20%, text-std14 3.4%, rotate90's only
-> failure is its 24pt text).
+> **Next session start here:** confirm the 4 CI runners went green on the M6-spike commit (fix anything that
+> didn't). The spike box is complete and far under budget (glaive max corner error 0.0022 pt vs 0.5 allowed;
+> 244 quads across 16 files enforced by the permanent TestTextQuadParity — layout, widths, Trm composition,
+> and quad metrics are all pinned; see the M6 boxes and the seven new decision-log entries before touching
+> font code). The next box is **glyph rasterization**, the heart of M6: cmap-based code→GID mapping for
+> simple TrueType fonts (Differences/base → AGL name → cmap(3,1); symbolic: (3,0) with 0xF000 fold, then
+> (1,0); fallback code→GID — pin against glaive pixels), glyph outlines via go-text
+> (`Face.GlyphDataOutline(gid)` for sfnt, `cff.Parse`+`LoadGlyph` for Type1C — GID from a GlyphName sweep),
+> render.FillText/StrokeText filling cached glyph-space outlines via `path.AddPathMatrix(outline, trm)` under
+> each glyph's Trm, EndTextClip becoming a real accumulated clip, Liberation substitution for non-embedded
+> fonts (data.Liberation TTFs are committed and parse) — then check rotate90 + text-std14 + std14-corpus
+> pixels against thresholds and record the numbers (rotate90's only failure has been its 24 pt text; glaive
+> full-page should drop from ~17–19% toward the exit threshold). After rendering: internal/type1 (container
+> only — go-text's psinterpreter has the charstring VM; the FontBBox also unlocks Type1-FontFile metrics),
+> internal/store (glyph paths + parsed fonts + decoded images; maxCacheSize finally honored, 0 = unlimited),
+> Type0/CID (cff.go's INDEX/DICT walkers are the base for charset/FDSelect), Type3 recursion, ToUnicode,
+> FuzzCMap/FuzzType1, and the M6-corpus expansion (embedded-TTF/CFF/Type1/Type0/Type3/CJK files with regen'd
+> goldens) as the exit criteria demand.
 
 ## Session protocol
 
@@ -416,16 +421,36 @@ text (M6) is the rest, exactly as the M4 note predicted.
 
 ### M6 — Fonts + text rendering (8–12 sessions, the long pole)
 
-- [ ] **Quad-parity spike first**: decode GLAIVE page-0 text, compute char quads from our metrics, diff against
-      oracle stext quads before building any rendering (de-risks M7's exact hits)
+- [x] **Quad-parity spike first**: decode GLAIVE page-0 text, compute char quads from our metrics, diff against
+      oracle stext quads before building any rendering (de-risks M7's exact hits) (2026-07-11: TestTextQuadParity,
+      a permanent root test, enforces EVERY searchRaw quad of 16 corpus files — both GLAIVE pages, text-std14,
+      rotate90, damaged ×3, encrypted ×6, both IRS forms, and the three new probe files — at ≤0.5 pt per corner.
+      Achieved: glaive max 0.0022 pt over 138 quads, mean 0.0000; every other enforced file exactly 0.0000,
+      244 quads total. See the decision log for the metric rules this pinned.)
 - [ ] `internal/type1` (PFA/PFB container, eexec, charstrings via psinterpreter)
 - [ ] `internal/font`: descriptors, embedded font dispatch, encodings + Differences + AGL, ToUnicode, widths
+      (2026-07-11: all landed for simple fonts — descriptors, FontFile2/FontFile3(OpenType) via go-text,
+      FontFile3/Type1C Top DICT metrics via our own TN5176 CFF reader, four generated base encodings +
+      /Differences + AGL/uniXXXX/uXXXX; still open: ToUnicode CMaps, Type 1 built-in encodings, symbolic-TT
+      cmap fallbacks + GID mapping + hmtx width fallback, which arrive with glyph rendering)
 - [ ] Standard-14 + substitution via embedded bundle (Liberation ×12 + Noto symbols subset + AFM width tables;
-      license texts committed)
+      license texts committed) (2026-07-11: AFM width tables + Symbol/ZapfDingbats built-in encodings + AGL +
+      Liberation ×12 fetched, generated, and committed under internal/font/data with licenses + provenance
+      README; deterministic std-14 aliasing + flag/name substitution and the oracle-pinned substitute metrics
+      are in; the Noto symbols subset (shapes only — widths/encodings already work) is still to be fetched)
 - [ ] Type0/CID: embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect reader
+      (2026-07-11: the CFF header/INDEX/DICT walkers the charset/FDSelect reader will build on are in
+      internal/font/cff.go)
 - [ ] Type3 CharProcs via interpreter recursion
 - [ ] Text operators incl. render modes 0–7 + text clip; glyph cache in `internal/store`; maxCacheSize honored
-- [ ] FuzzCMap + FuzzType1
+      (2026-07-11: ALL text operators are live in internal/content — BT/ET, full text state incl. Tz/Ts/Tr,
+      Td/TD/Tm/T*, Tj/TJ/'/\" — emitting device.TextRun with fully composed Trm matrices and dispatching
+      render modes 0–7 to Fill/Stroke/Ignore/ClipText; the interpreter finalizes accumulated text clips with
+      the new Device.EndTextClip at ET and at forced stream-end unwind. Still open: glyph rasterization
+      (render's text methods are still no-ops; EndTextClip pushes a no-op clip level), internal/store,
+      maxCacheSize)
+- [ ] FuzzCMap + FuzzType1 (parsers do not exist yet; FuzzContent now covers font loading + all text operators
+      via /Font resources — std-14 and a TrueType with Differences + junk FontFile2 — and new text-op seeds)
 
 Exit: text corpus within thresholds; GLAIVE full-page diff within threshold; spike corners <0.5 px; CID/CJK/Type3
 corpus per oracle; budget honored under a tiny maxCacheSize.
@@ -689,6 +714,71 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   engines (trunc(float32(s)/255×255) is the identity for every byte, verified exhaustively). Single-component
   spaces at bpc ≤ 8 convert through a precomputed sample→NRGBA LUT; multi-component and 16-bpc images convert
   per pixel.
+
+- 2026-07-11 (M6 spike): methodology — the spike became a permanent root test (TestTextQuadParity) rather than
+  throwaway tooling: a capture device records every glyph the interpreter emits (deduplicating runs delivered
+  through several verbs by run identity), computes per-char quads as Trm × [0..advance, desc..asc] exactly as
+  the M7 stext device will, locates each golden's needles with a small fz-search-compatible matcher (simple
+  case folding; needle whitespace matches space-char runs, gaps ≥ 0.2 em, or line breaks detected
+  perpendicular to the advance direction so rotated text works), and diffs all corners against searchRaw.
+  Results: glaive (10 embedded TrueType subsets) max corner error 0.0022 pt / mean 0.0000 over 138 quads;
+  text-std14, rotate90, std14-styles, subst-metrics, hit-quad-split, both IRS forms, damaged ×3, encrypted ×6
+  all EXACTLY 0.0000; 244 quads enforced at ≤0.5 pt. The M7 search implementation must graduate this matcher
+  into internal/stext against the same goldens.
+- 2026-07-11 (M6): quad-metric rules, all oracle-pinned behaviorally (probe corpus files committed):
+  EMBEDDED fonts use the font program, FreeType-style — sfnt: hhea ascender/descender, falling back to OS/2
+  typo then win metrics when hhea has none, over head's upem (glaive pins this: macOS Helvetica subsets,
+  hhea 1577/−471 @2048); bare CFF (FontFile3/Type1C): FontBBox yMax/yMin over the FontMatrix-implied upem,
+  read by our own TN5176 Top DICT parser since go-text's cff package does not expose them (irs-f1040 went
+  exact only with this rule, proving descriptors do NOT override embedded programs). SUBSTITUTED
+  (non-embedded) fonts: when the dictionary has a FontDescriptor, /Ascent and /Descent each apply when
+  nonzero with per-slot defaults 0.8/−0.2 — EVEN for standard-14 BaseFonts (subst-metrics.pdf pins all of
+  this, including the fw9 HelveticaLTStd-Bold case, zero/absent/one-sided slots); descriptor-less standard-14
+  fonts get MuPDF's bundled-substitute FontBBox values, recovered as exact integers from the std14-styles
+  probe (Helvetica 1075/−299, ..., Symbol 1010/−293 — see internal/font's nimbusMetrics). ZapfDingbats is
+  UNPINNABLE via search (MuPDF extracts no searchable Unicode for it: the AGL proper lacks the aN names);
+  its entry carries the Adobe AFM FontBBox 820/−143 as a documented stand-in.
+- 2026-07-11 (M6): width rules — PDF /Widths always wins (FirstChar-indexed; unresolvable entries and codes
+  outside the array take /MissingWidth, default 0); a font with NO /Widths array at all takes the bundled
+  Adobe Core-14 AFM widths by glyph name through its encoding (std14-styles verified every style's advances
+  exactly — MuPDF's Nimbus substitutes are AFM-metric-compatible); embedded fonts without /Widths will use
+  hmtx once GID mapping lands (no corpus coverage yet). Word spacing applies to single-byte code 32 only;
+  TJ numbers kick the text matrix by −n/1000×Tfs×Th; all Trm composition is [Tfs·Th 0, 0 Tfs, 0 Ts]·Tm·CTM
+  in float32.
+- 2026-07-11 (M6): search-hit quad grouping, pinned by probes (hit-quad-split.pdf commits the three
+  behaviors): walking a match's chars in order, a char whose vertical extent stays within a fraction of the
+  current quad's height extends the quad horizontally WITHOUT changing its vertical extent (the FIRST char's
+  extent wins — a slightly-taller bold inter-word space in fw9 does not stretch the quad), while a char
+  diverging further (a 40 pt space amid 20 pt words) closes the quad and starts its own, so one match can
+  yield several quads even on one line; a trailing space before a line wrap belongs to the match. The split
+  threshold was bisected into (0.101, 0.113) × height (20 pt text: a 22.6 pt space merges, 22.9 splits);
+  the matcher uses 1/9. Corpus quads sit far from the bracket; if a real file ever lands near it, re-bisect
+  with more probes before trusting the constant.
+- 2026-07-11 (M6): the embedded data bundle lives in internal/font/data (README.md there documents exact
+  URLs, versions, sha256s): Adobe Core-14 AFM widths + Symbol/ZapfDingbats built-in encodings (afm.txt.gz,
+  8 KB), the Adobe Glyph List (agl.txt.gz, 23 KB), and Liberation 2.1.5 ×12 gzipped TTFs (~2.4 MB total,
+  OFL-1.1) — committed with license texts (AFM MustRead.html redistribution notice, AGL BSD-3 header, OFL).
+  The four Annex D base encodings are GENERATED Go tables (internal/font/encodings_gen.go) derived from
+  pdf.js's encodings.js (Apache-2.0) and cross-checked at generation time against the AFM character codes
+  (1788 entries agree), so the two independent sources pin each other. Everything regenerates offline via
+  `go run ./internal/font/data/gen` from pre-fetched inputs; CI touches none of it. go-text/typesetting is
+  now a direct dependency (was indirect via canvas; same v0.3.4, no replace).
+- 2026-07-11 (M6): device-seam addition: `EndTextClip()` joined the Device interface — ClipText only
+  accumulates, and the interpreter emits exactly one EndTextClip per text object that produced ClipText calls
+  (at ET, at a forced text-object close on nested BT, and at stream-end unwind), counting it as one clip
+  level toward the balance contract. The render device pushes a no-op clip level until glyph outlines land
+  (clipping to nothing would wrongly erase content; clipping to glyphs needs the glyphs).
+- 2026-07-11 (M6): text-op robustness (matching the oracle's operator-level recovery): a failed font load
+  aborts Tf and KEEPS the previous font and size; show operators without a usable font are skipped entirely
+  (no matrix advance — MuPDF cannot advance without widths either); text ops outside BT..ET operate against
+  identity matrices; nested BT force-closes the open text object; per-glyph work drains the same maxTotalOps
+  budget as operators so huge show strings cannot amplify work; fonts are cached per Run by resource
+  reference (failures cached as nil), capped at 64 entries until internal/store lands.
+- 2026-07-11 (M6): corpus grew by three generated probe files (std14-styles, subst-metrics, hit-quad-split —
+  see testfiles/corpus/README.md) whose goldens pin substitute metrics, descriptor precedence, and hit-quad
+  grouping; regen.sh reruns confirmed all pre-existing goldens byte-identical (determinism holds). The
+  Symbol probe line searches as αβγδ (MuPDF maps its built-in encoding through the AGL), so Symbol metrics
+  and widths are enforced; the ZapfDingbats line yields no hits, leaving ZD metrics behaviorally unpinned.
 
 ## Verification
 

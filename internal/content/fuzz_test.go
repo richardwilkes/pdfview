@@ -32,6 +32,7 @@ func (b *balanceDevice) ClipStrokePath(*gfx.Path, *gfx.StrokeParams, gfx.Matrix)
 func (b *balanceDevice) FillText(*device.TextRun, device.Paint)                            {}
 func (b *balanceDevice) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint)       {}
 func (b *balanceDevice) ClipText(*device.TextRun)                                          {}
+func (b *balanceDevice) EndTextClip()                                                      { b.depth++ }
 func (b *balanceDevice) IgnoreText(*device.TextRun)                                        {}
 func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, float64)                     {}
 func (b *balanceDevice) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint)            {}
@@ -72,8 +73,26 @@ stream
 { dup dup dup 0.5 mul exch pop }
 endstream
 endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+8 0 obj
+<< /Type /Font /Subtype /TrueType /BaseFont /Junk-Bold /FirstChar 60 /Widths [500 600 700]
+   /Encoding << /BaseEncoding /WinAnsiEncoding /Differences [60 /alpha /bogusname 300 /x] >>
+   /FontDescriptor 9 0 R >>
+endobj
+9 0 obj
+<< /Type /FontDescriptor /FontName /Junk-Bold /Flags 4 /MissingWidth 250 /Ascent 700 /Descent -200
+   /FontFile2 10 0 R >>
+endobj
+10 0 obj
+<< /Length 16 >>
+stream
+notarealsfnt0000
+endstream
+endobj
 trailer
-<< /Root 1 0 R /Size 7 >>
+<< /Root 1 0 R /Size 11 >>
 startxref
 0
 %%EOF
@@ -88,6 +107,7 @@ func fuzzResources() (*cos.Document, cos.Dict) {
 		catXObject:   cos.Dict{resFormName: cos.Ref{Num: 2}},
 		catExtGState: cos.Dict{resGSName: cos.Ref{Num: 3}},
 		"ColorSpace": cos.Dict{"CS0": cos.Ref{Num: 4}, "CS1": cos.Ref{Num: 5}},
+		"Font":       cos.Dict{"F1": cos.Ref{Num: 7}, "F2": cos.Ref{Num: 8}},
 	}
 	return d, res
 }
@@ -108,6 +128,9 @@ func FuzzContent(f *testing.F) {
 	f.Add([]byte("/Fm0 Do"))
 	f.Add([]byte("BI /W 2 /H 2 /BPC 8 /CS /G ID \x00\x01\x02\x03 EI 0 0 1 1 re f"))
 	f.Add([]byte("BT /F1 12 Tf (text (nested) \\) here) Tj ET"))
+	f.Add([]byte("BT /F2 9 Tf 110 Tz 1 Tc 2 Tw 14 TL 3 Ts 40 700 Td [(ab) -500 (<=>)] TJ T* (x) ' 4 5 (y) \" ET"))
+	f.Add([]byte("BT 7 Tr /F1 8 Tf 1 0 0 1 40 40 Tm (clip me) Tj ET 0 0 9 9 re f"))
+	f.Add([]byte("BT 4 Tr /F2 8 Tf (fill+clip) Tj q ET Q BT 2 Tr (fs) Tj"))
 	f.Add([]byte("[3 1] 0.5 d 2 w 1 J 0 0 m 5 5 l 10 0 l S"))
 	f.Add([]byte("Q Q Q W W* n"))
 	doc, res := fuzzResources()
