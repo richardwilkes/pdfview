@@ -5,9 +5,10 @@
 // (reading back premultiplied is deliberate — see the 2026-07-11 decision-log entry on rounding parity).
 //
 // Milestone M4 implemented path fills, strokes (with dashing), and clips; M5 added images (RGBA draws and
-// Alpha8 stencil tinting under the image CTM). The text methods land with M6 and shadings/groups/masks with M8;
-// until then those calls are no-ops except for their stack obligations, which are always honored so the
-// interpreter's push/pop pairing holds.
+// Alpha8 stencil tinting under the image CTM); M6 added text: glyph outlines cached in glyph space and
+// filled/stroked/clipped under each glyph's Trm. Shadings/groups/masks land with M8; until then those calls
+// are no-ops except for their stack obligations, which are always honored so the interpreter's push/pop
+// pairing holds.
 package render
 
 import (
@@ -26,6 +27,7 @@ import (
 	"github.com/richardwilkes/canvas/surface"
 
 	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
@@ -39,6 +41,10 @@ var ErrSurface = errors.New("unable to create raster surface")
 type Device struct {
 	surf *surface.Surface
 	c    *canvas.Canvas
+	// glyphPaths caches converted glyph-space outlines for this render (see glyphPath).
+	glyphPaths map[glyphKey]*path.Path
+	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.
+	textClip *path.Path
 	// clipStack records the canvas save count at each clip push so PopClip can restore precisely.
 	clipStack []int
 	width     int
@@ -261,22 +267,114 @@ func (d *Device) PopClip() {
 	}
 }
 
-// FillText implements device.Device (text lands at M6).
-func (d *Device) FillText(*device.TextRun, device.Paint) {}
+// glyphKey identifies one glyph outline in the per-render path cache. Fonts are cached per content Run
+// keyed by resource reference, so the pointer is stable for all of one page's runs.
+type glyphKey struct {
+	font *font.Font
+	gid  uint32
+}
 
-// StrokeText implements device.Device (text lands at M6).
-func (d *Device) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint) {}
+// glyphPath returns the cached canvas path for one glyph in em-normalized glyph space, converting (and
+// caching, including failures as nil) on first use.
+func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
+	key := glyphKey{font: f, gid: gid}
+	if p, ok := d.glyphPaths[key]; ok {
+		return p
+	}
+	var p *path.Path
+	if g := f.GlyphPath(gid); g != nil && !g.IsEmpty() {
+		p = buildPath(g, false)
+	}
+	if d.glyphPaths == nil {
+		d.glyphPaths = make(map[glyphKey]*path.Path)
+	}
+	if len(d.glyphPaths) < maxCachedGlyphPaths {
+		d.glyphPaths[key] = p
+	}
+	return p
+}
 
-// ClipText implements device.Device. Glyph outlines have not landed yet, so nothing accumulates; the clip
-// pushed by EndTextClip is a no-op level until they do.
-func (d *Device) ClipText(*device.TextRun) {}
+// maxCachedGlyphPaths caps the per-render glyph path cache; a page rarely uses more than a few hundred
+// distinct glyphs, so the cap only bites on hostile content (which then just re-converts).
+const maxCachedGlyphPaths = 4096
+
+// textOutline merges a run's glyph outlines into one device-space path: each glyph's cached glyph-space
+// outline is appended under its Trm. Glyph fills use the non-zero winding rule (glyph contours are wound for
+// it; PDF's even-odd text mode does not exist). under, when non-nil, maps the accumulated result to another
+// space (used by StrokeText to build the path in user space instead).
+func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path {
+	out := path.New()
+	for i := range run.Glyphs {
+		g := &run.Glyphs[i]
+		gp := d.glyphPath(run.Font, g.GID)
+		if gp == nil {
+			continue
+		}
+		trm := g.Trm
+		if under != nil {
+			trm = trm.Mul(*under)
+		}
+		if !trm.IsFinite() {
+			continue
+		}
+		m := matrix(trm)
+		out.AddPathMatrix(gp, &m, path.AddPathAppend)
+	}
+	return out
+}
+
+// FillText implements device.Device: fill the run's merged outline (already in device space via the Trms)
+// with the non-zero winding rule, antialiased, matching the oracle's glyph rasterization.
+func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
+	p := d.textOutline(run, nil)
+	if p.IsEmpty() {
+		return
+	}
+	d.c.DrawPath(p, paintFor(paint))
+}
+
+// StrokeText implements device.Device. Stroke parameters are user-space quantities: the pen applies under
+// the run's CTM alone, not under the text matrix or font size (ISO 32000-2 9.3.6), so the merged outline is
+// built in user space (Trm·CTM⁻¹) and stroked exactly like a user-space path. A degenerate CTM draws
+// nothing (there is no meaningful pen).
+func (d *Device) StrokeText(run *device.TextRun, sp *gfx.StrokeParams, paint device.Paint) {
+	inv, ok := run.CTM.Invert()
+	if !ok {
+		return
+	}
+	p := d.textOutline(run, &inv)
+	if p.IsEmpty() {
+		return
+	}
+	cpaint := paintFor(paint)
+	strokeInto(cpaint, sp)
+	m := matrix(run.CTM)
+	count := d.c.Save()
+	d.c.Concat(&m)
+	d.c.DrawPath(p, cpaint)
+	d.c.RestoreToCount(count)
+}
+
+// ClipText implements device.Device: accumulate the run's device-space outline into the pending text clip,
+// finalized by EndTextClip.
+func (d *Device) ClipText(run *device.TextRun) {
+	if d.textClip == nil {
+		d.textClip = path.New()
+	}
+	d.textClip.AddPath(d.textOutline(run, nil), path.AddPathAppend)
+}
 
 // EndTextClip implements device.Device: push the text clip accumulated by ClipText since the last
-// EndTextClip as one clip level. Until glyph outlines land the level is pushed without a clip region (a
-// wrong-but-safe degrade: clipping to the glyphs' union would need the glyphs; clipping to nothing would
-// wrongly erase subsequent content), keeping the PopClip pairing intact.
+// EndTextClip as one clip level. A text object whose clip accumulation produced no outlines clips
+// everything away, per the text-clip semantics (the region is the union of the shown glyphs).
 func (d *Device) EndTextClip() {
 	d.clipStack = append(d.clipStack, d.c.Save())
+	clip := d.textClip
+	if clip == nil {
+		clip = path.New()
+	}
+	d.textClip = nil
+	d.c.ClipPath(clip, raster.ClipIntersect, true)
 }
 
 // IgnoreText implements device.Device.

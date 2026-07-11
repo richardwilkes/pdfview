@@ -78,10 +78,14 @@ type Glyph struct {
 	Advance float32
 }
 
-// TextRun is a run of glyphs sharing one font and writing mode, produced by one show-text operator.
+// TextRun is a run of glyphs sharing one font and writing mode, produced by one show-text operator. CTM is
+// the graphics state's user→device matrix at emission time: each glyph's Trm already folds it in, but glyph
+// STROKING needs it separately, because stroke parameters are user-space quantities the pen picks up under
+// the CTM alone — not under the text matrix or font size (ISO 32000-2 9.3.6).
 type TextRun struct {
 	Font   *font.Font
 	Glyphs []Glyph
+	CTM    gfx.Matrix
 	WMode  uint8 // 0 horizontal, 1 vertical
 }
 

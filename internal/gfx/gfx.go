@@ -89,6 +89,28 @@ func (m Matrix) ApplyXY(x, y float32) (tx, ty float32) {
 	return m.A*x + m.C*y + m.E, m.B*x + m.D*y + m.F
 }
 
+// Invert returns the inverse transform, reporting false when the matrix is degenerate (zero or non-finite
+// determinant) and no inverse exists.
+func (m Matrix) Invert() (Matrix, bool) {
+	det := m.A*m.D - m.B*m.C
+	d := float64(det)
+	if d == 0 || math.IsNaN(d) || math.IsInf(d, 0) {
+		return Matrix{}, false
+	}
+	inv := Matrix{
+		A: m.D / det,
+		B: -m.B / det,
+		C: -m.C / det,
+		D: m.A / det,
+	}
+	inv.E = -(m.E*inv.A + m.F*inv.C)
+	inv.F = -(m.E*inv.B + m.F*inv.D)
+	if !inv.IsFinite() {
+		return Matrix{}, false
+	}
+	return inv, true
+}
+
 // IsFinite reports whether every element is a finite number.
 func (m Matrix) IsFinite() bool {
 	for _, v := range [6]float32{m.A, m.B, m.C, m.D, m.E, m.F} {

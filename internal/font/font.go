@@ -51,22 +51,31 @@ type Font struct {
 	// widths maps codes to advances in text space (the PDF 1000-unit values already divided by 1000).
 	widths map[uint32]float32
 	// afm is the standard-14 fallback width table (glyph name → 1000-unit width) consulted only when the PDF
-	// supplies no /Widths array at all; nil for embedded non-standard fonts. When /Widths exists, codes it
-	// does not cover take /MissingWidth, per the descriptor.
+	// supplies no /Widths array at all and the font is substituted (embedded programs fall back to their own
+	// advances instead). When /Widths exists, codes it does not cover take /MissingWidth, per the descriptor.
 	afm map[string]uint16
 	// sfnt carries the parsed embedded TrueType/OpenType program, nil otherwise.
 	sfnt *sfntInfo
+	// cff carries the parsed embedded bare-CFF (Type1C) program, nil otherwise.
+	cff *cffInfo
+	// sub carries the bundled substitute face when no embedded program renders (nil for embedded fonts).
+	sub *subInfo
 	// BaseFont is the /BaseFont name with any subset prefix stripped.
 	BaseFont string
+	// Flags is the descriptor /Flags value (0 when absent).
+	Flags int
 	// uni maps codes to Unicode runes for simple fonts (0 when unknown).
 	uni [256]rune
+	// gids is the precomputed code→GID table (see buildGIDs).
+	gids [256]uint32
 	// ascender/descender are in text space (em units): the values MuPDF's stext device would use for quads.
 	ascender  float32
 	descender float32
 	// missingWidth is the descriptor /MissingWidth in text space.
 	missingWidth float32
-	// Flags is the descriptor /Flags value (0 when absent).
-	Flags int
+	// hasWidths records whether the dictionary carried a /Widths array (its gaps then mean /MissingWidth,
+	// never a fallback source).
+	hasWidths bool
 }
 
 // Load builds a Font from a font resource dictionary. The document's resolver is used for every indirect
@@ -159,16 +168,16 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	case desc.fontFile3 != nil:
 		// Bare CFF (Type1C): FreeType — and so the oracle — takes ascender/descender from the FontBBox.
-		// Glyph outlines (via go-text cff.Parse) land later in M6.
 		if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {
 			if asc, dsc, ok := top.metrics(); ok {
 				f.ascender, f.descender = asc, dsc
 				embedded = true
 			}
+			f.cff = parseCFFGlyphs(d, desc.fontFile3, top)
 		}
 	case desc.fontFile != nil:
 		// Type 1 programs: the internal/type1 container parser lands next; until then these degrade to
-		// substitution for metrics. Their /Widths still apply, so layout holds.
+		// substitution for metrics and shapes. Their /Widths still apply, so layout holds.
 	}
 	std14 := standard14Name(f.BaseFont, desc.flags)
 	if !embedded {
@@ -180,10 +189,27 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.enc = resolveEncoding(d, dict, std14)
 	buildUnicode(f)
 
-	// Widths: /Widths always wins; the standard-14 AFM tables apply only when it is absent entirely.
-	if !loadWidths(d, dict, f) {
+	// Widths: /Widths always wins. Without one, substituted fonts take the standard-14 AFM widths and
+	// embedded programs their own advances (in Width).
+	f.hasWidths = loadWidths(d, dict, f)
+
+	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes
+	// yield no outlines (parse failure, or an sfnt go-text rejects) — renders through the deterministic
+	// Liberation substitute (never an error, never a system font). The substitute is the glyph source only
+	// when no embedded source exists, so GID/GlyphPath/Width stay mutually consistent.
+	if f.sfnt != nil && f.sfnt.face == nil {
+		f.sfnt = nil
+	}
+	if f.sfnt == nil && f.cff == nil {
+		f.sub = loadSubstitute(std14)
+	}
+	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances (programAdvance); everything
+	// else — substituted fonts per the std14-styles pin, and bare CFF until its charstring advances land —
+	// takes the AFM widths of the standard-14 stand-in.
+	if !f.hasWidths && f.sfnt == nil {
 		f.afm = data.AFMWidths(std14)
 	}
+	f.buildGIDs()
 	return f, nil
 }
 
@@ -225,12 +251,16 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 	return true
 }
 
-// Width returns the advance for a code in text space (em units at size 1): the PDF /Widths value when
-// present, else the standard-14 AFM width for the code's glyph name, else the embedded program's advance
-// (once GID mapping lands), else /MissingWidth.
+// Width returns the advance for a code in text space (em units at size 1). A present /Widths array is
+// authoritative: its value when the code resolves, /MissingWidth otherwise (plan.md width rules). Without
+// one, substituted fonts use the standard-14 AFM width for the code's glyph name and embedded sfnt programs
+// their own hmtx advance, then /MissingWidth.
 func (f *Font) Width(code uint32) float32 {
 	if w, ok := f.widths[code]; ok {
 		return w
+	}
+	if f.hasWidths {
+		return f.missingWidth
 	}
 	if f.afm != nil && code < 256 && f.enc != nil {
 		if name := f.enc[code]; name != "" {
@@ -238,6 +268,9 @@ func (f *Font) Width(code uint32) float32 {
 				return float32(w) / 1000
 			}
 		}
+	}
+	if w, ok := f.programAdvance(f.GID(code)); ok {
+		return w
 	}
 	return f.missingWidth
 }

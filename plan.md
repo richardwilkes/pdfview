@@ -1,25 +1,26 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M5 complete; M6 (fonts + text) in progress — quad-parity spike DONE (2026-07-11).**
+**Current milestone: M5 complete; M6 (fonts + text) in progress — quad-parity spike + glyph rasterization
+DONE (2026-07-11).**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M6-spike commit (fix anything that
-> didn't). The spike box is complete and far under budget (glaive max corner error 0.0022 pt vs 0.5 allowed;
-> 244 quads across 16 files enforced by the permanent TestTextQuadParity — layout, widths, Trm composition,
-> and quad metrics are all pinned; see the M6 boxes and the seven new decision-log entries before touching
-> font code). The next box is **glyph rasterization**, the heart of M6: cmap-based code→GID mapping for
-> simple TrueType fonts (Differences/base → AGL name → cmap(3,1); symbolic: (3,0) with 0xF000 fold, then
-> (1,0); fallback code→GID — pin against glaive pixels), glyph outlines via go-text
-> (`Face.GlyphDataOutline(gid)` for sfnt, `cff.Parse`+`LoadGlyph` for Type1C — GID from a GlyphName sweep),
-> render.FillText/StrokeText filling cached glyph-space outlines via `path.AddPathMatrix(outline, trm)` under
-> each glyph's Trm, EndTextClip becoming a real accumulated clip, Liberation substitution for non-embedded
-> fonts (data.Liberation TTFs are committed and parse) — then check rotate90 + text-std14 + std14-corpus
-> pixels against thresholds and record the numbers (rotate90's only failure has been its 24 pt text; glaive
-> full-page should drop from ~17–19% toward the exit threshold). After rendering: internal/type1 (container
-> only — go-text's psinterpreter has the charstring VM; the FontBBox also unlocks Type1-FontFile metrics),
-> internal/store (glyph paths + parsed fonts + decoded images; maxCacheSize finally honored, 0 = unlimited),
-> Type0/CID (cff.go's INDEX/DICT walkers are the base for charset/FDSelect), Type3 recursion, ToUnicode,
-> FuzzCMap/FuzzType1, and the M6-corpus expansion (embedded-TTF/CFF/Type1/Type0/Type3/CJK files with regen'd
-> goldens) as the exit criteria demand.
+> **Next session start here:** confirm the 4 CI runners went green on the glyph-rasterization commit (fix
+> anything that didn't). Text RENDERS now — embedded TrueType (glaive), embedded bare CFF (both IRS forms),
+> and Liberation-substituted standard-14, through the pinned code→GID chains, go-text outlines, per-render
+> glyph path cache, real accumulated text clips, and user-space stroke pens (see the six new decision-log
+> entries). TestTextCorpusPixels enforces text-std14 + hit-quad-split + the six encrypted variants;
+> rotate90 is now enforced in TestVectorCorpusPixels; glaive/IRS/std14-styles/subst-metrics/damaged are
+> reported unenforced (numbers + why in the M6 status note — AA edge redistribution and substitute
+> letterform deltas, NOT layout or mapping bugs; per-file thresholds are an M6-exit decision). The next
+> boxes, in plan order: **internal/type1** (PFA/PFB container, eexec, charstrings via go-text psinterpreter
+> — also unlocks Type1-FontFile metrics + built-in encodings), **internal/store + maxCacheSize** (glyph
+> paths + parsed fonts + decoded images; the per-Run font/image caches and the render device's glyph-path
+> cache migrate there; "budget honored under a tiny maxCacheSize" is an exit criterion), **Type0/CID**
+> (embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect on cff.go's walkers —
+> note go-text refuses sfnts without a cmap table, so CIDFontType2 outlines need a glyf path that does not
+> go through otfont.NewFont, or an upstream re-check), **Type3** recursion, **ToUnicode**, FuzzCMap +
+> FuzzType1, and the M6-corpus expansion (embedded-Type1/Type0/Type3/CJK + a Tr-mode/text-clip probe file
+> with regen'd goldens; also consider a ZapfDingbats-capable bundled face — the ZD line renders blank
+> today). The gate const stays "M5" until ALL M6 exit criteria hold.
 
 ## Session protocol
 
@@ -431,13 +432,18 @@ text (M6) is the rest, exactly as the M4 note predicted.
 - [ ] `internal/font`: descriptors, embedded font dispatch, encodings + Differences + AGL, ToUnicode, widths
       (2026-07-11: all landed for simple fonts — descriptors, FontFile2/FontFile3(OpenType) via go-text,
       FontFile3/Type1C Top DICT metrics via our own TN5176 CFF reader, four generated base encodings +
-      /Differences + AGL/uniXXXX/uXXXX; still open: ToUnicode CMaps, Type 1 built-in encodings, symbolic-TT
-      cmap fallbacks + GID mapping + hmtx width fallback, which arrive with glyph rendering)
+      /Differences + AGL/uniXXXX/uXXXX; 2026-07-11 later: symbolic-TT cmap fallbacks, the full code→GID
+      chains, `Font.GlyphPath` outlines (sfnt via go-text Face, Type1C via cff.LoadGlyph + FontMatrix), and
+      the hmtx width fallback all landed with glyph rasterization — still open: ToUnicode CMaps, Type 1
+      built-in encodings)
 - [ ] Standard-14 + substitution via embedded bundle (Liberation ×12 + Noto symbols subset + AFM width tables;
       license texts committed) (2026-07-11: AFM width tables + Symbol/ZapfDingbats built-in encodings + AGL +
       Liberation ×12 fetched, generated, and committed under internal/font/data with licenses + provenance
       README; deterministic std-14 aliasing + flag/name substitution and the oracle-pinned substitute metrics
-      are in; the Noto symbols subset (shapes only — widths/encodings already work) is still to be fetched)
+      are in; 2026-07-11 later: substitution RENDERS — Liberation faces load/cache/map by AGL name→Unicode
+      and unparseable embedded programs fall back to them; the Noto symbols subset (shapes only —
+      widths/encodings already work) is still to be fetched, and ZapfDingbats renders blank until a
+      dingbat-capable face is bundled)
 - [ ] Type0/CID: embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect reader
       (2026-07-11: the CFF header/INDEX/DICT walkers the charset/FDSelect reader will build on are in
       internal/font/cff.go)
@@ -446,14 +452,34 @@ text (M6) is the rest, exactly as the M4 note predicted.
       (2026-07-11: ALL text operators are live in internal/content — BT/ET, full text state incl. Tz/Ts/Tr,
       Td/TD/Tm/T*, Tj/TJ/'/\" — emitting device.TextRun with fully composed Trm matrices and dispatching
       render modes 0–7 to Fill/Stroke/Ignore/ClipText; the interpreter finalizes accumulated text clips with
-      the new Device.EndTextClip at ET and at forced stream-end unwind. Still open: glyph rasterization
-      (render's text methods are still no-ops; EndTextClip pushes a no-op clip level), internal/store,
-      maxCacheSize)
+      the new Device.EndTextClip at ET and at forced stream-end unwind. 2026-07-11 later: GLYPH RASTERIZATION
+      LANDED — render.FillText fills merged per-run outlines (nonzero winding, AA) from a per-render
+      {font,gid} path cache, StrokeText strokes them with the user-space pen via the new TextRun.CTM,
+      ClipText/EndTextClip accumulate a REAL device-space clip, IgnoreText stays invisible; enforced by
+      TestTextCorpusPixels + render unit tests. Still open: internal/store, maxCacheSize)
 - [ ] FuzzCMap + FuzzType1 (parsers do not exist yet; FuzzContent now covers font loading + all text operators
-      via /Font resources — std-14 and a TrueType with Differences + junk FontFile2 — and new text-op seeds)
+      via /Font resources — std-14 and a TrueType with Differences + junk FontFile2 — and new text-op seeds;
+      2026-07-11 later: FuzzContent's device now pulls every glyph outline like the raster device would, and
+      the new FuzzFontProgram drives parseSFNT + parseCFFGlyphBytes + GID chains + GlyphPath on arbitrary
+      bytes, 20s smoke clean)
 
 Exit: text corpus within thresholds; GLAIVE full-page diff within threshold; spike corners <0.5 px; CID/CJK/Type3
 corpus per oracle; budget honored under a tiny maxCacheSize.
+
+Text-corpus pixel status at glyph rasterization (2026-07-11; % over Δ24 / mean Δ at dpi 72|100|150,
+worst page): ENFORCED (TestTextCorpusPixels + rotate90 in TestVectorCorpusPixels) — rotate90 0.70/0.60 |
+0.65/0.70 | 0.70/0.76 (was 1.18/2.09 pre-text, its only failure); text-std14 AND its six encrypted variants
+byte-identically 1.84/1.35 | 1.87/1.56 | 1.66/1.64 (was 3.41 over Δ24); hit-quad-split 0.39/0.25 | 0.44/0.35 |
+0.30/0.26. REPORTED, not yet enforced — glaive p1 8.40/5.55 | 8.80/5.92 | 6.74/4.58 (was 17.4–18.9 over Δ24);
+irs-f1040 p0 5.85/4.48 | 6.61/4.64 | 4.85/3.44 (was 10.2–11.7); irs-fw9 worst page p1 12.14/7.79 | 9.91/6.88 |
+7.70/5.36 (was 7.8–19.8); std14-styles 6.36/10.60 | 5.87/10.69 | 5.29/10.56; subst-metrics 2.01/2.75 |
+1.85/2.87 | 1.60/2.83; damaged ×3 identically 2.08/1.44 | 2.47/2.22 | 1.45/1.31 (p0). The unenforced misses
+are NOT layout or mapping errors (quads stay pinned at ≤0.0022 pt): for the embedded-font files, total ink
+matches the oracle within ~1% and the diff is FreeType-scanline-vs-Skia-analytic AA redistributing edge
+coverage — at glaive/IRS's 7–9 pt body text nearly every glyph pixel is an edge pixel; for the substituted
+files it is Liberation-vs-Nimbus letterform deltas (Liberation Mono is visibly heavier than Nimbus Mono,
+dominating std14-styles' mean) plus the blank ZapfDingbats line. Whether these get per-file thresholds (with
+this justification) or further work (bundled shapes closer to Nimbus, coverage tuning) is an M6-exit decision.
 
 ### M7 — Structured text + search (4–6 sessions)
 
@@ -779,6 +805,58 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   grouping; regen.sh reruns confirmed all pre-existing goldens byte-identical (determinism holds). The
   Symbol probe line searches as αβγδ (MuPDF maps its built-in encoding through the AGL), so Symbol metrics
   and widths are enforced; the ZapfDingbats line yields no hits, leaving ZD metrics behaviorally unpinned.
+- 2026-07-11 (M6 glyphs): code→GID chains, pixel-pinned by the corpus (glaive dropped 17.4–18.9% → 7.5–8.8%
+  over Δ24 with layout already quad-exact, so the mapping is what the pixels verify). Embedded sfnt,
+  non-symbolic (flag 4 unset OR flag 32 set): encoding glyph name → AGL Unicode → the font's Unicode cmap —
+  (3,1) preferred, then (3,10), then any platform-0 subtable, FreeType's charmap preference — then glyph
+  name → REVERSE Mac Roman code → the (1,0) subtable. glaive's macOS subsets carry ONLY (1,0) format-6
+  tables and /Encoding /MacRomanEncoding, so its pixels cannot distinguish name→MacRoman from raw-code
+  lookup there; name→MacRoman is implemented first per standard viewer practice (pdf.js consulted,
+  Apache-2.0). Symbolic, or when the name path misses: (3,0) with the bare code, then folded into the
+  0xF000 symbol page (code ≤ 0xFF), then (1,0) with the bare code, then Unicode-cmap-by-code for symbolic
+  fonts, and finally code-as-GID when it is within the glyph count. Bare CFF: encoding name → charset-sweep
+  name→GID map (first-wins on duplicates), else code-as-GID. Substituted: AGL-resolved name → Unicode →
+  Liberation's own best cmap, and ONLY that — a name the AGL cannot resolve (ZapfDingbats aN, private names)
+  maps to .notdef, which substituted fonts deliberately render as NOTHING (drawing the extraction table's
+  ASCII fallback would paint the WRONG glyph, and Liberation's .notdef box is ink the original never had);
+  embedded fonts keep gid 0 and draw their program's own .notdef like MuPDF. All 256 codes precompute at
+  Load into a flat table. Subtable formats 0/4/6/12 are implemented; 2 (legacy CJK) is not consulted.
+- 2026-07-11 (M6 glyphs): outlines are em-normalized glyph-space gfx.Paths (y up, advance 1 = one em),
+  produced by `Font.GlyphPath(gid)`: sfnt via go-text `Face.GlyphDataOutline` scaled by 1/upem (contours
+  implicitly closed, matching TrueType semantics); Type1C via `cff.Parse`+`LoadGlyph` mapped through the Top
+  DICT FontMatrix (not a hard-coded /1000 — non-standard matrices ride along); substituted via the
+  Liberation face. Fills use the NONZERO winding rule, AA on, one merged canvas path per TextRun (the plan's
+  "merged outline path per run"), built by `path.AddPathMatrix(outline, Trm)` per glyph. GlyphPath recovers
+  panics from hostile programs into a nil path (missing glyph, never a failed render); go-text rejecting a
+  program that parsed for metrics (e.g. an sfnt with no cmap table — NewFont requires one) drops to the
+  Liberation substitute for SHAPES while the embedded metrics/widths pins stay (fw9/glaive unaffected; note
+  for Type0: CIDFontType2 outlines will need a non-NewFont glyf path).
+- 2026-07-11 (M6 glyphs): device-seam addition: `TextRun.CTM` (the gs CTM at emission). Glyph Trms already
+  fold it in, but ISO 32000-2 9.3.6 stroke text takes its pen in USER space under the CTM alone — not under
+  the text matrix or font size — so render.StrokeText rebuilds the merged outline in user space via
+  Trm·CTM⁻¹ and strokes under Concat(CTM) exactly like StrokePath (gfx.Matrix gained Invert; a degenerate
+  CTM draws nothing). ClipText accumulates the device-space outline; EndTextClip pushes it as one real
+  Save+ClipPath level — a text object whose clip accumulated no outlines now clips EVERYTHING away (correct
+  text-clip semantics; the M6-session-1 no-op degrade is gone). No corpus file exercises Tr 1–7 yet — a
+  probe file should join the corpus before M6 exits.
+- 2026-07-11 (M6 glyphs): caching. Converted glyph paths cache per RENDER in the raster device, keyed
+  {*font.Font, gid} (fonts are per-Run cached by resource ref, so the pointer is stable within a page),
+  capped at 4096 entries; this migrates to internal/store when it lands. Parsed Liberation programs cache
+  globally under a mutex as immutable `*otfont.Font` (verified: the outline/advance paths only read Font
+  tables and allocate fresh points) with a fresh `otfont.Face` per pdfview Font, because Face-level caches
+  (cmapCache, extentsCache) mutate without locks; substituted cmap lookups go through `Font.Cmap.Lookup`
+  (pure) rather than the caching NominalGlyph.
+- 2026-07-11 (M6 glyphs): width fallback for /Widths-less fonts, refining the earlier width rules: embedded
+  sfnt programs now use their own hmtx advance via the GID chain (the promised "hmtx once GID mapping
+  lands"); substituted fonts keep the standard-14 AFM tables (std14-styles pin unchanged); bare CFF without
+  /Widths also takes the AFM stand-in until CFF charstring advances land (no corpus coverage). A PRESENT
+  /Widths array still never falls through to any of these — gaps mean /MissingWidth.
+- 2026-07-11 (M6 glyphs): pixel-enforcement scope: TestTextCorpusPixels enforces the files inside default
+  thresholds (text-std14, its six encrypted variants, hit-quad-split) and reports the rest; rotate90 moved
+  to enforced in TestVectorCorpusPixels. The recorded numbers and the analysis of the unenforced residuals
+  (AA edge redistribution with ~1% ink parity for embedded fonts; Liberation-vs-Nimbus letterforms for
+  substituted ones) live in the M6 status note above — per-file thresholds were deliberately NOT set this
+  session so the numbers stay honest until the M6-exit decision.
 
 ## Verification
 

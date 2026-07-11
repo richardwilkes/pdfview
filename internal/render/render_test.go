@@ -2,9 +2,12 @@ package render
 
 import (
 	"image/color"
+	"strings"
 	"testing"
 
+	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
@@ -199,6 +202,231 @@ func TestHairline(t *testing.T) {
 	}
 	if got := pixelAt(t, pix, stride, 4, 4); got[3] == 0 {
 		t.Error("hairline drew nothing")
+	}
+}
+
+// helveticaFont loads a substituted standard-14 Helvetica through the real font pipeline (rendering via the
+// bundled Liberation Sans), giving the text tests genuine outlines without fixture files.
+func helveticaFont(t *testing.T) *font.Font {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("%PDF-1.7\n1 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+	b.WriteString("2 0 obj\n<< /Type /Catalog >>\nendobj\n")
+	b.WriteString("trailer\n<< /Root 2 0 R /Size 3 >>\nstartxref\n0\n%%EOF\n")
+	d, err := cos.Open([]byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dict, ok := cos.AsDict(d.LoadObject(1))
+	if !ok {
+		t.Fatal("font dict unavailable")
+	}
+	f, err := font.Load(d, dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// glyphRun builds a one-glyph run for code, with the glyph-space em box mapped to device space by trm.
+func glyphRun(t *testing.T, f *font.Font, code uint32, trm, ctm gfx.Matrix) *device.TextRun {
+	t.Helper()
+	gid := f.GID(code)
+	if gid == 0 {
+		t.Fatalf("code %d unmapped", code)
+	}
+	return &device.TextRun{
+		Font:   f,
+		Glyphs: []device.Glyph{{Trm: trm, GID: gid, Code: code, Advance: f.Width(code)}},
+		CTM:    ctm,
+	}
+}
+
+// inkIn reports whether any pixel in the (inclusive) rectangle has nonzero alpha.
+func inkIn(pix []byte, stride, x0, y0, x1, y1 int) bool {
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			if pix[y*stride+x*4+3] != 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestFillTextPixels(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	// Glyph space is y-up with the baseline at y=0: scale to 24 px/em and place the baseline at y=28.
+	trm := gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28))
+	d.FillText(glyphRun(t, f, 'H', trm, gfx.Identity()), redPaint())
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The 24 px 'H' covers roughly x 4..17, y 11..28 (cap height ≈ 0.72 em): ink must exist there and the
+	// area above the cap height must stay empty.
+	if !inkIn(pix, stride, 3, 12, 18, 27) {
+		t.Fatal("FillText drew nothing where the glyph belongs")
+	}
+	if inkIn(pix, stride, 0, 0, 31, 8) {
+		t.Error("ink above the glyph's cap height")
+	}
+	// The counter between the stems (above the crossbar) must be empty: nonzero winding on real contours.
+	if inkIn(pix, stride, 9, 13, 11, 15) {
+		t.Error("ink inside the 'H' counter")
+	}
+}
+
+func TestFillTextNotdefSubstituteDrawsNothing(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 16, 16)
+	run := &device.TextRun{
+		Font:   f,
+		Glyphs: []device.Glyph{{Trm: gfx.Matrix{A: 12, D: -12, F: 14}, GID: 0}},
+		CTM:    gfx.Identity(),
+	}
+	d.FillText(run, redPaint())
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inkIn(pix, stride, 0, 0, 15, 15) {
+		t.Error("substituted .notdef painted")
+	}
+}
+
+// inkTotal sums the alpha channel over the whole surface.
+func inkTotal(pix []byte, stride, w, h int) int {
+	total := 0
+	for y := range h {
+		for x := range w {
+			total += int(pix[y*stride+x*4+3])
+		}
+	}
+	return total
+}
+
+func TestStrokeTextPen(t *testing.T) {
+	f := helveticaFont(t)
+	// 'O' at 60 px/em: a hairline stroke inks only the two contour outlines, so its total coverage must be
+	// well under the fill's ring area (a StrokeText that accidentally filled would match the fill's total).
+	trm := gfx.Matrix{A: 60, D: -60}.Mul(gfx.Translate(4, 58))
+	sp := gfx.StrokeParams{Width: 0, MiterLimit: 10}
+	run := glyphRun(t, f, 'O', trm, gfx.Identity())
+
+	dFill := newDevice(t, 64, 64)
+	dFill.FillText(run, redPaint())
+	fillPix, stride, err := dFill.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillInk := inkTotal(fillPix, stride, 64, 64)
+	if fillInk == 0 {
+		t.Fatal("fill reference drew nothing")
+	}
+
+	dStroke := newDevice(t, 64, 64)
+	dStroke.StrokeText(run, &sp, redPaint())
+	strokePix, _, err := dStroke.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	strokeInk := inkTotal(strokePix, stride, 64, 64)
+	if strokeInk == 0 {
+		t.Fatal("StrokeText drew nothing")
+	}
+	if strokeInk >= fillInk*3/5 {
+		t.Errorf("hairline stroke ink %d vs fill ink %d; stroke looks like a fill", strokeInk, fillInk)
+	}
+
+	// A degenerate CTM must draw nothing (no meaningful pen exists).
+	d2 := newDevice(t, 64, 64)
+	d2.StrokeText(glyphRun(t, f, 'O', trm, gfx.Matrix{}), &sp, redPaint())
+	pix2, _, err := d2.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inkTotal(pix2, stride, 64, 64) != 0 {
+		t.Error("degenerate CTM still painted")
+	}
+}
+
+func TestTextClipRestrictsAndPops(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	trm := gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28))
+	d.ClipText(glyphRun(t, f, 'H', trm, gfx.Identity()))
+	d.EndTextClip()
+	var p gfx.Path
+	p.Rect(0, 0, 32, 32)
+	d.FillPath(&p, false, gfx.Identity(), redPaint())
+	d.PopClip()
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ink only inside the glyph: the stems are covered, the region above the cap height is not, and the
+	// counter between the stems stays empty.
+	if !inkIn(pix, stride, 3, 12, 18, 27) {
+		t.Fatal("text clip admitted no ink")
+	}
+	if inkIn(pix, stride, 0, 0, 31, 8) {
+		t.Error("ink above the glyph within the text clip")
+	}
+	if inkIn(pix, stride, 9, 13, 11, 15) {
+		t.Error("ink inside the 'H' counter within the text clip")
+	}
+	// After PopClip, painting reaches everywhere again.
+	var p2 gfx.Path
+	p2.Rect(0, 0, 4, 4)
+	d.FillPath(&p2, false, gfx.Identity(), device.Paint{Color: color.NRGBA{G: 255, A: 255}, Alpha: 1})
+	pix, stride, err = d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inkIn(pix, stride, 0, 0, 3, 3) {
+		t.Error("PopClip did not restore the clip")
+	}
+}
+
+func TestEmptyTextClipClipsEverything(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 16, 16)
+	// A clip-text run whose glyphs produce no outlines (substituted .notdef) accumulates an empty region:
+	// the finalized clip admits nothing, and PopClip restores.
+	run := &device.TextRun{Font: f, Glyphs: []device.Glyph{{Trm: gfx.Matrix{A: 12, D: -12, F: 14}, GID: 0}}, CTM: gfx.Identity()}
+	d.ClipText(run)
+	d.EndTextClip()
+	var p gfx.Path
+	p.Rect(0, 0, 16, 16)
+	d.FillPath(&p, false, gfx.Identity(), redPaint())
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inkIn(pix, stride, 0, 0, 15, 15) {
+		t.Error("empty text clip admitted ink")
+	}
+	d.PopClip()
+	d.FillPath(&p, false, gfx.Identity(), redPaint())
+	pix, stride, err = d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inkIn(pix, stride, 0, 0, 15, 15) {
+		t.Error("PopClip did not restore after empty text clip")
+	}
+}
+
+func TestGlyphPathCacheReuse(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 8, 8)
+	gid := f.GID('A')
+	p1 := d.glyphPath(f, gid)
+	p2 := d.glyphPath(f, gid)
+	if p1 == nil || p1 != p2 {
+		t.Errorf("glyph path not cached: %p vs %p", p1, p2)
 	}
 }
 

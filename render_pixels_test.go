@@ -13,12 +13,43 @@ import (
 
 // TestVectorCorpusPixels is milestone M4's pixel-scope check (plan.md decision log, 2026-07-11): full-corpus
 // pixel enforcement waits for M8, but the vector corpus — content the graphics core alone must reproduce — is
-// compared against the goldens as soon as the real render path exists. rotate90.pdf additionally verifies the
-// rotated page CTM but contains text, which renders nothing until M6, so its numbers are reported without
-// being enforced until then.
+// compared against the goldens as soon as the real render path exists. rotate90.pdf (vectors plus 24 pt
+// rotated text) is enforced from M6 on, now that glyph rasterization exists.
 func TestVectorCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "vectors", "vectors", true)
-	comparePixelsToGolden(t, "rotate90", "rotate90", false)
+	comparePixelsToGolden(t, "rotate90", "rotate90", true)
+}
+
+// TestTextCorpusPixels is milestone M6's pixel-scope check, following the M4/M5 pattern: text corpus files
+// whose rendering divergence from the oracle is within the default thresholds are enforced at every recorded
+// DPI. The files below all render through Liberation substitutes (standard-14 fonts) whose Arial-class
+// letterforms differ slightly from the oracle's Nimbus substitutes, so their diffs are genuine shape deltas,
+// comfortably inside the gate. The six encrypted files are text-std14 variants and must render identically to
+// it once authenticated.
+//
+// Reported but NOT yet enforced (numbers recorded in plan.md M6; enforcement decisions — per-file thresholds
+// with logged justification — come with the M6 exit):
+//   - glaive, irs-f1040, irs-fw9: embedded fonts at 7–9 pt body sizes; layout is quad-exact and total ink
+//     matches the oracle within ~1%, but FreeType scanline AA vs canvas analytic AA redistributes edge
+//     coverage, and at those sizes nearly every glyph pixel is an edge pixel.
+//   - std14-styles: the Liberation Mono lines are visibly heavier than the oracle's Nimbus Mono, and the
+//     ZapfDingbats line renders blank (no dingbat-capable bundled face yet).
+//   - subst-metrics and the damaged trio: the same substitution letterform delta on small text-dominated
+//     pages, sitting just over the 2% gate at 72/100 dpi.
+func TestTextCorpusPixels(t *testing.T) {
+	for _, name := range []string{
+		"text-std14", "hit-quad-split",
+		"encrypted-r2-rc4", "encrypted-r3-rc4", "encrypted-r4-rc4", "encrypted-r4-aes",
+		"encrypted-r6-aes", "encrypted-r6-empty-user",
+	} {
+		comparePixelsToGolden(t, name, name, true)
+	}
+	for _, name := range []string{
+		"glaive", "irs-f1040", "irs-fw9", "std14-styles", "subst-metrics",
+		"damaged-bad-offsets", "damaged-no-trailer", "damaged-startxref-zero",
+	} {
+		comparePixelsToGolden(t, name, name, false)
+	}
 }
 
 // TestImageCorpusPixels is milestone M5's pixel-scope check, following the M4 pattern: the image corpus —
@@ -57,6 +88,12 @@ func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) 
 	truth, err := testsupport.LoadTruth(filepath.Join(goldenDir, "truth.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if doc.RequiresAuthentication() {
+		// The goldens were captured after authenticating with the recorded password.
+		if doc.Authenticate(truth.AuthPassword) == 0 {
+			t.Fatalf("Authenticate(%q) failed", truth.AuthPassword)
+		}
 	}
 	for _, page := range truth.Pages {
 		for _, dpi := range truth.DPIs {

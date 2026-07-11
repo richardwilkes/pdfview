@@ -28,22 +28,36 @@ func (b *balanceDevice) pop() {
 func (b *balanceDevice) FillPath(*gfx.Path, bool, gfx.Matrix, device.Paint)                {}
 func (b *balanceDevice) StrokePath(*gfx.Path, *gfx.StrokeParams, gfx.Matrix, device.Paint) {}
 func (b *balanceDevice) ClipPath(*gfx.Path, bool, gfx.Matrix)                              { b.depth++ }
-func (b *balanceDevice) ClipStrokePath(*gfx.Path, *gfx.StrokeParams, gfx.Matrix)           { b.depth++ }
-func (b *balanceDevice) FillText(*device.TextRun, device.Paint)                            {}
-func (b *balanceDevice) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint)       {}
-func (b *balanceDevice) ClipText(*device.TextRun)                                          {}
-func (b *balanceDevice) EndTextClip()                                                      { b.depth++ }
-func (b *balanceDevice) IgnoreText(*device.TextRun)                                        {}
-func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, float64)                     {}
-func (b *balanceDevice) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint)            {}
-func (b *balanceDevice) ClipImageMask(*imaging.Image, gfx.Matrix)                          { b.depth++ }
-func (b *balanceDevice) PopClip()                                                          { b.pop() }
-func (b *balanceDevice) BeginGroup(gfx.Rect, bool, bool, device.Blend, float64)            {}
-func (b *balanceDevice) EndGroup()                                                         {}
-func (b *balanceDevice) BeginMask(gfx.Rect, bool, color.NRGBA)                             {}
-func (b *balanceDevice) EndMask()                                                          {}
-func (b *balanceDevice) PopMask()                                                          {}
-func (b *balanceDevice) FillShading(*shading.Shading, gfx.Matrix, float64)                 {}
+
+func (b *balanceDevice) ClipStrokePath(*gfx.Path, *gfx.StrokeParams, gfx.Matrix) { b.depth++ }
+func (b *balanceDevice) FillText(run *device.TextRun, _ device.Paint)            { walkGlyphs(run) }
+
+func (b *balanceDevice) StrokeText(run *device.TextRun, _ *gfx.StrokeParams, _ device.Paint) {
+	walkGlyphs(run)
+}
+
+func (b *balanceDevice) ClipText(run *device.TextRun)   { walkGlyphs(run) }
+func (b *balanceDevice) EndTextClip()                   { b.depth++ }
+func (b *balanceDevice) IgnoreText(run *device.TextRun) { walkGlyphs(run) }
+
+// walkGlyphs pulls each glyph's outline exactly like the raster device would, so the fuzzer reaches the
+// outline-extraction path (which must degrade, never panic, on hostile font programs).
+func walkGlyphs(run *device.TextRun) {
+	for i := range run.Glyphs {
+		run.Font.GlyphPath(run.Glyphs[i].GID)
+	}
+}
+func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, float64)          {}
+func (b *balanceDevice) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) {}
+func (b *balanceDevice) ClipImageMask(*imaging.Image, gfx.Matrix)               { b.depth++ }
+
+func (b *balanceDevice) PopClip()                                               { b.pop() }
+func (b *balanceDevice) BeginGroup(gfx.Rect, bool, bool, device.Blend, float64) {}
+func (b *balanceDevice) EndGroup()                                              {}
+func (b *balanceDevice) BeginMask(gfx.Rect, bool, color.NRGBA)                  {}
+func (b *balanceDevice) EndMask()                                               {}
+func (b *balanceDevice) PopMask()                                               {}
+func (b *balanceDevice) FillShading(*shading.Shading, gfx.Matrix, float64)      {}
 
 // fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, an ExtGState, an
 // Indexed color space, and a Separation with a calculator tint.

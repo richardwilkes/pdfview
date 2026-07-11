@@ -35,11 +35,12 @@ func loadFromDict(t *testing.T, bodies ...string) (*Font, error) {
 	return Load(d, dict)
 }
 
+const (
+	glyphAlpha = "alpha"
+	glyphSpace = "space"
+)
+
 func TestBundledData(t *testing.T) {
-	const (
-		glyphAlpha = "alpha"
-		glyphSpace = "space"
-	)
 	for name, spot := range map[string]struct {
 		glyph string
 		width uint16

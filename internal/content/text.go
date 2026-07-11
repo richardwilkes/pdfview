@@ -179,7 +179,7 @@ func (in *interp) newRun() *device.TextRun {
 	if ts.font == nil || !in.tm.IsFinite() || !in.gs.ctm.IsFinite() {
 		return nil
 	}
-	return &device.TextRun{Font: ts.font, WMode: ts.font.WMode()}
+	return &device.TextRun{Font: ts.font, WMode: ts.font.WMode(), CTM: in.gs.ctm}
 }
 
 // appendGlyphs decodes one string operand into positioned glyphs, advancing the text matrix per glyph. The
@@ -196,6 +196,7 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 		if trm.IsFinite() {
 			run.Glyphs = append(run.Glyphs, device.Glyph{
 				Trm:     trm,
+				GID:     ts.font.GID(code),
 				Code:    code,
 				Unicode: ts.font.Unicode(code),
 				Advance: w0,

@@ -5,6 +5,9 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/go-text/typesetting/font/cff"
+	"github.com/go-text/typesetting/font/opentype"
+
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
@@ -260,4 +263,67 @@ func parseCFFTopFromStream(d *cos.Document, s *cos.Stream) *cffTop {
 		return nil
 	}
 	return top
+}
+
+// cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for charstring
+// interpretation, the name→GID map swept from its charset, and the FontMatrix that carries charstring space
+// to em space.
+type cffInfo struct {
+	font *cff.CFF
+	// names maps charset glyph names to GIDs (go-text exposes name-per-GID; the sweep inverts it once).
+	names map[string]uint32
+	// matrix is the Top DICT FontMatrix (charstring units → em space at size 1).
+	matrix [6]float32
+}
+
+// parseCFFGlyphs prepares a FontFile3/Type1C stream for glyph loading, tolerating hostile bytes (panics and
+// parse errors yield nil, and the caller renders through the substitute). top supplies the FontMatrix already
+// read by parseCFFTopFromStream.
+func parseCFFGlyphs(d *cos.Document, s *cos.Stream, top *cffTop) *cffInfo {
+	raw, err := d.StreamData(s)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return parseCFFGlyphBytes(raw, top)
+}
+
+// parseCFFGlyphBytes is the bytes-level half of parseCFFGlyphs (split out so the fuzzer can drive it
+// directly).
+func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
+	defer func() {
+		if recover() != nil {
+			info = nil
+		}
+	}()
+	f, err := cff.Parse(raw)
+	if err != nil || f == nil {
+		return nil
+	}
+	info = &cffInfo{font: f, matrix: [6]float32{0.001, 0, 0, 0.001, 0, 0}}
+	if top != nil && top.hasMatrix {
+		info.matrix = top.matrix
+	}
+	info.names = make(map[string]uint32, len(f.Charstrings))
+	for gid := range len(f.Charstrings) {
+		if name := f.GlyphName(opentype.GID(gid)); name != "" {
+			if _, exists := info.names[name]; !exists { // First wins on duplicate names.
+				info.names[name] = uint32(gid)
+			}
+		}
+	}
+	return info
+}
+
+// gid maps a code to a GID for a bare CFF program: the encoding's glyph name against the charset sweep, with
+// the code itself as the last resort (subset programs with junk charsets).
+func (c *cffInfo) gid(code uint32, name string) uint32 {
+	if name != "" {
+		if g, ok := c.names[name]; ok {
+			return g
+		}
+	}
+	if int(code) < len(c.font.Charstrings) {
+		return code
+	}
+	return 0
 }

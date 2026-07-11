@@ -20,6 +20,29 @@ func TestMatrixMulApply(t *testing.T) {
 	}
 }
 
+func TestMatrixInvert(t *testing.T) {
+	m := Matrix{A: 2, B: 0.5, C: -1, D: 3, E: 10, F: -20}
+	inv, ok := m.Invert()
+	if !ok {
+		t.Fatal("invertible matrix reported degenerate")
+	}
+	for _, p := range []Point{{}, {X: 1, Y: 0}, {X: -3.5, Y: 12.25}} {
+		back := inv.Apply(m.Apply(p))
+		if math.Abs(float64(back.X-p.X)) > 1e-4 || math.Abs(float64(back.Y-p.Y)) > 1e-4 {
+			t.Errorf("round trip moved %v to %v", p, back)
+		}
+	}
+	if _, ok = (Matrix{}).Invert(); ok {
+		t.Error("zero matrix inverted")
+	}
+	if _, ok = (Matrix{A: 1, B: 2, C: 2, D: 4}).Invert(); ok {
+		t.Error("singular matrix inverted")
+	}
+	if _, ok = (Matrix{A: float32(math.NaN()), D: 1}).Invert(); ok {
+		t.Error("NaN matrix inverted")
+	}
+}
+
 func TestMatrixIdentityTranslateScale(t *testing.T) {
 	p := Point{X: 3, Y: 4}
 	if got := Identity().Apply(p); got != p {
