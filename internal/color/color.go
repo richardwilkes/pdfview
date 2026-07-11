@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth milestone M4 requires: the device
 // spaces (Gray/RGB/CMYK, matched byte-for-byte to the oracle's observed ICC-backed conversions — see
 // convert.go), CalGray/CalRGB (approximated by their device analogs), ICCBased (N-component fallback to the

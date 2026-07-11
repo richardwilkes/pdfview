@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package cos implements the COS layer of a PDF document: the lexer, the object model (null, boolean, integer,
 // real, string, name, array, dictionary, stream, and indirect reference), classic and stream cross-reference
 // parsing with /Prev chains and hybrid files, object streams, a repair scan for files whose cross-reference data

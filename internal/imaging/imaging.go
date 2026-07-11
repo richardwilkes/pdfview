@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package imaging decodes PDF image XObjects and inline images (ISO 32000-2 8.9) into the two raster forms the
 // raster device (internal/render) consumes: straight-alpha RGBA pixels for ordinary images, and a one-byte-per-
 // pixel coverage plane for stencil masks (ImageMask true), which the device tints with the current fill paint.

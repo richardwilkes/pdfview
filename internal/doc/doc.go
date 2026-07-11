@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a
 // document builds the flat page list, honoring the tree structure with cycle and depth guards, that PageCount
 // and Page answer from), encryption setup, and — since milestone M3 — navigation: page geometry (the effective

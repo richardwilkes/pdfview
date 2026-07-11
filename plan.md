@@ -31,6 +31,9 @@ search) is next.**
 5. Committing and pushing to THIS repo is authorized: end the session by committing the work with a focused message
    and pushing. Never commit/push the sibling repos (`../pdf`, `../canvas`, `../unison`, `../mupdf`).
 6. Oracle regeneration (`oracle/regen.sh`) is local/manual only — CI must stay pure Go and offline.
+7. Every `.go` file begins with the standard copyright header (copy it from any existing file). The `goheader`
+   linter enforces this via `./build.sh --all`, and `internal/font/data/gen` emits it into generated files — keep
+   both in sync if the header ever changes.
 
 ## Goal
 
@@ -60,8 +63,9 @@ C-toolchain requirements: the library builds with `CGO_ENABLED=0`.
    search quad corners, page bounds) must round-trip through `float32` before the `float64` scale/floor/ceil math,
    or the exact-value tests will show 1-px off-by-ones. The engine-seam types in `pdf.go` already encode this.
 5. **`main` stays green** every session via the gate mechanism; at cutover `pdf_test.go` must be identical to its
-   pre-M0 state apart from the fixture path (user-directed, see decision log 2026-07-11): after the M8 gate removal,
-   `git diff 26de8a9 -- pdf_test.go` shows only the three `testfiles/corpus/glaive.pdf` path literals.
+   pre-M0 state apart from two user-directed diffs (see decision log 2026-07-11): after the M8 gate removal,
+   `git diff 26de8a9 -- pdf_test.go` shows only the standard copyright header plus the three
+   `testfiles/corpus/glaive.pdf` path literals.
 6. Panics from hostile input never escape the public API: `recover()` in `New`, render, and font loading maps to
    `ErrInternal` / `ErrUnableToOpenPDF` (added when those paths gain engine code; fuzzing enforces it).
 
@@ -528,8 +532,8 @@ Exit: **TestPDF green including the 9 exact GURPS rects** (gate → "M7"); searc
       without rendering relevance); permitted uses are the M8 soak, dev-time fuzz seeds, and up to ~10
       cherry-picked files committed with CC BY attribution in the corpus README.
 - [ ] `DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) error` vector API (documented as canvas-coupled)
-- [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must show only the three
-      `testfiles/corpus/glaive.pdf` fixture-path literals (see decision log 2026-07-11)
+- [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must show only the standard
+      copyright header plus the three `testfiles/corpus/glaive.pdf` fixture-path literals (decision log 2026-07-11)
 - [ ] Rewrite README + `.claude/CLAUDE.md` for the pure-Go engine; retire this plan or archive it
 - [ ] Tag first release
 
@@ -994,6 +998,10 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   rendering relevance. Permitted uses: the M8 soak, dev-time fuzz seeds, and up to ~10 cherry-picked files
   committed with CC BY attribution in the corpus README. Recording this is the only M6-session obligation;
   fetching and integration happen at M8.
+- 2026-07-11 (copyright headers, user-directed, applied between sessions by the coordinator): every `.go` file now
+  begins with the standard Richard A. Wilkes MPL-2.0 header; the `goheader` linter enforces it (template in
+  `.golangci.yml`), and `internal/font/data/gen` emits it into generated output. This adds the header block to the
+  allowed `pdf_test.go` diff vs 26de8a9 (invariant 5 and the M8 gate-removal box updated accordingly).
 
 ## Verification
 

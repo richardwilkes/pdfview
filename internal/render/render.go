@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package render is the raster device: the only package that imports github.com/richardwilkes/canvas (plan.md
 // invariant 3; canvas/gpu is never imported, keeping the build cgo- and purego-free). It draws the interpreter's
 // device calls onto a premultiplied N32 raster surface and hands the premultiplied pixels back through Pixels;

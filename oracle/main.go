@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Command oracle dumps the observable behavior of github.com/richardwilkes/pdf (MuPDF via cgo) for a corpus PDF
 // into a golden directory that the pure-Go pdfview engine is tested against (see plan.md). It is a development
 // tool: it requires cgo and a checkout of the binding at ../../pdf, is never imported by the library, and never

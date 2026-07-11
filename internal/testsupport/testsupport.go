@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package testsupport loads the committed golden files (testfiles/goldens/<name>/truth.json plus rendered PNGs,
 // produced from testfiles/corpus by the oracle module's regen.sh) and provides the comparison helpers the parity
 // tests are built on. It is pure Go: the goldens are committed, so no cgo, MuPDF, or network access is ever needed

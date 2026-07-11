@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package data holds the embedded font bundle: width tables and built-in encodings compiled from the Adobe
 // Core 14 AFMs, the Adobe Glyph List, and the Liberation fonts used as metric-compatible substitutes for
 // non-embedded fonts. Everything is embedded compressed and decompressed lazily on first use; README.md in

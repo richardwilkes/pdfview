@@ -1,3 +1,12 @@
+// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
+//
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, version 2.0. If a copy of the MPL was not distributed with
+// this file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// This Source Code Form is "Incompatible With Secondary Licenses", as
+// defined by the Mozilla Public License, version 2.0.
+
 // Package type1 parses Adobe Type 1 font programs (the FontFile stream of a PDF font dictionary): the PFA/PFB
 // container, eexec decryption, the built-in /Encoding, /FontMatrix and /FontBBox from the clear-text portion,
 // and the /Subrs and /CharStrings charstrings (decrypted with r=4330 and their lenIV bytes stripped) from the
