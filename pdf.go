@@ -3,10 +3,11 @@
 //
 // The package is a pure-Go PDF engine with rasterization delegated to github.com/richardwilkes/canvas. It is being
 // built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. With
-// the COS layer (M1), encryption (M2), and navigation (M3) in place, New parses documents — including damaged ones,
-// via a repair scan — and PageCount, authentication, TableOfContents, page bounds, and links are real; rendered
-// pages are blank placeholders of the final dimensions until rendering lands (M4), and search returns no hits until
-// structured text lands (M7).
+// the COS layer (M1), encryption (M2), navigation (M3), and the graphics core (M4) in place, New parses documents —
+// including damaged ones, via a repair scan — PageCount, authentication, TableOfContents, page bounds, and links are
+// real, and RenderPage/RenderPageForSize rasterize each page's vector content (paths, clips, colors, form XObjects)
+// through the content-stream interpreter. Images render at M5, text at M6, and shadings/patterns at M8; search
+// returns no hits until structured text lands (M7).
 package pdfview
 
 import (
@@ -18,7 +19,9 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/richardwilkes/pdfview/internal/content"
 	"github.com/richardwilkes/pdfview/internal/doc"
+	"github.com/richardwilkes/pdfview/internal/render"
 )
 
 // Possible error values
@@ -569,24 +572,46 @@ func (e *engineDocument) links(pg *page) []pageLinkInfo {
 }
 
 // rasterize renders the page at the given scale into premultiplied RGBA pixels (4 bytes per pixel, stride bytes per
-// row). Until the raster device — internal/render on github.com/richardwilkes/canvas — lands at M4, it produces a
-// fully transparent image of the final dimensions, which is enough for the navigation results (links, search, TOC)
-// that ride along with a render. The output extent must round exactly as MuPDF's fz_round_rect does, since the
+// row): the page's content streams run through the interpreter (internal/content) against the raster device
+// (internal/render), and the surface is read back still premultiplied (renderPage unpremultiplies; see the
+// decision log on rounding parity). The output extent must round exactly as MuPDF's fz_round_rect does, since the
 // dimension goldens (and TestPDF's stride/bounds literals) were captured from it: the page extent is scaled in
 // float32, then the max corner is ceiled with a small epsilon so float slop just above a whole number does not
-// spill into an extra pixel row (pinned against all recorded corpus dimensions; see the M3 decision log).
+// spill into an extra pixel row (pinned against all recorded corpus dimensions; see the M3 decision log). Per
+// plan.md invariant 6, a panic provoked by hostile content anywhere under the render surfaces as ErrInternal
+// rather than escaping the public API.
 func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, height, stride int, err error) {
+	defer func() {
+		if recover() != nil {
+			pix = nil
+			err = ErrInternal
+		}
+	}()
 	width = renderExtent(pg.width, scale)
 	height = renderExtent(pg.height, scale)
 	if width <= 0 || height <= 0 {
 		return nil, 0, 0, 0, ErrUnableToCreateImage
 	}
-	// Guard the allocation below; renderPage re-checks centrally.
+	// Guard the surface allocation below; renderPage re-checks centrally.
 	if int64(width)*int64(height) > int64(OverallMaxPixels) {
 		return nil, 0, 0, 0, ErrImageTooLarge
 	}
-	stride = width * 4
-	return make([]byte, stride*height), width, height, stride, nil
+	dev, err := render.New(width, height)
+	if err != nil {
+		return nil, 0, 0, 0, ErrUnableToCreateImage
+	}
+	ctm, err := e.doc.PageCTM(pg.number, float32(scale))
+	if err != nil {
+		return nil, 0, 0, 0, ErrUnableToLoadPage
+	}
+	if data := e.doc.PageContents(pg.number); len(data) > 0 {
+		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev)
+	}
+	pix, stride, err = dev.Pixels()
+	if err != nil {
+		return nil, 0, 0, 0, ErrUnableToCreateImage
+	}
+	return pix, width, height, stride, nil
 }
 
 // renderExtent converts one page-space extent to rendered pixels: float32 multiply (the engine's geometry

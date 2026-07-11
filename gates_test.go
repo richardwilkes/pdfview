@@ -5,7 +5,7 @@ import "testing"
 // milestone is the highest milestone of the pure-Go engine port that has been completed (see plan.md). The
 // pre-existing tests in pdf_test.go are gated on the milestone that wires up the functionality they exercise. At M8
 // the gate calls and this file are removed, restoring pdf_test.go to its original, ungated state.
-const milestone = "M3"
+const milestone = "M4"
 
 // gate skips t unless the current milestone is at or beyond the required one.
 func gate(t *testing.T, required string) {

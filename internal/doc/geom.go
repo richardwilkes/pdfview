@@ -20,9 +20,10 @@ type pageGeom struct {
 // inheritedAttrs carries the inheritable page attributes (ISO 32000-2 7.7.3.4) down the page-tree walk. Values
 // are kept unresolved until a leaf is reached; a node's own entry overrides whatever an ancestor supplied.
 type inheritedAttrs struct {
-	mediaBox cos.Object
-	cropBox  cos.Object
-	rotate   cos.Object
+	mediaBox  cos.Object
+	cropBox   cos.Object
+	rotate    cos.Object
+	resources cos.Object
 }
 
 // override replaces each attribute the node itself defines.
@@ -35,6 +36,9 @@ func (a inheritedAttrs) override(node cos.Dict) inheritedAttrs {
 	}
 	if v := node["Rotate"]; v != nil {
 		a.rotate = v
+	}
+	if v := node["Resources"]; v != nil {
+		a.resources = v
 	}
 	return a
 }

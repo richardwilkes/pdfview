@@ -51,7 +51,12 @@ func FuzzOpen(f *testing.F) {
 			if _, _, serr := d.PageSize(i); serr != nil {
 				t.Errorf("PageSize(%d) failed within PageCount %d: %v", i, d.PageCount(), serr)
 			}
+			if _, cerr := d.PageCTM(i, 1.5); cerr != nil {
+				t.Errorf("PageCTM(%d) failed within PageCount %d: %v", i, d.PageCount(), cerr)
+			}
 			d.Links(i)
+			d.PageResources(i)
+			d.PageContents(i)
 		}
 		c := d.COS()
 		for _, num := range c.ObjectNums() {

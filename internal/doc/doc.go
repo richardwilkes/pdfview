@@ -47,6 +47,8 @@ type Document struct {
 	// geoms holds each page's effective display geometry (inherited /MediaBox ∩ /CropBox plus /Rotate),
 	// captured during the page-tree walk.
 	geoms []pageGeom
+	// resources holds each page's (inheritable) /Resources entry, unresolved, captured during the walk.
+	resources []cos.Object
 	// encrypted records whether the trailer carried an /Encrypt dictionary, even if its handler is unsupported.
 	encrypted bool
 }
@@ -164,6 +166,7 @@ func (d *Document) buildPageList() {
 	d.pages = nil
 	d.pageRefs = nil
 	d.geoms = nil
+	d.resources = nil
 	d.pageIndex = make(map[cos.Ref]int)
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
@@ -199,6 +202,7 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 		d.pages = append(d.pages, node)
 		d.pageRefs = append(d.pageRefs, ref)
 		d.geoms = append(d.geoms, d.resolveGeom(attrs))
+		d.resources = append(d.resources, attrs.resources)
 		return
 	}
 	for _, kid := range kids {

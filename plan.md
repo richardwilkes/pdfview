@@ -1,15 +1,19 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M3 complete (2026-07-11). M4 (graphics core + wiring) is next.**
+**Current milestone: M4 complete (2026-07-11). M5 (images) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M3 commit (fix anything that didn't),
-> then begin M4: `internal/gfx` (Matrix/Point/Rect/Quad/Path/StrokeParams) plus the content-stream tokenizer +
-> interpreter — the first M4 box. Two things M3 already settled for M4: (1) `rasterize` in pdf.go is an interim
-> implementation returning a correctly-sized fully transparent image — replace its body with the real render
-> path but KEEP `renderExtent`'s pinned rounding (ceil(float32 extent × float32 scale − 0.001), verified against
-> all 78 recorded corpus render dimensions); (2) TestParity already enforces render success + dimensions +
-> stride + links from M3 on (see the M3 decision log), so the real render path must stay green against those
-> from its first session. The M4 gate promotes TestRenderPageForSizeLimits.
+> **Next session start here:** confirm the 4 CI runners went green on the M4 commit (fix anything that didn't),
+> then begin M5: `internal/imaging` — DCT (+CMYK/YCCK/APP14 via image/jpeg), CCITT (x/image/ccitt), JBIG2 stub,
+> JPX stub, bpc 1/2/4/8/16 unpack, Decode arrays, Indexed — then ImageMask→Alpha8 stencils, SMask/Mask/color-key,
+> and inline images (the tokenizer already skips BI/ID/EI safely in internal/content/inline.go; M5 replaces the
+> skip with decode+draw and its length handling is already /L-aware). The device seam is final: implement
+> render.Device's FillImage/FillImageMask/ClipImageMask (currently stack-preserving no-ops) with
+> imagecore.NewRasterData + DrawImageRect under Concat(ctm), Alpha8 for stencils; /Interpolate maps to sampling
+> filter Nearest/Linear — calibrate which against the oracle. The interpreter's opDo dispatches subtype /Image
+> to a no-op today (internal/content/ops.go); route it to imaging + the device instead. The irs-f1040/irs-fw9
+> corpus files carry real images; the M5 exit likely also needs 1–2 handcrafted image PDFs (imagemask, CCITT)
+> per the corpus list. Full-corpus pixel numbers as of M4 are recorded at the end of the M4 section — images
+> are NOT the dominant remaining diff (text is, M6), so keep M5's pixel expectations image-scoped.
 
 ## Session protocol
 
@@ -88,7 +92,7 @@ and convert coordinates; milestones only fill in the `engineDocument` stub metho
 | TestMalformedPDF | M0 | passing |
 | TestUseAfterRelease | M1 | passing |
 | TestInternalLinks | M3 | passing |
-| TestRenderPageForSizeLimits | M4 | gated |
+| TestRenderPageForSizeLimits | M4 | passing |
 | TestPDF | M7 | gated |
 
 `gates_test.go` holds `const milestone`; bump it only when a milestone's full exit criteria are met. All gate lines
@@ -344,18 +348,40 @@ TOC/link JSON parity at dpi 72+100 — done (TestParity: scaled-int TOC + links 
 recorded DPIs across all 16 goldens; internal/doc TestCorpusNavigation additionally pins the raw float32
 page-space outline coords, link rects, dest points, and page bounds against the goldens).
 
-### M4 — Graphics core + wiring (5–7 sessions)
+### M4 — Graphics core + wiring (5–7 sessions; done in 1, 2026-07-11)
 
-- [ ] `internal/gfx`; content tokenizer + interpreter (paths, q/Q/cm, ExtGState subset, W/W*, all paint ops)
-- [ ] `internal/device` (interface + Tee) with a null device for fuzzing
-- [ ] `internal/render` on `surface.NewRasterN32Premul`: fills/strokes/dash/clips; premultiplied readback wired into
-      `rasterize` (pdf.go's unpremultiply loop stays)
-- [ ] Page CTM + output dimension rounding pinned empirically against oracle dims across page sizes × dpis
-- [ ] `internal/color` (Gray/RGB/CMYK/Indexed/ICC-fallback/Separation basics) + `internal/function` (0/2/3/4)
-- [ ] RenderPage/RenderPageForSize end-to-end; FuzzContent
+- [x] `internal/gfx`; content tokenizer + interpreter (paths, q/Q/cm, ExtGState subset, W/W*, all paint ops)
+      (2026-07-11: tokenizer reuses the COS lexer via the exported `cos.Lexer` — content streams share COS's
+      lexical rules with no ref lookahead; text objects / `sh` / image `Do` / BI..ID..EI recognized and skipped
+      in sync; form XObjects recurse; see the decision log for the robustness semantics)
+- [x] `internal/device` (interface + Tee) with a null device for fuzzing (2026-07-11: interface verbatim per the
+      seam sketch; `internal/imaging` and `internal/shading` exist as placeholder types so the signatures are
+      final now; Tee collapses 0/1-device cases)
+- [x] `internal/render` on `surface.NewRasterN32Premul`: fills/strokes/dash/clips; premultiplied readback wired into
+      `rasterize` (pdf.go's unpremultiply loop stays) (2026-07-11: sole canvas importer; AA always on; clip paths
+      pre-transformed to device space so the canvas matrix stays identity between draws; recover→ErrInternal guard
+      in rasterize per invariant 6)
+- [x] Page CTM + output dimension rounding pinned empirically against oracle dims across page sizes × dpis
+      (2026-07-11: dimension rounding was pinned at M3 (all 78 corpus dims); `doc.PageCTM` expresses the M3-pinned
+      toTopLeft mapping as a matrix for all four rotations — unit-pinned in internal/doc/render_test.go and
+      pixel-verified by vectors + rotate90 at dpi 72/100/150)
+- [x] `internal/color` (Gray/RGB/CMYK/Indexed/ICC-fallback/Separation basics) + `internal/function` (0/2/3/4)
+      (2026-07-11: device conversions are behavioral tables captured from the oracle — see the decision log —
+      plus CalGray/CalRGB approx, Separation /None and /Pattern never-mark handling, DeviceN; all four function
+      types incl. the PostScript calculator)
+- [x] RenderPage/RenderPageForSize end-to-end; FuzzContent (2026-07-11: TestVectorCorpusPixels enforces the
+      vector corpus; FuzzContent drives the interpreter against a balance-checking device over canned resources,
+      14.8M execs/30s clean; FuzzOpen additionally drives PageCTM/PageResources/PageContents)
 
-Exit: TestRenderPageForSizeLimits green (gate → "M4"); fixture dims 827×1170 stride 3308 exact; vector corpus within
-thresholds; race-clean.
+Exit: TestRenderPageForSizeLimits green (gate → "M4") — done; fixture dims 827×1170 stride 3308 exact — done
+(TestParity, real render path); vector corpus within thresholds — done (vectors.pdf at dpi 72/100/150: 0.31%,
+0.74%, 0.42% over Δ24 against 2% allowed; mean Δ 0.42–1.07 against 2 allowed); race-clean — done.
+
+Full-corpus pixel status at M4 (dpi 72, enforcement stays per-milestone-scope until M8): vectors PASSES;
+internal-links exact (Δ0 — blank pages); rotate90 1.18% over Δ24 / mean Δ2.09 (fails only the mean, entirely its
+24pt text → M6); text-std14 + its encrypted variants identically 3.41% over Δ24 (decrypted content interprets
+byte-identically); damaged set ~2.7–3.8%; glaive 17.5–18.9%; irs-f1040 10.2–11.7%; irs-fw9 7.8–19.8% — all text
+(M6) and images (M5).
 
 ### M5 — Images (4–5 sessions)
 
@@ -548,6 +574,54 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   nodes total; page-link cap 65536 per page; name-tree depth 64 (all documented at their consts, per the
   resource-limits section; the public OverallMax* budgets apply on top in pdf.go). FuzzOpen now also drives
   Outline(), PageSize(i), and Links(i) for every page.
+
+- 2026-07-11 (M4): device color conversions are behavioral lookup tables, not formulas. The oracle's MuPDF build
+  routes device colorspaces through ICC (lcms): `0 0 0.8 0 k` renders (255,243,79), not the naive additive
+  formula's (255,255,51), and DeviceGray is a curve that is not even perfectly neutral (42/255 → 42,42,41).
+  Captured run-only via probe PDFs of flat patches rendered through the oracle: DeviceRGB = trunc(float32(v)×255)
+  per channel, independent (verified over 3563 patches: 0.5 g → 127 rules out round-half-up, ramp dips rule out
+  everything else); DeviceGray = 1021-sample table (i/1020, linear interp); DeviceCMYK = 17^4 grid + multilinear
+  interpolation (mean err 0.25, max 1.7 across 2516 off-grid validation observations; a 9^4 grid was tried first
+  and rejected — max err 26 at the R-channel gamut-clamp kink near c≈0.69). Tables live in internal/color/data
+  (gray1021.bin 3KB, cmyk17.bin.gz 206KB); `oracle/colorprobe` regenerates them AND fails loudly if the observed
+  conversion changes shape (RGB non-trunc or CMYK interp error growth), signalling rework rather than re-commit.
+- 2026-07-11 (M4): the content tokenizer is the exported `cos.Lexer` (content streams share ISO 32000-2 7.2
+  lexing exactly); operand assembly lives in internal/content because content has no indirect references — "R"
+  never triggers lookahead — and dict/array/inline-image forms are content-specific. Lexical errors skip forward
+  (the lexer guarantees position progress), so hostile bytes cannot wedge or desync the scan.
+- 2026-07-11 (M4): interpreter robustness semantics (all cap consts documented at their definitions): unknown
+  operators are skipped with the operand list reset; known operators with missing or mistyped operands are
+  skipped the same way; operands are consumed positionally from the list's start and the list is a sliding
+  window keeping the newest 64 (floods drop the oldest, which no well-formed operator can notice); q beyond
+  depth 256 is ignored with its matching Q ignored via an overflow counter (the counter is only nonzero at full
+  depth, so pairing survives); Q at the executing stream's floor is ignored — form content cannot pop its
+  caller's states; a per-Run budget of 2^22 executed operators bounds total work across form recursion; stream
+  end auto-unwinds states and clips so the device's push/pop pairing always balances (fuzzed via a
+  balance-checking device that panics on violation).
+- 2026-07-11 (M4): form XObjects: only /Subtype /Form recurses (images no-op until M5); depth cap 12 plus a
+  reference cycle set (entries removed on exit, so diamonds replay but cycles cut); execution is
+  q + /Matrix concat + /BBox clip + own-/Resources frame (inheriting the caller's when absent) with fresh
+  per-stream path/operand/pending-clip state, then Q. Color-space parses are cached per resource frame by name
+  (negative results too) so hostile cs loops cannot force repeated stream decodes.
+- 2026-07-11 (M4): W/W* semantics: the pending clip is applied after the painting operator, using the complete
+  current path and the W-variant's fill rule; an empty path still clips (to nothing), matching viewers. Paints
+  whose active space is /Pattern (until M8) or /Separation /None emit no device calls at all; both spaces also
+  report a fully transparent color so nothing marks even if something slips through.
+- 2026-07-11 (M4): dash handling is split: the interpreter enforces PDF-level validity — arrays truncate at 32
+  entries (MuPDF's stroke-state capacity), a negative or non-finite entry invalidates the whole d operator
+  (previous dash kept) — while the raster device adapts to the stroker: odd-length arrays are doubled (PDF's
+  alternating on/off repetition expressed literally), empty or all-zero arrays render solid, and anything
+  MakeDash rejects falls back to solid. Line width 0 maps to the stroker's hairline (1 device pixel), matching
+  the oracle within thresholds; ExtGState's LW/LC/LJ/ML/D/CA/ca/BM subset is applied at M4, the rest ignored
+  until their milestones.
+- 2026-07-11 (M4): rendering is antialiased everywhere (Skia analytic AA vs MuPDF's scanline aa-8); the residual
+  vector-corpus diffs are pure edge-coverage differences (vectors.pdf: ≤0.74% of pixels over Δ24, interiors
+  byte-exact thanks to the color tables). Rendered dimensions come from renderExtent exactly as pinned at M3;
+  the raster surface is created at those dimensions so stride/geometry parity is structural.
+- 2026-07-11 (M4): TestVectorCorpusPixels (root) is the milestone-scope pixel gate: vectors.pdf is enforced at
+  dpi 72/100/150 ungated — the real render path must keep passing it from M4 on — while rotate90.pdf is reported
+  unenforced until M6 supplies its text. TestParity's role is unchanged (dims/stride/links; full pixel
+  enforcement waits for M8 per the earlier decision).
 
 ## Verification
 
