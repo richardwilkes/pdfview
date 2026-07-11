@@ -30,12 +30,16 @@ var (
 // Document is one open PDF file at the COS level. It is not safe for concurrent use; the public API package
 // serializes access with its document mutex.
 type Document struct {
-	xref     map[int]xrefEntry
-	objCache map[int]Object
-	objStms  map[int]*objStm
-	trailer  Dict
-	data     []byte
-	repaired bool
+	xref      map[int]xrefEntry
+	objCache  map[int]Object
+	objStms   map[int]*objStm
+	trailer   Dict
+	decryptor Decryptor
+	data      []byte
+	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted; it is
+	// meaningful only once decryptor is non-nil.
+	encryptNum int
+	repaired   bool
 }
 
 // Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and
@@ -124,8 +128,14 @@ func (d *Document) loadObjectUncached(num int) (Object, error) {
 		return Null{}, nil
 	}
 	if entry.kind == xrefInFile {
-		obj, _, err := parseIndirectAt(d.data, entry.offset, num)
-		return obj, err
+		obj, gen, _, err := parseIndirectAt(d.data, entry.offset, num)
+		if err != nil {
+			return nil, err
+		}
+		// The object was stored directly in the file, so its strings and stream payload are encrypted under
+		// its own number and generation. Objects reached through objFromStm are not: their container was
+		// decrypted as a whole (ISO 32000-2 7.6.2).
+		return d.decryptDirect(num, gen, obj), nil
 	}
 	return d.objFromStm(entry.stmNum, entry.stmIdx, num)
 }

@@ -182,7 +182,7 @@ func TestParseNestingLimit(t *testing.T) {
 
 func TestParseIndirectWithStream(t *testing.T) {
 	src := []byte("7 0 obj\n<< /Length 5 >>\nstream\nabcde\nendstream\nendobj\n")
-	obj, end, err := parseIndirectAt(src, 0, 7)
+	obj, _, end, err := parseIndirectAt(src, 0, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestParseIndirectWithStream(t *testing.T) {
 	}
 	// A wrong /Length falls back to scanning for endstream.
 	src = []byte("7 0 obj\n<< /Length 9999 >>\nstream\nabcde\nendstream\nendobj\n")
-	obj, _, err = parseIndirectAt(src, 0, 7)
+	obj, _, _, err = parseIndirectAt(src, 0, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestParseIndirectWithStream(t *testing.T) {
 	}
 	// An indirect /Length uses the same scan.
 	src = []byte("7 0 obj << /Length 8 0 R >> stream\r\nxyz\nendstream endobj")
-	obj, _, err = parseIndirectAt(src, 0, 7)
+	obj, _, _, err = parseIndirectAt(src, 0, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestParseIndirectWithStream(t *testing.T) {
 		t.Errorf("indirect-length stream Raw = %q", stream.Raw)
 	}
 	// The wrong object number must be detected.
-	if _, _, err = parseIndirectAt([]byte("3 0 obj null endobj"), 0, 7); err == nil {
+	if _, _, _, err = parseIndirectAt([]byte("3 0 obj null endobj"), 0, 7); err == nil {
 		t.Error("expected a wrong-object-number error")
 	}
 }
@@ -228,7 +228,7 @@ func TestParseIndirectEmptyStream(t *testing.T) {
 		"1 0 obj << >> stream\nendstream endobj",
 		"1 0 obj << >> stream\r\nendstream endobj",
 	} {
-		obj, _, err := parseIndirectAt([]byte(src), 0, -1)
+		obj, _, _, err := parseIndirectAt([]byte(src), 0, -1)
 		if err != nil {
 			t.Fatalf("%q: %v", src, err)
 		}
@@ -246,7 +246,7 @@ func TestParseIndirectEndPosition(t *testing.T) {
 	// The value 42 requires lookahead that pushes tokens back; the reported end must still point before the
 	// next object's header.
 	src := []byte("5 0 obj 42\n6 0 obj null endobj")
-	obj, end, err := parseIndirectAt(src, 0, 5)
+	obj, _, end, err := parseIndirectAt(src, 0, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

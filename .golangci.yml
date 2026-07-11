@@ -72,6 +72,13 @@ linters:
         - G304
         - G306
         - G307
+        # The PDF standard security handler (ISO 32000-2 7.6) mandates MD5 and RC4. internal/crypt implements it
+        # with the Go standard library, so the weak-hash (G401), weak-cipher (G405), and blocklisted-import
+        # (G501 md5, G503 rc4) checks would fire on spec-required code with no alternative.
+        - G401
+        - G405
+        - G501
+        - G503
     govet:
       disable:
         - composites

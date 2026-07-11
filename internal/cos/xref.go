@@ -36,6 +36,10 @@ var (
 	errBadXrefStream = errors.New("cannot parse cross-reference stream")
 )
 
+// typeXRef is the /Type value of a cross-reference stream. Such streams are never encrypted (ISO 32000-2
+// 7.5.8.2), so the decryptor skips them.
+const typeXRef Name = "XRef"
+
 // startXrefWindow is how far from the end of the file the startxref keyword is searched for. The spec says the
 // last line holds the offset, but real files carry trailing junk; this matches the tolerance of deployed readers.
 const startXrefWindow = 2048
@@ -219,7 +223,7 @@ func (d *Document) setEntry(num int64, entry xrefEntry) {
 // readXrefStream reads the cross-reference stream at offset and returns its dictionary, which doubles as the
 // trailer, per ISO 32000-2 7.5.8.
 func (d *Document) readXrefStream(offset int64) (Dict, error) {
-	obj, _, err := parseIndirectAt(d.data, offset, -1)
+	obj, _, _, err := parseIndirectAt(d.data, offset, -1)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errBadXrefStream, err)
 	}
@@ -227,7 +231,7 @@ func (d *Document) readXrefStream(offset int64) (Dict, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: not a stream", errBadXrefStream)
 	}
-	if typ, _ := AsName(stream.Dict["Type"]); typ != "XRef" {
+	if typ, _ := AsName(stream.Dict["Type"]); typ != typeXRef {
 		return nil, fmt.Errorf("%w: stream /Type is not /XRef", errBadXrefStream)
 	}
 	if err = d.readXrefStreamEntries(stream); err != nil {

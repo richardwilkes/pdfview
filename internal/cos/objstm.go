@@ -30,7 +30,7 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if !ok || entry.kind != xrefInFile {
 		return nil, errObjStmSelf
 	}
-	obj, _, err := parseIndirectAt(d.data, entry.offset, num)
+	obj, gen, _, err := parseIndirectAt(d.data, entry.offset, num)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +38,10 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if !ok {
 		return nil, errNotObjStm
 	}
+	// The object stream is stored directly in the file, so its payload is encrypted under its own number.
+	// Decrypting it here (before the /Filter chain) means the objects parsed out of it need no further
+	// decryption, matching ISO 32000-2 7.6.2.
+	d.decryptDirect(num, gen, stream)
 	stm, err := d.parseObjStm(stream)
 	if err != nil {
 		return nil, err

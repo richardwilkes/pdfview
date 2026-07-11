@@ -487,16 +487,16 @@ func openEngine(buffer []byte, _ uint64) (eng *engineDocument, err error) {
 	return &engineDocument{doc: d}, nil
 }
 
-// needsPassword reports whether the document is encrypted and the empty user password does not grant access. The
-// standard security handler lands at M2.
+// needsPassword reports whether the document is encrypted and the empty user password does not grant access.
 func (e *engineDocument) needsPassword() bool {
-	return false
+	return e.doc.NeedsPassword()
 }
 
-// authenticate attempts to authenticate with the given user or owner password. The standard security handler lands
-// at M2.
-func (e *engineDocument) authenticate(_ string) AuthenticationStatus {
-	return 0
+// authenticate attempts to authenticate with the given user or owner password, returning MuPDF-compatible
+// status bits. doc.Authenticate produces them in the same layout as AuthenticationStatus (bit 0 = no
+// authentication required, bit 1 = user, bit 2 = owner), so the value maps straight across the seam.
+func (e *engineDocument) authenticate(password string) AuthenticationStatus {
+	return AuthenticationStatus(e.doc.Authenticate(password))
 }
 
 // pageCount returns the number of pages in the document, or 0 when it cannot be determined.

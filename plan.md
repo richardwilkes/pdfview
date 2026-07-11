@@ -1,14 +1,16 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M1 complete (2026-07-11). M2 (encryption) is next.**
+**Current milestone: M2 complete (2026-07-11). M3 (navigation) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M1 commit (fix anything that didn't),
-> then begin M2: standard security handler R2/R3/R4 (RC4 + AESV2)/R5/R6 (AESV3) — the first M2 box. The exact
-> Authenticate bit semantics to match are recorded per corpus file in `testfiles/goldens/*/truth.json` (see the
-> auth-truth decision log entry below); when `gates_test.go`'s milestone const reaches "M2", TestParity starts
-> comparing RequiresAuthentication, the Authenticate table, and encrypted-document PageCount automatically.
-> String/stream decryption hooks belong in `internal/cos` (its `StreamData`/`filterSpecs` already reject non-Identity
-> crypt filters with `errCryptFilter`, marking the seam).
+> **Next session start here:** confirm the 4 CI runners went green on the M2 commit (fix anything that didn't),
+> then begin M3: destinations (all /XYZ,/Fit,… kinds) + named dests (/Dests dict + /Names name tree) — the first
+> M3 box. M3 fills the `outline`, `links`, and `page.bounds` engine-seam stubs in `pdf.go` and adds an
+> `internal/doc` navigation layer (page-space→top-left mapping with MediaBox ∩ CropBox + /Rotate + y-flip,
+> NaN for coordinate-less dests, the float32 funnel). When `gates_test.go`'s milestone const reaches "M3",
+> TestParity starts comparing TableOfContents at every recorded DPI and the gate promotes TestInternalLinks.
+> Note the M2 caveat carried forward: encrypted page dictionaries first captured pre-authentication are now
+> refreshed by re-walking the page tree after a successful `Authenticate` (see the M2 decision log); M3's
+> destination resolution reads through the same freshly-decrypted dicts.
 
 ## Session protocol
 
@@ -301,14 +303,22 @@ Exit: TestUseAfterRelease green (bump gate const to "M1") — done; PageCount pa
 — done (TestParity at M1 plus internal/doc's TestCorpusPageCounts, which checks all 16 files including the
 encrypted set against truth.json).
 
-### M2 — Encryption (3–4 sessions)
+### M2 — Encryption (3–4 sessions; done in 1, 2026-07-11)
 
-- [ ] Standard security handler R2/R3/R4 (RC4 + AESV2)/R5/R6 (AESV3); crypt filters incl. Identity; per-object keys
-- [ ] String/stream decryption hooks in cos; /Encrypt-aware trailer handling
-- [ ] `needsPassword` + `authenticate` with oracle-captured bit semantics (incl. empty-user-password auto-auth)
-- [ ] FuzzCrypt (malformed /Encrypt dicts)
+- [x] Standard security handler R2/R3/R4 (RC4 + AESV2)/R5/R6 (AESV3); crypt filters incl. Identity; per-object keys
+      (2026-07-11: `internal/crypt`, stdlib crypto only — Algorithms 1/2/2.A/2.B/4/5/6/7; R5 covered by a white-box
+      round-trip since the corpus has no R5 file; all R2–R6 corpus content streams decrypt to valid content)
+- [x] String/stream decryption hooks in cos; /Encrypt-aware trailer handling (2026-07-11: `cos.Decryptor` seam +
+      `SetDecryptor`/`DropCaches`; per-object decrypt keyed by the direct object's number+generation, objects inside
+      object streams inherit the container's decryption, /Encrypt dict strings and /XRef streams never decrypted)
+- [x] `needsPassword` + `authenticate` with oracle-captured bit semantics (incl. empty-user-password auto-auth)
+      (2026-07-11: empty-password probe at open drives `NeedsPassword`; bits match all 43 golden attempts exactly)
+- [x] FuzzCrypt (malformed /Encrypt dicts) (2026-07-11: seeded from the encrypted corpus, drives open+auth×4+decode;
+      30s smoke clean, as are FuzzOpen and FuzzFilters)
 
-Exit: auth-bits parity table (corpus × {"", user, owner, wrong}) equals oracle exactly; encrypted docs parse.
+Exit: auth-bits parity table (corpus × {"", user, owner, wrong}) equals oracle exactly (done — TestParity at M2 plus
+internal/doc's TestAuthBitsMatchGoldens, 43 attempts across 16 files); encrypted docs parse (done — content streams
+of every R2–R6 file decrypt; TestCorpusPageCounts still green).
 
 ### M3 — Navigation (3–4 sessions)
 
@@ -454,6 +464,37 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
 - 2026-07-11 (M1): FuzzOpen lives in `internal/doc` (not internal/cos as once sketched) so one target covers
   doc.Open, the page-tree walk, and — via the `COS()` accessor — resolution of every xref'd object plus stream
   decoding. Corpus files are its seeds. FuzzFilters lives in `internal/filter`.
+- 2026-07-11 (M2): decryption seam. `internal/crypt` owns the standard security handler; `internal/cos` gains a
+  `Decryptor` interface (`DecryptString`/`DecryptStream`, both keyed by object number+generation) installed via
+  `SetDecryptor`. cos does not import crypt (dependency points downward); `internal/doc` wires them in
+  `setupEncryption`. Decryption is applied per *directly stored* object right after `parseIndirectAt` (in
+  `loadObjectUncached` and `loadObjStm`), so an object stream's payload is decrypted once under its own number and
+  the objects parsed out of it are never re-decrypted (ISO 32000-2 7.6.2). `parseIndirectAt` now returns the
+  object generation for the per-object key. Two exemptions live in cos: the /Encrypt dictionary object (recorded
+  from the trailer ref) and any /Type /XRef stream are never run through the decryptor.
+- 2026-07-11 (M2): auth-bit semantics reproduce MuPDF exactly and matched the goldens with no surprises. Not
+  encrypted → status 1 (`AuthNoneRequired`) for any password. Encrypted → bit 2 iff the password validates as the
+  *user* password (Algorithm 6) and bit 4 iff it validates as the *owner* password (Algorithm 7 recovers the user
+  password from /O, then Algorithm 6); the owner check sets only bit 4 even though it authenticates internally as a
+  user. The empty password is tried once at open: `NeedsPassword` is false iff it authenticated, which is how the
+  R6 empty-user variant reports requiresAuth=false yet `Authenticate("")`=2 (user) and `Authenticate("owner")`=4.
+  All 43 golden attempts (16 files × recorded passwords) match bit-for-bit.
+- 2026-07-11 (M2): a successful `Authenticate` drops the cos object cache and re-walks the page tree, so page
+  dictionaries first parsed pre-authentication (keyless) are recaptured decrypted. `buildPageList` is now
+  idempotent (resets its slices first). Harmless for M2 (PageCount is structure-only) but required before M3 reads
+  page-dict strings. Unencrypted documents short-circuit before this, so the common path is unchanged.
+- 2026-07-11 (M2): all crypto primitives are Go stdlib (crypto/{md5,rc4,aes,cipher,sha256,sha512}). The gosec
+  weak-primitive checks (G401 hash, G405 cipher) and blocklisted-import checks (G501 md5, G503 rc4) are added to
+  `.golangci.yml`'s existing global gosec exclude list, since the PDF standard security handler mandates MD5 and
+  RC4 and there is no alternative; this matches the project's established style of excluding gosec checks globally
+  rather than scattering inline directives. `saslPrep` is minimal (UTF-8 passthrough + 127-byte truncation, RFC
+  4013 profile step omitted); ASCII passwords — effectively all of them — are unaffected.
+- 2026-07-11 (M2): FuzzCrypt (in `internal/doc`, seeded from the encrypted corpus) drives open → authenticate with
+  each of {"", user, owner, wrong} → decode every stream, so malformed /Encrypt dicts, truncated /O/U/OE/UE, and
+  bogus V/R combinations exercise handler construction, key derivation, and per-object decryption. The decryptor
+  hooks are total (no error channel deep in object loading): any shortfall — no key, bad key length, malformed
+  ciphertext — returns the input unchanged rather than erroring or panicking. 30s smokes of FuzzCrypt, FuzzOpen,
+  and FuzzFilters are clean.
 
 ## Verification
 

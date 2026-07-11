@@ -199,28 +199,33 @@ func (p *parser) expectInt() (int64, error) {
 
 // parseIndirectAt parses the indirect object "num gen obj ... [stream ... endstream]" at offset off within data.
 // When wantNum is non-negative, the header's object number must match it (detecting stale or wrong xref
-// offsets). It returns the object and the offset just past it (past endstream for streams), which the repair
-// scanner uses to skip stream payloads.
-func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, end int64, err error) {
+// offsets). It returns the object, the object's generation number (which the standard security handler folds
+// into the per-object decryption key), and the offset just past it (past endstream for streams), which the
+// repair scanner uses to skip stream payloads.
+func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
-		return nil, 0, errStreamOutOfRange
+		return nil, 0, 0, errStreamOutOfRange
 	}
 	p := newParser(data, int(off))
 	num, err := p.expectInt()
 	if err != nil {
-		return nil, 0, errNotIndirect
+		return nil, 0, 0, errNotIndirect
 	}
-	if _, err = p.expectInt(); err != nil {
-		return nil, 0, errNotIndirect
+	genNum, err := p.expectInt()
+	if err != nil {
+		return nil, 0, 0, errNotIndirect
 	}
 	if err = p.expectKeyword("obj"); err != nil {
-		return nil, 0, errNotIndirect
+		return nil, 0, 0, errNotIndirect
 	}
 	if wantNum >= 0 && num != int64(wantNum) {
-		return nil, 0, errWrongObject
+		return nil, 0, 0, errWrongObject
+	}
+	if genNum < 0 || genNum > 0xffff {
+		genNum = 0 // A nonsensical generation cannot be a real one; the encryption key uses its low two bytes.
 	}
 	if obj, err = p.parseObject(); err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty here for
 	// any dictionary object (parseDict consumes through its closing >>), so the lexer position is authoritative
@@ -228,21 +233,21 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, end int64
 	// extent even when lookahead tokens were pushed back.
 	tok, err := p.next()
 	if err != nil {
-		return obj, int64(p.lex.pos), nil //nolint:nilerr // The object itself parsed; trailing junk is ignored.
+		return obj, int(genNum), int64(p.lex.pos), nil //nolint:nilerr // The object parsed; trailing junk is ignored.
 	}
 	if tok.kind != tkKeyword || !bytes.Equal(tok.s, []byte("stream")) {
 		// Not a stream; the object stands on its own. "endobj" is deliberately not required (leniency).
-		return obj, int64(tok.pos), nil
+		return obj, int(genNum), int64(tok.pos), nil
 	}
 	dict, ok := obj.(Dict)
 	if !ok {
-		return nil, 0, fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
+		return nil, 0, 0, fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
 	}
 	raw, rawEnd, err := captureRawStream(data, p.lex.pos, dict)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return &Stream{Dict: dict, Raw: raw}, rawEnd, nil
+	return &Stream{Dict: dict, Raw: raw}, int(genNum), rawEnd, nil
 }
 
 // captureRawStream slices the raw stream payload that begins after the stream keyword at pos. When the

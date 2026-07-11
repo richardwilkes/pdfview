@@ -31,7 +31,7 @@ func (d *Document) repair() error {
 			pos = idx + 3
 			continue
 		}
-		obj, end, err := parseIndirectAt(d.data, int64(numStart), -1)
+		obj, _, end, err := parseIndirectAt(d.data, int64(numStart), -1)
 		if err != nil || end <= int64(idx) {
 			pos = idx + 3
 			continue
@@ -47,7 +47,7 @@ func (d *Document) repair() error {
 				switch typ, _ := AsName(v.Dict["Type"]); typ {
 				case "ObjStm":
 					objStmNums = append(objStmNums, num)
-				case "XRef":
+				case typeXRef:
 					// A cross-reference stream's dictionary carries the document-level trailer keys.
 					trailers = append(trailers, v.Dict)
 				}

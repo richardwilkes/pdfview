@@ -3,6 +3,7 @@ package doc_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -50,6 +51,49 @@ func FuzzOpen(f *testing.F) {
 			obj := c.LoadObject(num)
 			if stream, ok := cos.AsStream(obj); ok {
 				c.StreamData(stream) //nolint:errcheck // Decode errors on hostile input are expected; panics are not.
+			}
+		}
+	})
+}
+
+// FuzzCrypt drives the standard security handler with mutated encrypted documents: malformed /Encrypt
+// dictionaries, truncated /O/U/OE/UE entries, and bogus V/R combinations. Seeded from the encrypted corpus, it
+// exercises handler construction, authentication (key derivation for every revision), and per-object stream
+// decryption. No input may panic or fail to terminate; a hostile document simply fails to open, fails to
+// authenticate, or leaves streams undecodable.
+func FuzzCrypt(f *testing.F) {
+	corpusDir := filepath.Join("..", "..", "testfiles", "corpus")
+	entries, err := os.ReadDir(corpusDir)
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if filepath.Ext(name) != ".pdf" || !strings.HasPrefix(name, "encrypted-") {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(corpusDir, name))
+		if rerr != nil {
+			f.Fatal(rerr)
+		}
+		f.Add(data)
+	}
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		d, oerr := doc.Open(data)
+		if oerr != nil {
+			return
+		}
+		// Probing the password surface must never panic regardless of how broken the /Encrypt dictionary is.
+		d.NeedsPassword()
+		d.IsEncrypted()
+		for _, pw := range []string{"", pwUser, pwOwner, "wrong"} {
+			d.Authenticate(pw)
+			// After each attempt, decoding every stream forces the decryptor over each object's payload.
+			c := d.COS()
+			for _, num := range c.ObjectNums() {
+				if stream, ok := cos.AsStream(c.LoadObject(num)); ok {
+					c.StreamData(stream) //nolint:errcheck // Decode errors on hostile input are expected.
+				}
 			}
 		}
 	})
