@@ -13,7 +13,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/richardwilkes/pdf"
+	"github.com/richardwilkes/pdfview"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func extract(path, search string) error {
 	}
 
 	// Pass 0 for maxCacheSize for no limit.
-	doc, err := pdf.New(data, 0)
+	doc, err := pdfview.New(data, 0)
 	if err != nil {
 		return err
 	}

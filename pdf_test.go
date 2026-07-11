@@ -1,4 +1,4 @@
-package pdf_test
+package pdfview_test
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/richardwilkes/pdf"
+	"github.com/richardwilkes/pdfview"
 )
 
 func TestPDF(t *testing.T) {
@@ -18,8 +18,8 @@ func TestPDF(t *testing.T) {
 	}
 
 	// Parse the data as a PDF document
-	var doc *pdf.Document
-	doc, err = pdf.New(data, 0)
+	var doc *pdfview.Document
+	doc, err = pdfview.New(data, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestPDF(t *testing.T) {
 	checkTOCEntry(t, toc, 60, "What's that odd ", 1, 446, 691)
 
 	// Render the first page
-	var page *pdf.RenderedPage
+	var page *pdfview.RenderedPage
 	page, err = doc.RenderPage(0, 100, 20, "GURPS")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestPDF(t *testing.T) {
 	if len(page.Links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(page.Links))
 	}
-	for i, one := range []pdf.PageLink{
+	for i, one := range []pdfview.PageLink{
 		{
 			PageNumber: -1,
 			URI:        "http://www.gamesdiner.com/glaive_mini",
@@ -102,10 +102,10 @@ func TestPDF(t *testing.T) {
 	}
 
 	// A negative page number must be rejected rather than crashing in MuPDF
-	if _, err = doc.RenderPage(-1, 100, 20, ""); !errors.Is(err, pdf.ErrInvalidPageNumber) {
+	if _, err = doc.RenderPage(-1, 100, 20, ""); !errors.Is(err, pdfview.ErrInvalidPageNumber) {
 		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
 	}
-	if _, err = doc.RenderPageForSize(-1, 800, 800, 20, ""); !errors.Is(err, pdf.ErrInvalidPageNumber) {
+	if _, err = doc.RenderPageForSize(-1, 800, 800, 20, ""); !errors.Is(err, pdfview.ErrInvalidPageNumber) {
 		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestPDF(t *testing.T) {
 func TestMalformedPDF(t *testing.T) {
 	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then causes MuPDF to throw
 	// while opening the document. This must surface as ErrUnableToOpenPDF rather than crashing the process.
-	if _, err := pdf.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdf.ErrUnableToOpenPDF) {
+	if _, err := pdfview.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdfview.ErrUnableToOpenPDF) {
 		t.Fatalf("expected ErrUnableToOpenPDF for a malformed document, got %v", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestUseAfterRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := pdf.New(data, 0)
+	doc, err := pdfview.New(data, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,10 +155,10 @@ func TestUseAfterRelease(t *testing.T) {
 	if got := doc.TableOfContents(100); got != nil {
 		t.Errorf("expected nil TableOfContents after release, got %v", got)
 	}
-	if _, err = doc.RenderPage(0, 100, 20, ""); !errors.Is(err, pdf.ErrDocumentReleased) {
+	if _, err = doc.RenderPage(0, 100, 20, ""); !errors.Is(err, pdfview.ErrDocumentReleased) {
 		t.Errorf("expected ErrDocumentReleased from RenderPage after release, got %v", err)
 	}
-	if _, err = doc.RenderPageForSize(0, 800, 800, 20, ""); !errors.Is(err, pdf.ErrDocumentReleased) {
+	if _, err = doc.RenderPageForSize(0, 800, 800, 20, ""); !errors.Is(err, pdfview.ErrDocumentReleased) {
 		t.Errorf("expected ErrDocumentReleased from RenderPageForSize after release, got %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := pdf.New(data, 0)
+	doc, err := pdfview.New(data, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,19 +188,19 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 
 	// A non-positive target size must be rejected up front with ErrInvalidPageSize.
 	for _, sz := range []struct{ w, h int }{{0, 800}, {800, 0}, {-1, 800}, {800, -1}} {
-		if _, err = doc.RenderPageForSize(0, sz.w, sz.h, 0, ""); !errors.Is(err, pdf.ErrInvalidPageSize) {
+		if _, err = doc.RenderPageForSize(0, sz.w, sz.h, 0, ""); !errors.Is(err, pdfview.ErrInvalidPageSize) {
 			t.Errorf("expected ErrInvalidPageSize for target size %dx%d, got %v", sz.w, sz.h, err)
 		}
 	}
 
 	// A request whose output would exceed OverallMaxPixels must be rejected with ErrImageTooLarge rather than
 	// attempting a huge allocation. Both render paths enforce the same limit and report the same sentinel.
-	defer func(prev int) { pdf.OverallMaxPixels = prev }(pdf.OverallMaxPixels)
-	pdf.OverallMaxPixels = 100
-	if _, err = doc.RenderPageForSize(0, 800, 800, 0, ""); !errors.Is(err, pdf.ErrImageTooLarge) {
+	defer func(prev int) { pdfview.OverallMaxPixels = prev }(pdfview.OverallMaxPixels)
+	pdfview.OverallMaxPixels = 100
+	if _, err = doc.RenderPageForSize(0, 800, 800, 0, ""); !errors.Is(err, pdfview.ErrImageTooLarge) {
 		t.Errorf("expected ErrImageTooLarge from RenderPageForSize when exceeding OverallMaxPixels, got %v", err)
 	}
-	if _, err = doc.RenderPage(0, 100, 0, ""); !errors.Is(err, pdf.ErrImageTooLarge) {
+	if _, err = doc.RenderPage(0, 100, 0, ""); !errors.Is(err, pdfview.ErrImageTooLarge) {
 		t.Errorf("expected ErrImageTooLarge from RenderPage when exceeding OverallMaxPixels, got %v", err)
 	}
 }
@@ -239,7 +239,7 @@ startxref
 `
 
 func TestInternalLinks(t *testing.T) {
-	doc, err := pdf.New([]byte(internalLinkPDF), 0)
+	doc, err := pdfview.New([]byte(internalLinkPDF), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestInternalLinks(t *testing.T) {
 	}
 }
 
-func checkTOCEntry(t *testing.T, toc []*pdf.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
+func checkTOCEntry(t *testing.T, toc []*pdfview.TOCEntry, index int, prefix string, pageNumber, pageX, pageY int) {
 	t.Helper()
 	if !strings.HasPrefix(toc[index].Title, prefix) {
 		t.Errorf("TOC entry %d's Title does not start with %q, instead is %q", index, prefix, toc[index].Title)
