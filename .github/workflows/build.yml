@@ -16,12 +16,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-26-intel, macos-26, windows-2022, windows-11-arm]
+        # Pure Go: one runner per OS plus both architectures on Linux. The parity tests assert exact integer
+        # geometry, so keeping amd64 and arm64 in the matrix polices any floating-point divergence between them.
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-26, windows-2022]
     defaults:
       run:
         shell: bash
-    env:
-      CGO_ENABLED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -31,21 +31,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The default mingw gcc on the Windows/ARM64 runner is an x86_64 build that
-      # emits x86 code, so it can't link the native arm64 library. Install a
-      # native aarch64 llvm-mingw toolchain and point cgo's CC at it.
-      - name: Install Windows ARM64 toolchain
-        if: runner.os == 'Windows' && runner.arch == 'ARM64'
-        env:
-          LLVM_MINGW_VERSION: "20260616"
-        run: |
-          name="llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-aarch64"
-          curl -fsSL -o "$RUNNER_TEMP/$name.zip" \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/$name.zip"
-          7z x "$RUNNER_TEMP/$name.zip" -o"$RUNNER_TEMP" >/dev/null
-          echo "$RUNNER_TEMP/$name/bin" >> "$GITHUB_PATH"
-          echo "CC=aarch64-w64-mingw32-gcc" >> "$GITHUB_ENV"
-
       # Lint via the official action rather than build.sh's --lint step: the
       # latter downloads golangci-lint through its upstream install.sh, whose
       # checksum verification fails for unauthenticated release downloads in CI.
@@ -54,13 +39,13 @@ jobs:
         with:
           version: latest
 
-      # build.sh builds and runs the tests with the race detector. The race
-      # detector isn't supported on windows/arm64, so fall back to plain tests
-      # there.
+      # The library must stay buildable without cgo. Enforce that explicitly,
+      # since the race-enabled test run below re-enables cgo internally (the
+      # race runtime requires it) and so cannot catch a cgo dependency creeping
+      # in.
+      - name: Verify cgo-free build
+        run: CGO_ENABLED=0 go build ./...
+
+      # build.sh builds and runs the tests with the race detector.
       - name: build.sh
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ] && [ "$RUNNER_ARCH" = "ARM64" ]; then
-            ./build.sh --test
-          else
-            ./build.sh --race
-          fi
+        run: ./build.sh --race

@@ -11,6 +11,7 @@ import (
 )
 
 func TestPDF(t *testing.T) {
+	gate(t, "M7")
 	// Load the data we are going to use
 	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
 	if err != nil {
@@ -120,6 +121,7 @@ func TestPDF(t *testing.T) {
 }
 
 func TestMalformedPDF(t *testing.T) {
+	gate(t, "M0")
 	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then causes MuPDF to throw
 	// while opening the document. This must surface as ErrUnableToOpenPDF rather than crashing the process.
 	if _, err := pdfview.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdfview.ErrUnableToOpenPDF) {
@@ -128,6 +130,7 @@ func TestMalformedPDF(t *testing.T) {
 }
 
 func TestUseAfterRelease(t *testing.T) {
+	gate(t, "M1")
 	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +167,7 @@ func TestUseAfterRelease(t *testing.T) {
 }
 
 func TestRenderPageForSizeLimits(t *testing.T) {
+	gate(t, "M4")
 	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -239,6 +243,7 @@ startxref
 `
 
 func TestInternalLinks(t *testing.T) {
+	gate(t, "M3")
 	doc, err := pdfview.New([]byte(internalLinkPDF), 0)
 	if err != nil {
 		t.Fatal(err)

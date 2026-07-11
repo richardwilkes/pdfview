@@ -3,6 +3,5 @@
 # gofmt/gofumpt rejects, failing the linter on Windows only.
 * text=auto eol=lf
 
-# Vendored binary artifacts must never be line-ending converted.
-*.a binary
+# Binary test fixtures must never be line-ending converted.
 *.pdf binary

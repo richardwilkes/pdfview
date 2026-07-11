@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Pure-Go rewrite in progress.** This repository is being reimplemented as a pure-Go PDF engine (no cgo, no
+> MuPDF), with rasterization delegated to `github.com/richardwilkes/canvas`. The working plan, milestone status,
+> decision log, and session protocol live in [plan.md](plan.md) — read that first; where it conflicts with anything
+> below, plan.md wins. The sections below describe the original cgo/MuPDF binding this repo was seeded from (still
+> published as `github.com/richardwilkes/pdf`) and will be rewritten as milestones land; the cgo pieces they mention
+> (lib/, include/, the `wrapped_fz_*` wrappers, update_from_release.sh, setup-windows.ps1, the Windows UCRT
+> toolchain requirement) were removed at milestone M0.
+
 ## Overview
 
 A small Go package (`github.com/richardwilkes/pdf`) that wraps [MuPDF](https://mupdf.com)
