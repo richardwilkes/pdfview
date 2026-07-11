@@ -58,6 +58,37 @@ fonts, so nothing is embedded, and all content streams are stored uncompressed f
 - `damaged-no-trailer.pdf` — objects and `%%EOF` only: no xref, no trailer, no startxref; MuPDF reconstructs
   everything, finding the catalog by scanning.
 
+## M6 font probes (generated 2026-07-11)
+
+Hand-assembled like the rest (a dev-time script; only outputs committed), but with the embedded font programs
+themselves built from scratch — a Type 1 program (clear text, eexec- and charstring-encryption applied by the
+script), a TrueType program deliberately carrying no `cmap` table, and a CID-keyed CFF with its own
+charset/FDSelect — so every byte is license-free and the exercised operator set is exactly known. Search
+needles pin layout (quads) and, for the Type0 files, the /ToUnicode extraction chain.
+
+- `text-type1.pdf` — an embedded Type 1 font (raw FontFile) used by two font dictionaries: F1 with
+  /Widths+/Differences, F2 without /Widths (hsbw advances drive layout). The glyphs cover hsbw/sbw, all the
+  lineto/moveto forms, rrcurveto/vhcurveto/hvcurveto, closepath, callsubr, div, hstem/vstem/dotsection, the
+  full othersubr flex protocol, a nonzero-winding counter (hole), and a seac composite (é = e + acute,
+  reachable through the built-in encoding and through /Differences).
+- `text-type0-cid2.pdf` — Type0/CIDFontType2 over the cmap-less TrueType: font A uses Identity-H with a
+  /CIDToGIDMap stream (CIDs 100–103) and /W overrides plus a /ToUnicode mapping to CJK codepoints (the
+  extraction text is 你佡世界 — the bfrange increment is deliberate); font B uses /CIDToGIDMap /Identity
+  (ToUnicode WXYZ); font C shows the same descendant through Identity-V (vertical advances/origins, no
+  needle — vertical quads are pinned at M7). The TrueType glyphs include quadratic on/off-curve contours, a
+  fully off-curve contour, and a composite glyph with scaled components.
+- `text-type0-cid0.pdf` — Type0/CIDFontType0 over a CID-keyed CFF (ROS, charset format 0, FDSelect format 3,
+  one FD) addressed through an EMBEDDED CMap stream with a one-byte codespace (codes A–D map to CIDs
+  10/11/30/20; CID 11 is deliberately absent from the charset — MuPDF/FreeType render nothing for it and the
+  empty .notdef matches). /W mixes both entry forms; /ToUnicode maps to PQRS.
+- `text-type3.pdf` — two Type 3 fonts sharing three CharProcs: a d1 (shape) glyph whose own color operator
+  must be ignored, a d0 (colored) glyph painting its own fill and stroke, and a d1 glyph with Bézier subpaths;
+  the second font differs only in a wider FontMatrix, pinning matrix-scaled advances. No needles (Type 3 quad
+  metrics are pinned at M7).
+- `text-trmodes.pdf` — standard-14 text across every text render mode: Tr 0/1/2 fill/stroke/both, Tr 3
+  invisible (its needle pins extraction of invisible text), Tr 7 clip-only and Tr 4/5 fill+clip / stroke+clip
+  with colored bands painted through the live clip, plus rise (Ts) and horizontal scaling (Tz) lines.
+
 ## Encrypted variants
 
 Generated from `text-std14.pdf` with qpdf 12.3.2 (`brew install qpdf`); only the outputs are committed. The user

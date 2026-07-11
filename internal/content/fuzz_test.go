@@ -11,6 +11,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 // balanceDevice panics on any push/pop violation, so the fuzzer surfaces balance bugs as crashes.
@@ -150,7 +151,13 @@ func FuzzContent(f *testing.F) {
 	doc, res := fuzzResources()
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dev := &balanceDevice{}
-		Run(doc, res, data, gfx.Matrix{A: 1.5, D: -1.5, F: 100}, dev)
+		// Alternate between a tiny budgeted store (constant eviction) and none (per-Run caches) so both
+		// cache layers fuzz.
+		var st *store.Store
+		if len(data)%2 == 0 {
+			st = store.New(256)
+		}
+		Run(doc, res, data, gfx.Matrix{A: 1.5, D: -1.5, F: 100}, dev, st)
 		if dev.depth != 0 {
 			t.Fatalf("clip depth %d after Run", dev.depth)
 		}

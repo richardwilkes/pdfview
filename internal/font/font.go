@@ -58,6 +58,16 @@ type Font struct {
 	sfnt *sfntInfo
 	// cff carries the parsed embedded bare-CFF (Type1C) program, nil otherwise.
 	cff *cffInfo
+	// t1 carries the parsed embedded Type 1 program (FontFile), nil otherwise.
+	t1 *t1Info
+	// type0 carries composite-font state (CMap, CID widths, CID→GID); nil for simple fonts. The simple-font
+	// [256] tables below are not consulted when it is set.
+	type0 *type0Info
+	// type3 carries Type 3 CharProcs state; the interpreter recurses into the procs instead of drawing
+	// outlines (GlyphPath reports none).
+	type3 *type3Info
+	// toUni is the parsed /ToUnicode CMap, nil when absent; it takes precedence over every Unicode source.
+	toUni *cmapPDF
 	// sub carries the bundled substitute face when no embedded program renders (nil for embedded fonts).
 	sub *subInfo
 	// BaseFont is the /BaseFont name with any subset prefix stripped.
@@ -86,8 +96,10 @@ func Load(d *cos.Document, dict cos.Dict) (*Font, error) {
 	switch subtype {
 	case "Type1", "MMType1", "TrueType":
 		return loadSimple(d, dict)
-	case "Type0", "Type3":
-		return nil, ErrUnsupportedFont
+	case "Type0":
+		return loadType0(d, dict)
+	case "Type3":
+		return loadType3(d, dict)
 	default:
 		// A missing or unknown subtype gets the simple-font treatment when the dictionary looks like one —
 		// lenient, like deployed viewers.
@@ -176,17 +188,30 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 			f.cff = parseCFFGlyphs(d, desc.fontFile3, top)
 		}
 	case desc.fontFile != nil:
-		// Type 1 programs: the internal/type1 container parser lands next; until then these degrade to
-		// substitution for metrics and shapes. Their /Widths still apply, so layout holds.
+		// Type 1 programs: quad metrics come from the FontBBox over the FontMatrix-implied upem, like bare
+		// CFF (FreeType's rule; see the package comment). seac needs StandardEncoding regardless of the
+		// font's own encoding, so the generated table is injected here.
+		if info := parseType1Stream(d, desc.fontFile, &standardEncoding); info != nil {
+			f.t1 = info
+			if asc, dsc, ok := info.metrics(); ok {
+				f.ascender, f.descender = asc, dsc
+				embedded = true
+			}
+		}
 	}
 	std14 := standard14Name(f.BaseFont, desc.flags)
 	if !embedded {
 		f.ascender, f.descender = substituteMetrics(&desc, std14)
 	}
 
-	// Encoding: explicit /Encoding wins; otherwise Symbol/ZapfDingbats use their built-in tables and
-	// everything else defaults to StandardEncoding. (Type 1 built-in encodings arrive with internal/type1.)
-	f.enc = resolveEncoding(d, dict, std14)
+	// Encoding: explicit /Encoding wins; otherwise the embedded program's built-in encoding (Type 1),
+	// Symbol/ZapfDingbats' built-in tables, or StandardEncoding, in that order.
+	var builtin *[256]string
+	if f.t1 != nil {
+		builtin = f.t1.builtinEncoding()
+	}
+	f.enc = resolveEncoding(d, dict, std14, builtin)
+	f.toUni = loadToUnicode(d, dict)
 	buildUnicode(f)
 
 	// Widths: /Widths always wins. Without one, substituted fonts take the standard-14 AFM widths and
@@ -194,22 +219,26 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.hasWidths = loadWidths(d, dict, f)
 
 	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes
-	// yield no outlines (parse failure, or an sfnt go-text rejects) — renders through the deterministic
-	// Liberation substitute (never an error, never a system font). The substitute is the glyph source only
+	// yield no outline source at all — renders through the deterministic Liberation substitute (never an
+	// error, never a system font). An sfnt go-text rejects (no cmap table) but whose glyf/loca tables read
+	// keeps rendering its own shapes through the direct glyf walker. The substitute is the glyph source only
 	// when no embedded source exists, so GID/GlyphPath/Width stay mutually consistent.
-	if f.sfnt != nil && f.sfnt.face == nil {
+	if f.sfnt != nil && f.sfnt.face == nil && f.sfnt.glyf == nil {
 		f.sfnt = nil
 	}
-	if f.sfnt == nil && f.cff == nil {
+	if f.sfnt == nil && f.cff == nil && f.t1 == nil {
 		f.sub = loadSubstitute(std14)
 	}
-	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances (programAdvance); everything
-	// else — substituted fonts per the std14-styles pin, and bare CFF until its charstring advances land —
-	// takes the AFM widths of the standard-14 stand-in.
-	if !f.hasWidths && f.sfnt == nil {
+	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs their
+	// hsbw advances (programAdvance); everything else — substituted fonts per the std14-styles pin, and bare
+	// CFF until its charstring advances land — takes the AFM widths of the standard-14 stand-in.
+	if !f.hasWidths && f.sfnt == nil && f.t1 == nil {
 		f.afm = data.AFMWidths(std14)
 	}
 	f.buildGIDs()
+	if !f.hasWidths && f.t1 != nil {
+		f.t1.buildAdvances(f.enc)
+	}
 	return f, nil
 }
 
@@ -254,8 +283,11 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 // Width returns the advance for a code in text space (em units at size 1). A present /Widths array is
 // authoritative: its value when the code resolves, /MissingWidth otherwise (plan.md width rules). Without
 // one, substituted fonts use the standard-14 AFM width for the code's glyph name and embedded sfnt programs
-// their own hmtx advance, then /MissingWidth.
+// their own hmtx advance, then /MissingWidth. Composite fonts use /W with /DW as the default instead.
 func (f *Font) Width(code uint32) float32 {
+	if f.type0 != nil {
+		return f.type0.cidWidth(f.type0.cmap.cid(code))
+	}
 	if w, ok := f.widths[code]; ok {
 		return w
 	}
@@ -275,9 +307,18 @@ func (f *Font) Width(code uint32) float32 {
 	return f.missingWidth
 }
 
-// Unicode returns the Unicode rune for a code (simple fonts), or 0 when none is known.
+// Unicode returns the Unicode rune for a code, or 0 when none is known. A /ToUnicode CMap takes precedence
+// over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune until
+// the M7 extraction seam carries strings.
 func (f *Font) Unicode(code uint32) rune {
-	if code < 256 {
+	if f.toUni != nil {
+		if s := f.toUni.bfString(code); s != "" {
+			for _, r := range s {
+				return r
+			}
+		}
+	}
+	if f.type0 == nil && code < 256 {
 		return f.uni[code]
 	}
 	return 0
@@ -291,19 +332,82 @@ func (f *Font) GlyphName(code uint32) string {
 	return ""
 }
 
+// MemoryEstimate returns a rough byte footprint for cache budgeting (internal/store): the embedded program's
+// data plus a fixed allowance for the per-font tables. It never needs to be exact — the store's budget is a
+// working-set bound, not an accounting ledger.
+func (f *Font) MemoryEstimate() uint64 {
+	const base = 8 << 10 // gids/uni/enc tables, widths map, struct overhead.
+	n := uint64(base)
+	if f.type0 != nil {
+		if f.type0.sfnt != nil {
+			n += uint64(len(f.type0.sfnt.data)) * 2
+		}
+		n += uint64(len(f.type0.cidToGID))*2 + uint64(len(f.type0.w))*24 + uint64(len(f.type0.w2))*32
+		for i := range f.type0.w {
+			n += uint64(len(f.type0.w[i].ws)) * 4
+		}
+	}
+	switch {
+	case f.sfnt != nil:
+		n += uint64(len(f.sfnt.data)) * 2 // Raw table data plus go-text's parsed view of it.
+	case f.cff != nil:
+		for _, cs := range f.cff.font.Charstrings {
+			n += uint64(len(cs))
+		}
+		n += uint64(len(f.cff.names)) * 32
+	case f.t1 != nil:
+		for _, cs := range f.t1.font.CharStrings {
+			n += uint64(len(cs)) + 32
+		}
+		for _, sub := range f.t1.font.Subrs {
+			n += uint64(len(sub))
+		}
+	}
+	return n
+}
+
 // Ascender returns the quad-top metric in text space (em units): positive above the baseline.
 func (f *Font) Ascender() float32 { return f.ascender }
 
 // Descender returns the quad-bottom metric in text space (em units): negative below the baseline.
 func (f *Font) Descender() float32 { return f.descender }
 
-// WMode reports the writing mode: 0 horizontal (all simple fonts), 1 vertical (Type0 with a V CMap, later).
-func (f *Font) WMode() uint8 { return 0 }
+// WMode reports the writing mode: 0 horizontal (all simple fonts), 1 vertical (Type0 with a vertical CMap).
+func (f *Font) WMode() uint8 {
+	if f.type0 != nil && f.type0.vertical {
+		return 1
+	}
+	return 0
+}
 
-// ForEachCode decodes a PDF string operand into character codes. Simple fonts consume one byte per code;
-// Type0 fonts will consume per their CMap. oneByte reports whether the code came from a single byte (the
+// VMetrics returns the vertical-mode metrics for a code in text space: the vertical displacement w1 (usually
+// negative — downward) and the position vector (vx, vy) displacing the glyph from its horizontal origin
+// (ISO 32000-2 9.7.4.3). Only meaningful when WMode() is 1.
+func (f *Font) VMetrics(code uint32) (w1, vx, vy float32) {
+	if f.type0 == nil {
+		return -1, f.Width(code) / 2, 0.88
+	}
+	cid := f.type0.cmap.cid(code)
+	return f.type0.cidVMetrics(cid, f.type0.cidWidth(cid))
+}
+
+// ForEachCode decodes a PDF string operand into character codes: one byte per code for simple fonts, the
+// CMap's codespace ranges for composite fonts. oneByte reports whether the code came from a single byte (the
 // word-spacing rule applies only to single-byte code 32, ISO 32000-2 9.3.3).
 func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
+	if f.type0 != nil {
+		for len(s) > 0 {
+			code, n := f.type0.cmap.nextCode(s)
+			if n <= 0 { // Defensive: nextCode always consumes, but never risk a spin here.
+				n = 1
+			}
+			if !fn(code, n == 1) {
+				return
+			}
+			s = s[n:]
+		}
+		return
+	}
 	for _, b := range s {
 		if !fn(uint32(b), true) {
 			return

@@ -13,6 +13,14 @@ import (
 //
 //nolint:gocyclo // A flat dispatch table over the content operator set; a map of closures would just hide the same fan-out.
 func (in *interp) op(word string) {
+	if in.t3Shape == t3Mask {
+		// After d1, a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill
+		// color paints the glyph (ISO 32000-2 9.6.4).
+		switch word {
+		case "g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN":
+			return
+		}
+	}
 	switch word {
 	// ---- graphics state ----
 	case "q":
@@ -219,8 +227,18 @@ func (in *interp) op(word string) {
 	case "\"":
 		in.opSpacedShow()
 
-	// ---- recognized no-ops: type 3 glyph metrics, marked content, compatibility ----
-	case "d0", "d1", "BMC", "BDC", "EMC", "MP", "DP", "BX", "EX":
+	// ---- Type 3 glyph metrics ----
+	case "d0":
+		if in.t3Shape != t3None {
+			in.t3Shape = t3Colored // The proc paints with its own colors.
+		}
+	case "d1":
+		if in.t3Shape != t3None {
+			in.t3Shape = t3Mask // The proc is a shape; the caller's fill color applies (see the guard above).
+		}
+
+	// ---- recognized no-ops: marked content, compatibility ----
+	case "BMC", "BDC", "EMC", "MP", "DP", "BX", "EX":
 
 	default:
 		// Unknown operator: skipped; the caller resets the operand list.

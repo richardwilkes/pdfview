@@ -31,6 +31,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 // ErrSurface is reported when the raster surface cannot be created (non-positive or absurd dimensions).
@@ -41,6 +42,9 @@ var ErrSurface = errors.New("unable to create raster surface")
 type Device struct {
 	surf *surface.Surface
 	c    *canvas.Canvas
+	// store, when set, caches converted glyph outlines across renders under the document's byte budget; the
+	// per-render glyphPaths map is the fallback without one (see glyphPath).
+	store *store.Store
 	// glyphPaths caches converted glyph-space outlines for this render (see glyphPath).
 	glyphPaths map[glyphKey]*path.Path
 	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.
@@ -50,6 +54,10 @@ type Device struct {
 	width     int
 	height    int
 }
+
+// SetStore wires the document's budgeted resource store into the device, migrating the glyph-path cache from
+// per-render to document scope (plan.md internal/store).
+func (d *Device) SetStore(st *store.Store) { d.store = st }
 
 // New returns a device rendering to a zeroed (fully transparent) width×height premultiplied RGBA surface.
 func New(width, height int) (*Device, error) {
@@ -275,15 +283,29 @@ type glyphKey struct {
 }
 
 // glyphPath returns the cached canvas path for one glyph in em-normalized glyph space, converting (and
-// caching, including failures as nil) on first use.
+// caching, including failures as nil) on first use. With a store wired, converted paths live there — shared
+// across renders and bounded by the document's byte budget; otherwise the per-render map caches them.
 func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
 	key := glyphKey{font: f, gid: gid}
-	if p, ok := d.glyphPaths[key]; ok {
+	if d.store != nil {
+		if v, ok := d.store.Get(key); ok {
+			if p, isPath := v.(*path.Path); isPath {
+				return p
+			}
+			return nil // Cached failure (negative entry).
+		}
+	} else if p, ok := d.glyphPaths[key]; ok {
 		return p
 	}
 	var p *path.Path
+	var size uint64 = 64
 	if g := f.GlyphPath(gid); g != nil && !g.IsEmpty() {
 		p = buildPath(g, false)
+		size += uint64(len(g.Verbs)) + uint64(len(g.Points))*8
+	}
+	if d.store != nil {
+		d.store.Put(key, p, size)
+		return p
 	}
 	if d.glyphPaths == nil {
 		d.glyphPaths = make(map[glyphKey]*path.Path)

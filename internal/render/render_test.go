@@ -9,6 +9,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 func newDevice(t *testing.T, w, h int) *Device {
@@ -427,6 +428,34 @@ func TestGlyphPathCacheReuse(t *testing.T) {
 	p2 := d.glyphPath(f, gid)
 	if p1 == nil || p1 != p2 {
 		t.Errorf("glyph path not cached: %p vs %p", p1, p2)
+	}
+}
+
+func TestGlyphPathStoreSharedAcrossRenders(t *testing.T) {
+	f := helveticaFont(t)
+	st := store.New(0)
+	d1 := newDevice(t, 8, 8)
+	d1.SetStore(st)
+	d2 := newDevice(t, 8, 8)
+	d2.SetStore(st)
+	gid := f.GID('A')
+	p1 := d1.glyphPath(f, gid)
+	p2 := d2.glyphPath(f, gid) // A different render (device) hits the same document store.
+	if p1 == nil || p1 != p2 {
+		t.Errorf("glyph path not shared through the store: %p vs %p", p1, p2)
+	}
+	if st.Used() == 0 {
+		t.Error("store recorded no usage")
+	}
+	// A budget too small for anything must still yield paths (converted fresh each time).
+	tiny := store.New(1)
+	d3 := newDevice(t, 8, 8)
+	d3.SetStore(tiny)
+	if p := d3.glyphPath(f, gid); p == nil || p.CountVerbs() == 0 {
+		t.Error("tiny store lost the glyph path")
+	}
+	if tiny.Used() > 1 {
+		t.Errorf("tiny store exceeded budget: %d", tiny.Used())
 	}
 }
 

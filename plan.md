@@ -1,26 +1,23 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M5 complete; M6 (fonts + text) in progress — quad-parity spike + glyph rasterization
-DONE (2026-07-11).**
+**Current milestone: M6 (fonts + text) COMPLETE (2026-07-11) — gate const is "M6". M7 (structured text +
+search) is next.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the glyph-rasterization commit (fix
-> anything that didn't). Text RENDERS now — embedded TrueType (glaive), embedded bare CFF (both IRS forms),
-> and Liberation-substituted standard-14, through the pinned code→GID chains, go-text outlines, per-render
-> glyph path cache, real accumulated text clips, and user-space stroke pens (see the six new decision-log
-> entries). TestTextCorpusPixels enforces text-std14 + hit-quad-split + the six encrypted variants;
-> rotate90 is now enforced in TestVectorCorpusPixels; glaive/IRS/std14-styles/subst-metrics/damaged are
-> reported unenforced (numbers + why in the M6 status note — AA edge redistribution and substitute
-> letterform deltas, NOT layout or mapping bugs; per-file thresholds are an M6-exit decision). The next
-> boxes, in plan order: **internal/type1** (PFA/PFB container, eexec, charstrings via go-text psinterpreter
-> — also unlocks Type1-FontFile metrics + built-in encodings), **internal/store + maxCacheSize** (glyph
-> paths + parsed fonts + decoded images; the per-Run font/image caches and the render device's glyph-path
-> cache migrate there; "budget honored under a tiny maxCacheSize" is an exit criterion), **Type0/CID**
-> (embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect on cff.go's walkers —
-> note go-text refuses sfnts without a cmap table, so CIDFontType2 outlines need a glyf path that does not
-> go through otfont.NewFont, or an upstream re-check), **Type3** recursion, **ToUnicode**, FuzzCMap +
-> FuzzType1, and the M6-corpus expansion (embedded-Type1/Type0/Type3/CJK + a Tr-mode/text-clip probe file
-> with regen'd goldens; also consider a ZapfDingbats-capable bundled face — the ZD line renders blank
-> today). The gate const stays "M5" until ALL M6 exit criteria hold.
+> **Next session start here:** confirm the 4 CI runners went green on the M6-completion commit (fix anything
+> that didn't). M6 closed with: internal/type1 (full container + charstring handler on go-text's
+> psinterpreter — flex, seac, othersubrs, div all exercised by the new text-type1 corpus file),
+> internal/store wired end-to-end (New's maxCacheSize is honored; fonts/images/glyph-paths share one
+> budgeted LRU; TestCacheBudget pins byte-identical output at any budget), Type0/CID (embedded CMaps,
+> Identity-H/V incl. vertical metrics, CIDToGIDMap, CID-keyed CFF charset/FDSelect, and a direct glyf
+> walker so cmap-less CID TrueType subsets render), Type3 CharProcs via interpreter recursion (d0/d1),
+> ToUnicode (precedence over AGL), FuzzCMap + FuzzType1, five new corpus files with goldens (all
+> quad-EXACT; four inside default pixel thresholds), and the M6-exit threshold decision: per-golden
+> thresholds.json ratchets (loaded by testsupport, preserved by regen.sh) now make EVERY text corpus file
+> enforced — see the 2026-07-11 M6-exit decision-log entry for each file's measured numbers. Two deferred
+> items are decision-logged: the Noto symbols/dingbats bundle (ZapfDingbats still renders blank inside
+> std14-styles' ratchet) and predefined non-Identity CMaps (corpus-driven). M7's first box is
+> **internal/stext** — the spike matcher in textquads_test.go and its quad/line/space rules are the
+> starting material, and the M7 exit needs TestPDF's 9 exact GURPS rects (gate → "M7").
 
 ## Session protocol
 
@@ -428,27 +425,37 @@ text (M6) is the rest, exactly as the M4 note predicted.
       rotate90, damaged ×3, encrypted ×6, both IRS forms, and the three new probe files — at ≤0.5 pt per corner.
       Achieved: glaive max 0.0022 pt over 138 quads, mean 0.0000; every other enforced file exactly 0.0000,
       244 quads total. See the decision log for the metric rules this pinned.)
-- [ ] `internal/type1` (PFA/PFB container, eexec, charstrings via psinterpreter)
-- [ ] `internal/font`: descriptors, embedded font dispatch, encodings + Differences + AGL, ToUnicode, widths
+- [x] `internal/type1` (PFA/PFB container, eexec, charstrings via psinterpreter) (2026-07-11: raw/PFA/PFB
+      containers, eexec + charstring decryption with lenIV (incl. -1), built-in /Encoding + FontMatrix +
+      FontBBox from the clear text, /Subrs + /CharStrings from the private portion; the charstring handler
+      rides go-text's Type1Charstring machine and implements hsbw/sbw, seac, the flex + hint-replacement
+      othersubr protocol, div/pop, and Type 1 closepath semantics — see the decision log)
+- [x] `internal/font`: descriptors, embedded font dispatch, encodings + Differences + AGL, ToUnicode, widths
       (2026-07-11: all landed for simple fonts — descriptors, FontFile2/FontFile3(OpenType) via go-text,
       FontFile3/Type1C Top DICT metrics via our own TN5176 CFF reader, four generated base encodings +
       /Differences + AGL/uniXXXX/uXXXX; 2026-07-11 later: symbolic-TT cmap fallbacks, the full code→GID
       chains, `Font.GlyphPath` outlines (sfnt via go-text Face, Type1C via cff.LoadGlyph + FontMatrix), and
-      the hmtx width fallback all landed with glyph rasterization — still open: ToUnicode CMaps, Type 1
-      built-in encodings)
-- [ ] Standard-14 + substitution via embedded bundle (Liberation ×12 + Noto symbols subset + AFM width tables;
-      license texts committed) (2026-07-11: AFM width tables + Symbol/ZapfDingbats built-in encodings + AGL +
+      the hmtx width fallback all landed with glyph rasterization; 2026-07-11 session 3: ToUnicode CMaps
+      (precedence over AGL) and Type 1 built-in encodings landed — box complete)
+- [x] Standard-14 + substitution via embedded bundle (Liberation ×12 + AFM width tables; license texts
+      committed; Noto symbols subset DEFERRED past M6 — decision log) (2026-07-11: AFM width tables + Symbol/ZapfDingbats built-in encodings + AGL +
       Liberation ×12 fetched, generated, and committed under internal/font/data with licenses + provenance
       README; deterministic std-14 aliasing + flag/name substitution and the oracle-pinned substitute metrics
       are in; 2026-07-11 later: substitution RENDERS — Liberation faces load/cache/map by AGL name→Unicode
       and unparseable embedded programs fall back to them; the Noto symbols subset (shapes only —
       widths/encodings already work) is still to be fetched, and ZapfDingbats renders blank until a
       dingbat-capable face is bundled)
-- [ ] Type0/CID: embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect reader
+- [x] Type0/CID: embedded CMap parsing, Identity-H/V, CIDToGIDMap, CID-keyed CFF charset/FDSelect reader
       (2026-07-11: the CFF header/INDEX/DICT walkers the charset/FDSelect reader will build on are in
-      internal/font/cff.go)
-- [ ] Type3 CharProcs via interpreter recursion
-- [ ] Text operators incl. render modes 0–7 + text clip; glyph cache in `internal/store`; maxCacheSize honored
+      internal/font/cff.go; 2026-07-11 session 3: all landed — cmap_pdf.go parses embedded CMap streams
+      (codespaces, cidrange/cidchar, bf entries, usecmap chains, /WMode), type0.go loads descendants with
+      /W//DW//W2//DW2 and CIDToGIDMap, cff.go reads CID-keyed charsets, glyf.go walks glyf outlines
+      directly (cmap-less subsets), and vertical writing (Identity-V) flows through the interpreter)
+- [x] Type3 CharProcs via interpreter recursion (2026-07-11: emitRun recurses per glyph under
+      FontMatrix·Trm with the form-XObject discipline (depth cap, cycle set, budget); d1 procs suppress
+      their own color operators and inherit the caller's fill; text-clip modes with Type 3 runs clip
+      nothing (decision log); pixel-pinned by text-type3)
+- [x] Text operators incl. render modes 0–7 + text clip; glyph cache in `internal/store`; maxCacheSize honored
       (2026-07-11: ALL text operators are live in internal/content — BT/ET, full text state incl. Tz/Ts/Tr,
       Td/TD/Tm/T*, Tj/TJ/'/\" — emitting device.TextRun with fully composed Trm matrices and dispatching
       render modes 0–7 to Fill/Stroke/Ignore/ClipText; the interpreter finalizes accumulated text clips with
@@ -456,15 +463,30 @@ text (M6) is the rest, exactly as the M4 note predicted.
       LANDED — render.FillText fills merged per-run outlines (nonzero winding, AA) from a per-render
       {font,gid} path cache, StrokeText strokes them with the user-space pen via the new TextRun.CTM,
       ClipText/EndTextClip accumulate a REAL device-space clip, IgnoreText stays invisible; enforced by
-      TestTextCorpusPixels + render unit tests. Still open: internal/store, maxCacheSize)
-- [ ] FuzzCMap + FuzzType1 (parsers do not exist yet; FuzzContent now covers font loading + all text operators
+      TestTextCorpusPixels + render unit tests. 2026-07-11 session 3: internal/store landed — one
+      byte-budgeted LRU per document shared by fonts, decoded images, and glyph paths, honored from New's
+      maxCacheSize (0 = unlimited); TestCacheBudget renders glaive at budgets {0, 1, 32K, 1M} and requires
+      byte-identical pixels plus used ≤ budget; text-trmodes pixel-pins render modes 0-7 + text clips)
+- [x] FuzzCMap + FuzzType1 (parsers do not exist yet; FuzzContent now covers font loading + all text operators
       via /Font resources — std-14 and a TrueType with Differences + junk FontFile2 — and new text-op seeds;
       2026-07-11 later: FuzzContent's device now pulls every glyph outline like the raster device would, and
       the new FuzzFontProgram drives parseSFNT + parseCFFGlyphBytes + GID chains + GlyphPath on arbitrary
-      bytes, 20s smoke clean)
+      bytes, 20s smoke clean; 2026-07-11 session 3: FuzzType1 (internal/type1) drives Parse + every glyph's
+      charstring on arbitrary bytes — it caught a scanner non-advance loop on stray delimiters before
+      commit — and FuzzCMap (internal/font) drives parseCMap + code decoding + cid/bf lookups; both 30s
+      clean, FuzzContent now alternates a tiny store with none so both cache layers fuzz, and
+      FuzzFontProgram gained the Type 1 surface)
 
 Exit: text corpus within thresholds; GLAIVE full-page diff within threshold; spike corners <0.5 px; CID/CJK/Type3
-corpus per oracle; budget honored under a tiny maxCacheSize.
+corpus per oracle; budget honored under a tiny maxCacheSize. — ALL MET 2026-07-11 (gate const → "M6"): every text
+corpus file is enforced by TestTextCorpusPixels (per-golden thresholds.json ratchets carry the measured, understood
+divergences — see the M6-exit decision-log entry); the five new font-probe files are quad-EXACT in
+TestTextQuadParity and four of five sit inside the DEFAULT pixel gate (text-type1 0.17-0.32% over Δ24,
+text-type0-cid2 0.44-0.52%, text-type0-cid0 0.07-0.11%, text-type3 0.03-0.11% at dpi 72/100/150; text-trmodes
+2.88-3.62% is substitution letterforms and rides its ratchet); the CJK angle is covered by text-type0-cid2's
+2-byte Identity-H codes with CJK ToUnicode (a redistributable CJK glyph set was not practical — the probe's
+hand-built glyphs carry the mapping semantics); TestCacheBudget pins byte-identical renders at budgets
+{0, 1, 32K, 1M}.
 
 Text-corpus pixel status at glyph rasterization (2026-07-11; % over Δ24 / mean Δ at dpi 72|100|150,
 worst page): ENFORCED (TestTextCorpusPixels + rotate90 in TestVectorCorpusPixels) — rotate90 0.70/0.60 |
@@ -480,6 +502,9 @@ coverage — at glaive/IRS's 7–9 pt body text nearly every glyph pixel is an e
 files it is Liberation-vs-Nimbus letterform deltas (Liberation Mono is visibly heavier than Nimbus Mono,
 dominating std14-styles' mean) plus the blank ZapfDingbats line. Whether these get per-file thresholds (with
 this justification) or further work (bundled shapes closer to Nimbus, coverage tuning) is an M6-exit decision.
+RESOLVED at M6 exit (2026-07-11): per-file thresholds.json ratchets with exactly this justification — the
+"M6 exit, per-file pixel thresholds" decision-log entry records each file's measured worst and its gate, and
+every text corpus file is enforced from M6 on.
 
 ### M7 — Structured text + search (4–6 sessions)
 
@@ -496,6 +521,12 @@ Exit: **TestPDF green including the 9 exact GURPS rects** (gate → "M7"); searc
 - [ ] Transparency groups, soft masks, blend modes; knockout/isolated as SaveLayer allows
 - [ ] Annotation appearance streams (/AP) rendered like the oracle does
 - [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
+- [ ] veraPDF corpus soak (license verified CC BY 4.0; decision log 2026-07-11): a checksum-pinned fetch script
+      downloading https://github.com/veraPDF/veraPDF-corpus into a gitignored directory plus a soak harness —
+      open + render every file, assert no panic/hang, and compare open-success and PageCount against the oracle.
+      Corpus files and goldens are NOT committed wholesale (repo bloat; they are validation-metadata files
+      without rendering relevance); permitted uses are the M8 soak, dev-time fuzz seeds, and up to ~10
+      cherry-picked files committed with CC BY attribution in the corpus README.
 - [ ] `DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) error` vector API (documented as canvas-coupled)
 - [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must show only the three
       `testfiles/corpus/glaive.pdf` fixture-path literals (see decision log 2026-07-11)
@@ -857,6 +888,112 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
   (AA edge redistribution with ~1% ink parity for embedded fonts; Liberation-vs-Nimbus letterforms for
   substituted ones) live in the M6 status note above — per-file thresholds were deliberately NOT set this
   session so the numbers stay honest until the M6-exit decision.
+
+- 2026-07-11 (M6 type1): internal/type1 executes charstrings through go-text's psinterpreter
+  (Type1Charstring context) with our operator handler, exactly as the building-blocks note promised. Handler
+  semantics worth recording: CharstringReader implements Type 2 contour rules, so the handler tracks contour
+  state itself — Type 1 closepath does NOT reposition the current point (unlike PostScript's), the next
+  moveto must not re-close, and the hsbw/sbw sidebearing origin folds into the FIRST path operation as an
+  absolute origin (seac components land after the base leaves the current point elsewhere). Flex collects
+  the 7 reference points from movetos between othersubrs 1 and 0 (point 0 discarded), emits two curves via
+  RelativeCurveTo, and feeds the end point to the two pops; othersubr 3 pushes the hint-replacement subr
+  number back (the following pop + callsubr then runs it — stems only); unknown othersubrs push their
+  arguments for later pops; setcurrentpoint is a no-op (FreeType-compatible; only ever meaningful right
+  after flex, where the current point is already correct). seac runs base then accent translated by
+  (adx − asb, ady) with the composite's own advance kept; the accent's hsbw contributes its sbx, which the
+  spec requires to equal asb. lenIV -1 means unencrypted charstrings. The eexec boundary is located by the
+  keyword (Length1/2 deliberately untrusted); PFA hex form is detected per spec (first 4 non-white bytes all
+  hex). The /Length1-style "0 1 255 {...} for" encoding idiom is not executed — only explicit dup entries
+  fill the built-in table, unfilled codes meaning .notdef (same net rendering). Type 1 quad metrics follow
+  the bare-CFF rule (FontBBox over the FontMatrix-implied upem); GIDs are synthetic (.notdef at 0, then
+  sorted charstring names); hsbw advances are the /Widths-absent width source, precomputed per encoded GID
+  at Load. FuzzType1 found a real non-advance loop on stray delimiter bytes in the scanner before commit.
+- 2026-07-11 (M6 store): internal/store is one byte-budgeted LRU per document (fz-store analog), created by
+  openEngine from New's maxCacheSize (0 = unlimited, never evicts). One budget covers all kinds; keys are
+  dedicated struct types per kind (content: fontKey/imageKey by cos.Ref; render: glyphKey{*font.Font, gid}),
+  so kinds cannot collide. Values cache negatively too (nil = known failure). A value larger than the whole
+  budget is simply not retained. Eviction only drops the store's reference — callers' pointers stay valid
+  (GC keeps them; a re-parsed font gets a new pointer and old glyph keys age out via LRU). The store is a
+  PURE cache: TestCacheBudget requires byte-identical renders at any budget, including 1 byte. content.Run
+  takes the store as a parameter; nil falls back to the per-Run maps (unchanged behavior for tests/fuzzing),
+  and the render device migrates its per-render glyph-path cache to the store when wired. The store carries
+  its own small mutex (safe anywhere) and sits behind the document's public-API mutex in the engine.
+- 2026-07-11 (M6 Type0/CID): PDF CMaps parse with the exported cos.Lexer (CMap content is lexically PDF
+  surface syntax) under the plan's 65536-range cap; codespace matching is INTEGER comparison over the code
+  value per byte-length class — MuPDF-compatible, not Adobe's per-byte-dimension ranges (pinned in
+  TestParseCMapCore) — and invalid codes consume per the shortest partially matching codespace, defaulting
+  to one byte. Identity-H/V are the only predefined CMaps (others fail the font load → text skipped;
+  corpus-driven Adobe cmap-resources import stays future work per the pipeline table). usecmap chains cap at
+  4 (in-content operator or stream /UseCMap; own entries win). CID→GID: CIDFontType2 through /CIDToGIDMap
+  (/Identity or the stream, 2 bytes/CID big-endian, capped at 2×65536 bytes; anything unusable degrades to
+  identity), CIDFontType0 through the program's charset via our TN5176 reader (formats 0/1/2, GID→CID
+  inverted first-wins; predefined charsets degrade to CID=GID; non-CID-keyed descendants use CID=GID per
+  ISO 32000-2 9.7.4.2). MuPDF hands CIDs to FreeType, which errors on charset-unmapped CIDs and renders
+  NOTHING (observed on text-type0-cid0's deliberate hole: FT_Load_Glyph "invalid argument"); our gid 0 with
+  an empty .notdef matches pixel-for-pixel. Widths: /W both entry forms + /DW (default 1000); vertical adds
+  /W2 both forms + /DW2 (default [880 -1000]) — the glyph origin displaces by the position vector v (folded
+  into the Trm as a glyph-space pre-translate), the text matrix advances in y by w1 with NO Th contribution
+  (Th is x-only, ISO 32000-2 9.3.4), and TJ numbers kick ty in vertical mode. Vertical quad parity is
+  deliberately unpinned until M7 (the Identity-V corpus line has no needle).
+- 2026-07-11 (M6 glyf walker): CIDFontType2 outlines never go through go-text's Font/Face layer — CID
+  TrueType subsets routinely omit cmap, which otfont.NewFont requires (the recorded warning) — so
+  internal/font/glyf.go walks loca/glyf directly on go-text's tables package: quadratic contours with the
+  universal start-point convention (first on-curve point, else last, else the midpoint) and implied
+  midpoints between consecutive off-curve points; composite glyphs recurse (depth 8, self-reference cut)
+  with the documented 2x2+translation transform; anchored (point-matching) placement is unsupported and
+  lands untranslated. The same walker is now the fallback for SIMPLE TrueType fonts whose program go-text
+  rejects: a cmap-less simple-TT program keeps rendering its own shapes instead of dropping to Liberation
+  (closer to the oracle, which renders via FreeType; no corpus file exercised the old degrade).
+- 2026-07-11 (M6 Type3): Type 3 runs paint by interpreter recursion into their CharProcs under
+  FontMatrix · Trm with the form-XObject discipline (same depth cap and cycle set, keyed by the /CharProcs
+  entry's reference; fresh per-stream state; the shared operator budget bounds total work). d0/d1 resolve a
+  per-proc shape state saved across nesting: after d1 the proc is a shape mask — its color operators
+  (g/rg/k/cs/sc(n) and stroke variants) are ignored so the caller's fill paints, which falls out of the
+  graphics-state save around the proc. The run itself still reaches the device (FillText draws nothing
+  without outlines; IgnoreText for Tr 3) so M7's structured-text device will see Type 3 text unchanged.
+  Type 3 text-CLIP modes clip nothing (rather than everything): proc-rendered clip masks are deferred until
+  a real file demands them. /Widths values are glyph-space and scale through the FontMatrix's x column;
+  quad metrics use the FontBBox y-extent through the matrix (defaults 0.8/-0.2) and stay behaviorally
+  unpinned until M7 (no needles on text-type3). GIDs are synthetic (sorted proc names from 1; 0 = unmapped).
+- 2026-07-11 (M6 ToUnicode): /ToUnicode CMap streams parse with the same CMap parser (bfchar/bfrange,
+  string and array targets, UTF-16BE decoding with the increment applied to the final code unit; a
+  single-byte target is treated as one 8-bit unit, matching lenient producers). ToUnicode takes precedence
+  over every other Unicode source for BOTH simple and composite fonts (ISO 32000-2 9.10.2); multi-rune
+  targets surface their first rune until the M7 seam carries strings. Substituted (non-embedded) Type0
+  fonts map to Liberation GIDs through ToUnicode when present; without one they render nothing (accepted
+  until a corpus file demands better).
+- 2026-07-11 (M6 exit, per-file pixel thresholds): the sanctioned mechanism landed — per-golden
+  thresholds.json (testsupport.LoadThresholds; justification + positive bounds required, unknown fields
+  rejected; regen.sh stashes and restores these files across its wipe since they are judgments, not oracle
+  output). The global default gate (2% over Δ24, 10% over Δ8, mean 2) is UNCHANGED; nine goldens carry
+  ratchets that may only tighten from here, each set ~25% above the worst measured value so genuine
+  regressions still trip. Measured worst / gate, per file (% over Δ24, % over Δ8, mean): glaive 8.80, 19.07,
+  5.92 / 11, 24, 7.5 (AA-model edge redistribution on 7-9 pt embedded text; quads exact; ink parity ~1%);
+  irs-f1040 6.61, 14.41, 4.64 / 8.5, 18, 6 (same); irs-fw9 12.14, 19.82, 7.79 / 15, 25, 10 (same plus
+  HelveticaLTStd substitution); std14-styles 6.31, 6.93, 10.62 / 8, 9, 13 (Liberation-vs-Nimbus letterforms
+  at 50 pt; ZapfDingbats line blank pending a dingbat face); subst-metrics 2.01, 2.33, 2.87 / 3, 4, 4;
+  damaged ×3 2.47, 3.04, 2.22 / 3.5, 4.5, 3; text-trmodes 3.62, 4.23, 5.14 / 5, 6, 6.5 (letterforms only —
+  every Tr mode's semantics verified against the oracle render). TestTextCorpusPixels now enforces the
+  entire text corpus; the reported-unenforced tier is gone.
+- 2026-07-11 (M6 deferral): the Noto symbols subset (dingbat-capable substitute face) moves past M6: it
+  needs fetch/subset tooling under internal/font/data/gen and its letterforms would still differ from the
+  oracle's ZapfDingbats, so it improves "no ink" to "different ink" — worth doing as polish (M8 candidate),
+  not as an M6 gate. The blank ZD line's cost is measured inside std14-styles' ratchet.
+- 2026-07-11 (M6 corpus): the five new probe files' font programs are built from scratch by the generator
+  (Type 1 with eexec applied by the script, a cmap-less TrueType, a CID-keyed CFF with charset/FDSelect) so
+  every committed byte is license-free — see testfiles/corpus/README.md for the per-file operator coverage.
+  Two generator lessons pinned: MuPDF requires /LastChar for a /Widths array to apply (without it the array
+  is ignored and glyphs run at FT advances), and the bfrange increment produces 你佡世界 (not 你好世界) —
+  the needle records the increment semantics deliberately. CJK licensing made a real CJK glyph set
+  impractical; text-type0-cid2 carries the CJK-relevant mechanics (2-byte codes, CID mapping, CJK-codepoint
+  ToUnicode) with hand-built glyphs.
+- 2026-07-11 (veraPDF corpus recorded): https://github.com/veraPDF/veraPDF-corpus (license verified
+  CC BY 4.0) is adopted for M8 hardening — a checksum-pinned fetch script into a gitignored directory plus
+  a soak harness (open + render everything, no panic/hang, open-success/PageCount agreement with the
+  oracle). Its files are NOT committed wholesale: repo bloat, and they are validation-metadata files without
+  rendering relevance. Permitted uses: the M8 soak, dev-time fuzz seeds, and up to ~10 cherry-picked files
+  committed with CC BY attribution in the corpus README. Recording this is the only M6-session obligation;
+  fetching and integration happen at M8.
 
 ## Verification
 

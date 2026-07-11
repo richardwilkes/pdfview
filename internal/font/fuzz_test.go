@@ -17,6 +17,7 @@ func FuzzFontProgram(f *testing.F) {
 	f.Add([]byte("\x00\x01\x00\x00\x00\x04head")) // sfnt-ish prefix
 	f.Add([]byte{1, 0, 4, 4, 0, 0})               // CFF header prefix
 	f.Add([]byte("OTTO"))
+	f.Add(buildT1Program()) // Type 1 program (t1_test.go's builder)
 	f.Fuzz(func(_ *testing.T, raw []byte) {
 		if info := parseSFNT(raw); info != nil {
 			fnt := &Font{sfnt: info, enc: &standardEncoding}
@@ -37,6 +38,15 @@ func FuzzFontProgram(f *testing.F) {
 			fnt.buildGIDs()
 			for _, code := range []uint32{0, 'A', 255} {
 				fnt.GlyphPath(fnt.GID(code))
+			}
+		}
+		if info := parseType1Bytes(raw, &standardEncoding); info != nil {
+			fnt := &Font{t1: info, enc: &standardEncoding}
+			fnt.buildGIDs()
+			info.buildAdvances(fnt.enc)
+			for _, code := range []uint32{0, 'A', 255} {
+				fnt.GlyphPath(fnt.GID(code))
+				fnt.programAdvance(fnt.GID(code))
 			}
 		}
 	})

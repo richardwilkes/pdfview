@@ -1,0 +1,6 @@
+{
+  "justification": "Embedded bare-CFF text at small sizes: quad-exact layout; AA-model edge redistribution as for glaive. Measured worst (2026-07-11, page 0 @100dpi): 6.61% over d24, 14.41% over d8, mean 4.64.",
+  "maxOver24Pct": 8.5,
+  "maxOver8Pct": 18,
+  "maxMeanDelta": 6
+}

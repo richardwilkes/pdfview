@@ -16,7 +16,14 @@ trap 'echo -e "\033[33;5mRegeneration failed on regen.sh:$LINENO\033[0m"' ERR
 CORPUS=../testfiles/corpus
 GOLDENS=../testfiles/goldens
 
-# Wipe all goldens first so a removed corpus file cannot leave an orphaned golden directory behind.
+# Wipe all goldens first so a removed corpus file cannot leave an orphaned golden directory behind — except the
+# hand-maintained per-file pixel gates (thresholds.json), which are not oracle output and must survive
+# regeneration. A removed corpus file's stale thresholds.json would be restored into an otherwise-empty
+# directory; regen diffs are reviewed at commit time, so delete such orphans by hand when retiring a file.
+THRESH_STASH=$(mktemp -d)
+if [ -d "$GOLDENS" ]; then
+  (cd "$GOLDENS" && find . -name thresholds.json | tar -cf "$THRESH_STASH/thresholds.tar" -T - 2>/dev/null) || true
+fi
 rm -rf "$GOLDENS"
 
 dump() {
@@ -30,6 +37,12 @@ dump glaive -search GURPS -search the -search 'of the' -search Glaive
 dump internal-links
 dump vectors
 dump text-std14 -search Hello -search 'hello world' -search 'brown fox' -search QUICK -search 'Spaced words' -search 'Kerned Text'
+dump text-type1 -search BCD -search 'Aé' -search DAC -search eBe
+dump text-type0-cid2 -search '你佡世界' -search WXYZ
+dump text-type0-cid0 -search PRS -search SQRP
+dump text-type3
+dump text-trmodes -search 'Filled zero' -search 'Stroked pen' -search 'Both layers' -search 'Ghost words' \
+  -search CLIPPED -search FILLCLIP -search Risen -search Wide -search STROKECLIP
 dump std14-styles -search handgrip -search boldface -search obliquely -search chiseled -search romanesque \
   -search duckweed -search italicize -search marbled -search typewriter -search keystroke -search slanting \
   -search flywheel -search 'αβγδ' -search '✁✂✃'
@@ -58,5 +71,10 @@ dump images-ccitt
 dump images-jbig2
 dump images-jpx
 dump images-interpolate
+
+if [ -s "$THRESH_STASH/thresholds.tar" ]; then
+  tar -xf "$THRESH_STASH/thresholds.tar" -C "$GOLDENS"
+fi
+rm -rf "$THRESH_STASH"
 
 echo -e "\033[32mDone.\033[0m"

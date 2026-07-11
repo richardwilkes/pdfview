@@ -1,0 +1,6 @@
+{
+  "justification": "Embedded TrueType at 7-9 pt body sizes: layout is quad-exact (TestTextQuadParity, max 0.0022 pt) and total ink matches the oracle within ~1%; the divergence is FreeType scanline AA vs canvas analytic AA redistributing edge coverage where nearly every glyph pixel is an edge pixel. Measured worst (2026-07-11, page 1 @100dpi): 8.80% over d24, 16.44% over d8, mean 5.92; bounds ~25% above so real regressions still trip.",
+  "maxOver24Pct": 11,
+  "maxOver8Pct": 24,
+  "maxMeanDelta": 7.5
+}

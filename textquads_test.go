@@ -34,6 +34,7 @@ func TestTextQuadParity(t *testing.T) {
 		"encrypted-r6-aes": true, "encrypted-r6-empty-user": true,
 		"glaive": true, "hit-quad-split": true, "irs-f1040": true, "irs-fw9": true, "rotate90": true,
 		"std14-styles": true, "subst-metrics": true, "text-std14": true,
+		"text-type1": true, "text-type0-cid2": true, "text-type0-cid0": true, "text-trmodes": true,
 	}
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -209,7 +210,7 @@ func extractChars(t *testing.T, document *doc.Document, pageNumber int) []capCha
 	}
 	capture := &textCapture{}
 	if data := document.PageContents(pageNumber); len(data) > 0 {
-		content.Run(document.COS(), document.PageResources(pageNumber), data, ctm, capture)
+		content.Run(document.COS(), document.PageResources(pageNumber), data, ctm, capture, nil)
 	}
 	return capture.chars
 }

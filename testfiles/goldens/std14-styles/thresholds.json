@@ -1,0 +1,6 @@
+{
+  "justification": "Non-embedded standard-14 styles at 50 pt: Liberation letterforms differ from the oracle's Nimbus substitutes (Liberation Mono is visibly heavier than Nimbus Mono) and the ZapfDingbats line renders blank until a dingbat-capable face is bundled. Advances and metrics are oracle-exact. Measured worst (2026-07-11 @72dpi): 6.31% over d24, 6.93% over d8, mean 10.62.",
+  "maxOver24Pct": 8,
+  "maxOver8Pct": 9,
+  "maxMeanDelta": 13
+}

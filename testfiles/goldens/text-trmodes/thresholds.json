@@ -1,0 +1,6 @@
+{
+  "justification": "Standard-14 substituted text across all Tr render modes: mode semantics (fill/stroke/clip layering) verified visually against the oracle render; the divergence is Liberation-vs-Nimbus letterforms at 26-44 pt. Measured worst (2026-07-11 @72dpi): 3.62% over d24, 4.23% over d8, mean 5.14.",
+  "maxOver24Pct": 5,
+  "maxOver8Pct": 6,
+  "maxMeanDelta": 6.5
+}

@@ -1,0 +1,141 @@
+{
+  "file": "text-type0-cid0.pdf",
+  "sha256": "ce613ad5a634f02a0295d474bf0c06317521c77d5636913e5a2846f5af12dcde",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "needles": [
+    "PRS",
+    "SQRP"
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        400,
+        600
+      ],
+      "linksRaw": [],
+      "searchRaw": {
+        "PRS": [
+          [
+            30,
+            64.8,
+            118.880005,
+            64.8,
+            30,
+            108.8,
+            118.880005,
+            108.8
+          ]
+        ],
+        "SQRP": [
+          [
+            30,
+            156,
+            109.799995,
+            156,
+            30,
+            186,
+            109.799995,
+            186
+          ]
+        ]
+      },
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 556,
+          "height": 834,
+          "stride": 2224,
+          "links": [],
+          "search": {
+            "PRS": [
+              [
+                41,
+                90,
+                166,
+                152
+              ]
+            ],
+            "SQRP": [
+              [
+                41,
+                216,
+                153,
+                259
+              ]
+            ]
+          }
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 834,
+          "height": 1250,
+          "stride": 3336,
+          "links": [],
+          "search": {
+            "PRS": [
+              [
+                62,
+                135,
+                248,
+                227
+              ]
+            ],
+            "SQRP": [
+              [
+                62,
+                325,
+                229,
+                388
+              ]
+            ]
+          }
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 400,
+          "height": 600,
+          "stride": 1600,
+          "links": [],
+          "search": {
+            "PRS": [
+              [
+                30,
+                64,
+                119,
+                109
+              ]
+            ],
+            "SQRP": [
+              [
+                30,
+                156,
+                110,
+                186
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -5,6 +5,7 @@
 package testsupport
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -256,16 +257,63 @@ func ComparePixels(got, want *image.NRGBA) (*PixelDiff, error) {
 	return diff, nil
 }
 
-// WithinDefaultThresholds reports whether the difference passes the initial perceptual gate from plan.md: at most
-// 2% of pixels with a delta over 24, at most 10% with a delta over 8, and a mean delta of at most 2. Per-golden
-// overrides (goldens/<name>/thresholds.json, only ever tightened) arrive when render parity starts being enforced.
-func (p *PixelDiff) WithinDefaultThresholds() bool {
+// Thresholds is one golden's pixel gate. Every file is compared against the default gate from plan.md unless
+// its golden directory carries a thresholds.json override, the sanctioned mechanism for files whose measured,
+// UNDERSTOOD divergence exceeds the default (substitute-font letterform deltas, AA-model edge redistribution
+// on small text — see the M6 decision log). Overrides are a ratchet: once set they may only ever tighten as
+// rendering fidelity improves, and each must carry its justification.
+type Thresholds struct {
+	// Justification documents why this golden's gate differs from the default. Required in overrides.
+	Justification string `json:"justification"`
+	// MaxOver24Pct and MaxOver8Pct bound the percentage (0-100) of pixels whose max channel delta exceeds
+	// 24 and 8 respectively; MaxMeanDelta bounds the mean delta.
+	MaxOver24Pct float64 `json:"maxOver24Pct"`
+	MaxOver8Pct  float64 `json:"maxOver8Pct"`
+	MaxMeanDelta float64 `json:"maxMeanDelta"`
+}
+
+// DefaultThresholds is the initial perceptual gate from plan.md: at most 2% of pixels with a delta over 24,
+// at most 10% with a delta over 8, and a mean delta of at most 2.
+func DefaultThresholds() Thresholds {
+	return Thresholds{MaxOver24Pct: 2, MaxOver8Pct: 10, MaxMeanDelta: 2}
+}
+
+// LoadThresholds returns the gate for a golden directory: the default unless <dir>/thresholds.json overrides
+// it. Unknown fields and malformed overrides are errors — a broken override must never silently widen (or
+// narrow) a gate.
+func LoadThresholds(dir string) (Thresholds, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "thresholds.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return DefaultThresholds(), nil
+		}
+		return Thresholds{}, err
+	}
+	var th Thresholds
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(&th); err != nil {
+		return Thresholds{}, fmt.Errorf("%s: %w", dir, err)
+	}
+	if th.Justification == "" || th.MaxOver24Pct <= 0 || th.MaxOver8Pct <= 0 || th.MaxMeanDelta <= 0 {
+		return Thresholds{}, fmt.Errorf("%s: thresholds.json must carry a justification and positive bounds", dir)
+	}
+	return th, nil
+}
+
+// Within reports whether the difference passes th.
+func (p *PixelDiff) Within(th Thresholds) bool {
 	if p.Pixels == 0 {
 		return true
 	}
-	return float64(p.Over24) <= 0.02*float64(p.Pixels) &&
-		float64(p.Over8) <= 0.10*float64(p.Pixels) &&
-		p.MeanDelta <= 2
+	return 100*float64(p.Over24) <= th.MaxOver24Pct*float64(p.Pixels) &&
+		100*float64(p.Over8) <= th.MaxOver8Pct*float64(p.Pixels) &&
+		p.MeanDelta <= th.MaxMeanDelta
+}
+
+// WithinDefaultThresholds reports whether the difference passes the default gate.
+func (p *PixelDiff) WithinDefaultThresholds() bool {
+	return p.Within(DefaultThresholds())
 }
 
 // String summarizes the diff for test failure messages.

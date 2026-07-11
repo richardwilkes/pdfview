@@ -119,7 +119,7 @@ func run(t *testing.T, d *cos.Document, resources cos.Dict, content string) *rec
 		}
 	}
 	rec := &recorder{t: t}
-	Run(d, resources, []byte(content), gfx.Identity(), rec)
+	Run(d, resources, []byte(content), gfx.Identity(), rec, nil)
 	if rec.depth != 0 {
 		t.Fatalf("device clip depth %d after Run; the auto-unwind failed", rec.depth)
 	}

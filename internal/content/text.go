@@ -1,6 +1,7 @@
 package content
 
 import (
+	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
@@ -58,8 +59,9 @@ func (in *interp) opTf() {
 	in.gs.text.size = float32(size)
 }
 
-// loadFont resolves /Resources /Font <name> and loads it, caching per reference for this Run (failures are
-// cached as nil so hostile content cannot force repeated parses).
+// loadFont resolves /Resources /Font <name> and loads it, caching per reference — in the document's budgeted
+// store when one is wired (surviving across runs), else in the per-Run map. Failures are cached as nil either
+// way, so hostile content cannot force repeated parses.
 func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	raw, ok := in.resource("Font", name)
 	if !ok {
@@ -67,7 +69,14 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	}
 	ref, isRef := raw.(cos.Ref)
 	if isRef {
-		if f, cached := in.fonts[ref]; cached {
+		if in.st != nil {
+			if v, hit := in.st.Get(fontKey{ref: ref}); hit {
+				if f, isFont := v.(*font.Font); isFont {
+					return f, true
+				}
+				return nil, false // Cached failure (negative entry).
+			}
+		} else if f, cached := in.fonts[ref]; cached {
 			return f, f != nil
 		}
 	}
@@ -77,10 +86,23 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 			f = loaded
 		}
 	}
-	if isRef && len(in.fonts) < maxCachedFonts {
-		in.fonts[ref] = f
+	if isRef {
+		switch {
+		case in.st != nil:
+			in.st.Put(fontKey{ref: ref}, f, fontSize(f))
+		case len(in.fonts) < maxCachedFonts:
+			in.fonts[ref] = f
+		}
 	}
 	return f, f != nil
+}
+
+// fontSize estimates a loaded font's cache footprint (nil — a cached failure — still costs an entry).
+func fontSize(f *font.Font) uint64 {
+	if f == nil {
+		return 64
+	}
+	return f.MemoryEstimate()
 }
 
 // textMove implements Td (and the T*/'/" leading moves): translate the line matrix and restart the text
@@ -136,14 +158,18 @@ func (in *interp) opTJ() {
 		return
 	}
 	ts := &in.gs.text
+	vertical := run.WMode == 1
 	for _, el := range arr {
 		if s, isStr := el.(cos.String); isStr {
 			in.appendGlyphs(run, s)
 			continue
 		}
 		if n, isNum := cos.AsReal(el); isNum && isFinitePt(float32(n), 0) {
-			tx := float32(-n) / 1000 * ts.size * ts.scale
-			in.tm = gfx.Translate(tx, 0).Mul(in.tm)
+			if vertical { // TJ numbers kick the vertical advance, with no horizontal-scaling factor.
+				in.tm = gfx.Translate(0, float32(-n)/1000*ts.size).Mul(in.tm)
+			} else {
+				in.tm = gfx.Translate(float32(-n)/1000*ts.size*ts.scale, 0).Mul(in.tm)
+			}
 		}
 	}
 	in.emitRun(run)
@@ -183,9 +209,13 @@ func (in *interp) newRun() *device.TextRun {
 }
 
 // appendGlyphs decodes one string operand into positioned glyphs, advancing the text matrix per glyph. The
-// glyph count drains the per-Run operator budget so huge strings cannot amplify work unboundedly.
+// glyph count drains the per-Run operator budget so huge strings cannot amplify work unboundedly. In
+// vertical writing mode (ISO 32000-2 9.7.4.3), each glyph is displaced by its position vector v (folded into
+// its Trm) and the text matrix advances by the vertical displacement w1 in y — with no horizontal-scaling
+// contribution, which applies only to x-axis quantities (9.3.4).
 func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 	ts := &in.gs.text
+	vertical := run.WMode == 1
 	ts.font.ForEachCode(s, func(code uint32, oneByte bool) bool {
 		if in.budget < 0 {
 			return false
@@ -193,27 +223,42 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 		in.budget--
 		trm := gfx.Matrix{A: ts.size * ts.scale, D: ts.size, F: ts.rise}.Mul(in.tm).Mul(in.gs.ctm)
 		w0 := ts.font.Width(code)
+		adv := w0
+		if vertical {
+			w1, vx, vy := ts.font.VMetrics(code)
+			trm = gfx.Translate(-vx, -vy).Mul(trm) // Glyph-space displacement to the vertical origin.
+			adv = w1
+		}
 		if trm.IsFinite() {
 			run.Glyphs = append(run.Glyphs, device.Glyph{
 				Trm:     trm,
 				GID:     ts.font.GID(code),
 				Code:    code,
 				Unicode: ts.font.Unicode(code),
-				Advance: w0,
+				Advance: adv,
 			})
 		}
-		tx := w0*ts.size + ts.charSpacing
-		if oneByte && code == 32 {
-			tx += ts.wordSpacing
+		if vertical {
+			ty := adv*ts.size + ts.charSpacing
+			if oneByte && code == 32 {
+				ty += ts.wordSpacing
+			}
+			in.tm = gfx.Translate(0, ty).Mul(in.tm)
+		} else {
+			tx := w0*ts.size + ts.charSpacing
+			if oneByte && code == 32 {
+				tx += ts.wordSpacing
+			}
+			in.tm = gfx.Translate(tx*ts.scale, 0).Mul(in.tm)
 		}
-		in.tm = gfx.Translate(tx*ts.scale, 0).Mul(in.tm)
 		return true
 	})
 }
 
 // emitRun dispatches a completed run per the text render mode (ISO 32000-2 9.3.6): modes 0-2 paint, 3 is
 // recorded but invisible, and 4-7 additionally (or only) accumulate the text clip. Pattern color spaces do
-// not paint until M8, exactly like path painting.
+// not paint until M8, exactly like path painting. Type 3 runs paint by interpreter recursion into their
+// CharProcs instead of outline drawing.
 func (in *interp) emitRun(run *device.TextRun) {
 	if run == nil || len(run.Glyphs) == 0 {
 		return
@@ -221,6 +266,10 @@ func (in *interp) emitRun(run *device.TextRun) {
 	mode := in.gs.text.mode
 	fill := mode == 0 || mode == 2 || mode == 4 || mode == 6
 	stroke := mode == 1 || mode == 2 || mode == 5 || mode == 6
+	if run.Font.IsType3() {
+		in.emitType3Run(run, fill || stroke, mode)
+		return
+	}
 	if fill && in.marks(in.gs.fillSpace) {
 		in.dev.FillText(run, in.fillPaint())
 	}
@@ -234,6 +283,65 @@ func (in *interp) emitRun(run *device.TextRun) {
 		in.dev.ClipText(run)
 		in.textClipRuns++
 	}
+}
+
+// emitType3Run paints a Type 3 run: the glyph procs execute through the interpreter (depth-capped, cycle-
+// guarded), inheriting the caller's graphics state — which is how a d1 (shape) glyph picks up the current
+// fill color, since d1 blocks the proc's own color operators. The run itself still reaches the device
+// (FillText draws nothing for a font without outlines) so the structured-text device sees Type 3 text like
+// any other. Type 3 text clipping (modes 4-7) is not supported: the run clips nothing rather than everything,
+// the least-wrong degrade until a corpus file demands proc-rendered clip masks.
+func (in *interp) emitType3Run(run *device.TextRun, paint bool, mode int) {
+	if mode == 3 {
+		in.dev.IgnoreText(run)
+		return
+	}
+	if !paint || !in.marks(in.gs.fillSpace) {
+		return
+	}
+	in.dev.FillText(run, in.fillPaint())
+	for i := range run.Glyphs {
+		in.execType3Glyph(run.Font, &run.Glyphs[i])
+	}
+}
+
+// execType3Glyph executes one glyph's charproc with CTM = FontMatrix · Trm, its own resource frame, and
+// fresh per-stream state — the same discipline as form XObjects, sharing their depth cap and budget.
+func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
+	stream, ref, ok := f.Type3Proc(g.Code)
+	if !ok || in.formDepth >= maxFormDepth || len(in.gsStack) >= maxQDepth {
+		return
+	}
+	if ref != (cos.Ref{}) {
+		if in.active[ref] {
+			return
+		}
+		in.active[ref] = true
+		defer delete(in.active, ref)
+	}
+	body, err := in.doc.StreamData(stream)
+	if err != nil {
+		return
+	}
+	in.opSave()
+	in.gs.ctm = f.Type3Matrix().Mul(g.Trm)
+	resources := in.res[len(in.res)-1]
+	if t3res := f.Type3Resources(); t3res != nil {
+		resources = t3res
+	}
+	in.res = append(in.res, resources)
+	in.spaces = append(in.spaces, map[cos.Name]pdfcolor.Space{})
+	savedPath, savedCur, savedStart, savedHasCur, savedPending := in.path, in.cur, in.start, in.hasCur, in.pending
+	savedShape := in.t3Shape
+	in.path, in.hasCur, in.pending, in.t3Shape = &gfx.Path{}, false, clipNone, t3Colored
+	in.formDepth++
+	in.exec(body)
+	in.formDepth--
+	in.t3Shape = savedShape
+	in.path, in.cur, in.start, in.hasCur, in.pending = savedPath, savedCur, savedStart, savedHasCur, savedPending
+	in.spaces = in.spaces[:len(in.spaces)-1]
+	in.res = in.res[:len(in.res)-1]
+	in.opRestore()
 }
 
 // string1 returns the single leading string operand.

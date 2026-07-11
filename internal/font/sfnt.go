@@ -16,9 +16,12 @@ import (
 type sfntInfo struct {
 	// face is the go-text view of the program, used for glyph outlines (GlyphDataOutline) and hmtx advances.
 	// It is nil when go-text rejects the program (such as a subset with no cmap table at all — go-text
-	// requires one); metrics and cmap lookups still work then, but there are no outlines, so the font renders
-	// through its substitute.
+	// requires one); metrics and cmap lookups still work then, and TrueType-flavored programs fall back to
+	// the direct glyf walker below for outlines.
 	face *otfont.Face
+	// glyf is the direct glyf outline walker (glyf.go): the only outline source for CIDFontType2 programs
+	// (whose subsets routinely omit cmap) and the fallback for cmap-less simple TrueType programs.
+	glyf *glyfInfo
 	// cmapUnicode/cmapSymbol/cmapMacRoman are the subtables of the pinned lookup chains (nil when absent).
 	cmapUnicode  *cmapTable
 	cmapSymbol   *cmapTable
@@ -105,6 +108,7 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 	if ft, ftErr := otfont.NewFont(ld); ftErr == nil {
 		info.face = otfont.NewFace(ft)
 	}
+	info.glyf = newGlyfInfo(ld, upem, info.nGlyphs)
 	return info
 }
 

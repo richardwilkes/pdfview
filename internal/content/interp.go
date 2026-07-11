@@ -22,6 +22,14 @@ import (
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
+	"github.com/richardwilkes/pdfview/internal/store"
+)
+
+// Store key types: one dedicated comparable type per cached resource kind (see internal/store's package
+// comment), keyed by the resource entry's object reference.
+type (
+	fontKey  struct{ ref cos.Ref }
+	imageKey struct{ ref cos.Ref }
 )
 
 // Limits. maxQDepth matches the q/Q cap in plan.md; pushes beyond it are ignored (with their matching Qs
@@ -36,8 +44,8 @@ const (
 	maxOperands    = 64
 	maxDashEntries = 32
 	maxTotalOps    = 1 << 22
-	// maxCachedFonts caps the per-Run font cache (matching maxCachedImages' role for images); the budgeted
-	// cross-run store arrives later in M6.
+	// maxCachedFonts caps the per-Run font cache used when no budgeted store is wired (matching
+	// maxCachedImages' role for images); with a store, its byte budget replaces this cap.
 	maxCachedFonts = 64
 )
 
@@ -91,6 +99,9 @@ func (g *gstate) clone() gstate {
 type interp struct {
 	doc *cos.Document
 	dev device.Device
+	// st is the document-scoped budgeted resource store; fonts and decoded images cache there across runs
+	// when it is non-nil (the per-Run maps below are the nil-store fallback).
+	st *store.Store
 	// res is the resource-dictionary stack; lookups use only the top (form resources replace, not merge).
 	res []cos.Dict
 	// spaces caches parsed color spaces per resource frame, keyed by resource name, so repeated cs/scn
@@ -121,19 +132,32 @@ type interp struct {
 	// textClipRuns counts the ClipText calls of the current text object; ET (or forced text-object end)
 	// finalizes them with one EndTextClip.
 	textClipRuns int
-	hasCur       bool
-	inText       bool
-	pending      uint8
+	// t3Shape tracks Type 3 charproc execution: t3None outside procs, t3Colored inside a proc before d0/d1
+	// resolve it, t3Shape after d1 — which makes the proc a shape mask, so its own color operators are
+	// ignored and the caller's fill color paints (ISO 32000-2 9.6.4).
+	t3Shape uint8
+	hasCur  bool
+	inText  bool
+	pending uint8
 }
 
+// t3Shape states.
+const (
+	t3None uint8 = iota
+	t3Colored
+	t3Mask
+)
+
 // Run interprets a content stream against dev. resources is the page's resource dictionary (nil when the page
-// has none); ctm maps user space to device space. Malformed content degrades — operators are skipped, never
-// escalated — so Run does not fail; panics from truly hostile input are the caller's concern (the public API
-// wraps rendering in a recover guard per plan.md invariant 6).
-func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev device.Device) {
+// has none); ctm maps user space to device space; st is the document's budgeted resource store (nil degrades
+// to per-Run caching only — correct, just re-parsing across runs). Malformed content degrades — operators are
+// skipped, never escalated — so Run does not fail; panics from truly hostile input are the caller's concern
+// (the public API wraps rendering in a recover guard per plan.md invariant 6).
+func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev device.Device, st *store.Store) {
 	in := &interp{
 		doc:    d,
 		dev:    dev,
+		st:     st,
 		res:    []cos.Dict{resources},
 		spaces: []map[cos.Name]pdfcolor.Space{{}},
 		gs: gstate{

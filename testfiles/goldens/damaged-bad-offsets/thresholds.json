@@ -1,0 +1,6 @@
+{
+  "justification": "Standard-14 substituted text: Liberation-vs-Nimbus letterform deltas on a small text-dominated page (identical content across the damaged trio). Measured worst (2026-07-11 @100dpi): 2.47% over d24, 3.04% over d8, mean 2.22.",
+  "maxOver24Pct": 3.5,
+  "maxOver8Pct": 4.5,
+  "maxMeanDelta": 3
+}

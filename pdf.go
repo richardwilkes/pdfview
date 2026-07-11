@@ -22,6 +22,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/content"
 	"github.com/richardwilkes/pdfview/internal/doc"
 	"github.com/richardwilkes/pdfview/internal/render"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 // Possible error values
@@ -437,6 +438,9 @@ func (d *document) release() {
 // release().
 type engineDocument struct {
 	doc *doc.Document
+	// store is the maxCacheSize-budgeted resource cache (fonts, decoded images, glyph outlines) shared by all
+	// of this document's renders; New's maxCacheSize argument is its byte budget (0 = unlimited).
+	store *store.Store
 }
 
 // page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points
@@ -477,9 +481,9 @@ type pageLinkInfo struct {
 }
 
 // openEngine parses the raw PDF bytes into the engine's document state, honoring maxCacheSize as the resource-cache
-// budget (0 = unlimited, honored from M6). Any parse failure — and, per plan.md invariant 6, any panic provoked by
-// hostile input — surfaces as ErrUnableToOpenPDF rather than escaping to the caller.
-func openEngine(buffer []byte, _ uint64) (eng *engineDocument, err error) {
+// budget (0 = unlimited). Any parse failure — and, per plan.md invariant 6, any panic provoked by hostile input —
+// surfaces as ErrUnableToOpenPDF rather than escaping to the caller.
+func openEngine(buffer []byte, maxCacheSize uint64) (eng *engineDocument, err error) {
 	defer func() {
 		if recover() != nil {
 			eng = nil
@@ -493,7 +497,7 @@ func openEngine(buffer []byte, _ uint64) (eng *engineDocument, err error) {
 	if derr != nil {
 		return nil, ErrUnableToOpenPDF
 	}
-	return &engineDocument{doc: d}, nil
+	return &engineDocument{doc: d, store: store.New(maxCacheSize)}, nil
 }
 
 // needsPassword reports whether the document is encrypted and the empty user password does not grant access.
@@ -600,12 +604,13 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToCreateImage
 	}
+	dev.SetStore(e.store)
 	ctm, err := e.doc.PageCTM(pg.number, float32(scale))
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToLoadPage
 	}
 	if data := e.doc.PageContents(pg.number); len(data) > 0 {
-		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev)
+		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
 	}
 	pix, stride, err = dev.Pixels()
 	if err != nil {

@@ -135,6 +135,8 @@ func (f *Font) buildGIDs() {
 			f.gids[code] = f.sfnt.gid(code, f.GlyphName(code), symbolic)
 		case f.cff != nil:
 			f.gids[code] = f.cff.gid(code, f.GlyphName(code))
+		case f.t1 != nil:
+			f.gids[code] = f.t1.gid(f.GlyphName(code))
 		case f.sub != nil:
 			if r := firstRune(GlyphNameToUnicode(f.GlyphName(code))); r != 0 {
 				if g, ok := f.sub.face.Cmap.Lookup(r); ok {
@@ -147,6 +149,19 @@ func (f *Font) buildGIDs() {
 
 // GID returns the font-program glyph index the code renders with (0 when unmapped — .notdef).
 func (f *Font) GID(code uint32) uint32 {
+	if f.type0 != nil {
+		if f.sub != nil {
+			// A substituted (non-embedded) composite font has no CID→GID program; mapping through the
+			// substitute's cmap needs Unicode, which ToUnicode supplies when present.
+			if r := f.Unicode(code); r != 0 {
+				if g, ok := f.sub.face.Cmap.Lookup(r); ok {
+					return uint32(g)
+				}
+			}
+			return 0
+		}
+		return f.type0.gid(f.type0.cmap.cid(code))
+	}
 	if code < 256 {
 		return f.gids[code]
 	}
@@ -166,13 +181,31 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	if gid > 0xFFFF { // sfnt and CFF glyph indices are 16-bit.
 		return nil
 	}
-	switch {
-	case f.sfnt != nil && f.sfnt.face != nil:
-		outline, ok := f.sfnt.face.GlyphDataOutline(tables.GlyphID(gid))
-		if !ok || f.sfnt.upem <= 0 {
-			return nil
+	if f.type3 != nil {
+		return nil // Type 3 glyphs are content streams; the interpreter executes them (no outlines exist).
+	}
+	if f.type0 != nil && f.type0.sfnt != nil {
+		// CIDFontType2: always the direct glyf walker — CID TrueType subsets routinely lack the cmap table
+		// go-text's Font layer requires (M6 decision-log warning), and one deterministic outline path beats
+		// two.
+		if f.type0.sfnt.glyf != nil {
+			return f.type0.sfnt.glyf.path(gid)
 		}
-		return segmentsToPath(outline.Segments, gfx.Scale(1/f.sfnt.upem, 1/f.sfnt.upem))
+		return nil
+	}
+	switch {
+	case f.sfnt != nil:
+		if f.sfnt.face != nil {
+			outline, ok := f.sfnt.face.GlyphDataOutline(tables.GlyphID(gid))
+			if !ok || f.sfnt.upem <= 0 {
+				return nil
+			}
+			return segmentsToPath(outline.Segments, gfx.Scale(1/f.sfnt.upem, 1/f.sfnt.upem))
+		}
+		if f.sfnt.glyf != nil { // cmap-less simple TrueType: the direct walker renders the embedded shapes.
+			return f.sfnt.glyf.path(gid)
+		}
+		return nil
 	case f.cff != nil:
 		segs, _, err := f.cff.font.LoadGlyph(tables.GlyphID(gid))
 		if err != nil {
@@ -180,6 +213,8 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 		}
 		m := f.cff.matrix
 		return segmentsToPath(segs, gfx.Matrix{A: m[0], B: m[1], C: m[2], D: m[3], E: m[4], F: m[5]})
+	case f.t1 != nil:
+		return f.t1.glyphPath(gid)
 	case f.sub != nil:
 		if gid == 0 {
 			// A substituted code that mapped nowhere renders nothing: the substitute's .notdef box would be
@@ -202,6 +237,9 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 func (f *Font) programAdvance(gid uint32) (float32, bool) {
 	if f.sfnt != nil && f.sfnt.face != nil && f.sfnt.upem > 0 {
 		return f.sfnt.face.HorizontalAdvance(opentype.GID(gid)) / f.sfnt.upem, true
+	}
+	if f.t1 != nil {
+		return f.t1.advance(gid)
 	}
 	return 0, false
 }

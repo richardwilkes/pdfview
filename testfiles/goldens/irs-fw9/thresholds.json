@@ -1,0 +1,6 @@
+{
+  "justification": "Embedded bare-CFF plus HelveticaLTStd substitution on dense small text; AA edge redistribution plus Liberation-vs-Nimbus letterforms. Measured worst (2026-07-11, page 1 @72dpi): 12.14% over d24, 19.82% over d8, mean 7.79.",
+  "maxOver24Pct": 15,
+  "maxOver8Pct": 25,
+  "maxMeanDelta": 10
+}

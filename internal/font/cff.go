@@ -21,10 +21,13 @@ var errBadCFF = errors.New("malformed CFF data")
 
 // cffTop is the Top DICT subset the engine consumes.
 type cffTop struct {
-	bbox      [4]float32 // FontBBox: x0, y0, x1, y1 in font units (0 0 0 0 when absent)
-	matrix    [6]float32 // FontMatrix (0.001 0 0 0.001 0 0 default)
-	hasBBox   bool
-	hasMatrix bool
+	bbox           [4]float32 // FontBBox: x0, y0, x1, y1 in font units (0 0 0 0 when absent)
+	matrix         [6]float32 // FontMatrix (0.001 0 0 0.001 0 0 default)
+	charsetOff     int        // charset offset (0/1/2 are the predefined charsets)
+	charStringsOff int        // CharStrings INDEX offset (0 when absent)
+	hasBBox        bool
+	hasMatrix      bool
+	isCID          bool // ROS present: a CID-keyed program (charset maps GIDs to CIDs, not name SIDs)
 }
 
 // parseCFFTopDict reads the header, skips the Name INDEX, and decodes the first Top DICT.
@@ -57,11 +60,116 @@ func parseCFFTopDict(data []byte) (*cffTop, error) {
 				top.matrix[i] = float32(operands[i])
 			}
 			top.hasMatrix = true
+		case op == 15 && len(operands) >= 1: // charset offset
+			top.charsetOff = clampDictOffset(operands[len(operands)-1])
+		case op == 17 && len(operands) >= 1: // CharStrings offset
+			top.charStringsOff = clampDictOffset(operands[len(operands)-1])
+		case op == 0x0c1e: // ROS (escaped operator 12 30): CID-keyed
+			top.isCID = true
 		}
 	}); err != nil {
 		return nil, err
 	}
 	return top, nil
+}
+
+// clampDictOffset converts a DICT operand to a non-negative int offset (junk collapses to 0 = unset).
+func clampDictOffset(v float64) int {
+	if v < 0 || v > float64(math.MaxInt32) || math.IsNaN(v) {
+		return 0
+	}
+	return int(v)
+}
+
+// cffCID is the CID→GID view of a CID-keyed CFF program, read from its charset per Adobe TN5176 section 13
+// (go-text's cff package parses CID programs for glyph loading but does not expose the charset). For CID
+// fonts the charset maps each GID to its CID; the engine needs the inverse.
+type cffCID struct {
+	cidToGID map[uint32]uint32
+	nGlyphs  int
+	identity bool // Predefined charsets (offsets 0-2) degrade to CID = GID for CID-keyed programs.
+}
+
+// gid maps a CID to a GID (0 when unmapped).
+func (c *cffCID) gid(cid uint32) uint32 {
+	if c.identity {
+		if int(cid) < c.nGlyphs {
+			return cid
+		}
+		return 0
+	}
+	return c.cidToGID[cid]
+}
+
+// parseCFFCharsetCID reads a CID-keyed program's charset. nGlyphs comes from the CharStrings INDEX count.
+func parseCFFCharsetCID(data []byte, top *cffTop) *cffCID {
+	if top == nil || !top.isCID {
+		return nil
+	}
+	nGlyphs := cffIndexCount(data, top.charStringsOff)
+	if nGlyphs <= 0 || nGlyphs > 65536 {
+		return nil
+	}
+	out := &cffCID{nGlyphs: nGlyphs}
+	if top.charsetOff <= 2 { // Predefined charsets are meaningless for CID keying; degrade to identity.
+		out.identity = true
+		return out
+	}
+	pos := top.charsetOff
+	if pos >= len(data) {
+		return nil
+	}
+	format := data[pos]
+	pos++
+	out.cidToGID = make(map[uint32]uint32, min(nGlyphs, 4096))
+	put := func(cid, gid uint32) {
+		if _, exists := out.cidToGID[cid]; !exists { // First wins on duplicates.
+			out.cidToGID[cid] = gid
+		}
+	}
+	put(0, 0) // GID 0 is always CID 0 (.notdef); the charset lists GIDs from 1.
+	switch format {
+	case 0:
+		for gid := 1; gid < nGlyphs; gid++ {
+			if pos+2 > len(data) {
+				break
+			}
+			put(uint32(data[pos])<<8|uint32(data[pos+1]), uint32(gid))
+			pos += 2
+		}
+	case 1, 2:
+		nLeftSize := 1
+		if format == 2 {
+			nLeftSize = 2
+		}
+		for gid := 1; gid < nGlyphs; {
+			if pos+2+nLeftSize > len(data) {
+				break
+			}
+			first := uint32(data[pos])<<8 | uint32(data[pos+1])
+			pos += 2
+			nLeft := int(data[pos])
+			if nLeftSize == 2 {
+				nLeft = nLeft<<8 | int(data[pos+1])
+			}
+			pos += nLeftSize
+			for i := 0; i <= nLeft && gid < nGlyphs; i++ {
+				put(first+uint32(i), uint32(gid))
+				gid++
+			}
+		}
+	default:
+		return nil
+	}
+	return out
+}
+
+// cffIndexCount returns the entry count of the INDEX at pos, or -1 when unreadable.
+func cffIndexCount(data []byte, pos int) int {
+	if pos <= 0 || pos+2 > len(data) {
+		return -1
+	}
+	return int(data[pos])<<8 | int(data[pos+1])
 }
 
 // metrics converts the Top DICT to em-normalized ascender/descender the FreeType way: the FontBBox's

@@ -20,35 +20,22 @@ func TestVectorCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "rotate90", "rotate90", true)
 }
 
-// TestTextCorpusPixels is milestone M6's pixel-scope check, following the M4/M5 pattern: text corpus files
-// whose rendering divergence from the oracle is within the default thresholds are enforced at every recorded
-// DPI. The files below all render through Liberation substitutes (standard-14 fonts) whose Arial-class
-// letterforms differ slightly from the oracle's Nimbus substitutes, so their diffs are genuine shape deltas,
-// comfortably inside the gate. The six encrypted files are text-std14 variants and must render identically to
-// it once authenticated.
-//
-// Reported but NOT yet enforced (numbers recorded in plan.md M6; enforcement decisions — per-file thresholds
-// with logged justification — come with the M6 exit):
-//   - glaive, irs-f1040, irs-fw9: embedded fonts at 7–9 pt body sizes; layout is quad-exact and total ink
-//     matches the oracle within ~1%, but FreeType scanline AA vs canvas analytic AA redistributes edge
-//     coverage, and at those sizes nearly every glyph pixel is an edge pixel.
-//   - std14-styles: the Liberation Mono lines are visibly heavier than the oracle's Nimbus Mono, and the
-//     ZapfDingbats line renders blank (no dingbat-capable bundled face yet).
-//   - subst-metrics and the damaged trio: the same substitution letterform delta on small text-dominated
-//     pages, sitting just over the 2% gate at 72/100 dpi.
+// TestTextCorpusPixels is milestone M6's pixel-scope check, following the M4/M5 pattern, and from M6 exit on
+// it enforces EVERY text corpus file: files inside the default gate directly, and the files whose divergence
+// is measured and understood — substitute-font letterform deltas (Liberation vs the oracle's Nimbus) and
+// AA-model edge redistribution on small embedded-font text — through their goldens' thresholds.json ratchets
+// (see the 2026-07-11 M6-exit decision-log entry for the measured numbers behind each). The six encrypted
+// files are text-std14 variants and must render identically to it once authenticated.
 func TestTextCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"text-std14", "hit-quad-split",
 		"encrypted-r2-rc4", "encrypted-r3-rc4", "encrypted-r4-rc4", "encrypted-r4-aes",
 		"encrypted-r6-aes", "encrypted-r6-empty-user",
-	} {
-		comparePixelsToGolden(t, name, name, true)
-	}
-	for _, name := range []string{
+		"text-type1", "text-type0-cid2", "text-type0-cid0", "text-type3", "text-trmodes",
 		"glaive", "irs-f1040", "irs-fw9", "std14-styles", "subst-metrics",
 		"damaged-bad-offsets", "damaged-no-trailer", "damaged-startxref-zero",
 	} {
-		comparePixelsToGolden(t, name, name, false)
+		comparePixelsToGolden(t, name, name, true)
 	}
 }
 
@@ -72,7 +59,8 @@ func TestImageCorpusPixels(t *testing.T) {
 }
 
 // comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
-// pixels. goldenName equals name except for the stub-codec cross-check described on TestImageCorpusPixels.
+// pixels against the golden's gate (its thresholds.json when present, else the default). goldenName equals
+// name except for the stub-codec cross-check described on TestImageCorpusPixels.
 func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", name+".pdf"))
@@ -85,6 +73,10 @@ func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) 
 	}
 	defer doc.Release()
 	goldenDir := filepath.Join("testfiles", "goldens", goldenName)
+	thresholds, err := testsupport.LoadThresholds(goldenDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	truth, err := testsupport.LoadTruth(filepath.Join(goldenDir, "truth.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +110,7 @@ func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) 
 				continue
 			}
 			switch {
-			case enforce && !diff.WithinDefaultThresholds():
+			case enforce && !diff.Within(thresholds):
 				t.Errorf("%s: pixels diverge beyond thresholds: %s", label, diff)
 			default:
 				t.Logf("%s: %s", label, diff)
