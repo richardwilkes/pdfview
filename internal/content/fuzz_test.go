@@ -25,7 +25,10 @@ import (
 
 // balanceDevice panics on any push/pop violation, so the fuzzer surfaces balance bugs as crashes.
 type balanceDevice struct {
-	depth int
+	// maskPhase tracks open mask spans: false = mask content (Begin..End), true = masked content (End..Pop).
+	maskPhase []bool
+	depth     int
+	groups    int
 }
 
 func (b *balanceDevice) pop() {
@@ -74,12 +77,35 @@ func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, float64)          
 func (b *balanceDevice) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) {}
 func (b *balanceDevice) ClipImageMask(*imaging.Image, gfx.Matrix)               { b.depth++ }
 
-func (b *balanceDevice) PopClip()                                               { b.pop() }
-func (b *balanceDevice) BeginGroup(gfx.Rect, bool, bool, device.Blend, float64) {}
-func (b *balanceDevice) EndGroup()                                              {}
-func (b *balanceDevice) BeginMask(gfx.Rect, bool, color.NRGBA)                  {}
-func (b *balanceDevice) EndMask()                                               {}
-func (b *balanceDevice) PopMask()                                               {}
+func (b *balanceDevice) PopClip() { b.pop() }
+
+func (b *balanceDevice) BeginGroup(gfx.Rect, bool, bool, device.Blend, float64) { b.groups++ }
+
+func (b *balanceDevice) EndGroup() {
+	b.groups--
+	if b.groups < 0 {
+		panic("EndGroup underflow")
+	}
+}
+
+func (b *balanceDevice) BeginMask(gfx.Rect, bool, color.NRGBA, []byte) {
+	b.maskPhase = append(b.maskPhase, false)
+}
+
+func (b *balanceDevice) EndMask() {
+	if len(b.maskPhase) == 0 || b.maskPhase[len(b.maskPhase)-1] {
+		panic("EndMask without open mask content")
+	}
+	b.maskPhase[len(b.maskPhase)-1] = true
+}
+
+func (b *balanceDevice) PopMask() {
+	if len(b.maskPhase) == 0 || !b.maskPhase[len(b.maskPhase)-1] {
+		panic("PopMask without EndMask")
+	}
+	b.maskPhase = b.maskPhase[:len(b.maskPhase)-1]
+}
+
 func (b *balanceDevice) FillShading(*shading.Shading, gfx.Matrix, device.Paint) {}
 
 // fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, an ExtGState, an
@@ -148,8 +174,24 @@ stream
 000000ff00000064000030ff000064ffff00>
 endstream
 endobj
+15 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 40 40]
+   /Group << /S /Transparency /CS /DeviceRGB /I true /K true >> /Length 34 >>
+stream
+1 0 0 rg 0 0 20 20 re f /SH1 sh q
+endstream
+endobj
+16 0 obj
+<< /Type /ExtGState /SMask << /S /Luminosity /G 15 0 R /BC [0.5 0 0] /TR 6 0 R >> /BM /Screen >>
+endobj
+17 0 obj
+<< /Type /ExtGState /ca 0.25 /SMask << /S /Alpha /G 2 0 R >> >>
+endobj
+18 0 obj
+<< /Type /ExtGState /SMask /None >>
+endobj
 trailer
-<< /Root 1 0 R /Size 15 >>
+<< /Root 1 0 R /Size 19 >>
 startxref
 0
 %%EOF
@@ -161,8 +203,8 @@ func fuzzResources() (*cos.Document, cos.Dict) {
 		panic(err)
 	}
 	res := cos.Dict{
-		catXObject:   cos.Dict{resFormName: cos.Ref{Num: 2}},
-		catExtGState: cos.Dict{resGSName: cos.Ref{Num: 3}},
+		catXObject:   cos.Dict{resFormName: cos.Ref{Num: 2}, "FmG": cos.Ref{Num: 15}},
+		catExtGState: cos.Dict{resGSName: cos.Ref{Num: 3}, "GSL": cos.Ref{Num: 16}, "GSA": cos.Ref{Num: 17}, "GSN": cos.Ref{Num: 18}},
 		catColorSpc:  cos.Dict{"CS0": cos.Ref{Num: 4}, "CS1": cos.Ref{Num: 5}},
 		"Font":       cos.Dict{"F1": cos.Ref{Num: 7}, "F2": cos.Ref{Num: 8}},
 		"Shading":    cos.Dict{"SH1": cos.Ref{Num: 11}, "SH2": cos.Ref{Num: 14}},
@@ -195,6 +237,10 @@ func FuzzContent(f *testing.F) {
 	f.Add([]byte("/SH1 sh /SH2 sh"))
 	f.Add([]byte("/Pattern cs /P2 scn 0 0 20 20 re f /Pattern CS /P2 SCN 0 0 m 9 9 l S"))
 	f.Add([]byte("/Pattern cs /P1 scn 0 0 20 20 re f BT /F1 8 Tf (pat) Tj ET"))
+	f.Add([]byte("/GSL gs 0 0 30 30 re f /GSN gs 0 0 5 5 re f"))
+	f.Add([]byte("q /GSA gs BT /F1 8 Tf (m) Tj ET /SH1 sh Q /FmG Do"))
+	f.Add([]byte("/GSL gs /FmG Do /GSA gs /Fm0 Do"))
+	f.Add([]byte("/GSA gs /Pattern cs /P1 scn 0 0 20 20 re f BI /W 1 /H 1 /BPC 8 /CS /G ID \x42 EI"))
 	doc, res := fuzzResources()
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dev := &balanceDevice{}
@@ -207,6 +253,9 @@ func FuzzContent(f *testing.F) {
 		Run(doc, res, data, gfx.Matrix{A: 1.5, D: -1.5, F: 100}, dev, st)
 		if dev.depth != 0 {
 			t.Fatalf("clip depth %d after Run", dev.depth)
+		}
+		if dev.groups != 0 || len(dev.maskPhase) != 0 {
+			t.Fatalf("groups %d / masks %d left open after Run", dev.groups, len(dev.maskPhase))
 		}
 	})
 }

@@ -1,0 +1,57 @@
+{
+  "file": "transparency-group.pdf",
+  "sha256": "b556eb37195c1559e9e24abad950396a97d80824083f6fddf8f3c72740f68c7e",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        400,
+        300
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 556,
+          "height": 417,
+          "stride": 2224,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 834,
+          "height": 625,
+          "stride": 3336,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 400,
+          "height": 300,
+          "stride": 1600,
+          "links": []
+        }
+      }
+    }
+  ]
+}

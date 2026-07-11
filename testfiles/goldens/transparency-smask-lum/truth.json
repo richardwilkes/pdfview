@@ -1,0 +1,57 @@
+{
+  "file": "transparency-smask-lum.pdf",
+  "sha256": "faa90b1b25d484745d7fd8919fafa44cd135e19f60f227b319c19a2008f90e4d",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        420,
+        200
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 584,
+          "height": 278,
+          "stride": 2336,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 875,
+          "height": 417,
+          "stride": 3500,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 420,
+          "height": 200,
+          "stride": 1680,
+          "links": []
+        }
+      }
+    }
+  ]
+}

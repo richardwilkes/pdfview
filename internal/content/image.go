@@ -81,8 +81,12 @@ func (in *interp) drawImage(img *imaging.Image) {
 		if !in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 			return
 		}
-		in.dev.FillImageMask(img, in.gs.ctm, in.fillPaint())
+		in.masked(in.gs.fillAlpha, func() {
+			in.dev.FillImageMask(img, in.gs.ctm, in.fillPaint())
+		})
 		return
 	}
-	in.dev.FillImage(img, in.gs.ctm, in.gs.fillAlpha)
+	in.masked(in.gs.fillAlpha, func() {
+		in.dev.FillImage(img, in.gs.ctm, in.gs.fillAlpha)
+	})
 }

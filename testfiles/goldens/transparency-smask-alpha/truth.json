@@ -1,0 +1,57 @@
+{
+  "file": "transparency-smask-alpha.pdf",
+  "sha256": "7ee73768f5270e78e447d714c9af288b570a3e941a6c11034c9f62f98dfacb1c",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        320,
+        160
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 445,
+          "height": 223,
+          "stride": 1780,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 667,
+          "height": 334,
+          "stride": 2668,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 320,
+          "height": 160,
+          "stride": 1280,
+          "links": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+%PDF-1.7
+1 0 obj
+<< /Length 853 >>
+stream
+0.1 0.2 0.9 rg 0 0 105 420 re f
+0.5 0.5 0.5 rg 105 0 105 420 re f
+0.1 0.8 0.2 rg 210 0 105 420 re f
+0.9 0.15 0.1 rg 315 0 145 420 re f
+q /B0 gs 0.2 0.6 0.9 rg 52 12 81 81 re f Q
+q /B1 gs 0.2 0.6 0.9 rg 157 12 81 81 re f Q
+q /B2 gs 0.2 0.6 0.9 rg 262 12 81 81 re f Q
+q /B3 gs 0.2 0.6 0.9 rg 367 12 81 81 re f Q
+q /B4 gs 0.9 0.6 0.1 rg 52 117 81 81 re f Q
+q /B5 gs 0.9 0.6 0.1 rg 157 117 81 81 re f Q
+q /B6 gs 0.9 0.6 0.1 rg 262 117 81 81 re f Q
+q /B7 gs 0.9 0.6 0.1 rg 367 117 81 81 re f Q
+q /B8 gs 0.5 0.5 0.5 rg 52 222 81 81 re f Q
+q /B9 gs 0.5 0.5 0.5 rg 157 222 81 81 re f Q
+q /B10 gs 0.5 0.5 0.5 rg 262 222 81 81 re f Q
+q /B11 gs 0.5 0.5 0.5 rg 367 222 81 81 re f Q
+q /B12 gs 0.8 0.1 0.4 rg 52 327 81 81 re f Q
+q /B13 gs 0.8 0.1 0.4 rg 157 327 81 81 re f Q
+q /B14 gs 0.8 0.1 0.4 rg 262 327 81 81 re f Q
+q /B15 gs 0.8 0.1 0.4 rg 367 327 81 81 re f Q
+
+endstream
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 460 420] /Resources << /ExtGState << /B0 << /BM /Normal /ca 1 >> /B1 << /BM /Multiply /ca 0.7 >> /B2 << /BM /Screen /ca 1 >> /B3 << /BM /Overlay /ca 0.7 >> /B4 << /BM /Darken /ca 1 >> /B5 << /BM /Lighten /ca 0.7 >> /B6 << /BM /ColorDodge /ca 1 >> /B7 << /BM /ColorBurn /ca 0.7 >> /B8 << /BM /HardLight /ca 1 >> /B9 << /BM /SoftLight /ca 0.7 >> /B10 << /BM /Difference /ca 1 >> /B11 << /BM /Exclusion /ca 0.7 >> /B12 << /BM /Hue /ca 1 >> /B13 << /BM /Saturation /ca 0.7 >> /B14 << /BM /Color /ca 1 >> /B15 << /BM /Luminosity /ca 0.7 >> >> >> /Contents 1 0 R >>
+endobj
+4 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000913 00000 n 
+0000000970 00000 n 
+0000001589 00000 n 
+trailer
+<< /Size 5 /Root 4 0 R >>
+startxref
+1638
+%%EOF

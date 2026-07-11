@@ -1,22 +1,23 @@
 # plan.md — pure-Go pdfview port
 
 **Current milestone: M8 (advanced graphics, hardening, cutover) IN PROGRESS — gate const is "M7". Box 1
-(shadings 1-7 + shading/tiling patterns) landed 2026-07-11.**
+(shadings + patterns) and box 2 (transparency groups, soft masks, blend modes) landed 2026-07-11.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M8-shadings commit (fix anything
-> that didn't). The M7 CI run (29168015189) was confirmed green. M8 box 1 is COMPLETE: internal/shading
-> parses all seven shading types to the normalized form (sampled 256-stop ramps for axial/radial, an eval
-> closure for function-based, fair-budget flat tessellation for mesh types 4-7), the interpreter wires `sh`
-> and /Pattern paints (shading + tiling, colored + uncolored) through the device seam with pattern space
-> anchored to the selecting stream's default CTM, and the raster device realizes them as canvas shaders /
-> replayed tiles / non-AA triangles under MuPDF's shade-painter half-pixel offset and floored tile blitting
-> (all behaviorally pinned — see the M8 decision-log entries). Five new corpus files + goldens
-> (shading-axial/radial/function/mesh, pattern-tiling) are enforced by TestShadingCorpusPixels (three carry
-> ratchets); FuzzShading is the tenth fuzz target and FuzzContent now fuzzes sh/scn patterns and the tiling
-> replay closure. NEXT BOX: **transparency groups, soft masks, blend modes** (BeginGroup/BeginMask/EndMask/
-> PopMask in render via SaveLayer + BlendDstIn + colorfilter.NewLuma; /G XObjects + gs /SMask /BM /ca /CA in
-> the interpreter) — needs new corpus probes (blend modes, group alpha, luminosity + alpha soft masks) per
-> the regen.sh pattern; then /AP streams, veraPDF soak + perf numbers, DrawPage, gate removal (delete
+> **Next session start here:** confirm the 4 CI runners went green on the M8-transparency commit (fix
+> anything that didn't; the M8-shadings run 29170016930 was confirmed green). M8 box 2 is COMPLETE:
+> transparency groups (/G forms with /Group /S /Transparency — alpha/blend/mask reset inside, composite once
+> at the caller's ca/BM, isolation honored via non-isolated pass-through, knockout honored via BlendSrc for
+> solid interiors), ExtGState /SMask soft masks (luminosity + alpha subtypes, /BC backdrop, /TR sampled to a
+> 256 LUT, gs-time CTM anchoring), and all 16 /BM blend modes (near-exact vs the oracle, incl. the
+> non-separable four) are wired interpreter→seam→render; the luminosity conversion is a captured behavioral
+> model (weighted sum + neutral LUT, ±2 of the oracle). Four new corpus files + goldens
+> (transparency-blend/group/smask-lum/smask-alpha) are enforced by TestTransparencyCorpusPixels — three
+> inside the DEFAULT gate, smask-lum on a ratchet (letterforms + gradient-in-alpha; see the decision log).
+> All semantics were pinned by oracle probes BEFORE coding — read the five M8-transparency decision-log
+> entries before touching this area. NEXT BOX: **annotation /AP streams** (render like the oracle does —
+> check what MuPDF draws for widget/normal appearances, /AS state selection, /Off states, hidden/noview
+> flags; the IRS AcroForm files are the real-world regression net and their ratchets were set WITHOUT /AP
+> rendering, so expect them to TIGHTEN); then veraPDF soak + perf numbers, DrawPage, gate removal (delete
 > gates_test.go and every gate line; check the pdf_test.go diff criterion in invariant 5), README +
 > .claude/CLAUDE.md rewrite, first release tag.
 
@@ -548,7 +549,17 @@ goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
       non-AA flat triangles, and tiling as per-tile replay with floored device offsets — all under MuPDF's
       shade-painter half-pixel offset, behaviorally pinned. Five corpus files + goldens enforced by
       TestShadingCorpusPixels; per-file numbers in the status note below.)
-- [ ] Transparency groups, soft masks, blend modes; knockout/isolated as SaveLayer allows
+- [x] Transparency groups, soft masks, blend modes; knockout/isolated as SaveLayer allows (2026-07-11: the
+      interpreter detects /Group /S /Transparency forms at Do (BeginGroup with the caller's blend + fill
+      alpha, interior alpha/blend/mask reset per ISO 32000-2 11.6.6), parses ExtGState /SMask into a cached
+      CTM-independent resource anchored to the gs-time CTM, and wraps every marking emission in the active
+      mask (BeginMask → mask-form replay under form discipline → EndMask → op with alpha/blend lifted to a
+      composite group → PopMask); render realizes groups as SaveLayer (non-isolated trivial composites pass
+      through layerless — exact non-isolation), knockout as BlendSrc on solid interior draws, and masks as
+      offscreen surfaces reduced to Alpha8 planes (captured luminosity model + /TR LUT) applied with
+      BlendDstIn — CPU-side, not colorfilter.NewLuma, so the captured MuPDF response could be reproduced.
+      All semantics oracle-probe-pinned first; blend modes near-exact. Four corpus files + goldens enforced
+      by TestTransparencyCorpusPixels; per-file numbers in the status note below.)
 - [ ] Annotation appearance streams (/AP) rendered like the oracle does
 - [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
 - [ ] veraPDF corpus soak (license verified CC BY 4.0; decision log 2026-07-11): a checksum-pinned fetch script
@@ -573,6 +584,16 @@ edges pinned by the half-pixel offset); shading-function 0.00/0.00/0.41 | 0.45/0
 exceeds the default, all of it fractional-scale edge AA — interiors within Δ8); pattern-tiling
 1.20/3.78/2.31 | 2.03/5.64/2.88 | 1.13/2.29/1.67 (ratchet 2.6/10/3.6: per-cell AA of glyph-scale features,
 placement floored-blit-exact per the dpi-150 pass).
+
+Transparency-corpus pixel status at M8 box 2 (2026-07-11; % over Δ24 / % over Δ8 / mean Δ at dpi 72|100|150):
+transparency-blend 0.00/0.00/0.34 | 0.05/0.52/0.47 | 0.00/0.32/0.41 (default gate — all 16 blend modes,
+max Δ3 at dpi 72, the nonzero dpi-100 slice is fractional-scale square-edge AA); transparency-group
+0.00/0.00/0.79 | 0.67/1.29/1.14 | 0.31/0.70/0.97 (default gate — group alpha reset, non-isolated
+pass-through, nested groups, knockout all inside, max Δ5 at dpi 72); transparency-smask-alpha
+0.00/0.00/0.55 | 0.73/1.44/0.89 | 0.40/0.61/1.20 (default gate); transparency-smask-lum
+1.76/3.27/2.60 | 1.37/2.80/2.39 | 1.33/2.88/2.47 (ratchet 2.2/4.5/3.3: substituted Helvetica-Bold
+letterforms under a gradient mask plus the axial-ramp divergence carried into alpha — the structural arms
+(/BC, sampled /TR, gs anchoring, /None) are near-exact; the TR+anchor arm is byte-exact at dpi 72).
 
 ## Decision log (append-only, dated)
 
@@ -1122,6 +1143,66 @@ placement floored-blit-exact per the dpi-150 pass).
   fractional-scale edge AA on clip/decal/circle boundaries, interiors within Δ8; pattern-tiling (2.6/10/3.6) —
   per-cell AA of glyph-scale cell art against MuPDF's blitted scanline-AA tile (the M6 letterform-ratchet
   argument at tile scale), placement itself pinned by the clean dpi-150 pass.
+- 2026-07-11 (M8 transparency, soft-mask semantics — all oracle-probe-pinned BEFORE coding, scratch probes
+  p1–p8): the ExtGState /SMask anchors to the CTM at the **gs operator** (a cm between gs and the paint does
+  not move the mask), composed with the mask form's /Matrix; the mask applies **per painting operation**
+  until /SMask /None (or Q) clears it; /BC prefills the mask surface so areas outside the mask form's /BBox
+  take the backdrop's luminosity (BC white + small BBox leaves the outside fully unmasked — the mask value
+  outside the BBox is NOT zero); /S /Alpha masks take the rendered alpha with colors irrelevant; /TR applies
+  to the mask value in float before quantization (types 2 and 4 probe-pinned, type 0 corpus-pinned; type 3
+  rides the same internal/function sampling, behaviorally unpinned). Blend-under-mask ordering: the mask
+  gates the op's alpha BEFORE the op's blend composites against the backdrop (a Multiply fill under a 0.5
+  luminosity mask over green renders 0.5·green + 0.5·multiply — pinned), which fixes the layer structure:
+  composite group (op alpha+blend) OUTSIDE, masked-content layer + BlendDstIn INSIDE. The interpreter emits
+  the op itself with alpha 1 / blend Normal / mask nil, and the composite BeginGroup is emitted only when
+  alpha < 1 or blend ≠ Normal.
+- 2026-07-11 (M8 transparency, luminosity conversion): MuPDF's RGB→mask-value conversion is NOT any standard
+  luma (Rec601/709 both fail by >10/255) and not a pure linear map; it was captured behaviorally like the M4
+  color tables: mask = neutralLUT[round((78·R + 159·G + 15·B)/252)] over the ENCODED channel bytes, where
+  the weights are the measured ramp tops and neutralLUT is the captured 256-entry neutral-ramp response
+  (internal/render/mask.go). Neutral inputs reproduce the oracle exactly by construction; primaries and 32
+  mixed validation colors land within ±2. Known ±1–2 residue: the oracle converts DeviceGray-SOURCED mask
+  content through a different gray→gray ICC path (RGB neutral 191→191 vs gray 192→192 etc.), and our
+  pipeline goes through the M4 gray→RGB table first; LUT entry 255 is pinned to 255 (oracle: RGB white→254,
+  gray white→255) so fully lit masks pass content unchanged. Masks are computed CPU-side at EndMask (surface
+  readback → Alpha8 plane → BlendDstIn draw) — colorfilter.NewLuma was rejected because Skia's Rec709 luma
+  is not MuPDF's response. MuPDF renders masks into a GRAY pixmap (per-draw color conversion) where we
+  composite in RGB then convert — indistinguishable for opaque mask content, unpinned for exotic overlaps.
+- 2026-07-11 (M8 transparency, groups): interior state reset pinned (a group form painted at ca 0.5 with
+  overlapping opaque interior rects composites the overlap ONCE at 0.5 — bit-close to the oracle);
+  non-isolation is HONORED by MuPDF (an interior Multiply in an /I false group sees the page backdrop:
+  probe renders black, /I true renders red), reproduced exactly by the layerless pass-through when the
+  group composite is trivial (alpha 1, blend Normal, no knockout); a non-isolated group with a NON-trivial
+  composite still gets a SaveLayer — an accepted isolated approximation with no corpus coverage (revisit if
+  a real file surfaces). Knockout is HONORED by MuPDF (overlapping ca-0.5 interior rects: the later one
+  replaces the earlier), reproduced via BlendSrc on solid direct-child draws (Skia lerps non-SrcOver blends
+  by AA coverage, which is exactly the knockout composite against an isolated group's transparent initial
+  backdrop; an interior op's own blend degenerates against that backdrop, so Src applies regardless of the
+  op's /BM — corpus-pinned with a /BM /Multiply knockout child). Approximations, logged: /K with /I false
+  is treated as isolated knockout; pattern/shading/tiling paints and masked ops inside knockout groups keep
+  normal compositing. MuPDF quantizes constant alpha slightly differently (0.5 → 125–126 vs our 128, ±3
+  accepted inside the gates).
+- 2026-07-11 (M8 transparency, seam + interpreter mechanics): Device.BeginMask gained `transfer []byte`
+  (the /TR LUT; nil = identity) — the mask-value pipeline is the device's, so the LUT rides the seam.
+  softMaskRes caches per resource frame keyed by the ExtGState NAME (CTM-independent part only; the anchor
+  CTM is captured per gs invocation in gstate.softMaskCTM, mirroring fillPattern/fillPatCTM). The mask
+  replay runs under full form discipline — depth cap, cycle set on the /G reference, shared operator
+  budget, BBox clip, own resources — with alpha/blend/mask reset (the mask group is isolated by
+  construction: it renders on its own surface). Type 3 runs composite through the mask ONCE per run (procs
+  execute with the mask lifted), like MuPDF's per-text-object application. A structural consequence shared
+  with MuPDF's interpreter-driven replay: mask content passes through the DEVICE for every wrapped op, so
+  the stext pass records mask-content text (repeatedly, searchable) — behaviorally unpinned, no corpus
+  needle; revisit only if a real file surfaces.
+- 2026-07-11 (M8 transparency, blend parity + enforcement): all 16 /BM modes map 1:1 to raster.Blend* and
+  land NEAR-EXACT against the oracle — transparency-blend (16 modes × opaque/0.7-alpha over 4 backdrop
+  bands) measures max Δ3 at dpi 72 with 0.00% over Δ8, including the non-separable Hue/Saturation/Color/
+  Luminosity quartet: canvas's ports of Skia's blend stages agree with MuPDF's independent ISO 32000-2
+  implementations to quantization. Three of the four new corpus files sit inside the DEFAULT gate at all
+  DPIs; transparency-smask-lum carries a ratchet (2.2/4.5/3.3) for substituted-letterform text under a
+  gradient mask plus the axial-ramp divergence transported into the alpha channel, where straight-alpha
+  comparison amplifies near-zero-alpha color quantization (alpha 2 vs 4 → unpremultiplied color 64 apart).
+  FuzzContent gained luminosity/alpha-mask ExtGStates (one /G pointing at the self-referential form), a
+  knockout group form, and /SMask /None seeds, plus group/mask phase-ordering checks in its balance device.
 
 ## Verification
 

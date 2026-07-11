@@ -138,12 +138,20 @@ type Device interface {
 	ClipImageMask(img *imaging.Image, ctm gfx.Matrix)
 	// PopClip pops the most recent clip push.
 	PopClip()
-	// BeginGroup opens a transparency group; content until the matching EndGroup composites as a unit.
+	// BeginGroup opens a transparency group; content until the matching EndGroup composites as a unit,
+	// with the group's constant alpha and blend mode applied once at that composite (ISO 32000-2 11.6.6:
+	// the producer resets its alpha/blend/soft-mask state for the group's interior). isolated groups
+	// composite their interior against a transparent backdrop; knockout groups let each interior object
+	// knock out the ones before it.
 	BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend Blend, alpha float64)
 	// EndGroup closes the innermost group.
 	EndGroup()
-	// BeginMask starts soft-mask content: drawing until EndMask defines the mask.
-	BeginMask(bbox gfx.Rect, luminosity bool, backdrop color.NRGBA)
+	// BeginMask starts soft-mask content: drawing until EndMask defines the mask. For a luminosity mask
+	// the mask surface starts at the backdrop color (/BC composited under the mask group, ISO 32000-2
+	// 11.6.5.2) and the mask value is the rendered luminosity; for an alpha mask it starts transparent and
+	// the mask value is the rendered alpha. transfer, when non-nil, is the /TR transfer function sampled to
+	// a 256-entry LUT applied to the mask value.
+	BeginMask(bbox gfx.Rect, luminosity bool, backdrop color.NRGBA, transfer []byte)
 	// EndMask switches from mask content to masked content.
 	EndMask()
 	// PopMask applies the mask to the content drawn since EndMask and pops it.

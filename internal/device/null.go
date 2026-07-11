@@ -68,7 +68,7 @@ func (Null) BeginGroup(gfx.Rect, bool, bool, Blend, float64) {}
 func (Null) EndGroup() {}
 
 // BeginMask implements Device.
-func (Null) BeginMask(gfx.Rect, bool, color.NRGBA) {}
+func (Null) BeginMask(gfx.Rect, bool, color.NRGBA, []byte) {}
 
 // EndMask implements Device.
 func (Null) EndMask() {}

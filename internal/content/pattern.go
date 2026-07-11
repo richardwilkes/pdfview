@@ -225,7 +225,9 @@ func (in *interp) opShading() {
 	if sh == nil {
 		return
 	}
-	in.dev.FillShading(sh, in.gs.ctm, device.Paint{Alpha: in.gs.fillAlpha, Blend: in.gs.blend})
+	in.masked(in.gs.fillAlpha, func() {
+		in.dev.FillShading(sh, in.gs.ctm, device.Paint{Alpha: in.gs.fillAlpha, Blend: in.gs.blend})
+	})
 }
 
 // shadingFor parses /Shading[name] with per-frame caching (failures cache as nil).

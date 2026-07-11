@@ -43,16 +43,18 @@ const (
 	catPattern   cos.Name = "Pattern"
 )
 
-// call is one recorded device call.
+// call is one recorded device call. evenOdd doubles as the isolated (begingroup) / luminosity (beginmask)
+// flag, knockout as begingroup's knockout flag, and alpha as beginmask's transfer-LUT length.
 type call struct {
-	path    *gfx.Path
-	img     *imaging.Image
-	op      string
-	sp      gfx.StrokeParams
-	paint   device.Paint
-	ctm     gfx.Matrix
-	alpha   float64
-	evenOdd bool
+	path     *gfx.Path
+	img      *imaging.Image
+	op       string
+	sp       gfx.StrokeParams
+	paint    device.Paint
+	ctm      gfx.Matrix
+	alpha    float64
+	evenOdd  bool
+	knockout bool
 }
 
 // recorder records device calls and enforces the push/pop balance contract.
@@ -114,11 +116,18 @@ func (r *recorder) ClipImageMask(*imaging.Image, gfx.Matrix) {
 	r.add(&call{op: "clipimagemask"})
 }
 
-func (r *recorder) BeginGroup(gfx.Rect, bool, bool, device.Blend, float64) {}
-func (r *recorder) EndGroup()                                              {}
-func (r *recorder) BeginMask(gfx.Rect, bool, color.NRGBA)                  {}
-func (r *recorder) EndMask()                                               {}
-func (r *recorder) PopMask()                                               {}
+func (r *recorder) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
+	r.add(&call{op: "begingroup", evenOdd: isolated, knockout: knockout, paint: device.Paint{Blend: blend}, alpha: alpha})
+}
+
+func (r *recorder) EndGroup() { r.add(&call{op: "endgroup"}) }
+
+func (r *recorder) BeginMask(_ gfx.Rect, luminosity bool, backdrop color.NRGBA, transfer []byte) {
+	r.add(&call{op: "beginmask", evenOdd: luminosity, paint: device.Paint{Color: backdrop}, alpha: float64(len(transfer))})
+}
+
+func (r *recorder) EndMask() { r.add(&call{op: "endmask"}) }
+func (r *recorder) PopMask() { r.add(&call{op: "popmask"}) }
 func (r *recorder) FillShading(_ *shading.Shading, ctm gfx.Matrix, paint device.Paint) {
 	r.add(&call{op: opFillShading, ctm: ctm, paint: paint, alpha: paint.Alpha})
 }

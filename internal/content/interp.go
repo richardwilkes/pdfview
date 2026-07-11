@@ -75,15 +75,19 @@ type gstate struct {
 	// matrices captured when the pattern was selected.
 	fillPattern   *patternRes
 	strokePattern *patternRes
-	fillComps     []float32
-	strokeComps   []float32
-	sp            gfx.StrokeParams
-	text          textParams
-	ctm           gfx.Matrix
-	fillPatCTM    gfx.Matrix
-	strokePatCTM  gfx.Matrix
-	fillAlpha     float64
-	strokeAlpha   float64
+	// softMask is the active ExtGState soft mask (nil when /SMask is /None or absent); softMaskCTM is the CTM
+	// captured when the gs operator installed it — the mask's anchor space (oracle-pinned; see softmask.go).
+	softMask     *softMaskRes
+	fillComps    []float32
+	strokeComps  []float32
+	sp           gfx.StrokeParams
+	text         textParams
+	ctm          gfx.Matrix
+	fillPatCTM   gfx.Matrix
+	strokePatCTM gfx.Matrix
+	softMaskCTM  gfx.Matrix
+	fillAlpha    float64
+	strokeAlpha  float64
 	// clips counts device clips pushed while this state has been current; Q (or the auto-unwind) pops them.
 	clips int
 	blend device.Blend
@@ -118,6 +122,9 @@ type resFrame struct {
 	spaces   map[cos.Name]pdfcolor.Space
 	shadings map[cos.Name]*shading.Shading
 	patterns map[cos.Name]*patternRes
+	// softMasks caches parsed ExtGState /SMask entries keyed by the ExtGState resource name (nil for /None
+	// and failures); the anchoring CTM is captured per gs invocation, not cached.
+	softMasks map[cos.Name]*softMaskRes
 }
 
 // interp interprets content streams for one Run call.

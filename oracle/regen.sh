@@ -76,6 +76,10 @@ dump shading-radial
 dump shading-function
 dump shading-mesh
 dump pattern-tiling
+dump transparency-blend
+dump transparency-group
+dump transparency-smask-lum
+dump transparency-smask-alpha
 
 if [ -s "$THRESH_STASH/thresholds.tar" ]; then
   tar -xf "$THRESH_STASH/thresholds.tar" -C "$GOLDENS"

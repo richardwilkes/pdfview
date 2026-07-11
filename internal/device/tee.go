@@ -123,9 +123,9 @@ func (t tee) EndGroup() {
 	}
 }
 
-func (t tee) BeginMask(bbox gfx.Rect, luminosity bool, backdrop color.NRGBA) {
+func (t tee) BeginMask(bbox gfx.Rect, luminosity bool, backdrop color.NRGBA, transfer []byte) {
 	for _, d := range t {
-		d.BeginMask(bbox, luminosity, backdrop)
+		d.BeginMask(bbox, luminosity, backdrop, transfer)
 	}
 }
 

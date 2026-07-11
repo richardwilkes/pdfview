@@ -56,7 +56,9 @@ const (
 // paint triangles instead).
 func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, bool) {
 	if p.Shading == nil && p.Tiling == nil {
-		return paintFor(p), true
+		paint := paintFor(p)
+		d.applyKnockout(paint) // Solid draws replace inside knockout groups (mask.go); patterns keep SrcOver.
+		return paint, true
 	}
 	local := p.PatternCTM
 	if p.Shading != nil {

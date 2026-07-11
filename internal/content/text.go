@@ -280,10 +280,14 @@ func (in *interp) emitRun(run *device.TextRun) {
 		return
 	}
 	if fill && in.marks(in.gs.fillSpace, in.gs.fillPattern) {
-		in.dev.FillText(run, in.fillPaint())
+		in.masked(in.gs.fillAlpha, func() {
+			in.dev.FillText(run, in.fillPaint())
+		})
 	}
 	if stroke && in.marks(in.gs.strokeSpace, in.gs.strokePattern) {
-		in.dev.StrokeText(run, &in.gs.sp, in.strokePaint())
+		in.masked(in.gs.strokeAlpha, func() {
+			in.dev.StrokeText(run, &in.gs.sp, in.strokePaint())
+		})
 	}
 	if mode == 3 {
 		in.dev.IgnoreText(run)
@@ -308,10 +312,15 @@ func (in *interp) emitType3Run(run *device.TextRun, paint bool, mode int) {
 	if !paint || !in.marks(in.gs.fillSpace, in.gs.fillPattern) {
 		return
 	}
-	in.dev.FillText(run, in.fillPaint())
-	for i := range run.Glyphs {
-		in.execType3Glyph(run.Font, &run.Glyphs[i])
-	}
+	// The whole run composites through the soft mask once (the mask gates the run as one object, like
+	// MuPDF's per-text-object mask application); the procs execute with the mask lifted so their individual
+	// paints do not each re-apply it.
+	in.masked(in.gs.fillAlpha, func() {
+		in.dev.FillText(run, in.fillPaint())
+		for i := range run.Glyphs {
+			in.execType3Glyph(run.Font, &run.Glyphs[i])
+		}
+	})
 }
 
 // execType3Glyph executes one glyph's charproc with CTM = FontMatrix · Trm, its own resource frame, and

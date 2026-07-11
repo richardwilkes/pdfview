@@ -78,6 +78,18 @@ func TestShadingCorpusPixels(t *testing.T) {
 	}
 }
 
+// TestTransparencyCorpusPixels is milestone M8's second pixel-scope check, following the established pattern:
+// the transparency corpus — all 16 blend modes over mixed backdrops, transparency groups (constant alphas,
+// alpha reset, isolation, knockout), and soft masks (luminosity incl. /BC and a sampled /TR, alpha subtype,
+// /SMask /None reset, gs-time anchoring) — is enforced against the goldens at every recorded DPI.
+func TestTransparencyCorpusPixels(t *testing.T) {
+	for _, name := range []string{
+		"transparency-blend", "transparency-group", "transparency-smask-lum", "transparency-smask-alpha",
+	} {
+		comparePixelsToGolden(t, name, name, true)
+	}
+}
+
 // comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
 // pixels against the golden's gate (its thresholds.json when present, else the default). goldenName equals
 // name except for the stub-codec cross-check described on TestImageCorpusPixels.

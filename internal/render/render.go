@@ -15,14 +15,12 @@
 //
 // Milestone M4 implemented path fills, strokes (with dashing), and clips; M5 added images (RGBA draws and
 // Alpha8 stencil tinting under the image CTM); M6 added text: glyph outlines cached in glyph space and
-// filled/stroked/clipped under each glyph's Trm. Shadings/groups/masks land with M8; until then those calls
-// are no-ops except for their stack obligations, which are always honored so the interpreter's push/pop
-// pairing holds.
+// filled/stroked/clipped under each glyph's Trm; M8 added shadings/patterns (shading.go) and transparency —
+// groups, soft masks, blend modes, knockout (mask.go).
 package render
 
 import (
 	"errors"
-	stdcolor "image/color"
 	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
@@ -60,8 +58,11 @@ type Device struct {
 	textClip *path.Path
 	// clipStack records the canvas save count at each clip push so PopClip can restore precisely.
 	clipStack []int
-	width     int
-	height    int
+	// groupStack and maskStack track open transparency groups and soft-mask spans (see mask.go).
+	groupStack []groupState
+	maskStack  []*maskState
+	width      int
+	height     int
 }
 
 // SetStore wires the document's budgeted resource store into the device, migrating the glyph-path cache from
@@ -569,6 +570,7 @@ func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 	paint := canvas.NewPaint()
 	paint.AntiAlias = true
 	paint.Color = skcolor.ARGB(uint8(alpha*255+0.5), 255, 255, 255)
+	d.applyKnockout(paint)
 	d.drawImage(ci, img, ctm, paint)
 }
 
@@ -609,31 +611,6 @@ func (d *Device) ClipImageMask(_ *imaging.Image, ctm gfx.Matrix) {
 	square.Rect(0, 0, 1, 1)
 	d.ClipPath(square, false, ctm)
 }
-
-// BeginGroup implements device.Device (transparency groups land at M8). The layer indirection already exists
-// so group content composites as a unit once blends/isolation arrive.
-func (d *Device) BeginGroup(_ gfx.Rect, _, _ bool, _ device.Blend, alpha float64) {
-	if alpha < 0 {
-		alpha = 0
-	} else if alpha > 1 {
-		alpha = 1
-	}
-	d.c.SaveLayerAlpha(nil, uint8(alpha*255+0.5))
-}
-
-// EndGroup implements device.Device.
-func (d *Device) EndGroup() {
-	d.c.Restore()
-}
-
-// BeginMask implements device.Device (soft masks land at M8).
-func (d *Device) BeginMask(gfx.Rect, bool, stdcolor.NRGBA) {}
-
-// EndMask implements device.Device (soft masks land at M8).
-func (d *Device) EndMask() {}
-
-// PopMask implements device.Device (soft masks land at M8).
-func (d *Device) PopMask() {}
 
 // FillShading implements device.Device: paint the shading across the current clip (the sh operator). The
 // shading's own geometry — gradient extent under decal/clamp tiling, the function domain, mesh triangles —

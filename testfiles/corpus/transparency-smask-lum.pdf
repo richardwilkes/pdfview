@@ -1,0 +1,80 @@
+%PDF-1.7
+1 0 obj
+<< /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [0 0 0] /N 1 >>
+endobj
+2 0 obj
+<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Function 1 0 R /Extend [true true] >>
+endobj
+3 0 obj
+<< /Length 6 /Type /XObject /Subtype /Form /BBox [0 0 100 200] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /Shading << /SH 2 0 R >> >> >>
+stream
+/SH sh
+endstream
+endobj
+4 0 obj
+<< /Length 21 /Type /XObject /Subtype /Form /BBox [130 60 180 140] /Group << /S /Transparency /CS /DeviceGray >> >>
+stream
+1 g 135 65 40 70 re f
+endstream
+endobj
+5 0 obj
+<< /Length 33 /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [16] /BitsPerSample 8 /Filter /ASCIIHexDecode >>
+stream
+FFEEDDCCBBAA99887766554433221100>
+endstream
+endobj
+6 0 obj
+<< /Length 22 /Type /XObject /Subtype /Form /BBox [0 0 90 200] /Group << /S /Transparency /CS /DeviceGray >> >>
+stream
+0.35 g 0 0 90 200 re f
+endstream
+endobj
+7 0 obj
+<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 20 0 190] /Function 1 0 R /Extend [true true] >>
+endobj
+8 0 obj
+<< /Length 6 /Type /XObject /Subtype /Form /BBox [310 0 420 200] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /Shading << /SH 7 0 R >> >> >>
+stream
+/SH sh
+endstream
+endobj
+9 0 obj
+<< /Length 308 >>
+stream
+q /GA gs 0.8 0.1 0.2 rg 0 0 100 200 re f Q
+q /GB gs 0 0.2 0.9 rg 110 0 90 200 re f Q
+q /GC gs 1 0 0 1 25 0 cm 0.1 0.5 0.15 rg 185 0 90 200 re f Q
+q 1 0 0 1 210 0 cm /GC2 gs 0.1 0.5 0.15 rg 0 0 90 200 re f Q
+q /GD gs BT /F1 34 Tf 0.1 0.1 0.5 rg 312 150 Td (Mask) Tj 0 -60 Td (over) Tj 0 -60 Td (text) Tj ET Q
+
+endstream
+endobj
+10 0 obj
+<< /Type /Pages /Kids [11 0 R] /Count 1 >>
+endobj
+11 0 obj
+<< /Type /Page /Parent 10 0 R /MediaBox [0 0 420 200] /Resources << /ExtGState << /GA << /SMask << /S /Luminosity /G 3 0 R >> >> /GB << /SMask << /S /Luminosity /G 4 0 R /BC [0.6] >> >> /GC << /SMask << /S /Luminosity /G 6 0 R /TR 5 0 R >> >> /GC2 << /SMask << /S /Luminosity /G 6 0 R /TR 5 0 R >> >> /GD << /SMask << /S /Luminosity /G 8 0 R >> >> >> /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >> >> /Contents 9 0 R >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 10 0 R >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000009 00000 n 
+0000000089 00000 n 
+0000000204 00000 n 
+0000000396 00000 n 
+0000000566 00000 n 
+0000000744 00000 n 
+0000000911 00000 n 
+0000001028 00000 n 
+0000001222 00000 n 
+0000001581 00000 n 
+0000001640 00000 n 
+0000002105 00000 n 
+trailer
+<< /Size 13 /Root 12 0 R >>
+startxref
+2156
+%%EOF

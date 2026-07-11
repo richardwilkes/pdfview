@@ -292,10 +292,14 @@ func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 	}
 	if !in.path.IsEmpty() {
 		if fill && in.marks(in.gs.fillSpace, in.gs.fillPattern) {
-			in.dev.FillPath(in.path, evenOdd, in.gs.ctm, in.fillPaint())
+			in.masked(in.gs.fillAlpha, func() {
+				in.dev.FillPath(in.path, evenOdd, in.gs.ctm, in.fillPaint())
+			})
 		}
 		if stroke && in.marks(in.gs.strokeSpace, in.gs.strokePattern) {
-			in.dev.StrokePath(in.path, &in.gs.sp, in.gs.ctm, in.strokePaint())
+			in.masked(in.gs.strokeAlpha, func() {
+				in.dev.StrokePath(in.path, &in.gs.sp, in.gs.ctm, in.strokePaint())
+			})
 		}
 	}
 	if in.pending != clipNone {
@@ -420,6 +424,25 @@ func (in *interp) opExtGState() {
 	if bm, has := dict["BM"]; has {
 		in.gs.blend = blendFor(in.doc, bm)
 	}
+	if smObj, has := dict["SMask"]; has {
+		in.gs.softMask = in.softMaskFor(name, smObj)
+		in.gs.softMaskCTM = in.gs.ctm // The mask anchors to the CTM at gs time (oracle-pinned; softmask.go).
+	}
+}
+
+// softMaskFor parses an ExtGState /SMask entry with per-frame caching keyed by the ExtGState resource name
+// (the CTM-independent part is cached; the anchor CTM is captured per invocation).
+func (in *interp) softMaskFor(gsName cos.Name, obj cos.Object) *softMaskRes {
+	frame := &in.frames[len(in.frames)-1]
+	if frame.softMasks == nil {
+		frame.softMasks = make(map[cos.Name]*softMaskRes)
+	}
+	if sm, ok := frame.softMasks[gsName]; ok {
+		return sm
+	}
+	sm := in.parseSoftMask(obj)
+	frame.softMasks[gsName] = sm
+	return sm
 }
 
 // d64 resolves dict[key] as a float64.
@@ -505,6 +528,24 @@ func (in *interp) opDo() {
 	if v, has := numbers6(in.doc, stream.Dict, "Matrix"); has {
 		in.gs.ctm = gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}.Mul(in.gs.ctm)
 	}
+	// A /Group /S /Transparency form composites as a transparency group (ISO 32000-2 11.6.6): the current
+	// soft mask, constant alpha, and blend apply once to the group's composite (the mask via the replay, the
+	// alpha/blend via BeginGroup), and the group's interior starts with those reset. Painting a group via Do
+	// is a nonstroking operation, so the FILL alpha composites it.
+	inGroup, isolated, knockout := in.transparencyGroup(stream.Dict)
+	maskWrapped := false
+	if inGroup {
+		bboxDev := gfx.Rect{}
+		if bbox, has := rectFrom(in.doc, stream.Dict, "BBox"); has {
+			bboxDev = transformAABB(bbox, in.gs.ctm)
+		}
+		in.dev.BeginGroup(bboxDev, isolated, knockout, in.gs.blend, in.gs.fillAlpha)
+		if sm := in.gs.softMask; sm != nil {
+			in.replayMask(sm, in.gs.softMaskCTM)
+			maskWrapped = true
+		}
+		in.gs.fillAlpha, in.gs.strokeAlpha, in.gs.blend, in.gs.softMask = 1, 1, device.BlendNormal, nil
+	}
 	if bbox, has := rectFrom(in.doc, stream.Dict, "BBox"); has {
 		clip := &gfx.Path{}
 		clip.Rect(bbox.X0, bbox.Y0, bbox.X1-bbox.X0, bbox.Y1-bbox.Y0)
@@ -525,7 +566,31 @@ func (in *interp) opDo() {
 	in.path, in.cur, in.start, in.hasCur, in.pending = savedPath, savedCur, savedStart, savedHasCur, savedPending
 	in.frames = in.frames[:len(in.frames)-1]
 	in.res = in.res[:len(in.res)-1]
+	if inGroup {
+		// The BBox clip must pop before the mask/group layers close, keeping the device's push/pop nesting
+		// well-formed; opRestore then only restores the graphics state.
+		in.popClips(0)
+		if maskWrapped {
+			in.dev.PopMask()
+		}
+		in.dev.EndGroup()
+	}
 	in.opRestore()
+}
+
+// transparencyGroup reports whether a form XObject's dictionary declares a transparency group, with its
+// isolation (/I) and knockout (/K) attributes.
+func (in *interp) transparencyGroup(dict cos.Dict) (isGroup, isolated, knockout bool) {
+	groupDict, has := in.doc.GetDict(dict, "Group")
+	if !has {
+		return false, false, false
+	}
+	if s, _ := in.doc.GetName(groupDict, "S"); s != "Transparency" {
+		return false, false, false
+	}
+	isolated, _ = cos.AsBool(in.doc.Resolve(groupDict["I"]))
+	knockout, _ = cos.AsBool(in.doc.Resolve(groupDict["K"]))
+	return true, isolated, knockout
 }
 
 // numbers6 reads dict[key] as six finite numbers.
