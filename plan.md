@@ -47,8 +47,9 @@ C-toolchain requirements: the library builds with `CGO_ENABLED=0`.
 4. **float32 funnel**: every geometry value the cgo code received as `C.float` (TOC x/y, link rects, dest points,
    search quad corners, page bounds) must round-trip through `float32` before the `float64` scale/floor/ceil math,
    or the exact-value tests will show 1-px off-by-ones. The engine-seam types in `pdf.go` already encode this.
-5. **`main` stays green** every session via the gate mechanism; at cutover `pdf_test.go` must be byte-identical to
-   its pre-M0 state (`git diff 26de8a9 -- pdf_test.go` empty after gate lines are removed at M8).
+5. **`main` stays green** every session via the gate mechanism; at cutover `pdf_test.go` must be identical to its
+   pre-M0 state apart from the fixture path (user-directed, see decision log 2026-07-11): after the M8 gate removal,
+   `git diff 26de8a9 -- pdf_test.go` shows only the three `testfiles/corpus/glaive.pdf` path literals.
 6. Panics from hostile input never escape the public API: `recover()` in `New`, render, and font loading maps to
    `ErrInternal` / `ErrUnableToOpenPDF` (added when those paths gain engine code; fuzzing enforces it).
 
@@ -362,7 +363,8 @@ Exit: **TestPDF green including the 9 exact GURPS rects** (gate → "M7"); searc
 - [ ] Annotation appearance streams (/AP) rendered like the oracle does
 - [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
 - [ ] `DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) error` vector API (documented as canvas-coupled)
-- [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must be empty
+- [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must show only the three
+      `testfiles/corpus/glaive.pdf` fixture-path literals (see decision log 2026-07-11)
 - [ ] Rewrite README + `.claude/CLAUDE.md` for the pure-Go engine; retire this plan or archive it
 - [ ] Tag first release
 
@@ -413,12 +415,15 @@ Exit: full parity suite green at committed thresholds; `CGO_ENABLED=0 go build .
 - 2026-07-11: glaive.pdf is a byte-identical copy of the original fixture rather than a symlink (Windows checkout
   safety; git stores one blob for both). internal-links.pdf byte-matches the internalLinkPDF constant in
   pdf_test.go, verified via go/ast extraction.
+- 2026-07-11: user-directed: the duplicate `testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf` was removed;
+  `testfiles/corpus/glaive.pdf` is the canonical fixture and `pdf_test.go` now reads it. This relaxes the M8
+  "pdf_test.go byte-identical" criterion to "identical apart from the three fixture-path literals".
 
 ## Verification
 
 - Every session: `./build.sh --all` (build, golangci-lint, `go test -race ./...`).
 - Parity: `go test -run Parity ./...` once the harness exists (pure Go, committed goldens).
 - Oracle regen (local only): `cd oracle && ./regen.sh` (needs cgo + `../pdf`); review golden diffs before commit.
-- End-to-end from M4 on: `go run ./example testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf GURPS` → compare `page0.png`
+- End-to-end from M4 on: `go run ./example testfiles/corpus/glaive.pdf GURPS` → compare `page0.png`
   against the oracle's PNG. `mutool` (brew install mupdf-tools) is a secondary investigative tool only.
 - Cutover checks are listed under M8.

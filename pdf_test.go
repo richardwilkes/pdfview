@@ -13,7 +13,7 @@ import (
 func TestPDF(t *testing.T) {
 	gate(t, "M7")
 	// Load the data we are going to use
-	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
+	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestMalformedPDF(t *testing.T) {
 
 func TestUseAfterRelease(t *testing.T) {
 	gate(t, "M1")
-	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
+	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestUseAfterRelease(t *testing.T) {
 
 func TestRenderPageForSizeLimits(t *testing.T) {
 	gate(t, "M4")
-	data, err := os.ReadFile("testfiles/GLAIVE_Mini_v2_3_for_GURPS_4e.pdf")
+	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,10 +6,10 @@ The per-file dump parameters (search needles, passwords) are registered in `orac
 file, add a dump line there and document the file's provenance below. Corpus files and goldens are committed;
 nothing here is fetched or regenerated in CI.
 
-## Copies of existing fixtures
+## Pre-existing fixtures
 
-- `glaive.pdf` — byte-identical copy of `../GLAIVE_Mini_v2_3_for_GURPS_4e.pdf`, which must stay at that path
-  because `pdf_test.go` references it. "GLAIVE Mini v2.3 for GURPS 4e" by T Bone (Games Diner,
+- `glaive.pdf` — the repository's long-standing test fixture, formerly at `../GLAIVE_Mini_v2_3_for_GURPS_4e.pdf`
+  (moved here 2026-07-11; `pdf_test.go` reads this path). "GLAIVE Mini v2.3 for GURPS 4e" by T Bone (Games Diner,
   <https://www.gamesdiner.com/glaive_mini>), distributed as a free download; it has shipped as this repository's
   test fixture since before the pure-Go port. The exact-value expectations in `pdf_test.go` (page count, TOC
   spots, GURPS search hits, link bounds, image dimensions) come from this file.
