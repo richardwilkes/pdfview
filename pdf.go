@@ -10,13 +10,15 @@
 // Package pdfview renders PDF pages to images and extracts text-search hits, links, and the table of contents. It
 // also handles password-protected documents.
 //
-// The package is a pure-Go PDF engine with rasterization delegated to github.com/richardwilkes/canvas. It is being
-// built milestone by milestone — see plan.md for the working plan, milestone status, and current capabilities. With
-// the COS layer (M1), encryption (M2), navigation (M3), the graphics core (M4), images (M5), fonts and text (M6),
-// and structured text + search (M7) in place, New parses documents — including damaged ones, via a repair scan —
-// PageCount, authentication, TableOfContents, page bounds, and links are real, RenderPage/RenderPageForSize
-// rasterize each page's content (paths, clips, colors, form XObjects, images, text) through the content-stream
-// interpreter, and text search returns MuPDF-compatible hit rectangles. Shadings and patterns render at M8.
+// The package is a pure-Go PDF engine — no cgo, CGO_ENABLED=0 builds — with rasterization delegated to
+// github.com/richardwilkes/canvas. New parses documents (including damaged ones, via a repair scan) and decrypts
+// password-protected ones (standard security handler R2-R6); RenderPage and RenderPageForSize rasterize each
+// page's content — paths, clips, colors, form XObjects, images, fonts and text, shadings, patterns, transparency
+// groups, soft masks, blend modes, and annotation appearance streams — through the content-stream interpreter;
+// text search returns MuPDF-compatible hit rectangles; and DrawPage draws a page's content onto a caller-owned
+// canvas. The engine's behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it
+// succeeds: coordinates exactly, pixels within committed perceptual thresholds. See README.md for the
+// architecture and plan.md for the port's historical record and decision log.
 package pdfview
 
 import (
@@ -440,10 +442,10 @@ func (d *document) release() {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// Engine seam. Everything below is the boundary the pure-Go engine grows behind, milestone by milestone (see
-// plan.md). The public methods above are fully wired to it so their validation, budgeting, and coordinate-conversion
-// behavior — the frozen API contract — is already in its final shape; each milestone only replaces stub bodies here
-// with calls into the internal packages.
+// Engine seam. Everything below is the boundary between the frozen public API above — validation, budgeting, and
+// coordinate conversion — and the engine in the internal packages. The seam types deliberately carry float32
+// geometry (plan.md invariant 4): every value the original cgo implementation received as a C float must
+// round-trip through float32 before the float64 scale/floor/ceil math, or the exact-value tests show off-by-ones.
 // ------------------------------------------------------------------------------------------------------------------
 
 // engineDocument holds the engine-side state for an open document. It is created by openEngine and discarded by
@@ -461,8 +463,8 @@ type engineDocument struct {
 }
 
 // page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points
-// (the effective box after rotation, in float32 per the funnel below). Content (resources, content streams)
-// arrives at M4.
+// (the effective box after rotation, in float32 per the funnel below). Content (resources, content streams) is
+// fetched from the engine's document by page number when rendering or searching.
 type page struct {
 	width, height float32
 	number        int
@@ -470,7 +472,7 @@ type page struct {
 
 // outlineNode is one node of the document outline (/Outlines tree), in the shape buildTOCEntries consumes: siblings
 // are linked through next, children hang off down, and x/y are the destination coordinate on the 0-based target page
-// in top-left/y-down page space (NaN when the destination carries no explicit coordinate). Produced at M3.
+// in top-left/y-down page space (NaN when the destination carries no explicit coordinate).
 type outlineNode struct {
 	down  *outlineNode
 	next  *outlineNode
@@ -488,7 +490,7 @@ type quad struct {
 }
 
 // pageLinkInfo describes one link annotation on a page, in top-left/y-down page space. Produced by the navigation
-// layer (M3) and consumed by loadLinks to build the public PageLink values.
+// layer (internal/doc) and consumed by loadLinks to build the public PageLink values.
 type pageLinkInfo struct {
 	uri            string  // raw URI for external links; empty for internal links
 	page           int     // internal links: 0-based target page; -1 when external or unresolvable
@@ -534,7 +536,7 @@ func (e *engineDocument) pageCount() int {
 	return e.doc.PageCount()
 }
 
-// loadPage loads the given 0-based page, capturing its display geometry. The page's content arrives at M4.
+// loadPage loads the given 0-based page, capturing its display geometry.
 func (e *engineDocument) loadPage(pageNumber int) (*page, error) {
 	w, h, err := e.doc.PageSize(pageNumber)
 	if err != nil {
@@ -633,15 +635,23 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToLoadPage
 	}
-	if data := e.doc.PageContents(pg.number); len(data) > 0 {
-		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
-	}
-	e.runAnnots(pg, ctm, dev)
+	e.runPage(pg, ctm, dev)
 	pix, stride, err = dev.Pixels()
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToCreateImage
 	}
 	return pix, width, height, stride, nil
+}
+
+// runPage runs the page's content streams and then its annotation appearance streams through the interpreter
+// against the given device under the page-space→device matrix ctm. It is the one body shared by every consumer
+// of a page's drawn content: rasterize (raster device), search (structured-text device), and DrawPage (raster
+// device wrapped around a caller's canvas).
+func (e *engineDocument) runPage(pg *page, ctm gfx.Matrix, dev device.Device) {
+	if data := e.doc.PageContents(pg.number); len(data) > 0 {
+		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
+	}
+	e.runAnnots(pg, ctm, dev)
 }
 
 // runAnnots draws the page's annotation appearance streams after the page content, in /Annots order — matching
@@ -692,12 +702,9 @@ func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []qu
 		return nil
 	}
 	dev := stext.New()
-	if data := e.doc.PageContents(pg.number); len(data) > 0 {
-		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
-	}
 	// Annotation appearance text is part of MuPDF's structured text (probe-pinned: widget /AP text is
 	// searchable), so the stext pass runs the appearances exactly like the raster pass does.
-	e.runAnnots(pg, ctm, dev)
+	e.runPage(pg, ctm, dev)
 	found := dev.Search(needle, maxHits)
 	if len(found) == 0 {
 		return nil

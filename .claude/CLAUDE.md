@@ -2,139 +2,103 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Pure-Go rewrite in progress.** This repository is being reimplemented as a pure-Go PDF engine (no cgo, no
-> MuPDF), with rasterization delegated to `github.com/richardwilkes/canvas`. The working plan, milestone status,
-> decision log, and session protocol live in [plan.md](plan.md) — read that first; where it conflicts with anything
-> below, plan.md wins. The sections below describe the original cgo/MuPDF binding this repo was seeded from (still
-> published as `github.com/richardwilkes/pdf`) and will be rewritten as milestones land; the cgo pieces they mention
-> (lib/, include/, the `wrapped_fz_*` wrappers, update_from_release.sh, setup-windows.ps1, the Windows UCRT
-> toolchain requirement) were removed at milestone M0.
-
 ## Overview
 
-A small Go package (`github.com/richardwilkes/pdf`) that wraps [MuPDF](https://mupdf.com)
-via cgo to render PDF pages to images and extract text-search hits, links, and the table
-of contents. It also handles password-protected documents. The entire public API lives in a
-single file, [pdf.go](pdf.go). A runnable demonstration lives in [example/main.go](example/main.go)
-(`go run ./example document.pdf [search]`).
+`github.com/richardwilkes/pdfview` is a **pure-Go PDF engine** (no cgo; builds with `CGO_ENABLED=0`) that renders
+PDF pages to images and extracts text-search hits, links, and the table of contents, including for
+password-protected documents. Rasterization is delegated to `github.com/richardwilkes/canvas` (a pure-Go Skia
+port, locally `../canvas`). The package is the successor to `github.com/richardwilkes/pdf` (MuPDF via cgo), which
+remains published separately and serves as this repo's **behavioral oracle**: the test suite pins the public API's
+output — coordinates exactly, pixels within committed thresholds — to what that binding produces.
 
-Static MuPDF libraries are vendored in [lib/](lib/) for six platforms (macOS, Linux, and
-Windows, each amd64 and arm64), so no system MuPDF install is needed. Because the package uses
-cgo, a C toolchain and `CGO_ENABLED=1` are required; cross-compiling needs a matching cross C
-toolchain. Targets go 1.26.
+The port was built milestone by milestone against [plan.md](plan.md), which is retained as the historical record:
+milestone status, the dated decision log (every behavioral pin against the oracle, with how it was measured), and
+per-file pixel-parity numbers. **Consult plan.md's decision log before changing rendering, font, color, or search
+behavior** — most constants and code paths in those areas are oracle-pinned, and the log explains what pins them.
 
 ## Commands
 
 - `./build.sh` — build everything (`go build -v ./...`)
-- `./build.sh --all` — build, lint, and run tests with `-race`
-- `./build.sh --lint` — install (if needed) and run golangci-lint
-- `./build.sh --test` / `--race` — run tests, optionally with the race detector
-- `go test -run TestPDF ./...` — run the single test directly
-- `./update_from_release.sh` — refresh the vendored MuPDF headers ([include/mupdf](include/mupdf))
-  and per-platform static libs ([lib/](lib/)) by downloading the `libmupdf_*.tar.gz` artifacts from
-  the latest [richardwilkes/mupdf](https://github.com/richardwilkes/mupdf) GitHub release. Requires
-  the GitHub CLI (`gh`). The resulting `lib/*.a` and headers are committed to the repo.
-- `setup-windows.ps1` — one-time Windows machine setup (Git, Go, UCRT mingw-w64 toolchain, PATH,
-  `CGO_ENABLED`). See the Windows toolchain note below.
+- `./build.sh --all` — build, golangci-lint, and tests with `-race` (the bar every change must pass)
+- `./build.sh --lint` / `--test` / `--race` — the individual pieces
+- `go test -run TestParity ./...` — golden-parity suite alone
+- `go run ./example document.pdf [search]` — end-to-end demonstration
+- `cd oracle && ./regen.sh` — regenerate testfiles/goldens from the cgo binding (local/manual only; requires cgo
+  and `../pdf`; CI stays pure Go and offline). Review golden diffs before committing them.
+- `testfiles/external/fetch-verapdf.sh` — fetch the veraPDF corpus (gitignored) for the optional soak
+  (`PDFVIEW_SOAK_DIR=... go test -run TestExternalCorpusSoak .`)
 
-### Windows C toolchain (UCRT, not MSVCRT)
-
-The vendored Windows static libs are built with a **UCRT** mingw-w64 toolchain. The local C toolchain
-must also be UCRT mingw-w64 (MSYS2 `ucrt64`). The MSVCRT `mingw64` variant and TDM-GCC both fail at
-link time with `undefined reference to '__intrinsic_setjmpex'` — that symbol is emitted only against
-UCRT mingw-w64 headers and resolvable only by a UCRT runtime, so this is a C-runtime mismatch, not a
-missing `-l` flag. CI uses UCRT toolchains as well (the workflow fetches a `-ucrt-` llvm-mingw build
-for windows/arm64). Build from Git Bash or PowerShell with `ucrt64\bin` on `PATH`, not from the MSYS2
-shell. `setup-windows.ps1` configures this.
+There is no C toolchain, vendored library, or platform-specific setup on any platform. CI
+(.github/workflows/build.yml) runs a four-runner matrix (ubuntu-22.04, ubuntu-22.04-arm, macos-26, windows-2022)
+plus an explicit `CGO_ENABLED=0 go build ./...` check and short fuzz smokes.
 
 ## Architecture
 
-### cgo + MuPDF binding
+The frozen public API lives in [pdf.go](pdf.go): `New(buffer, maxCacheSize)`, `RequiresAuthentication`,
+`Authenticate`, `PageCount`, `TableOfContents(dpi)`, `RenderPage`, `RenderPageForSize`, `Release`, the sentinel
+errors, and the `OverallMax*` budget variables. Its methods hold the document's one mutex, check released state,
+enforce budgets, and convert coordinates; they call into the engine seam (`engineDocument`, bottom of the file),
+which drives the `internal/` packages. [drawpage.go](drawpage.go) adds `DrawPage`, the one canvas-coupled API
+(renders onto a caller-owned `*canvas.Canvas`; only file in the root package that imports canvas types).
 
-[pdf.go](pdf.go) opens with a cgo preamble that `#include`s `mupdf/fitz.h` and links the
-per-platform static library (`-lmupdf_<os>_<arch>`) from [lib/](lib/). MuPDF reports many
-errors through a C-level `fz_try`/`fz_catch` exception mechanism that cgo cannot cross
-safely. The preamble therefore defines `wrapped_fz_*` C functions that run the throwing
-calls inside `fz_try`/`fz_catch` and return `NULL`/`0` on failure. **Any MuPDF call that can
-"throw" must be invoked through such a wrapper, never directly from Go.**
+Layering (dependencies point downward only):
 
-### Document lifecycle and memory
+- `internal/cos` — lexer, object model, xref (classic/stream/hybrid, /Prev chains), object streams, repair scan,
+  resolver with cycle guard, decryption hooks
+- `internal/filter` — Flate, LZW (both EarlyChange modes), ASCIIHex/85, RunLength, PNG/TIFF predictors
+- `internal/crypt` — standard security handler R2–R6 (RC4/AES), auth bits matching the oracle
+- `internal/doc` — page tree, destinations, outline, links, annotations (/AP selection + placement), page geometry
+  (MediaBox∩CropBox, /Rotate, y-flip)
+- `internal/function`, `internal/color` — PDF functions 0/2/3/4; color conversions (behavioral tables captured
+  from the oracle's ICC-backed output — do not replace with formulas)
+- `internal/type1`, `internal/font` (+ `font/data`) — font programs, encodings, widths, glyph outlines; embedded
+  Liberation bundle for deterministic substitution (never system fonts)
+- `internal/content` — content-stream interpreter (graphics state, all operators, XObjects, patterns, shadings,
+  transparency, Type 3 recursion); emits calls on the `internal/device.Device` seam
+- `internal/imaging`, `internal/shading` — image decode (JBIG2/JPX are deliberate blank-rendering stubs), shading
+  types 1–7
+- `internal/render` — **sole canvas importer**; raster device (fills, strokes, clips, text via outlines plus a
+  glyph-coverage blit cache, images, gradients, tiling, groups/soft masks); never import `canvas/gpu`
+- `internal/stext` — structured-text device and MuPDF-compatible search (its own scale-1 interpreter pass; see
+  the M7 decision log for why it cannot share the render pass)
+- `internal/store` — the maxCacheSize-budgeted LRU (pure cache: output never depends on budget)
+- `oracle/` — separate cgo module (own go.mod, `replace` to `../pdf`); never imported by the library
 
-`New(buffer, maxCacheSize)` scans the first 1KB for the `%PDF` marker (tolerating leading bytes
-before it, as Acrobat and MuPDF themselves do), creates an `fz_context`, registers the document
-handlers, copies the buffer into C memory (`C.CBytes`), and opens it as an in-memory
-stream. The `Document` type embeds a pointer to an unexported `document` that owns three C
-resources: `ctx`, `doc`, and `data`. These are freed in `release()` in that paired order (doc,
-data, ctx). After release, `ctx`/`doc` are nil; every public method first takes `d.lock` and
-checks `released()`, returning a zero value or `ErrDocumentReleased` rather than calling into C.
+Key contracts: every geometry value crosses the seam as **float32** (the C-float funnel the exact-value tests were
+baselined against — see plan.md invariant 4); pixels are premultiplied until pdf.go's round-half-up
+`unpremultiply`; panics from hostile input never escape the public API (`recover()` at the seam boundaries maps to
+sentinel errors); one mutex serializes all engine work per document.
 
-Cleanup is handled two ways: `runtime.AddCleanup` runs `release()` at GC time, and callers
-may call `Release()` for immediate reclamation. `document` is embedded by pointer (rather
-than by value) so it lives in its own heap allocation, distinct from the `Document` wrapper.
-`runtime.AddCleanup` requires that the cleanup arg (`d.document`) not point into the same
-allocation as the tracked pointer (`&d`); otherwise the tracked object can never become
-unreachable and the cleanup would never run (it panics at registration time). A `sync.Mutex`
-on the document serializes all C calls, so methods are safe to call concurrently but execute
-one at a time.
+## Testing
 
-### Coordinate scaling
+- `TestParity` (root) replays the public API against committed goldens in `testfiles/goldens/` (produced by
+  `oracle/regen.sh` from `testfiles/corpus/`): sha256 pairing, page counts, auth-status tables, TOC/links/search
+  rects (exact), and pixels within each golden's gate — the default (≤2% of pixels over Δ24, ≤10% over Δ8, mean
+  Δ≤2) unless the golden carries a `thresholds.json` ratchet (justified, only ever tightened).
+- `TestPDF` and friends in pdf_test.go assert exact literals against the GLAIVE fixture — these are the original
+  cgo binding's tests, byte-unchanged apart from the copyright header and fixture path; treat any needed change
+  to them as an API regression.
+- Per-area pixel/quad tests: `TestTextQuadParity` (every search quad, positional, ≤0.5 pt),
+  `Test{Vector,Text,Image,Shading,Transparency,Annotation}CorpusPixels`, `TestDrawPage`, `TestCacheBudget`
+  (byte-identical renders at any budget).
+- Ten fuzz targets (FuzzOpen, FuzzCrypt, FuzzFilters, FuzzContent, FuzzCMap, FuzzFontProgram, FuzzType1,
+  FuzzImaging, FuzzShading, FuzzStext). CI smokes them; crashers get committed as regression seeds plus a
+  unit-level pin.
+- The veraPDF soak (2694 files) is env-gated (`PDFVIEW_SOAK_DIR`) and offline-optional; CI never fetches it.
 
-DPI is converted to a scale factor via `dpiToScale` (`dpi/72`, clamped to 10x to guard
-against bad EDID data). `RenderPage` renders at a fixed DPI; `RenderPageForSize` computes a
-scale to fit within a max width/height. The same scale is applied to search-hit quads, link
-rectangles, internal-link destination points, and TOC x/y positions so all returned coordinates
-are in rendered-image pixel space. Rendered output is always `*image.NRGBA` (RGB device colorspace, alpha=1). MuPDF renders
-with premultiplied alpha, so `renderPage` runs `unpremultiply` on each non-opaque, non-transparent
-pixel to convert back to the straight alpha `image.NRGBA` expects.
+When pixels drift: regenerate nothing until you understand the diff. Ratchets exist for measured, understood
+divergences (substitute-font letterforms, AA-model edge redistribution); a new divergence is a bug until proven
+otherwise. Golden regeneration is a deliberate, reviewed act (determinism notes in plan.md's decision log).
 
-`quadToRect` builds the axis-aligned bounding box from all four corners of a search-hit quad (not
-just two), so boxes stay correct for rotated or skewed text; min uses `math.Floor`, max uses
-`math.Ceil`.
+## Conventions
 
-### Authentication
-
-`RequiresAuthentication()` wraps `fz_needs_password`. `Authenticate(password)` wraps
-`fz_authenticate_password` and returns an `AuthenticationStatus` byte; a non-zero value means
-success, and the `NoAuthenticationRequiredMask` / `UserAuthenticatedMask` / `OwnerAuthenticatedMask`
-bit masks describe the detail.
-
-### Resource limits
-
-Several package-level `OverallMax*` variables cap how much work untrusted input can force,
-guarding against out-of-memory errors:
-
-- `OverallMaxHits` (default 1000) — maximum search-hit boxes returned, regardless of the
-  `maxHits` argument passed to a render call.
-- `OverallMaxLinks` (default 1000) — maximum links returned for a page.
-- `OverallMaxTOCEntries` (default 1000) — maximum table-of-contents entries returned, counted
-  across the entire (possibly nested) outline tree.
-- `OverallMaxPixels` (default `math.MaxInt32 / 4`) — maximum pixels (width × height) in a
-  rendered image, matching the internal 32-bit ceiling on the rendered buffer's byte size.
-
-A render whose output would exceed `OverallMaxPixels` is rejected with `ErrImageTooLarge`.
-`RenderPageForSize` checks this up front—before building the display list or asking MuPDF to
-allocate the pixmap—and both render paths also enforce it centrally in `renderPage`.
-
-### Conventions
-
-- Page numbers are 0-based internally. `loadLinks` classifies each link with
-  `fz_is_external_link`: external links keep their URI (`PageNumber` stays -1); internal links are
-  resolved via `fz_resolve_link` + `fz_page_number_from_location` to a 0-based page number (URI
-  emptied). That resolved location is already 0-based, so no decrement is applied — unlike the
-  1-based `#page=N` URI text the old hand-parser consumed. Internal links that cannot be resolved
-  (page -1, empty URI) are dropped. `fz_resolve_link` also yields a destination point on the target
-  page (`PageLink.DestPoint`), in the same top-left/y-down page space as link rects; it is 0,0 when
-  the destination carries no explicit coordinate (e.g. a /Fit destination) or for external links.
-- All strings coming from MuPDF pass through `sanitizeString`, which strips non-printable/
-  control runes (including U+FFFD, the replacement character that stands in for bytes that
-  could not be decoded as valid UTF-8, such as the unmappable dot-leader glyphs some PDFs put
-  in outline titles) and trims whitespace.
-- Errors are predefined sentinel `error` values at the top of the file; return those rather
-  than constructing new ones.
-
-## Testing notes
-
-The test in [pdf_test.go](pdf_test.go) asserts exact values (page count, TOC count, search-hit
-rectangles, link bounds, image stride/bounds) against a committed fixture in
-[testfiles/](testfiles/). These exact numbers depend on the bundled MuPDF version, so a MuPDF
-upgrade (via `update_from_release.sh`) will likely require updating the expected values in the test.
+- Every `.go` file begins with the standard Richard A. Wilkes MPL-2.0 copyright header (goheader-enforced;
+  `internal/font/data/gen` emits it into generated files).
+- Errors returned by the public API are the predefined sentinels at the top of pdf.go; return those rather than
+  constructing new ones.
+- Page numbers are 0-based everywhere. All strings from the engine pass through `sanitizeString`.
+- Resource caps are named constants documented where they are defined; termination is guaranteed by caps, not
+  timeouts.
+- MuPDF/mutool are run-only investigative tools (the repo is clean-room: ISO 32000-2 is the spec authority;
+  pdfcpu, rsc.io/pdf, pdf.js, x/image are consultable). Never read MuPDF source. Never modify the sibling repos
+  (`../pdf`, `../canvas`, `../mupdf`).

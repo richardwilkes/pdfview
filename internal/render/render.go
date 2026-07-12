@@ -96,6 +96,27 @@ func New(width, height int) (*Device, error) {
 	return &Device{surf: surf, c: surf.Canvas(), width: width, height: height}, nil
 }
 
+// Wrap returns a device that draws onto the caller's canvas instead of an owned raster surface (the public
+// DrawPage API). The device never touches the canvas's surface lifecycle — Pixels and Reset are unavailable —
+// and FillText's glyph-coverage blit fast path is disabled (it composites straight into an owned surface's
+// pixmap), so text renders through the pinned merged-outline path, which transforms correctly under any state
+// the caller's canvas carries. Soft-mask spans still render to their own offscreen surfaces, sized from the
+// canvas's base device so mask coverage spans the whole canvas.
+func Wrap(c *canvas.Canvas) (*Device, error) {
+	if c == nil {
+		return nil, ErrSurface
+	}
+	base := c.BaseDevice()
+	if base == nil {
+		return nil, ErrSurface
+	}
+	width, height := int(base.Width()), int(base.Height())
+	if width <= 0 || height <= 0 {
+		return nil, ErrSurface
+	}
+	return &Device{c: c, width: width, height: height}, nil
+}
+
 // Pixels reads back the rendered image as premultiplied RGBA bytes (4 per pixel), row-major with the returned
 // stride. The alpha stays premultiplied by design; the caller unpremultiplies (see the package comment). The
 // pixels are read straight from the surface's pixmap — byte-identical to the premul→premul ReadPixels copy
@@ -103,6 +124,9 @@ func New(width, height int) (*Device, error) {
 // MakeImageSnapshot: a snapshot would share the backing store and force a copy-on-write allocation on the
 // next draw, defeating Reset's surface reuse.
 func (d *Device) Pixels() (pix []byte, stride int, err error) {
+	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) has no surface of its own to read.
+		return nil, 0, ErrSurface
+	}
 	stride = d.width * 4
 	pix = make([]byte, stride*d.height)
 	pm := d.surf.Pixmap()
@@ -126,6 +150,9 @@ func (d *Device) Pixels() (pix []byte, stride int, err error) {
 // they reference, so entries can never collide with a later font instance. The per-render maps are dropped
 // because without a store nothing keeps their keyed font pointers alive across renders.
 func (d *Device) Reset() {
+	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) must never unwind or clear that canvas.
+		return
+	}
 	d.c.RestoreToCount(1)
 	d.c.ResetMatrix()
 	d.c.Clear(skcolor.ARGB(0, 0, 0, 0))
@@ -505,7 +532,9 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 // the overwhelmingly common case — go through the glyph coverage cache instead (glyphmask.go), which blits
 // each glyph's cached analytic-AA coverage at its exact subpixel position.
 func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
-	if d.blitTextRun(run, paint) {
+	// The coverage-blit fast path composites into the device's own surface at pixel-space positions; a device
+	// wrapping a caller's canvas (Wrap) has neither, so it always fills merged outlines.
+	if d.surf != nil && d.blitTextRun(run, paint) {
 		return
 	}
 	p := d.textOutline(run, nil)
