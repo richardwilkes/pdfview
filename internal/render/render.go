@@ -20,6 +20,7 @@
 package render
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 
@@ -54,20 +55,34 @@ type Device struct {
 	store *store.Store
 	// glyphPaths caches converted glyph-space outlines for this render (see glyphPath).
 	glyphPaths map[glyphKey]*path.Path
+	// glyphMasks caches rendered glyph coverage planes for this render when no store is wired (glyphmask.go).
+	glyphMasks map[glyphMaskKey]*glyphMask
+	// maskScratch is the reusable surface glyph coverage planes render into (glyphmask.go).
+	maskScratch *surface.Surface
 	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.
 	textClip *path.Path
 	// clipStack records the canvas save count at each clip push so PopClip can restore precisely.
 	clipStack []int
+	// clipRects parallels clipStack with the cumulative pixel-aligned interior of the intersected clips,
+	// valid while every open clip level is an axis-aligned rectangle (glyphmask.go's direct blits use it;
+	// see clipInterior).
+	clipRects []clipRect
 	// groupStack and maskStack track open transparency groups and soft-mask spans (see mask.go).
 	groupStack []groupState
 	maskStack  []*maskState
-	width      int
-	height     int
+	// untrackedState counts canvas clip/layer state pushed outside the tracked stacks (the tiling replay
+	// clips cell content directly); nonzero disables the direct blit path.
+	untrackedState int
+	width          int
+	height         int
 }
 
 // SetStore wires the document's budgeted resource store into the device, migrating the glyph-path cache from
 // per-render to document scope (plan.md internal/store).
 func (d *Device) SetStore(st *store.Store) { d.store = st }
+
+// Size reports the surface dimensions in pixels, for the caller's reuse check (see Reset).
+func (d *Device) Size() [2]int { return [2]int{d.width, d.height} }
 
 // New returns a device rendering to a zeroed (fully transparent) width×height premultiplied RGBA surface.
 func New(width, height int) (*Device, error) {
@@ -82,21 +97,46 @@ func New(width, height int) (*Device, error) {
 }
 
 // Pixels reads back the rendered image as premultiplied RGBA bytes (4 per pixel), row-major with the returned
-// stride. The alpha stays premultiplied by design; the caller unpremultiplies (see the package comment).
+// stride. The alpha stays premultiplied by design; the caller unpremultiplies (see the package comment). The
+// pixels are read straight from the surface's pixmap — byte-identical to the premul→premul ReadPixels copy
+// (the pixmap's word layout is R | G<<8 | B<<16 | A<<24, i.e. RGBA8888 byte order) — deliberately NOT through
+// MakeImageSnapshot: a snapshot would share the backing store and force a copy-on-write allocation on the
+// next draw, defeating Reset's surface reuse.
 func (d *Device) Pixels() (pix []byte, stride int, err error) {
 	stride = d.width * 4
 	pix = make([]byte, stride*d.height)
-	info := imagecore.ImageInfo{
-		Width:     int32(d.width),
-		Height:    int32(d.height),
-		ColorType: imagecore.ColorTypeRGBA8888,
-		AlphaType: imagecore.AlphaTypePremul,
-	}
-	img := d.surf.MakeImageSnapshot()
-	if img == nil || !img.ReadPixels(info, pix, stride, 0, 0, imagecore.CachingDisallow) {
+	pm := d.surf.Pixmap()
+	if pm == nil || int(pm.Width) != d.width || int(pm.Height) != d.height {
 		return nil, 0, ErrSurface
 	}
+	for row := 0; row < d.height; row++ {
+		base := row * int(pm.RowPixels)
+		out := pix[row*stride:]
+		for col := 0; col < d.width; col++ {
+			binary.LittleEndian.PutUint32(out[col*4:], pm.Pix[base+col])
+		}
+	}
 	return pix, stride, nil
+}
+
+// Reset returns the device to its just-created state — canvas state unwound, pixels cleared to transparent,
+// per-render caches dropped — so one surface can serve a document's successive renders at the same size
+// (fresh multi-megabyte surfaces per render made the page-fault cost of faulting them in a top profile
+// entry; see the M8 perf decision log). Store-backed caches survive: their keys hold the *font.Font pointers
+// they reference, so entries can never collide with a later font instance. The per-render maps are dropped
+// because without a store nothing keeps their keyed font pointers alive across renders.
+func (d *Device) Reset() {
+	d.c.RestoreToCount(1)
+	d.c.ResetMatrix()
+	d.c.Clear(skcolor.ARGB(0, 0, 0, 0))
+	d.glyphPaths = nil
+	d.glyphMasks = nil
+	d.textClip = nil
+	d.clipStack = d.clipStack[:0]
+	d.clipRects = d.clipRects[:0]
+	d.groupStack = d.groupStack[:0]
+	d.maskStack = d.maskStack[:0]
+	d.untrackedState = 0
 }
 
 // matrix converts a gfx.Matrix (PDF row-vector [a b c d e f]) to canvas's geom.Matrix.
@@ -299,6 +339,7 @@ func (d *Device) StrokePath(p *gfx.Path, sp *gfx.StrokeParams, ctm gfx.Matrix, p
 // the matrix) so the clip can be pushed without disturbing the canvas matrix for later draws.
 func (d *Device) ClipPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) {
 	d.clipStack = append(d.clipStack, d.c.Save())
+	d.pushClipRect(p, ctm)
 	cp := buildPath(p, evenOdd)
 	m := matrix(ctm)
 	cp.Transform(&m)
@@ -316,7 +357,77 @@ func (d *Device) PopClip() {
 	if n := len(d.clipStack); n > 0 {
 		d.c.RestoreToCount(d.clipStack[n-1])
 		d.clipStack = d.clipStack[:n-1]
+		d.clipRects = d.clipRects[:n-1]
 	}
+}
+
+// clipRect is one level of the rectangular-clip interior tracking: the cumulative pixel-aligned region fully
+// inside every clip pushed so far, valid only while every open level was an axis-aligned rectangle. It lets
+// the glyph blit fast path (glyphmask.go) composite directly under the ubiquitous page/form rectangle clips;
+// any non-rectangular clip level poisons the tracking (rect false) until it pops. x1/y1 are exclusive.
+type clipRect struct {
+	x0, y0, x1, y1 int
+	rect           bool
+}
+
+// pushClipRect records one clip level's contribution to the rectangular interior tracking.
+func (d *Device) pushClipRect(p *gfx.Path, ctm gfx.Matrix) {
+	prev := d.clipInterior()
+	cur := clipRect{}
+	if prev.rect {
+		if x0, y0, x1, y1, ok := rectInterior(p, ctm); ok {
+			cur = clipRect{x0: max(prev.x0, x0), y0: max(prev.y0, y0), x1: min(prev.x1, x1), y1: min(prev.y1, y1), rect: true}
+		}
+	}
+	d.clipRects = append(d.clipRects, cur)
+}
+
+// pushOpaqueClip records a clip level the rectangle tracking cannot model (stencil and text clips).
+func (d *Device) pushOpaqueClip() {
+	d.clipRects = append(d.clipRects, clipRect{})
+}
+
+// clipInterior returns the innermost tracked interior, or the whole surface when no clip is open.
+func (d *Device) clipInterior() clipRect {
+	if n := len(d.clipRects); n > 0 {
+		return d.clipRects[n-1]
+	}
+	return clipRect{x0: 0, y0: 0, x1: d.width, y1: d.height, rect: true}
+}
+
+// rectInterior reports the pixel-aligned interior of a path that is a single axis-aligned rectangle after
+// transformation (the re-operator expansion under a rectilinear matrix — the shape of virtually every W-n
+// page and form /BBox clip). A pixel is inside only when the rectangle covers it fully, so antialiased clip
+// edges never affect blits that stay within the reported region.
+func rectInterior(p *gfx.Path, ctm gfx.Matrix) (x0, y0, x1, y1 int, ok bool) {
+	if len(p.Points) != 4 ||
+		len(p.Verbs) < 4 || len(p.Verbs) > 5 ||
+		p.Verbs[0] != gfx.MoveTo || p.Verbs[1] != gfx.LineTo || p.Verbs[2] != gfx.LineTo || p.Verbs[3] != gfx.LineTo ||
+		(len(p.Verbs) == 5 && p.Verbs[4] != gfx.ClosePath) {
+		return 0, 0, 0, 0, false
+	}
+	var xs, ys [4]float32
+	for i, pt := range p.Points {
+		xs[i], ys[i] = ctm.ApplyXY(pt.X, pt.Y)
+		if !isFinite32(xs[i]) || !isFinite32(ys[i]) {
+			return 0, 0, 0, 0, false
+		}
+	}
+	// The transformed quad must still be an axis-aligned rectangle (identity/scale or 90-degree rotations).
+	if !(xs[0] == xs[3] && xs[1] == xs[2] && ys[0] == ys[1] && ys[2] == ys[3]) &&
+		!(xs[0] == xs[1] && xs[2] == xs[3] && ys[0] == ys[3] && ys[1] == ys[2]) {
+		return 0, 0, 0, 0, false
+	}
+	minX := min(xs[0], xs[1], xs[2], xs[3])
+	maxX := max(xs[0], xs[1], xs[2], xs[3])
+	minY := min(ys[0], ys[1], ys[2], ys[3])
+	maxY := max(ys[0], ys[1], ys[2], ys[3])
+	const maxReasonable = 1 << 24
+	if minX < -maxReasonable || maxX > maxReasonable || minY < -maxReasonable || maxY > maxReasonable {
+		return 0, 0, 0, 0, false
+	}
+	return int(math.Ceil(float64(minX))), int(math.Ceil(float64(minY))),
+		int(math.Floor(float64(maxX))), int(math.Floor(float64(maxY))), true
 }
 
 // glyphKey identifies one glyph outline in the per-render path cache. Fonts are cached per content Run
@@ -390,8 +501,13 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 }
 
 // FillText implements device.Device: fill the run's merged outline (already in device space via the Trms)
-// with the non-zero winding rule, antialiased, matching the oracle's glyph rasterization.
+// with the non-zero winding rule, antialiased, matching the oracle's glyph rasterization. Plain solid fills —
+// the overwhelmingly common case — go through the glyph coverage cache instead (glyphmask.go), which blits
+// each glyph's cached analytic-AA coverage at its exact subpixel position.
 func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
+	if d.blitTextRun(run, paint) {
+		return
+	}
 	p := d.textOutline(run, nil)
 	if p.IsEmpty() {
 		return
@@ -465,6 +581,7 @@ func (d *Device) ClipText(run *device.TextRun) {
 // everything away, per the text-clip semantics (the region is the union of the shown glyphs).
 func (d *Device) EndTextClip() {
 	d.clipStack = append(d.clipStack, d.c.Save())
+	d.pushOpaqueClip()
 	clip := d.textClip
 	if clip == nil {
 		clip = path.New()

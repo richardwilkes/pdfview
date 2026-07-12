@@ -183,6 +183,20 @@ checkbox whose /AS names a missing non-/Off state), since MuPDF's synthesized ap
   text arms whose recorded quads pin appearance text in structured text: `WIDGETXT` (a kid widget inheriting
   /FT /Tx through /Parent, own /Resources) and `INHERITX` (a /Resources-less appearance using the page's font).
 
+## veraPDF corpus cherry-picks (M8, CC BY 4.0)
+
+The [veraPDF corpus](https://github.com/veraPDF/veraPDF-corpus) (© the veraPDF Consortium, licensed
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) is used as a local-only soak corpus at M8 — fetch it
+with `testfiles/external/fetch-verapdf.sh`; it is never committed wholesale (plan.md decision log 2026-07-11).
+Individual files that expose real engine gaps may be cherry-picked here with goldens, per the same decision:
+
+- `verapdf-a018-tiling.pdf` — veraPDF corpus v1.28.1, `TWG test files/TWG test suite A018-pdfa2-fail-b.pdf`,
+  unmodified. A tiling pattern whose `/YStep` is a negative denormal (−1.173e−38): the float32 lattice division
+  overflows to ±Inf, whose int conversion saturates to MaxInt64, and the pre-fix tile-replay loop
+  (`for j := j0; j <= j1; j++` with `j1 == MaxInt64`) never terminated — the only hang the 2694-file M8 soak
+  found. The golden pins the fixed behavior (the fill takes the bounded image-shader fallback and the page
+  renders like MuPDF).
+
 ## Public-domain real-world PDFs
 
 Both are works of the United States federal government and therefore in the public domain in the United States

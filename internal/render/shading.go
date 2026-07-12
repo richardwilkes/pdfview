@@ -456,12 +456,20 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	if !(t.XStep > 0) || !(t.YStep > 0) || !isFinite32(t.XStep) || !isFinite32(t.YStep) {
 		return
 	}
-	i0 := int(math.Floor(float64((px0 - t.BBox.X1) / t.XStep)))
-	i1 := int(math.Ceil(float64((px1 - t.BBox.X0) / t.XStep)))
-	j0 := int(math.Floor(float64((py0 - t.BBox.Y1) / t.YStep)))
-	j1 := int(math.Ceil(float64((py1 - t.BBox.Y0) / t.YStep)))
+	// The lattice bounds are computed in float64 and validated BEFORE the int conversions: a hostile step (a
+	// denormal /YStep, say) overflows the float32 division to ±Inf, and Go's out-of-range float→int conversion
+	// saturates — j0 == j1 == MaxInt64 passes an nx*ny cap yet `for j := j0; j <= j1; j++` never terminates
+	// (j++ wraps). Found by the veraPDF soak; anything outside a sane index range takes the shader fallback.
+	fi0 := math.Floor(float64((px0 - t.BBox.X1) / t.XStep))
+	fi1 := math.Ceil(float64((px1 - t.BBox.X0) / t.XStep))
+	fj0 := math.Floor(float64((py0 - t.BBox.Y1) / t.YStep))
+	fj1 := math.Ceil(float64((py1 - t.BBox.Y0) / t.YStep))
+	const maxLatticeIndex = 1 << 30 // far beyond any real lattice; NaN/Inf fail these comparisons too
+	replayable := fi0 >= -maxLatticeIndex && fi1 <= maxLatticeIndex && fj0 >= -maxLatticeIndex && fj1 <= maxLatticeIndex
+	i0, i1 := int(fi0), int(fi1)
+	j0, j1 := int(fj0), int(fj1)
 	nx, ny := i1-i0+1, j1-j0+1
-	if nx <= 0 || ny <= 0 || nx > maxReplayTiles || ny > maxReplayTiles || nx*ny > maxReplayTiles {
+	if !replayable || nx <= 0 || ny <= 0 || nx > maxReplayTiles || ny > maxReplayTiles || nx*ny > maxReplayTiles {
 		// Too many tiles for replay: use the repeating-image shader instead (the path is device space, so
 		// the shader anchors directly).
 		if cpaint, okPaint := d.preparePaint(p, nil); okPaint {
@@ -469,6 +477,10 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 		}
 		return
 	}
+	// The per-tile clips and layer below are canvas state the device's clip tracking does not see, and
+	// Replay re-enters the device with them active; keep the direct glyph blits off for the duration.
+	d.untrackedState++
+	defer func() { d.untrackedState-- }()
 	count := d.c.Save()
 	d.c.ClipPath(devicePath, raster.ClipIntersect, true)
 	layered := p.Alpha < 1 || p.Blend != device.BlendNormal

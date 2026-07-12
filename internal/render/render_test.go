@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
@@ -484,4 +485,87 @@ func TestEvenOddFill(t *testing.T) {
 	if got := pixelAt(t, pix, stride, 10, 10); got[3] != 0 {
 		t.Errorf("even-odd hole painted: %v", got)
 	}
+}
+
+// TestTilingDenormalStepTerminates is the regression test for the only hang the M8 veraPDF soak found
+// (verapdf-a018-tiling.pdf, decision log 2026-07-11): a denormal tile step overflows the float32 lattice
+// division to ±Inf, whose int conversion saturates to MaxInt64, and the pre-fix replay loop `for j := j0;
+// j <= j1; j++` never terminated because j++ wraps past MaxInt64. The fill must complete (via the bounded
+// image-shader fallback) — run under a watchdog so a regression fails fast instead of hanging the suite.
+func TestTilingDenormalStepTerminates(t *testing.T) {
+	d := newDevice(t, 50, 50)
+	var p gfx.Path
+	p.Rect(0, 0, 50, 50)
+	paint := device.Paint{
+		Alpha: 1,
+		Tiling: &device.Tiling{
+			Replay: func(dev device.Device, ctm gfx.Matrix) {
+				var cell gfx.Path
+				cell.Rect(0, 0, 10, 10)
+				dev.FillPath(&cell, false, ctm, redPaint())
+			},
+			BBox:  gfx.Rect{X0: 0, Y0: 0, X1: 100, Y1: 100},
+			XStep: 15,
+			YStep: 1.173e-38, // the A018 /YStep magnitude after the interpreter folds its sign
+		},
+		PatternCTM: gfx.Identity(),
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.FillPath(&p, false, gfx.Identity(), paint)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("tiling fill with denormal step did not terminate")
+	}
+}
+
+// TestGlyphBlitMatchesDirectFill pins the M8 glyph-coverage-cache invariants: the three ways a solid-color
+// glyph can reach pixels — the direct pixmap composite (no clip), the DrawImage route (under a non-rect
+// clip), and the merged-outline DrawPath fill (translucent paint forces it) — must agree everywhere within
+// ±2 per channel, since all three apply the same analytic-AA coverage and differ only in compositing
+// rounding. A byte-level divergence beyond that means the cache no longer reproduces the fill.
+func TestGlyphBlitMatchesDirectFill(t *testing.T) {
+	f := helveticaFont(t)
+	trm := gfx.Matrix{A: 24.37, B: 0, C: 0, D: -24.37}.Mul(gfx.Translate(2.31, 27.63)) // fractional phase on purpose
+	render := func(prep func(d *Device), paint device.Paint) []byte {
+		d := newDevice(t, 32, 32)
+		if prep != nil {
+			prep(d)
+		}
+		d.FillText(glyphRun(t, f, 'H', trm, gfx.Identity()), paint)
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	direct := render(nil, redPaint())
+	var octagon gfx.Path // large non-rect clip fully covering the glyph: forces the DrawImage route
+	octagon.MoveTo(10, -40)
+	octagon.LineTo(70, 16)
+	octagon.LineTo(10, 72)
+	octagon.LineTo(-50, 16)
+	octagon.Close()
+	viaCanvas := render(func(d *Device) { d.ClipPath(&octagon, false, gfx.Identity()) }, redPaint())
+	nearOpaque := redPaint()
+	nearOpaque.Alpha = 254.4 / 255 // folds to alpha 254: forces the merged-outline DrawPath fill
+	merged := render(nil, nearOpaque)
+	for i := range direct {
+		if delta(direct[i], viaCanvas[i]) > 2 {
+			t.Fatalf("direct blit diverges from canvas image draw at byte %d: %d vs %d", i, direct[i], viaCanvas[i])
+		}
+		if delta(direct[i], merged[i]) > 3 {
+			t.Fatalf("direct blit diverges from merged outline fill at byte %d: %d vs %d", i, direct[i], merged[i])
+		}
+	}
+}
+
+func delta(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
 }

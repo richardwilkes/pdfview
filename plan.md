@@ -1,24 +1,22 @@
 # plan.md — pure-Go pdfview port
 
-**Current milestone: M8 (advanced graphics, hardening, cutover) IN PROGRESS — gate const is "M7". Box 1
-(shadings + patterns), box 2 (transparency), and box 3 (annotation /AP streams) landed 2026-07-11.**
+**Current milestone: M8 (advanced graphics, hardening, cutover) IN PROGRESS — gate const is "M7". Boxes 1-3
+(shadings + patterns, transparency, /AP annotations), the veraPDF soak, and the perf box landed 2026-07-11.**
 
-> **Next session start here:** confirm the 4 CI runners went green on the M8-annotations commit (fix anything
-> that didn't; the M8-transparency run 29171283124 was confirmed green). M8 box 3 is COMPLETE: annotation
-> /AP /N appearance streams render exactly like MuPDF's display path — internal/doc.Annotations applies the
-> probe-pinned gates (flags 1/2/32 hide; Link/Popup never; widgets need /FT via /Parent; /AS selects dict
-> states; /CA ignored) and the ISO 32000-2 12.5.5 placement, content.RunAnnot runs each appearance under full
-> form discipline with page-resource inheritance, and BOTH the raster and stext passes run them (appearance
-> text is searchable). annotations.pdf + golden are enforced by TestAnnotationCorpusPixels inside the DEFAULT
-> gate; the IRS ratchets were re-validated WITH /AP rendering (their widgets are unchecked checkboxes — no
-> ink) and tightened. MuPDF's appearance SYNTHESIS (AP-less markup annots, non-/Off missing states) is
-> deliberately out of scope — read the M8 /AP decision-log entries before touching this area. REMAINING
-> BOXES, in order: **veraPDF corpus soak** (checksum-pinned fetch script into a gitignored dir + soak runner;
-> see the recorded decision), **perf** (baseline measured this session: glaive @150 dpi renders at 40/43
-> ms/page pure vs 6.5/4.5 ms cgo, ~6-9x — target ≤2x; profile says canvas analytic-AA raster fills dominate,
-> GC is <5%; the promising avenue is glyph/raster caching, see the perf decision-log entry), long fuzz/soak
-> runs, DrawPage, gate removal (delete gates_test.go and every gate line; check the pdf_test.go diff
-> criterion in invariant 5), README + .claude/CLAUDE.md rewrite, first release tag.
+> **Next session start here:** confirm the 4 CI runners went green on the soak+perf commit (the /AP-annotations
+> run 29172133942 was confirmed green). This session completed TWO boxes. (1) veraPDF soak: fetch via
+> testfiles/external/fetch-verapdf.sh (tag+sha256-pinned, gitignored), soak via TestExternalCorpusSoak
+> (PDFVIEW_SOAK_DIR env; optional PDFVIEW_SOAK_ORACLE JSON from the new `oracle soak` subcommand) — 2694/2694
+> files open, render page 0, and search with ZERO sentinel errors, pageCount agrees with MuPDF on all 2694,
+> slowest file 2.5 s; the one hang it found (denormal /YStep tiling → int-saturated infinite replay loop) is
+> fixed, unit-pinned, and cherry-picked as corpus file verapdf-a018-tiling (byte-exact golden). (2) Perf:
+> glaive @150 dpi warm is now **8.6/7.6 ms per page vs cgo 6.5/4.9 — 1.32x/1.55x, inside the ≤2x exit
+> target** (was 40/43, ~6-9x) via the glyph coverage cache + direct blits + surface reuse; read the three M8
+> perf decision-log entries before touching internal/render — the direct-blit soundness argument (rect-clip
+> interiors, untrackedState) is subtle. BenchmarkRenderGlaive150 is the committed protocol. REMAINING BOXES,
+> in order: long fuzz/soak runs (all 10 targets have only had ≤30 s smokes; run hours-long local fuzz +
+> consider a bigger external corpus soak), DrawPage, gate removal (delete gates_test.go and every gate line;
+> check the pdf_test.go diff criterion in invariant 5), README + .claude/CLAUDE.md rewrite, first release tag.
 
 ## Session protocol
 
@@ -565,15 +563,27 @@ goldens — all exact, on top of the 30 stext unit/budget/fuzz assertions.
       page content; annotations.pdf + golden enforced by TestAnnotationCorpusPixels inside the default gate;
       IRS ratchets re-validated with /AP live and tightened; appearance SYNTHESIS deliberately out of scope —
       see the M8 /AP decision-log entries)
-- [ ] Fuzz/soak (corpus × long local runs), race, perf ≤2× cgo wall time on fixture @150 dpi (record the numbers)
-      (2026-07-11: baseline recorded — glaive @150 dpi pure 40/43 ms per page vs cgo 6.5/4.5 ms, cold
-      open+render-both 89 ms vs 22 ms, ~6-9x; see the perf-baseline decision-log entry for the profile)
-- [ ] veraPDF corpus soak (license verified CC BY 4.0; decision log 2026-07-11): a checksum-pinned fetch script
+- [x] Perf ≤2× cgo wall time on fixture @150 dpi, race (2026-07-11: **MET — glaive @150 dpi warm 8.6/7.6
+      ms per page (pages 0/1) vs cgo 6.5/4.9 ms = 1.32x/1.55x**, from the 40/43 ms (~6-9x) baseline; cold
+      open+render-both 68.6 ms vs 22 ms (3.1x, allocation-bound — not the exit metric, recorded). Means:
+      glyph coverage cache (Alpha8 planes keyed by exact Trm+subpixel phase, store-budgeted), direct pixmap
+      compositing under tracked rect-clip interiors, per-document surface reuse with snapshot-free readback.
+      All pixel gates/ratchets still pass (glaive marginally IMPROVED); protocol committed as
+      BenchmarkRenderGlaive150; see the three M8 perf decision-log entries incl. upstream canvas candidates)
+- [ ] Long fuzz/soak runs (corpus × hours-long local fuzz on all 10 targets; the 25-30 s smokes are green
+      every session but no long run has happened yet)
+- [x] veraPDF corpus soak (license verified CC BY 4.0; decision log 2026-07-11): a checksum-pinned fetch script
       downloading https://github.com/veraPDF/veraPDF-corpus into a gitignored directory plus a soak harness —
       open + render every file, assert no panic/hang, and compare open-success and PageCount against the oracle.
       Corpus files and goldens are NOT committed wholesale (repo bloat; they are validation-metadata files
       without rendering relevance); permitted uses are the M8 soak, dev-time fuzz seeds, and up to ~10
-      cherry-picked files committed with CC BY attribution in the corpus README.
+      cherry-picked files committed with CC BY attribution in the corpus README. (2026-07-11: DONE —
+      testfiles/external/fetch-verapdf.sh pins tag v1.28.1 + sha256; TestExternalCorpusSoak (root, env-gated,
+      CI never needs the files) opens, renders page 0, and searches every file under a 60 s per-file watchdog
+      with sentinel-error validation, and compares open-success + PageCount against `oracle soak` output.
+      Tally: 2694 files, 2694 opened, 2694 rendered, 2694 searched, 0 sentinel errors, 0 auth-required,
+      pageCount 2694/2694 oracle-exact, slowest 2.5 s, no hangs after the fillTilingInto fix. One cherry-pick:
+      verapdf-a018-tiling.pdf, the file behind the only hang found — see the soak decision-log entry.)
 - [ ] `DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) error` vector API (documented as canvas-coupled)
 - [ ] Remove gates (`gates_test.go` + gate lines): `git diff 26de8a9 -- pdf_test.go` must show only the standard
       copyright header plus the three `testfiles/corpus/glaive.pdf` fixture-path literals (decision log 2026-07-11)
@@ -589,7 +599,9 @@ edges pinned by the half-pixel offset); shading-function 0.00/0.00/0.41 | 0.45/0
 0.05/1.98/1.02 | 1.10/2.07/2.27 | 0.73/0.90/1.91 (ratchets 2/10/3.2 and 2/10/2.9: only the mean at dpi 100
 exceeds the default, all of it fractional-scale edge AA — interiors within Δ8); pattern-tiling
 1.20/3.78/2.31 | 2.03/5.64/2.88 | 1.13/2.29/1.67 (ratchet 2.6/10/3.6: per-cell AA of glyph-scale features,
-placement floored-blit-exact per the dpi-150 pass).
+placement floored-blit-exact per the dpi-150 pass). Added at the veraPDF soak (2026-07-11):
+verapdf-a018-tiling byte-exact (0.00/0.00/0.00 at all DPIs — the denormal-step pattern draws nothing in
+MuPDF too; the golden pins the fixed no-hang behavior).
 
 Annotation-corpus pixel status at M8 box 3 (2026-07-11; % over Δ24 / % over Δ8 / mean Δ at dpi 72|100|150):
 annotations 0.16/0.21/0.12 | 0.44/0.62/0.28 | 0.31/0.46/0.30 (default gate — the nonzero slices are the two
@@ -1259,6 +1271,64 @@ letterforms under a gradient mask plus the axial-ramp divergence carried into al
   most promising avenue is caching rendered glyph coverage (MuPDF caches glyph BITMAPS; we re-fill outline
   paths every render), then reducing per-render surface allocation. Canvas-side optimization would land in
   ../canvas (never modified from this repo's sessions — coordinate separately if needed).
+- 2026-07-11 (M8 veraPDF soak): executed and CLEAN. testfiles/external/fetch-verapdf.sh downloads the corpus
+  tag v1.28.1 archive, verifies its sha256, and extracts into the gitignored testfiles/external/veraPDF-corpus
+  (CC BY 4.0 attribution in the script and corpus README). TestExternalCorpusSoak (root) skips without
+  PDFVIEW_SOAK_DIR so CI stays offline; it walks every PDF, runs open → auth probe → PageCount → TOC →
+  RenderPage(0, 72 dpi, with a search needle) on a worker pool, enforces a 60 s per-file watchdog (the caps
+  guarantee termination, so a timeout is a bug by definition), and requires every failure to be a public
+  sentinel error. `oracle soak` (new subcommand) dumps {open, needsPassword, pageCount} per file for the
+  optional PDFVIEW_SOAK_ORACLE comparison: open-success and PageCount agreement are asserted per file. Final
+  tally: 2694/2694 open + render + search, zero sentinel errors, zero auth-required files, pageCount
+  oracle-exact on all 2694, slowest file 2.5 s. The soak found exactly one bug, a HANG: a tiling pattern with
+  /YStep -1.173e-38 (TWG test suite A018-pdfa2-*-b.pdf) — stepValue folds the sign, the float32 lattice
+  division overflows to ±Inf, Go's out-of-range float→int conversion SATURATES to MaxInt64, j0 == j1 ==
+  MaxInt64 passes every nx*ny cap, and `for j := j0; j <= j1; j++` never terminates because j++ wraps.
+  fillTilingInto now validates the lattice in float64 against a ±2^30 index bound before converting (NaN/Inf
+  fail too) and falls back to the bounded image-shader path. Pinned three ways: TestTilingDenormalStepTerminates
+  (internal/render, watchdogged), the cherry-picked corpus file verapdf-a018-tiling.pdf whose golden is
+  byte-exact (0.00% at all three DPIs, enforced in TestShadingCorpusPixels), and the soak itself.
+- 2026-07-11 (M8 perf, glyph coverage cache): FillText's solid-color path (opaque folded color, Normal blend,
+  no pattern/shading, not in a knockout group) no longer fills outlines through the analytic-AA rasterizer per
+  render; internal/render/glyphmask.go rasterizes each distinct glyph appearance ONCE into an Alpha8 coverage
+  plane — keyed {font, gid, exact float32 Trm linear part, exact subpixel phase of the origin} in the budgeted
+  store (per-render map without one) — and blits it at integer device positions. EXACT phase keys were chosen
+  over quantized ones deliberately: the mask is produced by the same analytic-AA fill at the same subpixel
+  position, so cached output is bit-equal in coverage to the uncached fill (only final compositing can round
+  ±1), no pixel drifts anywhere, and warm re-renders (the recorded protocol, and how consumers actually behave
+  on scroll/zoom — MuPDF's glyph bitmap cache warms the cgo numbers identically) hit 100%. Oversized (>256 px)
+  or unrasterizable glyphs fall back per glyph into a merged-outline fill; translucent/blended/pattern text
+  keeps the pinned merged-outline path entirely. TestGlyphBlitMatchesDirectFill pins direct-blit vs
+  canvas-image-draw vs merged-fill agreement to ±2/±3 per channel; TestCacheBudget still passes byte-identical
+  at budgets {0, 1, 32K, 1M} (mask rendering is deterministic, so output never depends on cache hits).
+- 2026-07-11 (M8 perf, direct blits + rect-clip interior tracking): canvas has NO fast path for Alpha8 image
+  draws (drawBitmap explicitly excludes Alpha8 from treatAsSprite; the BlitMask machinery is reachable only
+  through canvas's own text stack, which needs sfnt typefaces) — every DrawImage of a glyph mask runs the
+  general float shader pipeline, which stayed >50% of warm profiles. The device therefore composites coverage
+  planes STRAIGHT into the surface pixmap (single-rounded SrcOver lerp per channel) when it can prove the
+  canvas draw state is trivial: no group/mask layer open, no untracked canvas state (untrackedState guards the
+  tiling replay's direct cell clips), every open clip level an axis-aligned rectangle (clipRects tracks the
+  cumulative PIXEL-ALIGNED INTERIOR — ceil(min)/floor(max), so AA clip edges can never differ), and the mask
+  rect fully inside that interior; anything else routes through DrawImage unchanged. ClipImageMask's tracking
+  is consistent because the canvas clip it pushes IS the transformed unit square. This is what met the target:
+  merged fills 42/46 → +glyph cache (DrawImage) 23.5/24.2 → +direct blits 8.7/7.8 ms. Upstream canvas
+  candidates recorded for the user (measured, not acted on — ../canvas is read-only from here): (1) an Alpha8
+  sprite/BlitMask fast path for integer-translate nearest image draws would let the cache drop compositeMask
+  and its clip-tracking machinery; (2) runtime.madvise (fresh-allocation page faults) is still ~9% warm and
+  ~32% cold even after surface reuse — an arena/pool for large pixel buffers is canvas/runtime territory.
+- 2026-07-11 (M8 perf, surface reuse + readback): engineDocument caches the raster device across renders while
+  the output dimensions repeat, dropping it on dimension change or render panic (the recover path nils it —
+  half-unwound canvas state must never be reused); Device.Reset restores canvas state, clears pixels, and
+  drops the per-render maps (without a store nothing keeps their keyed *font.Font pointers alive; store-backed
+  entries are safe because the keys themselves reference the fonts). Pixels() now reads the surface pixmap
+  directly instead of MakeImageSnapshot — byte-identical (the pixmap word layout IS RGBA8888 premul byte
+  order) and deliberately snapshot-free, since an outstanding snapshot would force a copy-on-write of the
+  whole surface on the next render's first draw, defeating reuse. The glyph-mask scratch surface is likewise
+  reused (grow-only, clip-scoped clears). Final numbers, darwin/arm64 M4 Max, BenchmarkRenderGlaive150
+  (committed; 10-iteration warm loop after one warm-up, same shape as the cgo measurement): pure 8.6/7.6
+  ms/page vs cgo 6.4-6.8/4.9-5.0 → **1.32x/1.55x, ≤2x exit criterion MET**; cold open+render-both 68.6 ms
+  (was 89) vs cgo 22 — cold is fresh-allocation-bound (madvise 32%), inherent to per-open buffer allocation,
+  and not the exit metric.
 
 ## Verification
 

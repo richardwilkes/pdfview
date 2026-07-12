@@ -73,6 +73,7 @@ func TestImageCorpusPixels(t *testing.T) {
 func TestShadingCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"shading-axial", "shading-radial", "shading-function", "shading-mesh", "pattern-tiling",
+		"verapdf-a018-tiling",
 	} {
 		comparePixelsToGolden(t, name, name, true)
 	}

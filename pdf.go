@@ -453,6 +453,11 @@ type engineDocument struct {
 	// store is the maxCacheSize-budgeted resource cache (fonts, decoded images, glyph outlines) shared by all
 	// of this document's renders; New's maxCacheSize argument is its byte budget (0 = unlimited).
 	store *store.Store
+	// dev is the raster device reused across renders while the output dimensions repeat (the common case:
+	// re-rendering pages of one size at one scale). Reuse avoids allocating and page-faulting a fresh
+	// multi-megabyte surface per render (see the M8 perf decision log); it is dropped on a dimension change
+	// or a render panic. Safe under the document mutex like every other engine field.
+	dev *render.Device
 }
 
 // page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points
@@ -601,6 +606,7 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 		if recover() != nil {
 			pix = nil
 			err = ErrInternal
+			e.dev = nil // The device may hold half-unwound canvas state; never reuse it.
 		}
 	}()
 	width = renderExtent(pg.width, scale)
@@ -612,9 +618,15 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 	if int64(width)*int64(height) > int64(OverallMaxPixels) {
 		return nil, 0, 0, 0, ErrImageTooLarge
 	}
-	dev, err := render.New(width, height)
-	if err != nil {
-		return nil, 0, 0, 0, ErrUnableToCreateImage
+	dev := e.dev
+	if dev != nil && dev.Size() == [2]int{width, height} {
+		dev.Reset()
+	} else {
+		e.dev = nil
+		if dev, err = render.New(width, height); err != nil {
+			return nil, 0, 0, 0, ErrUnableToCreateImage
+		}
+		e.dev = dev
 	}
 	dev.SetStore(e.store)
 	ctm, err := e.doc.PageCTM(pg.number, float32(scale))

@@ -58,8 +58,13 @@ func (s *stringList) Set(v string) error {
 
 func main() {
 	log.SetFlags(0)
+	if len(os.Args) >= 2 && os.Args[1] == "soak" {
+		soakMain(os.Args[2:])
+		return
+	}
 	if len(os.Args) < 2 || os.Args[1] != "dump" {
-		log.Fatalf("usage: %s dump -in file.pdf -out dir [-dpi 72,100,150] [-password pw]... [-search needle]...", filepath.Base(os.Args[0]))
+		log.Fatalf("usage: %s dump -in file.pdf -out dir [-dpi 72,100,150] [-password pw]... [-search needle]... | %s soak dir out.json",
+			filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	}
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
 	in := fs.String("in", "", "input PDF file (required)")

@@ -76,6 +76,7 @@ dump shading-radial
 dump shading-function
 dump shading-mesh
 dump pattern-tiling
+dump verapdf-a018-tiling
 dump transparency-blend
 dump transparency-group
 dump transparency-smask-lum

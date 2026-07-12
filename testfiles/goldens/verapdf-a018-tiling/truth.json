@@ -1,0 +1,219 @@
+{
+  "file": "verapdf-a018-tiling.pdf",
+  "sha256": "5a8e3c8258fe7bdf55fa8eb43b005b4c571335d2fd4f0906358796628ba8c001",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "tocRaw": [
+    {
+      "title": "TWG test suite: A018-pdfa2-fail-b",
+      "page": -1,
+      "x": null,
+      "y": null,
+      "children": [
+        {
+          "title": "clause: A018",
+          "page": -1,
+          "x": null,
+          "y": null
+        },
+        {
+          "title": "instance: b",
+          "page": -1,
+          "x": null,
+          "y": null
+        },
+        {
+          "title": "expected result: fail",
+          "page": -1,
+          "x": null,
+          "y": null
+        },
+        {
+          "title": "expected message: Colored Pattern contains entry /YStep operator with value -1.173e-38",
+          "page": -1,
+          "x": null,
+          "y": null
+        },
+        {
+          "title": "ISO WG Resolution: Non-zero values between the positive and negative thresholds are not permitted in ISO 19005-2 and ISO 19005-3 since this is clearly defined in these standards.",
+          "page": -1,
+          "x": null,
+          "y": null
+        }
+      ]
+    }
+  ],
+  "toc": {
+    "100": [
+      {
+        "title": "TWG test suite: A018-pdfa2-fail-b",
+        "page": -1,
+        "x": 0,
+        "y": 0,
+        "children": [
+          {
+            "title": "clause: A018",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "instance: b",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected result: fail",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected message: Colored Pattern contains entry /YStep operator with value -1.173e-38",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "ISO WG Resolution: Non-zero values between the positive and negative thresholds are not permitted in ISO 19005-2 and ISO 19005-3 since this is clearly defined in these standards.",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    ],
+    "150": [
+      {
+        "title": "TWG test suite: A018-pdfa2-fail-b",
+        "page": -1,
+        "x": 0,
+        "y": 0,
+        "children": [
+          {
+            "title": "clause: A018",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "instance: b",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected result: fail",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected message: Colored Pattern contains entry /YStep operator with value -1.173e-38",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "ISO WG Resolution: Non-zero values between the positive and negative thresholds are not permitted in ISO 19005-2 and ISO 19005-3 since this is clearly defined in these standards.",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    ],
+    "72": [
+      {
+        "title": "TWG test suite: A018-pdfa2-fail-b",
+        "page": -1,
+        "x": 0,
+        "y": 0,
+        "children": [
+          {
+            "title": "clause: A018",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "instance: b",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected result: fail",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "expected message: Colored Pattern contains entry /YStep operator with value -1.173e-38",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "title": "ISO WG Resolution: Non-zero values between the positive and negative thresholds are not permitted in ISO 19005-2 and ISO 19005-3 since this is clearly defined in these standards.",
+            "page": -1,
+            "x": 0,
+            "y": 0
+          }
+        ]
+      }
+    ]
+  },
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        500,
+        500
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 695,
+          "height": 695,
+          "stride": 2780,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 1042,
+          "height": 1042,
+          "stride": 4168,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 500,
+          "height": 500,
+          "stride": 2000,
+          "links": []
+        }
+      }
+    }
+  ]
+}
