@@ -13,12 +13,12 @@ import (
 	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
+	"github.com/richardwilkes/canvas/colorcore"
 	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/imagecore"
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/raster"
 	"github.com/richardwilkes/canvas/shaders"
-	"github.com/richardwilkes/canvas/skcolor"
 	"github.com/richardwilkes/canvas/surface"
 
 	"github.com/richardwilkes/pdfview/internal/device"
@@ -111,7 +111,7 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 	interior := d.clipInterior()
 	direct := interior.rect && len(d.groupStack) == 0 && len(d.maskStack) == 0 && d.untrackedState == 0
 	paint := canvas.NewPaint()
-	paint.Color = skcolor.ARGB(255, p.Color.R, p.Color.G, p.Color.B)
+	paint.Color = colorcore.ARGB(255, p.Color.R, p.Color.G, p.Color.B)
 	// The blit rectangle is pixel-aligned; all antialiasing lives in the mask's coverage values.
 	paint.AntiAlias = false
 	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
@@ -218,7 +218,7 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	// Clear only the region this mask uses (the scratch surface is sized for the largest glyph seen).
 	count := c.Save()
 	c.ClipRect(geom.RectWH(float32(w), float32(h)), raster.ClipIntersect, false)
-	c.Clear(skcolor.ARGB(0, 0, 0, 0))
+	c.Clear(colorcore.Transparent)
 	c.RestoreToCount(count)
 	local.E -= float32(mx0)
 	local.F -= float32(my0)
@@ -226,7 +226,7 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	fill := path.New()
 	fill.AddPathMatrix(gp, &m, path.AddPathAppend)
 	paint := canvas.NewPaint()
-	paint.Color = skcolor.ARGB(255, 255, 255, 255)
+	paint.Color = colorcore.White
 	paint.AntiAlias = true
 	c.DrawPath(fill, paint)
 	// White premultiplied by coverage stores the coverage in every channel; take the alpha byte (R|G<<8|B<<16|A<<24).

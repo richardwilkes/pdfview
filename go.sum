@@ -2,7 +2,7 @@ github.com/go-text/typesetting v0.3.4 h1:YYurUOtEb9kGSOz4uE3k4OpBGsp1dDL8+fjCeaF
 github.com/go-text/typesetting v0.3.4/go.mod h1:4qZCQphq4KSgGTAeI0uMEkVbROgfah8BuyF5LRYr7XY=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3 h1:drBZzMgdYPbmyXqOto4YhhJGrFIQCX94FpR4MzTCsos=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
-github.com/richardwilkes/canvas v0.0.0-20260710162742-558e56cdc5e8 h1:GxZ6FJb3z88uuGe6WGR7Qd6FmnpW25SHoDrZgHDvse0=
-github.com/richardwilkes/canvas v0.0.0-20260710162742-558e56cdc5e8/go.mod h1:RWOltfix65Pth3grFpYTYV5olXXdAgaZlTwdCOHNtUM=
+github.com/richardwilkes/canvas v0.0.0-20260714165015-a475398fec92 h1:UPoDNJG61E2Bw2mWXPTA3h2d9MX74UOfmqLkgONFefg=
+github.com/richardwilkes/canvas v0.0.0-20260714165015-a475398fec92/go.mod h1:RWOltfix65Pth3grFpYTYV5olXXdAgaZlTwdCOHNtUM=
 golang.org/x/image v0.43.0 h1:FLxcP4ec2350nTfOC8ysKtqYSIFbk/QGjw1ZHNP4tsY=
 golang.org/x/image v0.43.0/go.mod h1:rrpelvGFt+kLPAjPM4HeWPgrl0FtafueU//e5N0qk/Q=

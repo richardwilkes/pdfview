@@ -13,12 +13,12 @@ import (
 	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
+	"github.com/richardwilkes/canvas/colorcore"
 	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/imagecore"
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/raster"
 	"github.com/richardwilkes/canvas/shaders"
-	"github.com/richardwilkes/canvas/skcolor"
 
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
@@ -84,7 +84,7 @@ func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, b
 		return nil, false
 	}
 	paint := canvas.NewPaint()
-	paint.Color = skcolor.ARGB(alpha8(p.Alpha), 255, 255, 255)
+	paint.Color = colorcore.ARGB(alpha8(p.Alpha), 255, 255, 255)
 	paint.BlendMode = blendModes[p.Blend]
 	paint.AntiAlias = true
 	paint.Shader = shader
@@ -122,7 +122,7 @@ func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Sh
 
 // gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by
 // e0 before offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
-func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []skcolor.Color, pos []float32) {
+func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Color, pos []float32) {
 	span := 1 + e0 + e1
 	n := len(stops)
 	if e0 > 0 {
@@ -131,20 +131,20 @@ func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []skcolor.Color,
 	if e1 > 0 {
 		n++
 	}
-	colors = make([]skcolor.Color, 0, n)
+	colors = make([]colorcore.Color, 0, n)
 	pos = make([]float32, 0, n)
 	if e0 > 0 {
 		c := stops[0].Color
-		colors = append(colors, skcolor.ARGB(c.A, c.R, c.G, c.B))
+		colors = append(colors, colorcore.ARGB(c.A, c.R, c.G, c.B))
 		pos = append(pos, 0)
 	}
 	for _, s := range stops {
-		colors = append(colors, skcolor.ARGB(s.Color.A, s.Color.R, s.Color.G, s.Color.B))
+		colors = append(colors, colorcore.ARGB(s.Color.A, s.Color.R, s.Color.G, s.Color.B))
 		pos = append(pos, (s.Offset+e0)/span)
 	}
 	if e1 > 0 {
 		c := stops[len(stops)-1].Color
-		colors = append(colors, skcolor.ARGB(c.A, c.R, c.G, c.B))
+		colors = append(colors, colorcore.ARGB(c.A, c.R, c.G, c.B))
 		pos = append(pos, 1)
 	}
 	return colors, pos
@@ -486,7 +486,7 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	layered := p.Alpha < 1 || p.Blend != device.BlendNormal
 	if layered {
 		layerPaint := canvas.NewPaint()
-		layerPaint.Color = skcolor.ARGB(alpha8(p.Alpha), 255, 255, 255)
+		layerPaint.Color = colorcore.ARGB(alpha8(p.Alpha), 255, 255, 255)
 		layerPaint.BlendMode = blendModes[p.Blend]
 		d.c.SaveLayer(nil, layerPaint)
 	}
@@ -568,7 +568,7 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 		p.LineTo(tri.P[2].X, tri.P[2].Y)
 		p.Close()
 		ca := uint8((uint32(a)*uint32(tri.Color.A) + 127) / 255)
-		paint.Color = skcolor.ARGB(ca, tri.Color.R, tri.Color.G, tri.Color.B)
+		paint.Color = colorcore.ARGB(ca, tri.Color.R, tri.Color.G, tri.Color.B)
 		d.c.DrawPath(p, paint)
 	}
 	d.c.RestoreToCount(count)
@@ -589,7 +589,7 @@ func (d *Device) fillMeshInto(devicePath *path.Path, p device.Paint) {
 // image masks painted with a mesh-shading pattern.
 func (d *Device) maskedMesh(p device.Paint, drawMask func(mask *canvas.Paint)) {
 	layerPaint := canvas.NewPaint()
-	layerPaint.Color = skcolor.ARGB(alpha8(p.Alpha), 255, 255, 255)
+	layerPaint.Color = colorcore.ARGB(alpha8(p.Alpha), 255, 255, 255)
 	layerPaint.BlendMode = blendModes[p.Blend]
 	d.c.SaveLayer(nil, layerPaint)
 	d.withShadingBBox(p, func() {
@@ -597,7 +597,7 @@ func (d *Device) maskedMesh(p device.Paint, drawMask func(mask *canvas.Paint)) {
 	})
 	mask := canvas.NewPaint()
 	mask.AntiAlias = true
-	mask.Color = skcolor.ARGB(255, 255, 255, 255)
+	mask.Color = colorcore.White
 	mask.BlendMode = raster.BlendDstIn
 	drawMask(mask)
 	d.c.Restore()

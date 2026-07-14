@@ -13,12 +13,12 @@ import (
 	stdcolor "image/color"
 
 	"github.com/richardwilkes/canvas/canvas"
+	"github.com/richardwilkes/canvas/colorcore"
 	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/imagecore"
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/raster"
 	"github.com/richardwilkes/canvas/shaders"
-	"github.com/richardwilkes/canvas/skcolor"
 	"github.com/richardwilkes/canvas/surface"
 
 	"github.com/richardwilkes/pdfview/internal/device"
@@ -67,7 +67,7 @@ func (d *Device) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Bl
 		return
 	}
 	paint := canvas.NewPaint()
-	paint.Color = skcolor.ARGB(alpha8(alpha), 255, 255, 255)
+	paint.Color = colorcore.ARGB(alpha8(alpha), 255, 255, 255)
 	paint.BlendMode = blendModes[blend]
 	count := d.c.SaveLayer(nil, paint)
 	d.groupStack = append(d.groupStack, groupState{count: count, layered: true, knockout: knockout})
@@ -117,7 +117,7 @@ func (d *Device) BeginMask(_ gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA,
 			// The mask group composites over the /BC backdrop before luminance extraction; prefilling the
 			// whole surface also gives areas outside the group's BBox the backdrop's luminosity.
 			p := canvas.NewPaint()
-			p.Color = skcolor.ARGB(255, backdrop.R, backdrop.G, backdrop.B)
+			p.Color = colorcore.ARGB(255, backdrop.R, backdrop.G, backdrop.B)
 			d.c.DrawPaint(p)
 		}
 	}

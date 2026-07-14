@@ -25,13 +25,13 @@ import (
 	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
+	"github.com/richardwilkes/canvas/colorcore"
 	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/imagecore"
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/patheffect"
 	"github.com/richardwilkes/canvas/raster"
 	"github.com/richardwilkes/canvas/shaders"
-	"github.com/richardwilkes/canvas/skcolor"
 	"github.com/richardwilkes/canvas/surface"
 
 	"github.com/richardwilkes/pdfview/internal/device"
@@ -155,7 +155,7 @@ func (d *Device) Reset() {
 	}
 	d.c.RestoreToCount(1)
 	d.c.ResetMatrix()
-	d.c.Clear(skcolor.ARGB(0, 0, 0, 0))
+	d.c.Clear(colorcore.Transparent)
 	d.glyphPaths = nil
 	d.glyphMasks = nil
 	d.textClip = nil
@@ -225,7 +225,7 @@ func paintFor(p device.Paint) *canvas.Paint {
 		alpha = 1
 	}
 	a := uint8(alpha*float64(p.Color.A) + 0.5)
-	paint.Color = skcolor.ARGB(a, p.Color.R, p.Color.G, p.Color.B)
+	paint.Color = colorcore.ARGB(a, p.Color.R, p.Color.G, p.Color.B)
 	paint.BlendMode = blendModes[p.Blend]
 	paint.AntiAlias = true
 	return paint
@@ -715,7 +715,7 @@ func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 	}
 	paint := canvas.NewPaint()
 	paint.AntiAlias = true
-	paint.Color = skcolor.ARGB(uint8(alpha*255+0.5), 255, 255, 255)
+	paint.Color = colorcore.ARGB(uint8(alpha*255+0.5), 255, 255, 255)
 	d.applyKnockout(paint)
 	d.drawImage(ci, img, ctm, paint)
 }
