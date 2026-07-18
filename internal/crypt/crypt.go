@@ -7,15 +7,14 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package crypt implements the PDF standard security handler (ISO 32000-2 7.6): revisions 2, 3, and 4 (RC4 and
-// AESV2), revision 5, and revision 6 (AESV3). It authenticates the user and owner passwords, reproducing the
-// status bits MuPDF's fz_authenticate_password returns, and decrypts strings and streams with per-object keys.
+// Package crypt implements the PDF standard security handler (ISO 32000-2 7.6): revisions 2, 3, and 4 (RC4 and AESV2),
+// revision 5, and revision 6 (AESV3). It authenticates the user and owner passwords, reproducing the status bits
+// MuPDF's fz_authenticate_password returns, and decrypts strings and streams with per-object keys.
 //
-// It is installed into the COS layer as a cos.Decryptor: the handler is built from the /Encrypt dictionary,
-// the empty password is tried immediately (unlocking documents that need no password), and once a password
-// authenticates the file encryption key lets every subsequently loaded object be decrypted. All cryptographic
-// primitives come from the Go standard library. Hostile input yields errors or pass-through data, never a
-// panic.
+// It is installed into the COS layer as a cos.Decryptor: the handler is built from the /Encrypt dictionary, the empty
+// password is tried immediately (unlocking documents that need no password), and once a password authenticates the file
+// encryption key lets every subsequently loaded object be decrypted. All cryptographic primitives come from the Go
+// standard library. Hostile input yields errors or pass-through data, never a panic.
 package crypt
 
 import (
@@ -40,8 +39,8 @@ const (
 	methodAESV3                  // AES-256-CBC with the file key (V5 /CFM /AESV3)
 )
 
-// Handler is the standard security handler for one open document. It is safe to use only under the COS
-// document's own serialization (the public API's single mutex); it is not independently concurrency-safe.
+// Handler is the standard security handler for one open document. It is safe to use only under the COS document's own
+// serialization (the public API's single mutex); it is not independently concurrency-safe.
 type Handler struct {
 	id0     []byte // first element of the trailer /ID (empty when absent); folded into the R2-R4 key
 	o       []byte // /O entry
@@ -58,10 +57,10 @@ type Handler struct {
 	authed  bool   // whether a password has authenticated (including the empty password tried at open)
 }
 
-// New builds the standard security handler from encDict (the resolved /Encrypt dictionary) using c for the
-// trailer /ID and any indirectly stored entries, then tries the empty password so documents that need none are
-// immediately usable. It returns an error for encryption schemes it does not implement; the caller then treats
-// the document as encrypted-but-locked.
+// New builds the standard security handler from encDict (the resolved /Encrypt dictionary) using c for the trailer /ID
+// and any indirectly stored entries, then tries the empty password so documents that need none are immediately usable.
+// It returns an error for encryption schemes it does not implement; the caller then treats the document as
+// encrypted-but-locked.
 func New(c *cos.Document, encDict cos.Dict) (*Handler, error) {
 	if filter, _ := c.GetName(encDict, "Filter"); filter != "Standard" {
 		return nil, errNotStandard
@@ -107,8 +106,8 @@ func firstID(c *cos.Document) ([]byte, bool) {
 	return s, true
 }
 
-// configure sets the key length and the string/stream methods from V, R, /Length, and (for V4/V5) the crypt
-// filter dictionary, and validates the /O and /U lengths for the revision.
+// configure sets the key length and the string/stream methods from V, R, /Length, and (for V4/V5) the crypt filter
+// dictionary, and validates the /O and /U lengths for the revision.
 func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 	switch {
 	case h.r <= 4:
@@ -147,8 +146,8 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 	return nil
 }
 
-// cryptFilterMethod resolves the method named by the /StmF or /StrF entry through the /CF dictionary. The
-// default filter name is /Identity (no encryption) per ISO 32000-2 7.6.5.
+// cryptFilterMethod resolves the method named by the /StmF or /StrF entry through the /CF dictionary. The default
+// filter name is /Identity (no encryption) per ISO 32000-2 7.6.5.
 func (h *Handler) cryptFilterMethod(c *cos.Document, encDict cos.Dict, which cos.Name) method {
 	name, ok := c.GetName(encDict, which)
 	if !ok || name == "Identity" {
@@ -174,15 +173,15 @@ func (h *Handler) cryptFilterMethod(c *cos.Document, encDict cos.Dict, which cos
 	}
 }
 
-// NeedsPassword reports whether a password is required to use the document: true unless the empty password
-// (tried at open) already authenticated.
+// NeedsPassword reports whether a password is required to use the document: true unless the empty password (tried at
+// open) already authenticated.
 func (h *Handler) NeedsPassword() bool {
 	return !h.authed
 }
 
-// Authenticate tries password as both the user and the owner password, returning which matched. On success it
-// records the file encryption key so subsequent decryption can proceed. The two booleans map directly onto the
-// public API's UserAuthenticatedMask and OwnerAuthenticatedMask bits.
+// Authenticate tries password as both the user and the owner password, returning which matched. On success it records
+// the file encryption key so subsequent decryption can proceed. The two booleans map directly onto the public API's
+// UserAuthenticatedMask and OwnerAuthenticatedMask bits.
 func (h *Handler) Authenticate(password string) (user, owner bool) {
 	key, user, owner := h.derive(password)
 	if key != nil {
@@ -197,9 +196,8 @@ func (h *Handler) tryPassword(password string) {
 	h.Authenticate(password)
 }
 
-// derive tests password as user then owner, returning the file encryption key it yields (nil if neither
-// matched) and which checks passed. Testing both is required to set both status bits when a password serves as
-// both.
+// derive tests password as user then owner, returning the file encryption key it yields (nil if neither matched) and
+// which checks passed. Testing both is required to set both status bits when a password serves as both.
 func (h *Handler) derive(password string) (fileKey []byte, user, owner bool) {
 	pw := []byte(password)
 	if h.r <= 4 {
@@ -208,21 +206,21 @@ func (h *Handler) derive(password string) (fileKey []byte, user, owner bool) {
 	return h.deriveAES256(pw)
 }
 
-// DecryptString decrypts a string belonging to object (num, gen), returning it unchanged when no key is yet
-// available or the strings are not encrypted.
+// DecryptString decrypts a string belonging to object (num, gen), returning it unchanged when no key is yet available
+// or the strings are not encrypted.
 func (h *Handler) DecryptString(num, gen int, data []byte) []byte {
 	return h.apply(h.strM, num, gen, data)
 }
 
-// DecryptStream decrypts a stream's raw payload (before its /Filter chain) belonging to object (num, gen),
-// returning it unchanged when no key is yet available or the streams are not encrypted.
+// DecryptStream decrypts a stream's raw payload (before its /Filter chain) belonging to object (num, gen), returning it
+// unchanged when no key is yet available or the streams are not encrypted.
 func (h *Handler) DecryptStream(num, gen int, data []byte) []byte {
 	return h.apply(h.stmM, num, gen, data)
 }
 
-// apply performs the actual decryption for one string or stream. It is total: any shortfall (no key, bad key
-// length, malformed ciphertext) yields the input unchanged rather than an error or panic, because these hooks
-// run deep inside object loading where there is no error channel and hostile input must not crash.
+// apply performs the actual decryption for one string or stream. It is total: any shortfall (no key, bad key length,
+// malformed ciphertext) yields the input unchanged rather than an error or panic, because these hooks run deep inside
+// object loading where there is no error channel and hostile input must not crash.
 func (h *Handler) apply(m method, num, gen int, data []byte) []byte {
 	if h.fileKey == nil || m == methodIdentity || len(data) == 0 {
 		return data

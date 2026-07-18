@@ -216,8 +216,8 @@ func TestHairline(t *testing.T) {
 	}
 }
 
-// helveticaFont loads a substituted standard-14 Helvetica through the real font pipeline (rendering via the
-// bundled Liberation Sans), giving the text tests genuine outlines without fixture files.
+// helveticaFont loads a substituted standard-14 Helvetica through the real font pipeline (rendering via the bundled
+// Liberation Sans), giving the text tests genuine outlines without fixture files.
 func helveticaFont(t *testing.T) *font.Font {
 	t.Helper()
 	var b strings.Builder
@@ -275,8 +275,8 @@ func TestFillTextPixels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The 24 px 'H' covers roughly x 4..17, y 11..28 (cap height ≈ 0.72 em): ink must exist there and the
-	// area above the cap height must stay empty.
+	// The 24 px 'H' covers roughly x 4..17, y 11..28 (cap height ≈ 0.72 em): ink must exist there and the area above
+	// the cap height must stay empty.
 	if !inkIn(pix, stride, 3, 12, 18, 27) {
 		t.Fatal("FillText drew nothing where the glyph belongs")
 	}
@@ -320,8 +320,8 @@ func inkTotal(pix []byte, stride, w, h int) int {
 
 func TestStrokeTextPen(t *testing.T) {
 	f := helveticaFont(t)
-	// 'O' at 60 px/em: a hairline stroke inks only the two contour outlines, so its total coverage must be
-	// well under the fill's ring area (a StrokeText that accidentally filled would match the fill's total).
+	// 'O' at 60 px/em: a hairline stroke inks only the two contour outlines, so its total coverage must be well under
+	// the fill's ring area (a StrokeText that accidentally filled would match the fill's total).
 	trm := gfx.Matrix{A: 60, D: -60}.Mul(gfx.Translate(4, 58))
 	sp := gfx.StrokeParams{Width: 0, MiterLimit: 10}
 	run := glyphRun(t, f, 'O', trm, gfx.Identity())
@@ -377,8 +377,8 @@ func TestTextClipRestrictsAndPops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Ink only inside the glyph: the stems are covered, the region above the cap height is not, and the
-	// counter between the stems stays empty.
+	// Ink only inside the glyph: the stems are covered, the region above the cap height is not, and the counter between
+	// the stems stays empty.
 	if !inkIn(pix, stride, 3, 12, 18, 27) {
 		t.Fatal("text clip admitted no ink")
 	}
@@ -404,8 +404,8 @@ func TestTextClipRestrictsAndPops(t *testing.T) {
 func TestEmptyTextClipClipsEverything(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 16, 16)
-	// A clip-text run whose glyphs produce no outlines (substituted .notdef) accumulates an empty region:
-	// the finalized clip admits nothing, and PopClip restores.
+	// A clip-text run whose glyphs produce no outlines (substituted .notdef) accumulates an empty region: the finalized
+	// clip admits nothing, and PopClip restores.
 	run := &device.TextRun{Font: f, Glyphs: []device.Glyph{{Trm: gfx.Matrix{A: 12, D: -12, F: 14}, GID: 0}}, CTM: gfx.Identity()}
 	d.ClipText(run)
 	d.EndTextClip()
@@ -488,10 +488,10 @@ func TestEvenOddFill(t *testing.T) {
 }
 
 // TestTilingDenormalStepTerminates is the regression test for the only hang the veraPDF corpus soak found
-// (verapdf-a018-tiling.pdf): a denormal tile step overflows the float32 lattice division to ±Inf, whose int
-// conversion saturates to MaxInt64, and the pre-fix replay loop `for j := j0; j <= j1; j++` never terminated
-// because j++ wraps past MaxInt64. The fill must complete (via the bounded
-// image-shader fallback) — run under a watchdog so a regression fails fast instead of hanging the suite.
+// (verapdf-a018-tiling.pdf): a denormal tile step overflows the float32 lattice division to ±Inf, whose int conversion
+// saturates to MaxInt64, and the pre-fix replay loop `for j := j0; j <= j1; j++` never terminated because j++ wraps
+// past MaxInt64. The fill must complete (via the bounded image-shader fallback) — run under a watchdog so a regression
+// fails fast instead of hanging the suite.
 func TestTilingDenormalStepTerminates(t *testing.T) {
 	d := newDevice(t, 50, 50)
 	var p gfx.Path
@@ -522,11 +522,11 @@ func TestTilingDenormalStepTerminates(t *testing.T) {
 	}
 }
 
-// TestGlyphBlitMatchesDirectFill pins the glyph-coverage-cache invariants: the three ways a solid-color
-// glyph can reach pixels — the direct pixmap composite (no clip), the DrawImage route (under a non-rect
-// clip), and the merged-outline DrawPath fill (translucent paint forces it) — must agree everywhere within
-// ±2 per channel, since all three apply the same analytic-AA coverage and differ only in compositing
-// rounding. A byte-level divergence beyond that means the cache no longer reproduces the fill.
+// TestGlyphBlitMatchesDirectFill pins the glyph-coverage-cache invariants: the three ways a solid-color glyph can reach
+// pixels — the direct pixmap composite (no clip), the DrawImage route (under a non-rect clip), and the merged-outline
+// DrawPath fill (translucent paint forces it) — must agree everywhere within ±2 per channel, since all three apply the
+// same analytic-AA coverage and differ only in compositing rounding. A byte-level divergence beyond that means the
+// cache no longer reproduces the fill.
 func TestGlyphBlitMatchesDirectFill(t *testing.T) {
 	f := helveticaFont(t)
 	trm := gfx.Matrix{A: 24.37, B: 0, C: 0, D: -24.37}.Mul(gfx.Translate(2.31, 27.63)) // fractional phase on purpose

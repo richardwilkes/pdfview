@@ -25,18 +25,18 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// Shadings map to canvas shaders: axial → linear gradient, radial → two-point conical gradient (Skia's
-// conical implements the PDF/PostScript circle-interpolation semantics), function-based → a domain-grid image
-// shader, and the mesh kinds → flat tessellated triangles drawn directly. /Extend uses TileClamp when both
-// ends extend and TileDecal when neither does; MIXED extend is realized as a single decal draw over
-// parametrically extended geometry (the boundary color duplicated over the extension). Tiling patterns render
-// one cell into an offscreen surface wrapped in a repeating image shader.
+// Shadings map to canvas shaders: axial → linear gradient, radial → two-point conical gradient (Skia's conical
+// implements the PDF/PostScript circle-interpolation semantics), function-based → a domain-grid image shader, and the
+// mesh kinds → flat tessellated triangles drawn directly. /Extend uses TileClamp when both ends extend and TileDecal
+// when neither does; MIXED extend is realized as a single decal draw over parametrically extended geometry (the
+// boundary color duplicated over the extension). Tiling patterns render one cell into an offscreen surface wrapped in a
+// repeating image shader.
 
-// Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates
-// its function once per grid cell (maxFunctionArea bounds that work); a tiling cell rasterizes at the
-// pattern's device scale (maxTileDim/maxTileArea bound the surface), degrading to a coarser tile beyond them.
-// maxExtendFactor bounds the parametric gradient extension search. maxTileCopies bounds how many neighbor-cell
-// copies replay into one tile when the cell box overlaps its steps.
+// Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates its
+// function once per grid cell (maxFunctionArea bounds that work); a tiling cell rasterizes at the pattern's device
+// scale (maxTileDim/maxTileArea bound the surface), degrading to a coarser tile beyond them. maxExtendFactor bounds the
+// parametric gradient extension search. maxTileCopies bounds how many neighbor-cell copies replay into one tile when
+// the cell box overlaps its steps.
 const (
 	maxFunctionDim  = 512
 	maxFunctionArea = 1 << 18
@@ -46,12 +46,11 @@ const (
 	maxTileCopies   = 4
 )
 
-// preparePaint builds the canvas paint for a device paint that may carry a gradient/function shading or a
-// tiling pattern. ctm, when non-nil, is the matrix the draw will run under (Concat), so the shader's local
-// matrix maps pattern space back through its inverse; nil means the draw happens in device space. The bool
-// result is false when the paint cannot be realized (degenerate matrices, unusable pattern) — the draw is
-// skipped, matching viewer degradation. Mesh shadings never come through here (their draw paths clip and
-// paint triangles instead).
+// preparePaint builds the canvas paint for a device paint that may carry a gradient/function shading or a tiling
+// pattern. ctm, when non-nil, is the matrix the draw will run under (Concat), so the shader's local matrix maps pattern
+// space back through its inverse; nil means the draw happens in device space. The bool result is false when the paint
+// cannot be realized (degenerate matrices, unusable pattern) — the draw is skipped, matching viewer degradation. Mesh
+// shadings never come through here (their draw paths clip and paint triangles instead).
 func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, bool) {
 	if p.Shading == nil && p.Tiling == nil {
 		paint := paintFor(p)
@@ -60,9 +59,9 @@ func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, b
 	}
 	local := p.PatternCTM
 	if p.Shading != nil {
-		// MuPDF paints every shading kind through its shade painter, which samples at the pixel's top-right
-		// device corner where our shaders sample the center; shift the shading geometry by (-0.5, +0.5)
-		// device pixels to line the ramps and decal boundaries up (see drawMesh, pinned by the goldens).
+		// MuPDF paints every shading kind through its shade painter, which samples at the pixel's top-right device
+		// corner where our shaders sample the center; shift the shading geometry by (-0.5, +0.5) device pixels to line
+		// the ramps and decal boundaries up (see drawMesh, pinned by the goldens).
 		local = local.Mul(gfx.Translate(-0.5, 0.5))
 	}
 	if ctm != nil {
@@ -103,8 +102,8 @@ func isMesh(p device.Paint) bool {
 	return p.Shading != nil && p.Shading.Kind >= shading.KindFreeTriangle
 }
 
-// shadingShader builds the shader for a non-mesh shading; local maps the shading's target space to the space
-// the draw runs in.
+// shadingShader builds the shader for a non-mesh shading; local maps the shading's target space to the space the draw
+// runs in.
 func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
 	switch sh.Kind {
 	case shading.KindAxial:
@@ -118,8 +117,8 @@ func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Sh
 	}
 }
 
-// gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by
-// e0 before offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
+// gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by e0 before
+// offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
 func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Color, pos []float32) {
 	span := 1 + e0 + e1
 	n := len(stops)
@@ -148,8 +147,8 @@ func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Colo
 	return colors, pos
 }
 
-// coverageCorners maps the device surface's corners into the space local maps FROM (the shading target
-// space), for sizing gradient extensions.
+// coverageCorners maps the device surface's corners into the space local maps FROM (the shading target space), for
+// sizing gradient extensions.
 func (d *Device) coverageCorners(local gfx.Matrix) ([4]gfx.Point, bool) {
 	inv, ok := local.Invert()
 	if !ok {
@@ -183,8 +182,8 @@ func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shad
 	case sh.Extend[0] && sh.Extend[1]:
 		tile = shaders.TileClamp
 	case sh.Extend[0] || sh.Extend[1]:
-		// Mixed extend: extend the parametric span far enough to cover the surface on the extended side and
-		// keep decal so the other side stays unpainted.
+		// Mixed extend: extend the parametric span far enough to cover the surface on the extended side and keep decal
+		// so the other side stays unpainted.
 		dx, dy := p1.X-p0.X, p1.Y-p0.Y
 		lenSq := dx*dx + dy*dy
 		if lenSq <= 0 || !isFinite32(lenSq) {
@@ -245,9 +244,9 @@ func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Sha
 		geom.Point{X: c1.X, Y: c1.Y}, r1, colors, pos, tile, &lm)
 }
 
-// radialExtension finds the parametric extension factor (in units of the t span) that either covers every
-// corner with the extended circle or reaches the radius-zero cutoff PDF prescribes (ISO 32000-2 8.7.4.5.4:
-// extension continues until the circles cover the area or the radius becomes 0).
+// radialExtension finds the parametric extension factor (in units of the t span) that either covers every corner with
+// the extended circle or reaches the radius-zero cutoff PDF prescribes (ISO 32000-2 8.7.4.5.4: extension continues
+// until the circles cover the area or the radius becomes 0).
 func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atStart bool) float32 {
 	dr := r1 - r0
 	// The factor at which the extended radius reaches zero, when it shrinks in this direction.
@@ -289,9 +288,9 @@ func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atS
 	return min(float32(maxExtendFactor), cap32)
 }
 
-// functionShader realizes a type 1 shading as an image shader: the function is evaluated over a grid spanning
-// the domain at roughly device resolution (capped), and the image is placed by the domain-to-device mapping
-// with decal tiling so points outside the domain stay unpainted.
+// functionShader realizes a type 1 shading as an image shader: the function is evaluated over a grid spanning the
+// domain at roughly device resolution (capped), and the image is placed by the domain-to-device mapping with decal
+// tiling so points outside the domain stay unpainted.
 func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
 	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
 	if !(x1 > x0) || !(y1 > y0) {
@@ -358,9 +357,9 @@ func clampDim(v, maxV int) int {
 	return v
 }
 
-// tileShader renders one tiling-pattern cell into an offscreen surface at the pattern's device scale and
-// wraps it in a repeating image shader. local maps pattern space to the drawing space; patCTM is the full
-// pattern-space→device matrix (used only for scale so the tile rasterizes at device resolution).
+// tileShader renders one tiling-pattern cell into an offscreen surface at the pattern's device scale and wraps it in a
+// repeating image shader. local maps pattern space to the drawing space; patCTM is the full pattern-space→device matrix
+// (used only for scale so the tile rasterizes at device resolution).
 func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.Shader {
 	if !(t.XStep > 0) || !(t.YStep > 0) || !isFinite32(t.XStep) || !isFinite32(t.YStep) {
 		return nil
@@ -381,9 +380,9 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 		return nil
 	}
 	cell.store = d.store
-	// Pattern-space window [X0, X0+XStep] x [Y0, Y0+YStep] maps to the tile image with y flipped (image rows
-	// grow downward while pattern y grows upward under the usual page CTM; patCTM's own flip is applied when
-	// the shader samples, so the window mapping keeps pattern orientation).
+	// Pattern-space window [X0, X0+XStep] x [Y0, Y0+YStep] maps to the tile image with y flipped (image rows grow
+	// downward while pattern y grows upward under the usual page CTM; patCTM's own flip is applied when the shader
+	// samples, so the window mapping keeps pattern orientation).
 	fw := float32(w) / t.XStep
 	fh := float32(h) / t.YStep
 	window := gfx.Matrix{A: fw, D: -fh, E: -t.BBox.X0 * fw, F: (t.BBox.Y0 + t.YStep) * fh}
@@ -413,8 +412,8 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 	return shaders.NewImage(img, shaders.TileRepeat, shaders.TileRepeat, sampling, &lm)
 }
 
-// spillCopies reports how many neighbor cells (per direction, capped) can spill content into one tile window
-// when the cell box is larger than the tile step.
+// spillCopies reports how many neighbor cells (per direction, capped) can spill content into one tile window when the
+// cell box is larger than the tile step.
 func spillCopies(extent, step float32) int {
 	if !(extent > step) {
 		return 0
@@ -423,14 +422,13 @@ func spillCopies(extent, step float32) int {
 	return min(n, maxTileCopies)
 }
 
-// maxReplayTiles caps how many cell replays one fill may trigger; beyond it the fill falls back to the
-// repeating-image shader (coarser but bounded).
+// maxReplayTiles caps how many cell replays one fill may trigger; beyond it the fill falls back to the repeating-image
+// shader (coarser but bounded).
 const maxReplayTiles = 4096
 
-// fillTilingInto paints a tiling pattern into the device-space path by replaying the cell content once per
-// lattice position at full device resolution — the fidelity MuPDF gets by replaying tiles — rather than
-// resampling one rasterized tile. Falls back to the image-shader path when the fill would need an unbounded
-// number of replays.
+// fillTilingInto paints a tiling pattern into the device-space path by replaying the cell content once per lattice
+// position at full device resolution — the fidelity MuPDF gets by replaying tiles — rather than resampling one
+// rasterized tile. Falls back to the image-shader path when the fill would need an unbounded number of replays.
 func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	t := p.Tiling
 	inv, ok := p.PatternCTM.Invert()
@@ -454,10 +452,10 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	if !(t.XStep > 0) || !(t.YStep > 0) || !isFinite32(t.XStep) || !isFinite32(t.YStep) {
 		return
 	}
-	// The lattice bounds are computed in float64 and validated BEFORE the int conversions: a hostile step (a
-	// denormal /YStep, say) overflows the float32 division to ±Inf, and Go's out-of-range float→int conversion
-	// saturates — j0 == j1 == MaxInt64 passes an nx*ny cap yet `for j := j0; j <= j1; j++` never terminates
-	// (j++ wraps). Found by the veraPDF soak; anything outside a sane index range takes the shader fallback.
+	// The lattice bounds are computed in float64 and validated BEFORE the int conversions: a hostile step (a denormal
+	// /YStep, say) overflows the float32 division to ±Inf, and Go's out-of-range float→int conversion saturates — j0 ==
+	// j1 == MaxInt64 passes an nx*ny cap yet `for j := j0; j <= j1; j++` never terminates (j++ wraps). Found by the
+	// veraPDF soak; anything outside a sane index range takes the shader fallback.
 	fi0 := math.Floor(float64((px0 - t.BBox.X1) / t.XStep))
 	fi1 := math.Ceil(float64((px1 - t.BBox.X0) / t.XStep))
 	fj0 := math.Floor(float64((py0 - t.BBox.Y1) / t.YStep))
@@ -468,15 +466,15 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	j0, j1 := int(fj0), int(fj1)
 	nx, ny := i1-i0+1, j1-j0+1
 	if !replayable || nx <= 0 || ny <= 0 || nx > maxReplayTiles || ny > maxReplayTiles || nx*ny > maxReplayTiles {
-		// Too many tiles for replay: use the repeating-image shader instead (the path is device space, so
-		// the shader anchors directly).
+		// Too many tiles for replay: use the repeating-image shader instead (the path is device space, so the shader
+		// anchors directly).
 		if cpaint, okPaint := d.preparePaint(p, nil); okPaint {
 			d.c.DrawPath(devicePath, cpaint)
 		}
 		return
 	}
-	// The per-tile clips and layer below are canvas state the device's clip tracking does not see, and
-	// Replay re-enters the device with them active; keep the direct glyph blits off for the duration.
+	// The per-tile clips and layer below are canvas state the device's clip tracking does not see, and Replay re-enters
+	// the device with them active; keep the direct glyph blits off for the duration.
 	d.untrackedState++
 	defer func() { d.untrackedState-- }()
 	count := d.c.Save()
@@ -496,9 +494,9 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	bboxPath.Close()
 	for i := i0; i <= i1; i++ {
 		for j := j0; j <= j1; j++ {
-			// MuPDF rasterizes one tile and blits the copies at integer device offsets; quantizing each
-			// copy's device translation reproduces that (every cell renders at cell (0,0)'s subpixel phase),
-			// pinned against the tiling goldens at fractional scales.
+			// MuPDF rasterizes one tile and blits the copies at integer device offsets; quantizing each copy's device
+			// translation reproduces that (every cell renders at cell (0,0)'s subpixel phase), pinned against the
+			// tiling goldens at fractional scales.
 			sx := float32(i)*t.XStep*p.PatternCTM.A + float32(j)*t.YStep*p.PatternCTM.C
 			sy := float32(i)*t.XStep*p.PatternCTM.B + float32(j)*t.YStep*p.PatternCTM.D
 			rx := float32(math.Floor(float64(sx)))
@@ -519,8 +517,8 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	d.c.RestoreToCount(count)
 }
 
-// withShadingBBox wraps draw in the shading's /BBox clip (in the shading target space mapped by PatternCTM),
-// when one is present.
+// withShadingBBox wraps draw in the shading's /BBox clip (in the shading target space mapped by PatternCTM), when one
+// is present.
 func (d *Device) withShadingBBox(p device.Paint, draw func()) {
 	sh := p.Shading
 	if sh == nil || sh.BBox == nil {
@@ -542,17 +540,17 @@ func (d *Device) withShadingBBox(p device.Paint, draw func()) {
 }
 
 // drawMesh paints a tessellated mesh's flat triangles under the pattern matrix. Triangles are drawn without
-// antialiasing so shared edges neither seam nor double-blend (pixel centers land in exactly one triangle),
-// matching MuPDF's non-antialiased mesh rasterization; the region's outer boundary usually comes from a clip,
-// which carries its own antialiasing.
+// antialiasing so shared edges neither seam nor double-blend (pixel centers land in exactly one triangle), matching
+// MuPDF's non-antialiased mesh rasterization; the region's outer boundary usually comes from a clip, which carries its
+// own antialiasing.
 func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64, blend device.Blend) {
 	a := alpha8(alpha)
 	m := matrix(patCTM)
 	count := d.c.Save()
-	// MuPDF's shade painter tests each pixel at its top-right device corner where Skia's non-AA fill tests
-	// the center (pinned against the mesh goldens: at integer boundaries MuPDF's coverage sits one pixel
-	// left/down of center sampling). Shift the whole mesh by (-0.5, +0.5) device pixels — with a hair extra
-	// so exactly-on-boundary centers resolve the way MuPDF's inclusive/exclusive edges do.
+	// MuPDF's shade painter tests each pixel at its top-right device corner where Skia's non-AA fill tests the center
+	// (pinned against the mesh goldens: at integer boundaries MuPDF's coverage sits one pixel left/down of center
+	// sampling). Shift the whole mesh by (-0.5, +0.5) device pixels — with a hair extra so exactly-on-boundary centers
+	// resolve the way MuPDF's inclusive/exclusive edges do.
 	d.c.Translate(-0.501, 0.501)
 	d.c.Concat(&m)
 	paint := canvas.NewPaint()
@@ -582,9 +580,9 @@ func (d *Device) fillMeshInto(devicePath *path.Path, p device.Paint) {
 	d.c.RestoreToCount(count)
 }
 
-// maskedMesh draws the mesh into a layer and keeps only the region drawMask covers (BlendDstIn), applying the
-// paint's alpha and blend at the layer composite. Used where a clip path is unavailable: stroked regions and
-// image masks painted with a mesh-shading pattern.
+// maskedMesh draws the mesh into a layer and keeps only the region drawMask covers (BlendDstIn), applying the paint's
+// alpha and blend at the layer composite. Used where a clip path is unavailable: stroked regions and image masks
+// painted with a mesh-shading pattern.
 func (d *Device) maskedMesh(p device.Paint, drawMask func(mask *canvas.Paint)) {
 	layerPaint := canvas.NewPaint()
 	layerPaint.Color = colorcore.ARGB(alpha8(p.Alpha), 255, 255, 255)

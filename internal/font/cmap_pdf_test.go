@@ -202,8 +202,8 @@ func TestParseWArrays(t *testing.T) {
 }
 
 func TestCFFCIDCharset(t *testing.T) {
-	// A synthetic charset: format 1, GIDs 1.. mapping to CID ranges {100..102, 500}.
-	// CharStrings INDEX with 5 entries (nGlyphs = 5), each 1 byte.
+	// A synthetic charset: format 1, GIDs 1.. mapping to CID ranges {100..102, 500}. CharStrings INDEX with 5 entries
+	// (nGlyphs = 5), each 1 byte.
 	data := make([]byte, 64)
 	// CharStrings INDEX at offset 8: count=5, offSize=1, offsets 1..6, data 5 bytes.
 	copy(data[8:], []byte{0, 5, 1, 1, 2, 3, 4, 5, 6, 14, 14, 14, 14, 14})

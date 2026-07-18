@@ -19,11 +19,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// Patterns (ISO 32000-2 8.7.3-4). scn with a /Pattern color space selects a pattern resource: a shading
-// pattern (PatternType 2) becomes a Paint.Shading payload, a tiling pattern (PatternType 1) a Paint.Tiling
-// payload whose Replay closure re-enters the interpreter for one cell's content. Pattern space is anchored to
-// the default space of the content stream that selected the pattern — the /Matrix composed with the CTM in
-// effect at that stream's start (streamCTM) — so the pattern stays put while the drawing CTM changes.
+// Patterns (ISO 32000-2 8.7.3-4). scn with a /Pattern color space selects a pattern resource: a shading pattern
+// (PatternType 2) becomes a Paint.Shading payload, a tiling pattern (PatternType 1) a Paint.Tiling payload whose Replay
+// closure re-enters the interpreter for one cell's content. Pattern space is anchored to the default space of the
+// content stream that selected the pattern — the /Matrix composed with the CTM in effect at that stream's start
+// (streamCTM) — so the pattern stays put while the drawing CTM changes.
 
 // namePattern is the /Pattern name, shared by the color-space switch and the resource lookups.
 const namePattern cos.Name = "Pattern"
@@ -47,9 +47,9 @@ type tilingRes struct {
 	uncolored bool // PaintType 2: the cell content is a stencil painted with the scn-supplied color
 }
 
-// patternFor resolves the pattern selected by an scn/SCN operator: the trailing name operand looked up in the
-// current /Pattern resources. It returns the pattern and the composed pattern-space→device matrix. A non-
-// pattern space, a missing name, or an unusable pattern yields nil (the paint will not mark).
+// patternFor resolves the pattern selected by an scn/SCN operator: the trailing name operand looked up in the current
+// /Pattern resources. It returns the pattern and the composed pattern-space→device matrix. A non- pattern space, a
+// missing name, or an unusable pattern yields nil (the paint will not mark).
 func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	if _, isPattern := space.(*pdfcolor.Pattern); !isPattern {
 		return nil, gfx.Matrix{}
@@ -142,8 +142,8 @@ func (in *interp) parseTiling(raw cos.Object, stream *cos.Stream) *tilingRes {
 	return tile
 }
 
-// stepValue reads a tile step, degrading zero, missing, or non-finite values to the cell extent (the leniency
-// viewers apply) and folding negative steps to their magnitude (spacing is a distance).
+// stepValue reads a tile step, degrading zero, missing, or non-finite values to the cell extent (the leniency viewers
+// apply) and folding negative steps to their magnitude (spacing is a distance).
 func stepValue(d *cos.Document, dict cos.Dict, key cos.Name, fallback float32) float32 {
 	v, ok := d64(d, dict, key)
 	if !ok || !isFinitePt(float32(v), 0) || v == 0 {
@@ -183,10 +183,10 @@ func (in *interp) applyPattern(p *device.Paint, space pdfcolor.Space, pat *patte
 	}
 }
 
-// tilingReplay builds the Replay closure for one tiling pattern: it runs the cell content through a child
-// interpreter against the given device, sharing this interpreter's recursion guards and work budget so cyclic
-// or hostile patterns terminate. For uncolored patterns the cell's own color operators are suppressed and
-// everything paints with cellColor (ISO 32000-2 8.7.3.3).
+// tilingReplay builds the Replay closure for one tiling pattern: it runs the cell content through a child interpreter
+// against the given device, sharing this interpreter's recursion guards and work budget so cyclic or hostile patterns
+// terminate. For uncolored patterns the cell's own color operators are suppressed and everything paints with cellColor
+// (ISO 32000-2 8.7.3.3).
 func (in *interp) tilingReplay(tile *tilingRes, cellColor color.NRGBA) func(device.Device, gfx.Matrix) {
 	return func(dev device.Device, ctm gfx.Matrix) {
 		if in.formDepth >= maxFormDepth {
@@ -214,8 +214,8 @@ func (in *interp) tilingReplay(tile *tilingRes, cellColor color.NRGBA) func(devi
 	}
 }
 
-// opShading implements sh: paint the named shading across the current clip (ISO 32000-2 8.7.4.2). The paint
-// carries the fill alpha and blend mode; geometry and colors come from the shading itself.
+// opShading implements sh: paint the named shading across the current clip (ISO 32000-2 8.7.4.2). The paint carries the
+// fill alpha and blend mode; geometry and colors come from the shading itself.
 func (in *interp) opShading() {
 	name, ok := in.name1()
 	if !ok {

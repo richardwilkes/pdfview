@@ -7,14 +7,14 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package cos implements the COS layer of a PDF document: the lexer, the object model (null, boolean, integer,
-// real, string, name, array, dictionary, stream, and indirect reference), classic and stream cross-reference
-// parsing with /Prev chains and hybrid files, object streams, a repair scan for files whose cross-reference data
-// is broken or inconsistent, an indirect-reference resolver with a cycle guard, and text-string decoding.
+// Package cos implements the COS layer of a PDF document: the lexer, the object model (null, boolean, integer, real,
+// string, name, array, dictionary, stream, and indirect reference), classic and stream cross-reference parsing with
+// /Prev chains and hybrid files, object streams, a repair scan for files whose cross-reference data is broken or
+// inconsistent, an indirect-reference resolver with a cycle guard, and text-string decoding.
 //
-// Everything is bounded so hostile input cannot force unbounded work: reference chains are capped at
-// maxResolveDepth, container nesting at maxNestingDepth, and stream decoding inherits internal/filter's chain
-// and expansion caps. Termination is guaranteed by these caps; there are no timeouts.
+// Everything is bounded so hostile input cannot force unbounded work: reference chains are capped at maxResolveDepth,
+// container nesting at maxNestingDepth, and stream decoding inherits internal/filter's chain and expansion caps.
+// Termination is guaranteed by these caps; there are no timeouts.
 package cos
 
 import (
@@ -24,8 +24,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/filter"
 )
 
-// maxResolveDepth caps how many indirect references Resolve follows before giving up, terminating reference
-// cycles.
+// maxResolveDepth caps how many indirect references Resolve follows before giving up, terminating reference cycles.
 const maxResolveDepth = 64
 
 var (
@@ -35,8 +34,8 @@ var (
 	errBadFilterName = errors.New("filter name is not a name object")
 )
 
-// Document is one open PDF file at the COS level. It is not safe for concurrent use; the public API package
-// serializes access with its document mutex.
+// Document is one open PDF file at the COS level. It is not safe for concurrent use; the public API package serializes
+// access with its document mutex.
 type Document struct {
 	xref      map[int]xrefEntry
 	objCache  map[int]Object
@@ -51,8 +50,8 @@ type Document struct {
 }
 
 // Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and
-// validates that a usable document root exists, running the repair scan when the file's own cross-reference
-// information is broken, inconsistent, or missing. It fails only when even repair cannot produce a root.
+// validates that a usable document root exists, running the repair scan when the file's own cross-reference information
+// is broken, inconsistent, or missing. It fails only when even repair cannot produce a root.
 func Open(data []byte) (*Document, error) {
 	d := &Document{
 		data:     data,
@@ -89,9 +88,9 @@ func (d *Document) Trailer() Dict {
 	return d.trailer
 }
 
-// Resolve follows obj through indirect references until a direct object is reached and returns it. References to
-// free or absent objects resolve to Null per ISO 32000-2 7.3.10, as do reference cycles (terminated by
-// maxResolveDepth) and objects that cannot be loaded even after repair.
+// Resolve follows obj through indirect references until a direct object is reached and returns it. References to free
+// or absent objects resolve to Null per ISO 32000-2 7.3.10, as do reference cycles (terminated by maxResolveDepth) and
+// objects that cannot be loaded even after repair.
 func (d *Document) Resolve(obj Object) Object {
 	for range maxResolveDepth {
 		ref, ok := obj.(Ref)
@@ -110,9 +109,9 @@ func (d *Document) Resolve(obj Object) Object {
 	return Null{}
 }
 
-// loadObject returns the top-level object with the given number, parsing and caching it on first use. A load
-// failure (bad offset, mismatched header, unparseable content) triggers the document-wide repair scan once, then
-// retries; absent and free entries are not failures — they read as Null.
+// loadObject returns the top-level object with the given number, parsing and caching it on first use. A load failure
+// (bad offset, mismatched header, unparseable content) triggers the document-wide repair scan once, then retries;
+// absent and free entries are not failures — they read as Null.
 func (d *Document) loadObject(num int) (Object, error) {
 	if obj, ok := d.objCache[num]; ok {
 		return obj, nil
@@ -140,16 +139,16 @@ func (d *Document) loadObjectUncached(num int) (Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		// The object was stored directly in the file, so its strings and stream payload are encrypted under
-		// its own number and generation. Objects reached through objFromStm are not: their container was
-		// decrypted as a whole (ISO 32000-2 7.6.2).
+		// The object was stored directly in the file, so its strings and stream payload are encrypted under its own
+		// number and generation. Objects reached through objFromStm are not: their container was decrypted as a whole
+		// (ISO 32000-2 7.6.2).
 		return d.decryptDirect(num, gen, obj), nil
 	}
 	return d.objFromStm(entry.stmNum, entry.stmIdx, num)
 }
 
-// ObjectNums returns the object numbers present in the cross-reference data, in no particular order. It exists
-// for exhaustive sweeps (tests and fuzzing).
+// ObjectNums returns the object numbers present in the cross-reference data, in no particular order. It exists for
+// exhaustive sweeps (tests and fuzzing).
 func (d *Document) ObjectNums() []int {
 	nums := make([]int, 0, len(d.xref))
 	for num := range d.xref {
@@ -197,9 +196,9 @@ func (d *Document) GetString(dict Dict, key Name) (String, bool) {
 	return AsString(d.Resolve(dict[key]))
 }
 
-// StreamData applies s's /Filter chain to its raw bytes and returns the decoded data. Filter chain length and
-// output size are capped by internal/filter. Document-level encryption is already undone at parse time by the
-// installed Decryptor (see crypt.go); a non-Identity /Crypt filter in the chain is an error.
+// StreamData applies s's /Filter chain to its raw bytes and returns the decoded data. Filter chain length and output
+// size are capped by internal/filter. Document-level encryption is already undone at parse time by the installed
+// Decryptor (see crypt.go); a non-Identity /Crypt filter in the chain is an error.
 func (d *Document) StreamData(s *Stream) ([]byte, error) {
 	specs, err := d.filterSpecs(s.Dict)
 	if err != nil {
@@ -219,14 +218,13 @@ func imageFilterName(name Name) bool {
 	}
 }
 
-// ImageFilterSplit applies dict's leading non-image filters to raw — an image XObject's raw stream payload or
-// an inline image's data between ID and EI — and stops at the first image-codec filter (DCTDecode,
-// CCITTFaxDecode, JBIG2Decode, JPXDecode, or an abbreviated form), returning the processed data, the codec's
-// name, and its resolved decode-parms dictionary (possibly nil). The inline-image abbreviations /F and /DP are
-// honored alongside /Filter and /DecodeParms (only here — on ordinary streams /F means an external file). When
-// the chain contains no image codec, the returned codec is empty and data holds fully decoded sample bytes.
-// Filters listed after an image codec are impossible to apply (the codec ends the byte-stream pipeline) and are
-// ignored, matching deployed viewers.
+// ImageFilterSplit applies dict's leading non-image filters to raw — an image XObject's raw stream payload or an inline
+// image's data between ID and EI — and stops at the first image-codec filter (DCTDecode, CCITTFaxDecode, JBIG2Decode,
+// JPXDecode, or an abbreviated form), returning the processed data, the codec's name, and its resolved decode-parms
+// dictionary (possibly nil). The inline-image abbreviations /F and /DP are honored alongside /Filter and /DecodeParms
+// (only here — on ordinary streams /F means an external file). When the chain contains no image codec, the returned
+// codec is empty and data holds fully decoded sample bytes. Filters listed after an image codec are impossible to apply
+// (the codec ends the byte-stream pipeline) and are ignored, matching deployed viewers.
 func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
 	lookup := Dict{"Filter": dict["Filter"], "DecodeParms": dict["DecodeParms"]}
 	if lookup["Filter"] == nil {
@@ -268,9 +266,9 @@ func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec N
 	return data, "", nil, nil
 }
 
-// filterSpecs converts a stream dictionary's /Filter and /DecodeParms entries into filter.Specs. A /Crypt filter
-// whose /Name is /Identity (or absent, the default) is dropped from the chain, since Identity is a no-op; any
-// other (named) crypt filter is unsupported and is an error.
+// filterSpecs converts a stream dictionary's /Filter and /DecodeParms entries into filter.Specs. A /Crypt filter whose
+// /Name is /Identity (or absent, the default) is dropped from the chain, since Identity is a no-op; any other (named)
+// crypt filter is unsupported and is an error.
 func (d *Document) filterSpecs(dict Dict) ([]filter.Spec, error) {
 	names, parms, err := d.filterNamesAndParms(dict)
 	if err != nil {
@@ -294,8 +292,8 @@ func (d *Document) filterSpecs(dict Dict) ([]filter.Spec, error) {
 	return specs, nil
 }
 
-// filterNamesAndParms normalizes /Filter (name or array of names) and /DecodeParms (dictionary or array,
-// possibly containing nulls) into parallel slices.
+// filterNamesAndParms normalizes /Filter (name or array of names) and /DecodeParms (dictionary or array, possibly
+// containing nulls) into parallel slices.
 func (d *Document) filterNamesAndParms(dict Dict) (names []Name, parms Array, err error) {
 	switch f := d.Resolve(dict["Filter"]).(type) {
 	case nil, Null:

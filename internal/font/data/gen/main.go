@@ -7,11 +7,11 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Command gen regenerates the committed contents of internal/font/data (and the generated base-encoding tables
-// in internal/font/encodings_gen.go) from locally downloaded upstream inputs. It is a dev-time tool: CI never
-// runs it, only its committed outputs are used by the library, and it performs no network access itself. The
-// exact upstream sources, versions, and checksums are documented in internal/font/data/README.md; fetch them
-// into an input directory laid out as:
+// Command gen regenerates the committed contents of internal/font/data (and the generated base-encoding tables in
+// internal/font/encodings_gen.go) from locally downloaded upstream inputs. It is a dev-time tool: CI never runs it,
+// only its committed outputs are used by the library, and it performs no network access itself. The exact upstream
+// sources, versions, and checksums are documented in internal/font/data/README.md; fetch them into an input directory
+// laid out as:
 //
 //	<in>/afm/*.afm            Adobe Core 14 AFM files (Core14_AFMs.zip, extracted, incl. MustRead.html)
 //	<in>/glyphlist.txt        Adobe Glyph List (agl-aglfn repository)
@@ -20,9 +20,9 @@
 //
 // Usage: go run ./internal/font/data/gen -in <inputs> -data internal/font/data -enc internal/font/encodings_gen.go
 //
-// The generator cross-checks the derived StandardEncoding table against the AFM character codes (the Core 14
-// text AFMs are coded in AdobeStandardEncoding), so drift between the two upstream sources fails generation
-// rather than producing silently wrong tables.
+// The generator cross-checks the derived StandardEncoding table against the AFM character codes (the Core 14 text AFMs
+// are coded in AdobeStandardEncoding), so drift between the two upstream sources fails generation rather than producing
+// silently wrong tables.
 package main
 
 import (
@@ -168,9 +168,9 @@ func parseAFMs(dir string) []afmFont {
 	return fonts
 }
 
-// buildAFMBlob serializes the widths (all fonts) and built-in encodings (Symbol and ZapfDingbats only — the
-// text fonts use the standard tables from encodings_gen.go). Format: "font <name>" starts a width table with
-// "<width> <glyph>" lines; "enc <name>" starts an encoding table with "<code> <glyph>" lines.
+// buildAFMBlob serializes the widths (all fonts) and built-in encodings (Symbol and ZapfDingbats only — the text fonts
+// use the standard tables from encodings_gen.go). Format: "font <name>" starts a width table with "<width> <glyph>"
+// lines; "enc <name>" starts an encoding table with "<code> <glyph>" lines.
 func buildAFMBlob(fonts []afmFont) []byte {
 	var buf bytes.Buffer
 	for _, font := range fonts {
@@ -246,8 +246,8 @@ const (
 	encMacExpert = "MacExpert"
 )
 
-// parseEncodingsJS extracts the four base-encoding arrays from pdf.js's encodings.js: each is
-// "const <Name>Encoding = [ "glyph", "", ... ];" with 256 string entries ("" = unused code).
+// parseEncodingsJS extracts the four base-encoding arrays from pdf.js's encodings.js: each is "const <Name>Encoding = [
+// "glyph", "", ... ];" with 256 string entries ("" = unused code).
 func parseEncodingsJS(src []byte) map[string][256]string {
 	out := map[string][256]string{}
 	for _, want := range []string{encMacExpert, encMacRoman, encStandard, encWinAnsi} {
@@ -270,8 +270,8 @@ func parseEncodingsJS(src []byte) map[string][256]string {
 	return out
 }
 
-// crossCheckStandard verifies the StandardEncoding table from encodings.js against the AFM character codes:
-// the Core 14 text AFMs are coded in AdobeStandardEncoding, so every C >= 0 entry must agree.
+// crossCheckStandard verifies the StandardEncoding table from encodings.js against the AFM character codes: the Core 14
+// text AFMs are coded in AdobeStandardEncoding, so every C >= 0 entry must agree.
 func crossCheckStandard(std *[256]string, fonts []afmFont) {
 	checked := 0
 	for _, font := range fonts {

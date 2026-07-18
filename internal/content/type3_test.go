@@ -17,10 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// type3PDF builds a document whose object 1 is a resource dictionary carrying a Type 3 font /T3 with two
-// glyphs: "boxy" (d1 shape: a 500×700 unit rectangle, with an attempted color change that d1 must suppress)
-// and "dot" (d0 colored: paints its own green rectangle). The glyph coordinate space is 1000 units per em
-// (FontMatrix 0.001), and widths are 600 and 400 glyph units.
+// type3PDF builds a document whose object 1 is a resource dictionary carrying a Type 3 font /T3 with two glyphs: "boxy"
+// (d1 shape: a 500×700 unit rectangle, with an attempted color change that d1 must suppress) and "dot" (d0 colored:
+// paints its own green rectangle). The glyph coordinate space is 1000 units per em (FontMatrix 0.001), and widths are
+// 600 and 400 glyph units.
 func type3PDF(t *testing.T) *cos.Document {
 	t.Helper()
 	boxy := "600 0 0 0 500 700 d1\n0 0 1 rg\n0 0 500 700 re f"
@@ -74,8 +74,8 @@ func TestType3ShapeGlyph(t *testing.T) {
 	if f.paint.Color != (color.NRGBA{R: 255, A: 255}) {
 		t.Errorf("d1 glyph painted %+v, want the caller's red (its own color op must be suppressed)", f.paint.Color)
 	}
-	// CTM = FontMatrix(0.001) · Trm(10pt at 20,30): glyph units scale by 0.01. The rect spans 500×700 glyph
-	// units → 5×7 text units from (20, 30).
+	// CTM = FontMatrix(0.001) · Trm(10pt at 20,30): glyph units scale by 0.01. The rect spans 500×700 glyph units → 5×7
+	// text units from (20, 30).
 	if len(f.path.Points) < 3 {
 		t.Fatalf("charproc path too short: %+v", f.path)
 	}
@@ -115,8 +115,8 @@ func TestType3AdvanceUsesWidthsAndMatrix(t *testing.T) {
 func TestType3RecursionTerminates(t *testing.T) {
 	d := type3PDF(t)
 	rec := run(t, d, resourcesOf(t, d), "BT /T3 10 Tf (R) Tj ET") // The proc shows itself.
-	// Termination and balance are the assertions (run checks depth); the self-referential proc is cut by the
-	// cycle guard, so nothing fills.
+	// Termination and balance are the assertions (run checks depth); the self-referential proc is cut by the cycle
+	// guard, so nothing fills.
 	if n := len(rec.byOp(opFill)); n != 0 {
 		t.Errorf("fills = %d, want 0 (cycle must be cut)", n)
 	}
@@ -124,8 +124,8 @@ func TestType3RecursionTerminates(t *testing.T) {
 
 func TestType3ClipModeDegrades(t *testing.T) {
 	d := type3PDF(t)
-	// Tr 7 (clip-only) with a Type 3 font: no ClipText accumulation, no EndTextClip, and later content still
-	// draws (the degrade documented in emitType3Run).
+	// Tr 7 (clip-only) with a Type 3 font: no ClipText accumulation, no EndTextClip, and later content still draws (the
+	// degrade documented in emitType3Run).
 	rec := run(t, d, resourcesOf(t, d), "BT 7 Tr /T3 10 Tf (A) Tj ET 0 0 5 5 re f")
 	for _, c := range rec.calls {
 		if c.op == "endtextclip" {

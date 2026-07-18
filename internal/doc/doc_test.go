@@ -20,8 +20,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// pdf assembles a minimal PDF from object bodies keyed by object number. No xref is written; the COS layer's
-// repair scan indexes the objects, which is itself exercised constantly this way.
+// pdf assembles a minimal PDF from object bodies keyed by object number. No xref is written; the COS layer's repair
+// scan indexes the objects, which is itself exercised constantly this way.
 func pdf(objects map[int]string) []byte {
 	var sb strings.Builder
 	sb.WriteString("%PDF-1.7\n")
@@ -141,9 +141,9 @@ func TestNoPagesOpensWithZeroPages(t *testing.T) {
 	}
 }
 
-// TestCorpusPageCounts checks the walked page count of every corpus file against the oracle-recorded value in
-// its golden. This includes the encrypted set: page-tree dictionaries are not encrypted, so counting works
-// before authentication, exactly as the oracle did.
+// TestCorpusPageCounts checks the walked page count of every corpus file against the oracle-recorded value in its
+// golden. This includes the encrypted set: page-tree dictionaries are not encrypted, so counting works before
+// authentication, exactly as the oracle did.
 func TestCorpusPageCounts(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {

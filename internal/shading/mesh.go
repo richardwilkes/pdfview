@@ -19,14 +19,14 @@ import (
 )
 
 // Mesh shadings (ISO 32000-2 8.7.4.5.5-8) are tessellated at parse time into flat triangles: vertex colors are
-// converted to the rendered RGB space first (MuPDF likewise converts mesh vertex colors to the destination
-// space and interpolates RGB), then triangles are subdivided until the color difference across each is below
-// one 8-bit step, so drawing them flat is visually equivalent to Gouraud interpolation. Truncated or malformed
-// stream data degrades to however many complete primitives were read — never an error — matching the leniency
-// both MuPDF and the filter layer apply.
+// converted to the rendered RGB space first (MuPDF likewise converts mesh vertex colors to the destination space and
+// interpolates RGB), then triangles are subdivided until the color difference across each is below one 8-bit step, so
+// drawing them flat is visually equivalent to Gouraud interpolation. Truncated or malformed stream data degrades to
+// however many complete primitives were read — never an error — matching the leniency both MuPDF and the filter layer
+// apply.
 
-// vert is one mesh vertex: a shading-space position plus its resolved RGB color (0-255 range, kept in float
-// for exact midpoint interpolation).
+// vert is one mesh vertex: a shading-space position plus its resolved RGB color (0-255 range, kept in float for exact
+// midpoint interpolation).
 type vert struct {
 	pt gfx.Point
 	c  [3]float32
@@ -182,9 +182,9 @@ func validBits(v int, allowed ...int) bool {
 	return false
 }
 
-// parseFreeTriangles reads a type 4 free-form triangle stream: each vertex carries an edge flag — 0 starts a
-// fresh triangle (two more vertices follow), 1 continues sharing the previous triangle's second and third
-// vertices, 2 shares its first and third.
+// parseFreeTriangles reads a type 4 free-form triangle stream: each vertex carries an edge flag — 0 starts a fresh
+// triangle (two more vertices follow), 1 continues sharing the previous triangle's second and third vertices, 2 shares
+// its first and third.
 func parseFreeTriangles(r *bitReader, m *meshDecode, b *meshBuilder) {
 	var va, vb, vc vert
 	have := false
@@ -258,17 +258,16 @@ func parseLattice(r *bitReader, m *meshDecode, b *meshBuilder, perRow int) {
 	}
 }
 
-// patch is one Coons/tensor patch: a 4x4 control-point grid (Coons patches get their four interior points
-// computed from the boundary) plus the four corner colors c[0]..c[3] at grid corners (0,0), (0,3), (3,3),
-// (3,0).
+// patch is one Coons/tensor patch: a 4x4 control-point grid (Coons patches get their four interior points computed from
+// the boundary) plus the four corner colors c[0]..c[3] at grid corners (0,0), (0,3), (3,3), (3,0).
 type patch struct {
 	p [4][4]gfx.Point
 	c [4][3]float32
 }
 
-// Stream point orders (grid row, col), per the spec's tensor figure: a fresh patch's 16 (tensor) points are
-// the boundary counterclockwise from (0,0) then the four interior points; Coons patches carry only the 12
-// boundary points. Continuation patches reuse row 0 from the previous patch's shared edge and read the rest.
+// Stream point orders (grid row, col), per the spec's tensor figure: a fresh patch's 16 (tensor) points are the
+// boundary counterclockwise from (0,0) then the four interior points; Coons patches carry only the 12 boundary points.
+// Continuation patches reuse row 0 from the previous patch's shared edge and read the rest.
 var (
 	tensorOrderNew  = [][2]int{{0, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 2}, {3, 1}, {3, 0}, {2, 0}, {1, 0}, {1, 1}, {1, 2}, {2, 2}, {2, 1}}
 	tensorOrderCont = tensorOrderNew[4:]
@@ -344,8 +343,8 @@ func parsePatches(r *bitReader, m *meshDecode, b *meshBuilder, tensor bool) {
 	}
 }
 
-// fillCoonsInterior computes the four interior control points of a Coons patch from its boundary, the
-// standard Coons-to-tensor promotion (ISO 32000-2 8.7.4.5.7).
+// fillCoonsInterior computes the four interior control points of a Coons patch from its boundary, the standard
+// Coons-to-tensor promotion (ISO 32000-2 8.7.4.5.7).
 func fillCoonsInterior(pa *patch) {
 	p := &pa.p
 	p[1][1] = coonsInner(p[0][0], p[0][1], p[1][0], p[0][3], p[3][0], p[3][1], p[1][3], p[3][3])
@@ -354,8 +353,8 @@ func fillCoonsInterior(pa *patch) {
 	p[2][2] = coonsInner(p[3][3], p[3][2], p[2][3], p[3][0], p[0][3], p[0][2], p[2][0], p[0][0])
 }
 
-// coonsInner computes one interior point: (-4a + 6(b+c) - 2(d+e) + 3(f+g) - h) / 9, the spec's formula with
-// the operands ordered so all four interior points share it under symmetry.
+// coonsInner computes one interior point: (-4a + 6(b+c) - 2(d+e) + 3(f+g) - h) / 9, the spec's formula with the
+// operands ordered so all four interior points share it under symmetry.
 func coonsInner(a, b, c, d, e, f, g, h gfx.Point) gfx.Point {
 	return gfx.Point{
 		X: (-4*a.X + 6*(b.X+c.X) - 2*(d.X+e.X) + 3*(f.X+g.X) - h.X) / 9,
@@ -363,10 +362,10 @@ func coonsInner(a, b, c, d, e, f, g, h gfx.Point) gfx.Point {
 	}
 }
 
-// tessellatePatch evaluates the patch's Bézier surface over a grid sized by the corner-color deltas (so each
-// cell's color spread stays below one 8-bit step, up to the grid cap) with a geometric floor that keeps
-// curved patch interiors smooth, then emits two flat triangles per cell. share is this patch's slice of the
-// triangle budget; the grid coarsens rather than dropping the patch.
+// tessellatePatch evaluates the patch's Bézier surface over a grid sized by the corner-color deltas (so each cell's
+// color spread stays below one 8-bit step, up to the grid cap) with a geometric floor that keeps curved patch interiors
+// smooth, then emits two flat triangles per cell. share is this patch's slice of the triangle budget; the grid coarsens
+// rather than dropping the patch.
 func tessellatePatch(pa *patch, b *meshBuilder, share int) {
 	const geomFloor = 12
 	du := max(colorDelta(pa.c[0], pa.c[3]), colorDelta(pa.c[1], pa.c[2]))
@@ -438,9 +437,9 @@ func patchColor(pa *patch, u, v float32) color.NRGBA {
 	return quantize(out)
 }
 
-// meshBuilder accumulates the input primitives during stream parsing, then tessellates them under the global
-// triangle budget in finish(). Collecting first keeps the budget FAIR: every input triangle and patch gets an
-// equal share, so a color-contrasting first primitive cannot exhaust the budget and drop everything after it.
+// meshBuilder accumulates the input primitives during stream parsing, then tessellates them under the global triangle
+// budget in finish(). Collecting first keeps the budget FAIR: every input triangle and patch gets an equal share, so a
+// color-contrasting first primitive cannot exhaust the budget and drop everything after it.
 type meshBuilder struct {
 	input   []gouraudTri
 	patches []patch
@@ -459,8 +458,8 @@ func (b *meshBuilder) triangle(v0, v1, v2 vert) {
 	}
 }
 
-// finish tessellates the collected primitives. Each input's share of the budget bounds its subdivision depth;
-// within that depth, splitting stops as soon as the triangle's color spread is below one 8-bit step.
+// finish tessellates the collected primitives. Each input's share of the budget bounds its subdivision depth; within
+// that depth, splitting stops as soon as the triangle's color spread is below one 8-bit step.
 func (b *meshBuilder) finish() {
 	n := len(b.input) + len(b.patches)
 	if n == 0 {
@@ -481,8 +480,8 @@ func (b *meshBuilder) finish() {
 	b.input, b.patches = nil, nil
 }
 
-// subdivide splits a Gouraud triangle at edge midpoints until its color spread is below one 8-bit step or the
-// depth budget runs out, then emits it flat with the average color.
+// subdivide splits a Gouraud triangle at edge midpoints until its color spread is below one 8-bit step or the depth
+// budget runs out, then emits it flat with the average color.
 func (b *meshBuilder) subdivide(v0, v1, v2 vert, depth int) {
 	if len(b.tris) >= maxTriangles {
 		return

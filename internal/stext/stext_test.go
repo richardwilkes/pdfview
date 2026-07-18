@@ -15,8 +15,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// mkChar builds one axis-aligned character in top-left/y-down device space with an 0.8/-0.2 em vertical
-// extent, the shape the corpus text overwhelmingly uses.
+// mkChar builds one axis-aligned character in top-left/y-down device space with an 0.8/-0.2 em vertical extent, the
+// shape the corpus text overwhelmingly uses.
 func mkChar(r rune, x, y, adv, size float32) Char {
 	top, bottom := y-0.8*size, y+0.2*size
 	return Char{
@@ -34,8 +34,8 @@ func mkChar(r rune, x, y, adv, size float32) Char {
 	}
 }
 
-// mkWord lays out s as consecutive characters starting at (x, y), advancing adv per character, and returns
-// the characters plus the x just past the word.
+// mkWord lays out s as consecutive characters starting at (x, y), advancing adv per character, and returns the
+// characters plus the x just past the word.
 func mkWord(s string, x, y, adv, size float32) (chars []Char, endX float32) {
 	for _, r := range s {
 		chars = append(chars, mkChar(r, x, y, adv, size))
@@ -62,8 +62,8 @@ func TestSearchCaseFoldAndBounds(t *testing.T) {
 }
 
 func TestSearchGapAsWordSpace(t *testing.T) {
-	// No space character between the words; a horizontal gap of at least gapSpaceEm em must satisfy the
-	// needle's space, and a smaller gap must not.
+	// No space character between the words; a horizontal gap of at least gapSpaceEm em must satisfy the needle's space,
+	// and a smaller gap must not.
 	first, endX := mkWord("Kerned", 100, 200, 10, 20)
 	wide, _ := mkWord("Text", endX+gapSpaceEm*20, 200, 10, 20)
 	if got := searchChars(append(append([]Char(nil), first...), wide...), "Kerned Text", 100); len(got) != 1 {
@@ -76,8 +76,8 @@ func TestSearchGapAsWordSpace(t *testing.T) {
 }
 
 func TestSearchWrappedMatch(t *testing.T) {
-	// "brown" ends line 1 and "fox" starts line 2: the needle space matches the line break and the match
-	// yields one quad per line, first line first.
+	// "brown" ends line 1 and "fox" starts line 2: the needle space matches the line break and the match yields one
+	// quad per line, first line first.
 	line1, _ := mkWord("brown", 100, 200, 10, 12)
 	line2, _ := mkWord("fox", 40, 214, 10, 12)
 	chars := append(append([]Char(nil), line1...), line2...)
@@ -95,8 +95,8 @@ func TestSearchWrappedMatch(t *testing.T) {
 }
 
 func TestSearchExtentSplit(t *testing.T) {
-	// A 40-pt space amid 20-pt words diverges beyond extentSplitFraction of the quad height, so one
-	// single-line match yields three quads (word, oversized space, word) — the hit-quad-split.pdf behavior.
+	// A 40-pt space amid 20-pt words diverges beyond extentSplitFraction of the quad height, so one single-line match
+	// yields three quads (word, oversized space, word) — the hit-quad-split.pdf behavior.
 	alpha, endX := mkWord("alpha", 100, 200, 10, 20)
 	space := mkChar(' ', endX, 200, 20, 40)
 	beta, _ := mkWord("beta", endX+20, 200, 10, 20)
@@ -137,8 +137,8 @@ func TestSearchBudget(t *testing.T) {
 	if got := searchChars(chars, "ab", 3); len(got) != 3 {
 		t.Fatalf("expected exactly 3 quads under a budget of 3, got %d", len(got))
 	}
-	// A match that would overflow the budget is truncated mid-match and the search stops: the wrapped match
-	// below produces two quads but only the first fits.
+	// A match that would overflow the budget is truncated mid-match and the search stops: the wrapped match below
+	// produces two quads but only the first fits.
 	line1, _ := mkWord("brown", 100, 200, 10, 12)
 	line2, _ := mkWord("fox", 40, 214, 10, 12)
 	if got := searchChars(append(append([]Char(nil), line1...), line2...), "brown fox", 1); len(got) != 1 {
@@ -172,8 +172,8 @@ func TestSearchUnmappedRuneBreaksMatch(t *testing.T) {
 }
 
 func TestSearchRotatedRun(t *testing.T) {
-	// A 90°-rotated run: baseline advances through device y, so the perpendicular line-break test must keep
-	// it a single line, and the non-axis assembly spans first to last corner.
+	// A 90°-rotated run: baseline advances through device y, so the perpendicular line-break test must keep it a single
+	// line, and the non-axis assembly spans first to last corner.
 	chars := make([]Char, 0, 7)
 	x, y := float32(100), float32(400)
 	for _, r := range "Rotated" {

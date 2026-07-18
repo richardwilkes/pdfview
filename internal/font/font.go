@@ -7,19 +7,18 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package font implements PDF font semantics (ISO 32000-2 9.5–9.10): font-dictionary and descriptor parsing,
-// embedded font programs, encodings, width resolution, and the deterministic substitution of non-embedded
-// fonts from the bundled data (internal/font/data). It supplies the content interpreter with everything a
-// show-text operator needs — per-code advances in text space, ascent/descent for text quads, and Unicode for
-// extraction/search — and glyph outlines for rendering.
+// Package font implements PDF font semantics (ISO 32000-2 9.5–9.10): font-dictionary and descriptor parsing, embedded
+// font programs, encodings, width resolution, and the deterministic substitution of non-embedded fonts from the bundled
+// data (internal/font/data). It supplies the content interpreter with everything a show-text operator needs — per-code
+// advances in text space, ascent/descent for text quads, and Unicode for extraction/search — and glyph outlines for
+// rendering.
 //
-// Metrics contract (pinned behaviorally against the oracle goldens): the widths that position glyphs come from
-// the PDF /Widths (or /W) entries whenever present, never from the font program, so layout and search parity
-// hold even when glyph shapes are substituted. The ascender/descender that size text quads follow FreeType's
-// rules, because that is what the oracle's MuPDF build exposes: hhea values for sfnt fonts (falling back to
-// OS/2 typo, then win metrics, when hhea has none), and the FontBBox for bare CFF and Type 1 programs.
-// Substituted fonts use the pinned metrics of MuPDF's bundled replacements, not the metrics of our Liberation
-// stand-ins, for the same reason.
+// Metrics contract (pinned behaviorally against the oracle goldens): the widths that position glyphs come from the PDF
+// /Widths (or /W) entries whenever present, never from the font program, so layout and search parity hold even when
+// glyph shapes are substituted. The ascender/descender that size text quads follow FreeType's rules, because that is
+// what the oracle's MuPDF build exposes: hhea values for sfnt fonts (falling back to OS/2 typo, then win metrics, when
+// hhea has none), and the FontBBox for bare CFF and Type 1 programs. Substituted fonts use the pinned metrics of
+// MuPDF's bundled replacements, not the metrics of our Liberation stand-ins, for the same reason.
 package font
 
 import (
@@ -30,11 +29,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/font/data"
 )
 
-// Errors reported by Load. They flow no further than the interpreter, which degrades a failed font load by
-// keeping the previous font (matching the oracle's operator-level error recovery).
+// Errors reported by Load. They flow no further than the interpreter, which degrades a failed font load by keeping the
+// previous font (matching the oracle's operator-level error recovery).
 var (
-	// ErrUnsupportedFont marks font configurations without engine support (Type0 fonts encoded with a
-	// predefined non-Identity CMap); the interpreter skips text shown with them, never erroring the page.
+	// ErrUnsupportedFont marks font configurations without engine support (Type0 fonts encoded with a predefined
+	// non-Identity CMap); the interpreter skips text shown with them, never erroring the page.
 	ErrUnsupportedFont = errors.New("unsupported font type")
 	// ErrBadFont marks a font dictionary too malformed to use.
 	ErrBadFont = errors.New("unusable font dictionary")
@@ -59,9 +58,9 @@ type Font struct {
 	enc *[256]string
 	// widths maps codes to advances in text space (the PDF 1000-unit values already divided by 1000).
 	widths map[uint32]float32
-	// afm is the standard-14 fallback width table (glyph name → 1000-unit width) consulted only when the PDF
-	// supplies no /Widths array at all and the font is substituted (embedded programs fall back to their own
-	// advances instead). When /Widths exists, codes it does not cover take /MissingWidth, per the descriptor.
+	// afm is the standard-14 fallback width table (glyph name → 1000-unit width) consulted only when the PDF supplies
+	// no /Widths array at all and the font is substituted (embedded programs fall back to their own advances instead).
+	// When /Widths exists, codes it does not cover take /MissingWidth, per the descriptor.
 	afm map[string]uint16
 	// sfnt carries the parsed embedded TrueType/OpenType program, nil otherwise.
 	sfnt *sfntInfo
@@ -69,11 +68,11 @@ type Font struct {
 	cff *cffInfo
 	// t1 carries the parsed embedded Type 1 program (FontFile), nil otherwise.
 	t1 *t1Info
-	// type0 carries composite-font state (CMap, CID widths, CID→GID); nil for simple fonts. The simple-font
-	// [256] tables below are not consulted when it is set.
+	// type0 carries composite-font state (CMap, CID widths, CID→GID); nil for simple fonts. The simple-font [256]
+	// tables below are not consulted when it is set.
 	type0 *type0Info
-	// type3 carries Type 3 CharProcs state; the interpreter recurses into the procs instead of drawing
-	// outlines (GlyphPath reports none).
+	// type3 carries Type 3 CharProcs state; the interpreter recurses into the procs instead of drawing outlines
+	// (GlyphPath reports none).
 	type3 *type3Info
 	// toUni is the parsed /ToUnicode CMap, nil when absent; it takes precedence over every Unicode source.
 	toUni *cmapPDF
@@ -92,14 +91,14 @@ type Font struct {
 	descender float32
 	// missingWidth is the descriptor /MissingWidth in text space.
 	missingWidth float32
-	// hasWidths records whether the dictionary carried a /Widths array (its gaps then mean /MissingWidth,
-	// never a fallback source).
+	// hasWidths records whether the dictionary carried a /Widths array (its gaps then mean /MissingWidth, never a
+	// fallback source).
 	hasWidths bool
 }
 
-// Load builds a Font from a font resource dictionary. The document's resolver is used for every indirect
-// value. Unsupported subtypes return ErrUnsupportedFont; malformed dictionaries return ErrBadFont. The load
-// never panics on hostile input (embedded font parsing is guarded).
+// Load builds a Font from a font resource dictionary. The document's resolver is used for every indirect value.
+// Unsupported subtypes return ErrUnsupportedFont; malformed dictionaries return ErrBadFont. The load never panics on
+// hostile input (embedded font parsing is guarded).
 func Load(d *cos.Document, dict cos.Dict) (*Font, error) {
 	subtype, _ := d.GetName(dict, "Subtype")
 	switch subtype {
@@ -110,8 +109,8 @@ func Load(d *cos.Document, dict cos.Dict) (*Font, error) {
 	case "Type3":
 		return loadType3(d, dict)
 	default:
-		// A missing or unknown subtype gets the simple-font treatment when the dictionary looks like one —
-		// lenient, like deployed viewers.
+		// A missing or unknown subtype gets the simple-font treatment when the dictionary looks like one — lenient,
+		// like deployed viewers.
 		if _, ok := dict["BaseFont"]; ok {
 			return loadSimple(d, dict)
 		}
@@ -197,9 +196,9 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 			f.cff = parseCFFGlyphs(d, desc.fontFile3, top)
 		}
 	case desc.fontFile != nil:
-		// Type 1 programs: quad metrics come from the FontBBox over the FontMatrix-implied upem, like bare
-		// CFF (FreeType's rule; see the package comment). seac needs StandardEncoding regardless of the
-		// font's own encoding, so the generated table is injected here.
+		// Type 1 programs: quad metrics come from the FontBBox over the FontMatrix-implied upem, like bare CFF
+		// (FreeType's rule; see the package comment). seac needs StandardEncoding regardless of the font's own
+		// encoding, so the generated table is injected here.
 		if info := parseType1Stream(d, desc.fontFile, &standardEncoding); info != nil {
 			f.t1 = info
 			if asc, dsc, ok := info.metrics(); ok {
@@ -223,24 +222,24 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.toUni = loadToUnicode(d, dict)
 	buildUnicode(f)
 
-	// Widths: /Widths always wins. Without one, substituted fonts take the standard-14 AFM widths and
-	// embedded programs their own advances (in Width).
+	// Widths: /Widths always wins. Without one, substituted fonts take the standard-14 AFM widths and embedded programs
+	// their own advances (in Width).
 	f.hasWidths = loadWidths(d, dict, f)
 
-	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes
-	// yield no outline source at all — renders through the deterministic Liberation substitute (never an
-	// error, never a system font). An sfnt go-text rejects (no cmap table) but whose glyf/loca tables read
-	// keeps rendering its own shapes through the direct glyf walker. The substitute is the glyph source only
-	// when no embedded source exists, so GID/GlyphPath/Width stay mutually consistent.
+	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes yield no
+	// outline source at all — renders through the deterministic Liberation substitute (never an error, never a system
+	// font). An sfnt go-text rejects (no cmap table) but whose glyf/loca tables read keeps rendering its own shapes
+	// through the direct glyf walker. The substitute is the glyph source only when no embedded source exists, so
+	// GID/GlyphPath/Width stay mutually consistent.
 	if f.sfnt != nil && f.sfnt.face == nil && f.sfnt.glyf == nil {
 		f.sfnt = nil
 	}
 	if f.sfnt == nil && f.cff == nil && f.t1 == nil {
 		f.sub = loadSubstitute(std14)
 	}
-	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs their
-	// hsbw advances (programAdvance); everything else — substituted fonts per the std14-styles pin, and bare
-	// CFF until its charstring advances land — takes the AFM widths of the standard-14 stand-in.
+	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs their hsbw advances
+	// (programAdvance); everything else — substituted fonts per the std14-styles pin, and bare CFF until its charstring
+	// advances land — takes the AFM widths of the standard-14 stand-in.
 	if !f.hasWidths && f.sfnt == nil && f.t1 == nil {
 		f.afm = data.AFMWidths(std14)
 	}
@@ -264,8 +263,8 @@ func stripSubsetPrefix(name string) string {
 	return name
 }
 
-// loadWidths parses /FirstChar + /Widths into text-space advances, reporting whether a /Widths array was
-// present (even an empty or junk-filled one counts: its gaps mean /MissingWidth, not substitute advances).
+// loadWidths parses /FirstChar + /Widths into text-space advances, reporting whether a /Widths array was present (even
+// an empty or junk-filled one counts: its gaps mean /MissingWidth, not substitute advances).
 func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 	f.widths = map[uint32]float32{}
 	first, _ := d.GetInt(dict, "FirstChar")
@@ -289,10 +288,10 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 	return true
 }
 
-// Width returns the advance for a code in text space (em units at size 1). A present /Widths array is
-// authoritative: its value when the code resolves, /MissingWidth otherwise. Without one, substituted fonts
-// use the standard-14 AFM width for the code's glyph name and embedded sfnt programs their own hmtx advance,
-// then /MissingWidth. Composite fonts use /W with /DW as the default instead.
+// Width returns the advance for a code in text space (em units at size 1). A present /Widths array is authoritative:
+// its value when the code resolves, /MissingWidth otherwise. Without one, substituted fonts use the standard-14 AFM
+// width for the code's glyph name and embedded sfnt programs their own hmtx advance, then /MissingWidth. Composite
+// fonts use /W with /DW as the default instead.
 func (f *Font) Width(code uint32) float32 {
 	if f.type0 != nil {
 		return f.type0.cidWidth(f.type0.cmap.cid(code))
@@ -316,9 +315,9 @@ func (f *Font) Width(code uint32) float32 {
 	return f.missingWidth
 }
 
-// Unicode returns the Unicode rune for a code, or 0 when none is known. A /ToUnicode CMap takes precedence
-// over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the
-// one rune per code the search/extraction seam carries.
+// Unicode returns the Unicode rune for a code, or 0 when none is known. A /ToUnicode CMap takes precedence over every
+// other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the one rune per code the
+// search/extraction seam carries.
 func (f *Font) Unicode(code uint32) rune {
 	if f.toUni != nil {
 		if s := f.toUni.bfString(code); s != "" {
@@ -341,9 +340,9 @@ func (f *Font) GlyphName(code uint32) string {
 	return ""
 }
 
-// MemoryEstimate returns a rough byte footprint for cache budgeting (internal/store): the embedded program's
-// data plus a fixed allowance for the per-font tables. It never needs to be exact — the store's budget is a
-// working-set bound, not an accounting ledger.
+// MemoryEstimate returns a rough byte footprint for cache budgeting (internal/store): the embedded program's data plus
+// a fixed allowance for the per-font tables. It never needs to be exact — the store's budget is a working-set bound,
+// not an accounting ledger.
 func (f *Font) MemoryEstimate() uint64 {
 	const base = 8 << 10 // gids/uni/enc tables, widths map, struct overhead.
 	n := uint64(base)
@@ -389,9 +388,9 @@ func (f *Font) WMode() uint8 {
 	return 0
 }
 
-// VMetrics returns the vertical-mode metrics for a code in text space: the vertical displacement w1 (usually
-// negative — downward) and the position vector (vx, vy) displacing the glyph from its horizontal origin
-// (ISO 32000-2 9.7.4.3). Only meaningful when WMode() is 1.
+// VMetrics returns the vertical-mode metrics for a code in text space: the vertical displacement w1 (usually negative —
+// downward) and the position vector (vx, vy) displacing the glyph from its horizontal origin (ISO 32000-2 9.7.4.3).
+// Only meaningful when WMode() is 1.
 func (f *Font) VMetrics(code uint32) (w1, vx, vy float32) {
 	if f.type0 == nil {
 		return -1, f.Width(code) / 2, 0.88
@@ -400,9 +399,9 @@ func (f *Font) VMetrics(code uint32) (w1, vx, vy float32) {
 	return f.type0.cidVMetrics(cid, f.type0.cidWidth(cid))
 }
 
-// ForEachCode decodes a PDF string operand into character codes: one byte per code for simple fonts, the
-// CMap's codespace ranges for composite fonts. oneByte reports whether the code came from a single byte (the
-// word-spacing rule applies only to single-byte code 32, ISO 32000-2 9.3.3).
+// ForEachCode decodes a PDF string operand into character codes: one byte per code for simple fonts, the CMap's
+// codespace ranges for composite fonts. oneByte reports whether the code came from a single byte (the word-spacing rule
+// applies only to single-byte code 32, ISO 32000-2 9.3.3).
 func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
 	if f.type0 != nil {
 		for len(s) > 0 {
@@ -424,9 +423,9 @@ func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
 	}
 }
 
-// buildUnicode fills the code→rune table: glyph name through the Adobe Glyph List (including its uniXXXX and
-// uXXXXXX conventions), else the code itself for ASCII, else unknown. A /ToUnicode CMap, when present, takes
-// precedence over this table at lookup time (see Unicode).
+// buildUnicode fills the code→rune table: glyph name through the Adobe Glyph List (including its uniXXXX and uXXXXXX
+// conventions), else the code itself for ASCII, else unknown. A /ToUnicode CMap, when present, takes precedence over
+// this table at lookup time (see Unicode).
 func buildUnicode(f *Font) {
 	for code := range 256 {
 		if name := f.enc[code]; name != "" {
@@ -442,9 +441,9 @@ func buildUnicode(f *Font) {
 	}
 }
 
-// GlyphNameToUnicode implements the AGL algorithm for one glyph name: strip any suffix after the first
-// period, split ligature components on underscores, then resolve each component via the AGL, the uniXXXX
-// (one or more 4-hex-digit UTF-16 values) form, or the uXXXX[XX] form. Returns "" when nothing resolves.
+// GlyphNameToUnicode implements the AGL algorithm for one glyph name: strip any suffix after the first period, split
+// ligature components on underscores, then resolve each component via the AGL, the uniXXXX (one or more 4-hex-digit
+// UTF-16 values) form, or the uXXXX[XX] form. Returns "" when nothing resolves.
 func GlyphNameToUnicode(name string) string {
 	if name == "" {
 		return ""

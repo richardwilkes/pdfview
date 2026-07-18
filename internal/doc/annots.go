@@ -14,27 +14,26 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Annotation-appearance selection and placement, matching MuPDF's display path (fz_run_page), pinned entirely by
-// oracle probes:
+// Annotation-appearance selection and placement, matching MuPDF's display path (fz_run_page), pinned entirely by oracle
+// probes:
 //
-//   - Only the normal appearance (/AP /N) ever renders — /D and /R never do. A stream-valued /N is used directly
-//     (a stray /AS is ignored); a dictionary-valued /N requires /AS to name one of its stream entries, else the
-//     annotation draws nothing.
-//   - /F bits Invisible (1), Hidden (2), and NoView (32) each suppress rendering; Print (4) is irrelevant on
-//     screen. MuPDF hides Invisible-flagged annotations of every subtype, not just unrecognized ones.
-//   - /Link and /Popup annotations never render, even with an /AP. /Widget annotations render only when a field
-//     type (/FT) is resolvable on the annotation or through its /Parent chain; membership in the AcroForm
-//     /Fields array (or the existence of /AcroForm at all) is irrelevant. Every other subtype — known or unknown
-//     — renders its appearance.
-//   - Placement follows ISO 32000-2 12.5.5: the form's /BBox mapped through its /Matrix yields an axis-aligned
-//     bounding box, and the appearance is translated/scaled so that box coincides with the annotation's
-//     normalized /Rect. Degenerate boxes on either side skip the annotation entirely (probe-pinned), and a
-//     reversed /Rect normalizes.
+//   - Only the normal appearance (/AP /N) ever renders — /D and /R never do. A stream-valued /N is used directly (a
+//     stray /AS is ignored); a dictionary-valued /N requires /AS to name one of its stream entries, else the annotation
+//     draws nothing.
+//   - /F bits Invisible (1), Hidden (2), and NoView (32) each suppress rendering; Print (4) is irrelevant on screen.
+//     MuPDF hides Invisible-flagged annotations of every subtype, not just unrecognized ones.
+//   - /Link and /Popup annotations never render, even with an /AP. /Widget annotations render only when a field type
+//     (/FT) is resolvable on the annotation or through its /Parent chain; membership in the AcroForm /Fields array (or
+//     the existence of /AcroForm at all) is irrelevant. Every other subtype — known or unknown — renders its
+//     appearance.
+//   - Placement follows ISO 32000-2 12.5.5: the form's /BBox mapped through its /Matrix yields an axis-aligned bounding
+//     box, and the appearance is translated/scaled so that box coincides with the annotation's normalized /Rect.
+//     Degenerate boxes on either side skip the annotation entirely (probe-pinned), and a reversed /Rect normalizes.
 //   - Annotation opacity (/CA) is ignored — MuPDF's display path draws appearances opaque.
 //
-// MuPDF additionally synthesizes appearance streams for some /AP-less markup annotations (Square and Circle
-// observed, drawing /C borders and /IC interiors). That synthesis is deliberately out of scope: annotations
-// without a usable /AP draw nothing here, and the corpus pins only the /AP path.
+// MuPDF additionally synthesizes appearance streams for some /AP-less markup annotations (Square and Circle observed,
+// drawing /C borders and /IC interiors). That synthesis is deliberately out of scope: annotations without a usable /AP
+// draw nothing here, and the corpus pins only the /AP path.
 
 // maxParentDepth caps the /Parent chain walk for the widget /FT lookup so reference cycles terminate.
 const maxParentDepth = 32
@@ -42,18 +41,17 @@ const maxParentDepth = 32
 // annotHiddenFlags are the /F bits that suppress rendering: Invisible (1), Hidden (2), NoView (32).
 const annotHiddenFlags = 1 | 2 | 32
 
-// Annot is one renderable annotation appearance: the /AP /N form stream (state-selected for dictionary-valued
-// /N) and the ISO 32000-2 12.5.5 placement matrix mapping appearance space onto the page's PDF space. Raw is
-// the stream object as stored in the file (a cos.Ref when indirect), which the interpreter's form-cycle set
-// keys on.
+// Annot is one renderable annotation appearance: the /AP /N form stream (state-selected for dictionary-valued /N) and
+// the ISO 32000-2 12.5.5 placement matrix mapping appearance space onto the page's PDF space. Raw is the stream object
+// as stored in the file (a cos.Ref when indirect), which the interpreter's form-cycle set keys on.
 type Annot struct {
 	Raw       cos.Object
 	Stream    *cos.Stream
 	Transform gfx.Matrix
 }
 
-// Annotations returns the renderable annotation appearances of the given 0-based page, in /Annots order,
-// filtered and placed per the rules above. The maxPageLinks cap bounds the walk like the links walk.
+// Annotations returns the renderable annotation appearances of the given 0-based page, in /Annots order, filtered and
+// placed per the rules above. The maxPageLinks cap bounds the walk like the links walk.
 func (d *Document) Annotations(pageNumber int) []Annot {
 	if pageNumber < 0 || pageNumber >= len(d.pages) {
 		return nil
@@ -144,8 +142,8 @@ func (d *Document) annotAppearance(annot cos.Dict) (a Annot, ok bool) {
 	return Annot{Raw: raw, Stream: stream, Transform: transform}, true
 }
 
-// widgetHasFieldType reports whether a /Widget annotation resolves a field type (/FT) on itself or through its
-// /Parent chain — MuPDF renders only such widgets (probe-pinned; orphan fields render, /FT-less widgets do not).
+// widgetHasFieldType reports whether a /Widget annotation resolves a field type (/FT) on itself or through its /Parent
+// chain — MuPDF renders only such widgets (probe-pinned; orphan fields render, /FT-less widgets do not).
 func (d *Document) widgetHasFieldType(annot cos.Dict) bool {
 	node := annot
 	for range maxParentDepth {
@@ -161,9 +159,9 @@ func (d *Document) widgetHasFieldType(annot cos.Dict) bool {
 	return false
 }
 
-// appearanceStream selects the normal appearance: /AP /N directly when stream-valued, else the /AS-named entry
-// of a dictionary-valued /N. Raw is the object as stored (before resolution) for the /N stream case, or the
-// dictionary entry for the state case.
+// appearanceStream selects the normal appearance: /AP /N directly when stream-valued, else the /AS-named entry of a
+// dictionary-valued /N. Raw is the object as stored (before resolution) for the /N stream case, or the dictionary entry
+// for the state case.
 func (d *Document) appearanceStream(annot cos.Dict) (raw cos.Object, stream *cos.Stream, ok bool) {
 	ap, hasAP := d.cos.GetDict(annot, "AP")
 	if !hasAP {

@@ -26,20 +26,20 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// The veraPDF corpus soak: opens and renders EVERY file of an external corpus, asserting that the
-// engine never panics, never hangs (each file must complete within soakFileTimeout — the internal caps guarantee
-// termination, so a timeout is a bug), and fails only with the public sentinel errors. It is local-only: CI never
-// has the files. Fetch the corpus with testfiles/external/fetch-verapdf.sh and run
+// The veraPDF corpus soak: opens and renders EVERY file of an external corpus, asserting that the engine never panics,
+// never hangs (each file must complete within soakFileTimeout — the internal caps guarantee termination, so a timeout
+// is a bug), and fails only with the public sentinel errors. It is local-only: CI never has the files. Fetch the corpus
+// with testfiles/external/fetch-verapdf.sh and run
 //
 //	PDFVIEW_SOAK_DIR=testfiles/external/veraPDF-corpus go test -run TestExternalCorpusSoak -v -timeout 60m .
 //
 // Optionally set PDFVIEW_SOAK_ORACLE to a JSON file produced by `oracle soak` to also compare open-success and
-// PageCount against the cgo/MuPDF oracle (mismatches are reported and counted, and only fail the test when a
-// file MuPDF opens fails to open here).
+// PageCount against the cgo/MuPDF oracle (mismatches are reported and counted, and only fail the test when a file MuPDF
+// opens fails to open here).
 const (
-	// soakFileTimeout bounds one file's full pipeline (open + auth probe + TOC + render page 0 + search). The
-	// internal operator/recursion/allocation caps mean every file terminates; this exists to turn a would-be hang
-	// into a test failure naming the file.
+	// soakFileTimeout bounds one file's full pipeline (open + auth probe + TOC + render page 0 + search). The internal
+	// operator/recursion/allocation caps mean every file terminates; this exists to turn a would-be hang into a test
+	// failure naming the file.
 	soakFileTimeout = 60 * time.Second
 	// soakCacheSize is the per-document maxCacheSize used during the soak, exercising the budgeted store.
 	soakCacheSize = 32 << 20
@@ -193,8 +193,8 @@ func TestExternalCorpusSoak(t *testing.T) {
 	}
 }
 
-// soakOne runs the full pipeline for one file under the per-file timeout. Sentinel-error validation happens
-// inside; a non-sentinel error or a timeout fails the test immediately.
+// soakOne runs the full pipeline for one file under the per-file timeout. Sentinel-error validation happens inside; a
+// non-sentinel error or a timeout fails the test immediately.
 func soakOne(t *testing.T, dir, path string) *soakResult {
 	rel, err := filepath.Rel(dir, path)
 	if err != nil {

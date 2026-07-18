@@ -7,17 +7,17 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Command oracle dumps the observable behavior of github.com/richardwilkes/pdf (MuPDF via cgo) for a corpus PDF
-// into a golden directory that the pure-Go pdfview engine is tested against. It is a development
-// tool: it requires cgo and a checkout of the binding at ../../pdf, is never imported by the library, and never
-// runs in CI — the goldens it produces are committed. Run regen.sh to regenerate every golden from the corpus.
+// Command oracle dumps the observable behavior of github.com/richardwilkes/pdf (MuPDF via cgo) for a corpus PDF into a
+// golden directory that the pure-Go pdfview engine is tested against. It is a development tool: it requires cgo and a
+// checkout of the binding at ../../pdf, is never imported by the library, and never runs in CI — the goldens it
+// produces are committed. Run regen.sh to regenerate every golden from the corpus.
 //
 // Usage:
 //
 //	oracle dump -in file.pdf -out dir [-dpi 72,100,150] [-password pw]... [-search needle]...
 //
-// The output directory is wiped and recreated with one truth.json (see schema.go) plus one losslessly encoded PNG
-// per page per DPI. Output is deterministic for a given corpus file, MuPDF build, and Go release: truth.json is
+// The output directory is wiped and recreated with one truth.json (see schema.go) plus one losslessly encoded PNG per
+// page per DPI. Output is deterministic for a given corpus file, MuPDF build, and Go release: truth.json is
 // stable-marshaled (sorted map keys, shortest float32 round-trip formatting) and PNGs are encoded with a pinned
 // compression level, so a re-run that produces any diff signals a real behavior change to review.
 package main
@@ -41,8 +41,8 @@ import (
 	"github.com/richardwilkes/pdf"
 )
 
-// invalidPassword is deliberately attempted against every corpus file so the goldens pin how authentication
-// failure is reported.
+// invalidPassword is deliberately attempted against every corpus file so the goldens pin how authentication failure is
+// reported.
 const invalidPassword = "invalid-password"
 
 type stringList []string
@@ -118,8 +118,8 @@ func dump(in, out string, dpis []int, passwords, needles []string) error {
 		Needles: needles,
 	}
 
-	// Record the authentication table: every attempt runs against its own fresh document so no attempt can
-	// influence another (a successful authentication changes document state).
+	// Record the authentication table: every attempt runs against its own fresh document so no attempt can influence
+	// another (a successful authentication changes document state).
 	for _, password := range authAttemptPasswords(passwords) {
 		doc, docErr := pdf.New(data, 0)
 		if docErr != nil {
@@ -241,9 +241,9 @@ func dumpPage(doc *pdf.Document, raw *rawDoc, out string, pageNumber int, dpis [
 	return page, nil
 }
 
-// dumpRender renders one page at one DPI through the public API, writing the PNG and collecting the scaled links
-// and per-needle hit rectangles. The image and links come from the first call; each additional needle costs one
-// more render whose image is discarded (MuPDF is deterministic, so it is identical).
+// dumpRender renders one page at one DPI through the public API, writing the PNG and collecting the scaled links and
+// per-needle hit rectangles. The image and links come from the first call; each additional needle costs one more render
+// whose image is discarded (MuPDF is deterministic, so it is identical).
 func dumpRender(doc *pdf.Document, out string, pageNumber, dpi int, needles []string) (*Render, error) {
 	firstNeedle := ""
 	if len(needles) > 0 {
@@ -280,8 +280,8 @@ func dumpRender(doc *pdf.Document, out string, pageNumber, dpi int, needles []st
 			render.Search[needle] = convertHits(again.SearchHits)
 		}
 	}
-	// A pinned compression level keeps the encoded bytes deterministic for a given Go release; the pixel data
-	// itself is lossless either way (image.NRGBA round-trips exactly through 8-bit RGBA PNG).
+	// A pinned compression level keeps the encoded bytes deterministic for a given Go release; the pixel data itself is
+	// lossless either way (image.NRGBA round-trips exactly through 8-bit RGBA PNG).
 	encoder := png.Encoder{CompressionLevel: png.BestCompression}
 	var buffer bytes.Buffer
 	if err = encoder.Encode(&buffer, rendered.Image); err != nil {

@@ -59,17 +59,17 @@ func TestZapfDingbatsSubstituteDrawsNothing(t *testing.T) {
 	if f.sub == nil {
 		t.Fatal("no substitute loaded")
 	}
-	// Code 97 is /a9 in the built-in encoding: the AGL cannot resolve it, so it must map to .notdef and
-	// render nothing (drawing a Latin 'a' — the extraction fallback — would be the wrong glyph, and the
-	// substitute's .notdef box would be ink the oracle never shows).
+	// Code 97 is /a9 in the built-in encoding: the AGL cannot resolve it, so it must map to .notdef and render nothing
+	// (drawing a Latin 'a' — the extraction fallback — would be the wrong glyph, and the substitute's .notdef box would
+	// be ink the oracle never shows).
 	if gid := f.GID(97); gid != 0 {
 		t.Fatalf("ZapfDingbats code 97 mapped to %d, want .notdef", gid)
 	}
 	if p := f.GlyphPath(0); p != nil {
 		t.Error("substituted .notdef produced an outline; must render nothing")
 	}
-	// The widths still come from the ZapfDingbats AFM (through its built-in encoding) so layout stays
-	// oracle-exact even though nothing renders.
+	// The widths still come from the ZapfDingbats AFM (through its built-in encoding) so layout stays oracle-exact even
+	// though nothing renders.
 	name := data.BuiltinEncoding(stdZapfDingbats)[97]
 	want := float32(data.AFMWidths(stdZapfDingbats)[name]) / 1000
 	if name == "" || want == 0 {
@@ -80,8 +80,8 @@ func TestZapfDingbatsSubstituteDrawsNothing(t *testing.T) {
 	}
 }
 
-// embeddedTTFDict builds font-dictionary bodies embedding the bundled Liberation Sans as a FontFile2 stream:
-// a real TrueType program with (3,1)/(1,0)/(0,x) cmaps, exercising the embedded sfnt paths end to end.
+// embeddedTTFDict builds font-dictionary bodies embedding the bundled Liberation Sans as a FontFile2 stream: a real
+// TrueType program with (3,1)/(1,0)/(0,x) cmaps, exercising the embedded sfnt paths end to end.
 func embeddedTTFDict(t *testing.T, extra string) []string {
 	t.Helper()
 	ttf := data.Liberation("LiberationSans-Regular")
@@ -114,8 +114,8 @@ func TestEmbeddedSFNTGlyphs(t *testing.T) {
 	if p := f.GlyphPath(gidA); p == nil || p.IsEmpty() {
 		t.Fatal("no outline for embedded 'A'")
 	}
-	// No /Widths: the advance must come from the program's hmtx (Liberation Sans 'A' is 1366/2048 em units),
-	// not from the AFM table (which is reserved for substituted fonts).
+	// No /Widths: the advance must come from the program's hmtx (Liberation Sans 'A' is 1366/2048 em units), not from
+	// the AFM table (which is reserved for substituted fonts).
 	if w := f.Width('A'); w < 0.666 || w > 0.668 {
 		t.Errorf("hmtx fallback width = %v, want ≈0.667", w)
 	}
@@ -125,7 +125,8 @@ func TestEmbeddedSFNTGlyphs(t *testing.T) {
 }
 
 func TestEmbeddedJunkFallsBackToSubstitute(t *testing.T) {
-	f, err := loadFromDict(t,
+	f, err := loadFromDict(
+		t,
 		"<< /Type /Font /Subtype /TrueType /BaseFont /Broken /FontDescriptor 2 0 R >>",
 		"<< /Type /FontDescriptor /FontName /Broken /Flags 32 /FontFile2 3 0 R >>",
 		"<< /Length 24 >>\nstream\nnot a truetype font at all\nendstream",
@@ -148,9 +149,9 @@ func TestEmbeddedJunkFallsBackToSubstitute(t *testing.T) {
 	}
 }
 
-// TestSFNTGIDChainOrder pins the code→GID fallback order on hand-built subtables, independent of any real
-// font file: non-symbolic name→AGL→(3,1) then name→MacRoman→(1,0); symbolic (3,0) bare then 0xF000-folded,
-// then (1,0) raw; last-resort code→GID.
+// TestSFNTGIDChainOrder pins the code→GID fallback order on hand-built subtables, independent of any real font file:
+// non-symbolic name→AGL→(3,1) then name→MacRoman→(1,0); symbolic (3,0) bare then 0xF000-folded, then (1,0) raw;
+// last-resort code→GID.
 func TestSFNTGIDChainOrder(t *testing.T) {
 	uni := &cmapTable{sub: tables.CmapSubtable12{Groups: []tables.SequentialMapGroup{
 		{StartCharCode: 'A', EndCharCode: 'Z', StartGlyphID: 100},
@@ -170,14 +171,14 @@ func TestSFNTGIDChainOrder(t *testing.T) {
 	if g := full.gid('A', "A", false); g != 100 {
 		t.Errorf("nonsymbolic 'A' = %d, want 100 (Unicode table)", g)
 	}
-	// Without a Unicode table, the name's Mac Roman code drives the (1,0) lookup: /bullet is 0xA5 even
-	// though the PDF code is arbitrary.
+	// Without a Unicode table, the name's Mac Roman code drives the (1,0) lookup: /bullet is 0xA5 even though the PDF
+	// code is arbitrary.
 	noUni := &sfntInfo{cmapMacRoman: mac, nGlyphs: 1000}
 	if g := noUni.gid(1, "bullet", false); g != 500 {
 		t.Errorf("nonsymbolic /bullet = %d, want 500 (MacRoman (1,0))", g)
 	}
-	// Symbolic: (3,0) bare code first (digits live at 0x30 here), F000-folded next (letters), the name path
-	// never consulted.
+	// Symbolic: (3,0) bare code first (digits live at 0x30 here), F000-folded next (letters), the name path never
+	// consulted.
 	if g := full.gid(0x31, "one", true); g != 401 {
 		t.Errorf("symbolic 0x31 = %d, want 401 ((3,0) bare)", g)
 	}
@@ -206,8 +207,8 @@ func TestCmapFormatLookups(t *testing.T) {
 	}
 
 	// Format 4, three segments: [0x20..0x22] via idDelta (gid = code+5), [0x41..0x42] via idRangeOffset into
-	// GlyphIDArray, and the mandatory 0xFFFF terminator. The offset counts bytes from its own slot: slot 1
-	// is followed by slot 2 (2 bytes) and then the array, so offset 4 addresses array index (c - 0x41).
+	// GlyphIDArray, and the mandatory 0xFFFF terminator. The offset counts bytes from its own slot: slot 1 is followed
+	// by slot 2 (2 bytes) and then the array, so offset 4 addresses array index (c - 0x41).
 	f4 := tables.CmapSubtable4{
 		EndCode:        []uint16{0x22, 0x42, 0xFFFF},
 		StartCode:      []uint16{0x20, 0x41, 0xFFFF},

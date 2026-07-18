@@ -15,12 +15,12 @@ import (
 	"fmt"
 )
 
-// maxNestingDepth caps how deeply arrays and dictionaries may nest, guarding against stack exhaustion from
-// hostile input.
+// maxNestingDepth caps how deeply arrays and dictionaries may nest, guarding against stack exhaustion from hostile
+// input.
 const maxNestingDepth = 512
 
-// maxObjectNumber bounds accepted object numbers. ISO 32000-2 Annex C suggests 8388607 as an implementation
-// limit; this is slightly more generous while still bounding lookup structures.
+// maxObjectNumber bounds accepted object numbers. ISO 32000-2 Annex C suggests 8388607 as an implementation limit; this
+// is slightly more generous while still bounding lookup structures.
 const maxObjectNumber = 1 << 24
 
 var (
@@ -34,8 +34,8 @@ var (
 	errStreamOutOfRange = errors.New("stream extends past end of input")
 )
 
-// parser builds objects from a token stream, with a small pushback stack for the lookahead that indirect
-// references ("N G R") require.
+// parser builds objects from a token stream, with a small pushback stack for the lookahead that indirect references ("N
+// G R") require.
 type parser struct {
 	stack []token
 	lex   lexer
@@ -206,11 +206,11 @@ func (p *parser) expectInt() (int64, error) {
 	return tok.i, nil
 }
 
-// parseIndirectAt parses the indirect object "num gen obj ... [stream ... endstream]" at offset off within data.
-// When wantNum is non-negative, the header's object number must match it (detecting stale or wrong xref
-// offsets). It returns the object, the object's generation number (which the standard security handler folds
-// into the per-object decryption key), and the offset just past it (past endstream for streams), which the
-// repair scanner uses to skip stream payloads.
+// parseIndirectAt parses the indirect object "num gen obj ... [stream ... endstream]" at offset off within data. When
+// wantNum is non-negative, the header's object number must match it (detecting stale or wrong xref offsets). It returns
+// the object, the object's generation number (which the standard security handler folds into the per-object decryption
+// key), and the offset just past it (past endstream for streams), which the repair scanner uses to skip stream
+// payloads.
 func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
 		return nil, 0, 0, errStreamOutOfRange
@@ -236,10 +236,10 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 	if obj, err = p.parseObject(); err != nil {
 		return nil, 0, 0, err
 	}
-	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty here for
-	// any dictionary object (parseDict consumes through its closing >>), so the lexer position is authoritative
-	// for the stream payload; for other object types, the next token's recorded start position yields the object
-	// extent even when lookahead tokens were pushed back.
+	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty here for any
+	// dictionary object (parseDict consumes through its closing >>), so the lexer position is authoritative for the
+	// stream payload; for other object types, the next token's recorded start position yields the object extent even
+	// when lookahead tokens were pushed back.
 	tok, err := p.next()
 	if err != nil {
 		return obj, int(genNum), int64(p.lex.pos), nil //nolint:nilerr // The object parsed; trailing junk is ignored.
@@ -259,11 +259,11 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 	return &Stream{Dict: dict, Raw: raw}, int(genNum), rawEnd, nil
 }
 
-// captureRawStream slices the raw stream payload that begins after the stream keyword at pos. When the
-// dictionary carries a direct, plausible /Length — the payload fits and is followed by "endstream" — that length
-// is used; otherwise (indirect, missing, or wrong /Length) the data is scanned for the next "endstream" keyword
-// and any final end-of-line marker before it is trimmed, mirroring the recovery behavior of deployed readers.
-// The returned end offset is just past the endstream keyword.
+// captureRawStream slices the raw stream payload that begins after the stream keyword at pos. When the dictionary
+// carries a direct, plausible /Length — the payload fits and is followed by "endstream" — that length is used;
+// otherwise (indirect, missing, or wrong /Length) the data is scanned for the next "endstream" keyword and any final
+// end-of-line marker before it is trimmed, mirroring the recovery behavior of deployed readers. The returned end offset
+// is just past the endstream keyword.
 func captureRawStream(data []byte, pos int, dict Dict) (raw []byte, end int64, err error) {
 	// Per ISO 32000-2 7.3.8.1 the stream keyword is followed by CRLF or LF; a lone CR and a missing break are
 	// tolerated.
@@ -285,8 +285,8 @@ func captureRawStream(data []byte, pos int, dict Dict) (raw []byte, end int64, e
 	}
 	dataEnd := pos + idx
 	end = int64(dataEnd + len("endstream"))
-	// Trim the end-of-line marker that precedes endstream (it is not part of the payload). The pos-relative
-	// bounds keep a zero-length payload from double-counting the EOL already consumed after the stream keyword.
+	// Trim the end-of-line marker that precedes endstream (it is not part of the payload). The pos-relative bounds keep
+	// a zero-length payload from double-counting the EOL already consumed after the stream keyword.
 	switch {
 	case dataEnd >= pos+2 && data[dataEnd-2] == '\r' && data[dataEnd-1] == '\n':
 		dataEnd -= 2
@@ -296,8 +296,8 @@ func captureRawStream(data []byte, pos int, dict Dict) (raw []byte, end int64, e
 	return data[pos:dataEnd], end, nil
 }
 
-// endstreamAt reports whether the "endstream" keyword follows pos after optional whitespace, returning the
-// offset just past it.
+// endstreamAt reports whether the "endstream" keyword follows pos after optional whitespace, returning the offset just
+// past it.
 func endstreamAt(data []byte, pos int) (int64, bool) {
 	for pos < len(data) && isWhitespace(data[pos]) {
 		pos++

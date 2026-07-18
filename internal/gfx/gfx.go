@@ -7,11 +7,10 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package gfx holds the shared geometry types the engine's graphics pipeline is built on: points, rectangles,
-// quads, an affine matrix, paths, and stroke parameters. Everything is float32 — the precision the original
-// cgo/MuPDF implementation carried (C floats), which the exact-value tests were baselined against. Matrix
-// composition follows PDF's row-vector convention: a point is transformed as [x y 1]·M, and M1.Mul(M2) applies
-// M1 first.
+// Package gfx holds the shared geometry types the engine's graphics pipeline is built on: points, rectangles, quads, an
+// affine matrix, paths, and stroke parameters. Everything is float32 — the precision the original cgo/MuPDF
+// implementation carried (C floats), which the exact-value tests were baselined against. Matrix composition follows
+// PDF's row-vector convention: a point is transformed as [x y 1]·M, and M1.Mul(M2) applies M1 first.
 package gfx
 
 import "math"
@@ -21,8 +20,8 @@ type Point struct {
 	X, Y float32
 }
 
-// Rect is an axis-aligned rectangle. A Rect is normalized when X0 <= X1 and Y0 <= Y1; Normalize returns that
-// form, and consumers generally expect it.
+// Rect is an axis-aligned rectangle. A Rect is normalized when X0 <= X1 and Y0 <= Y1; Normalize returns that form, and
+// consumers generally expect it.
 type Rect struct {
 	X0, Y0, X1, Y1 float32
 }
@@ -98,8 +97,8 @@ func (m Matrix) ApplyXY(x, y float32) (tx, ty float32) {
 	return m.A*x + m.C*y + m.E, m.B*x + m.D*y + m.F
 }
 
-// Invert returns the inverse transform, reporting false when the matrix is degenerate (zero or non-finite
-// determinant) and no inverse exists.
+// Invert returns the inverse transform, reporting false when the matrix is degenerate (zero or non-finite determinant)
+// and no inverse exists.
 func (m Matrix) Invert() (Matrix, bool) {
 	det := m.A*m.D - m.B*m.C
 	d := float64(det)
@@ -131,8 +130,8 @@ func (m Matrix) IsFinite() bool {
 	return true
 }
 
-// LineCap selects the shape drawn at the endpoints of stroked open subpaths (PDF line cap style, ISO 32000-2
-// 8.4.3.3). The values match the J operator's operand.
+// LineCap selects the shape drawn at the endpoints of stroked open subpaths (PDF line cap style, ISO 32000-2 8.4.3.3).
+// The values match the J operator's operand.
 type LineCap uint8
 
 // LineCap values.
@@ -142,8 +141,8 @@ const (
 	SquareCap
 )
 
-// LineJoin selects the shape drawn at the corners of stroked paths (PDF line join style, ISO 32000-2 8.4.3.4).
-// The values match the j operator's operand.
+// LineJoin selects the shape drawn at the corners of stroked paths (PDF line join style, ISO 32000-2 8.4.3.4). The
+// values match the j operator's operand.
 type LineJoin uint8
 
 // LineJoin values.
@@ -153,11 +152,10 @@ const (
 	BevelJoin
 )
 
-// StrokeParams carries the stroke-related graphics-state parameters, in user-space units, exactly as the
-// content stream provided them; consumers (the raster device) adapt them to their stroker's requirements.
-// A Width of 0 requests the thinnest renderable line (a hairline). Dash is the dash array as written — possibly
-// empty (solid), of odd length (the pattern repeats with on/off roles alternating), or degenerate (all zeros,
-// rendered solid).
+// StrokeParams carries the stroke-related graphics-state parameters, in user-space units, exactly as the content stream
+// provided them; consumers (the raster device) adapt them to their stroker's requirements. A Width of 0 requests the
+// thinnest renderable line (a hairline). Dash is the dash array as written — possibly empty (solid), of odd length (the
+// pattern repeats with on/off roles alternating), or degenerate (all zeros, rendered solid).
 type StrokeParams struct {
 	Dash       []float32
 	Width      float32

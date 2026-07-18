@@ -15,8 +15,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/filter"
 )
 
-// FuzzFilters drives every filter and predictor combination with arbitrary data and parameters. Decoding hostile
-// input must never panic, and output must respect the size cap.
+// FuzzFilters drives every filter and predictor combination with arbitrary data and parameters. Decoding hostile input
+// must never panic, and output must respect the size cap.
 func FuzzFilters(f *testing.F) {
 	f.Add([]byte("48656C6C6F>"), uint8(2), uint8(1), uint8(1), uint8(8), uint16(1), uint8(1))
 	f.Add([]byte("87cUR@<Q~>"), uint8(3), uint8(1), uint8(1), uint8(8), uint16(1), uint8(1))

@@ -39,9 +39,9 @@ var encryptedCorpus = []struct {
 	{"encrypted-r6-empty-user.pdf", ""},
 }
 
-// TestDecryptContentStream authenticates each encrypted corpus file and decodes its page content stream,
-// confirming the file key, per-object key, and RC4/AES decryption all line up: the plaintext must be a valid
-// content stream that paints the "Hello" the goldens search for.
+// TestDecryptContentStream authenticates each encrypted corpus file and decodes its page content stream, confirming the
+// file key, per-object key, and RC4/AES decryption all line up: the plaintext must be a valid content stream that
+// paints the "Hello" the goldens search for.
 func TestDecryptContentStream(t *testing.T) {
 	for _, tc := range encryptedCorpus {
 		t.Run(tc.file, func(t *testing.T) {
@@ -61,8 +61,8 @@ func TestDecryptContentStream(t *testing.T) {
 	}
 }
 
-// TestDecryptWrongPasswordLeavesContentEncrypted confirms that without the key the content stream does not
-// decode to plaintext — a guard that the "Hello" assertion above is really exercising decryption.
+// TestDecryptWrongPasswordLeavesContentEncrypted confirms that without the key the content stream does not decode to
+// plaintext — a guard that the "Hello" assertion above is really exercising decryption.
 func TestDecryptWrongPasswordLeavesContentEncrypted(t *testing.T) {
 	data := readCorpus(t, "encrypted-r4-aes.pdf")
 	d, err := doc.Open(data)
@@ -105,8 +105,8 @@ func TestNeedsPasswordMatchesGoldens(t *testing.T) {
 	}
 }
 
-// TestAuthBitsMatchGoldens replays every recorded Authenticate attempt on a fresh document and checks the
-// status bits against the oracle — the full parity table (corpus × {"", user, owner, wrong}).
+// TestAuthBitsMatchGoldens replays every recorded Authenticate attempt on a fresh document and checks the status bits
+// against the oracle — the full parity table (corpus × {"", user, owner, wrong}).
 func TestAuthBitsMatchGoldens(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {

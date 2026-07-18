@@ -7,16 +7,16 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package store implements the document-scoped, byte-budgeted resource cache (the fz-store analog): parsed
-// fonts, decoded images, and converted glyph paths register here with byte-size
-// estimates, and least-recently-used entries evict when a New(maxCacheSize) budget would be exceeded. A zero
-// budget means unlimited (nothing ever evicts), matching the public API's documented maxCacheSize semantics.
+// Package store implements the document-scoped, byte-budgeted resource cache (the fz-store analog): parsed fonts,
+// decoded images, and converted glyph paths register here with byte-size estimates, and least-recently-used entries
+// evict when a New(maxCacheSize) budget would be exceeded. A zero budget means unlimited (nothing ever evicts),
+// matching the public API's documented maxCacheSize semantics.
 //
-// The store is a pure cache: eviction only drops the store's reference, never invalidates values still held
-// by callers (Go's GC keeps them alive), and a cache of any size — including one too small to hold anything —
-// must not change rendering output, only the amount of re-parsing work. It carries its own small mutex so it
-// is safe under any use; in the engine it additionally sits behind the document's public-API mutex, which
-// serializes all rendering work per document.
+// The store is a pure cache: eviction only drops the store's reference, never invalidates values still held by callers
+// (Go's GC keeps them alive), and a cache of any size — including one too small to hold anything — must not change
+// rendering output, only the amount of re-parsing work. It carries its own small mutex so it is safe under any use; in
+// the engine it additionally sits behind the document's public-API mutex, which serializes all rendering work per
+// document.
 package store
 
 import (
@@ -24,9 +24,8 @@ import (
 	"sync"
 )
 
-// Store is a budgeted LRU cache. Keys are arbitrary comparable values; use a dedicated key struct type per
-// resource kind so kinds cannot collide (e.g. one type for font-dictionary refs, another for {font, gid}
-// glyph paths).
+// Store is a budgeted LRU cache. Keys are arbitrary comparable values; use a dedicated key struct type per resource
+// kind so kinds cannot collide (e.g. one type for font-dictionary refs, another for {font, gid} glyph paths).
 type Store struct {
 	entries map[any]*list.Element
 	lru     *list.List // Front = most recently used.
@@ -51,8 +50,8 @@ func New(maxBytes uint64) *Store {
 	}
 }
 
-// Get returns the cached value for key and marks it most recently used. The second result distinguishes a
-// cached nil (negative caching: parse failures are cacheable) from a miss.
+// Get returns the cached value for key and marks it most recently used. The second result distinguishes a cached nil
+// (negative caching: parse failures are cacheable) from a miss.
 func (s *Store) Get(key any) (any, bool) {
 	if s == nil {
 		return nil, false
@@ -71,9 +70,9 @@ func (s *Store) Get(key any) (any, bool) {
 	return e.val, true
 }
 
-// Put caches val under key with the given byte-size estimate, evicting least-recently-used entries as needed
-// to fit the budget. A value larger than the whole budget is not cached at all (matching fz-store: the caller
-// keeps using its value; it just is not retained). Re-putting an existing key replaces its value and size.
+// Put caches val under key with the given byte-size estimate, evicting least-recently-used entries as needed to fit the
+// budget. A value larger than the whole budget is not cached at all (matching fz-store: the caller keeps using its
+// value; it just is not retained). Re-putting an existing key replaces its value and size.
 func (s *Store) Put(key, val any, size uint64) {
 	if s == nil {
 		return

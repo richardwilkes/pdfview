@@ -20,11 +20,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// A minimal CFF (Compact Font Format) container reader, written against Adobe TN5176. go-text's cff package
-// provides charstring interpretation and glyph loading but does not expose the Top DICT's FontBBox or
-// FontMatrix, which the engine needs because FreeType — and therefore the oracle's MuPDF build — takes a bare
-// CFF font's ascender/descender from its FontBBox (see internal/font's package comment). The INDEX and DICT
-// walkers here are also the base for the CID-keyed charset/FDSelect reader Type0 support uses.
+// A minimal CFF (Compact Font Format) container reader, written against Adobe TN5176. go-text's cff package provides
+// charstring interpretation and glyph loading but does not expose the Top DICT's FontBBox or FontMatrix, which the
+// engine needs because FreeType — and therefore the oracle's MuPDF build — takes a bare CFF font's ascender/descender
+// from its FontBBox (see internal/font's package comment). The INDEX and DICT walkers here are also the base for the
+// CID-keyed charset/FDSelect reader Type0 support uses.
 
 var errBadCFF = errors.New("malformed CFF data")
 
@@ -90,9 +90,9 @@ func clampDictOffset(v float64) int {
 	return int(v)
 }
 
-// cffCID is the CID→GID view of a CID-keyed CFF program, read from its charset per Adobe TN5176 section 13
-// (go-text's cff package parses CID programs for glyph loading but does not expose the charset). For CID
-// fonts the charset maps each GID to its CID; the engine needs the inverse.
+// cffCID is the CID→GID view of a CID-keyed CFF program, read from its charset per Adobe TN5176 section 13 (go-text's
+// cff package parses CID programs for glyph loading but does not expose the charset). For CID fonts the charset maps
+// each GID to its CID; the engine needs the inverse.
 type cffCID struct {
 	cidToGID map[uint32]uint32
 	nGlyphs  int
@@ -181,8 +181,8 @@ func cffIndexCount(data []byte, pos int) int {
 	return int(data[pos])<<8 | int(data[pos+1])
 }
 
-// metrics converts the Top DICT to em-normalized ascender/descender the FreeType way: the FontBBox's
-// yMax/yMin divided by the units-per-em implied by the FontMatrix (1/|yy|, 1000 for the standard matrix).
+// metrics converts the Top DICT to em-normalized ascender/descender the FreeType way: the FontBBox's yMax/yMin divided
+// by the units-per-em implied by the FontMatrix (1/|yy|, 1000 for the standard matrix).
 func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 	if !t.hasBBox || (t.bbox[1] == 0 && t.bbox[3] == 0) {
 		return 0, 0, false
@@ -205,8 +205,8 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 	return yMax / upem, yMin / upem, true
 }
 
-// cffIndex reads an INDEX at pos, returning up to maxEntries entry slices and the offset just past the INDEX.
-// An INDEX is: count (Card16), offSize (Card8, 1-4), count+1 offsets (1-based), then the data.
+// cffIndex reads an INDEX at pos, returning up to maxEntries entry slices and the offset just past the INDEX. An INDEX
+// is: count (Card16), offSize (Card8, 1-4), count+1 offsets (1-based), then the data.
 func cffIndex(data []byte, pos, maxEntries int) (entries [][]byte, next int, err error) {
 	if pos < 0 || pos+2 > len(data) {
 		return nil, 0, errBadCFF
@@ -382,9 +382,8 @@ func parseCFFTopFromStream(d *cos.Document, s *cos.Stream) *cffTop {
 	return top
 }
 
-// cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for charstring
-// interpretation, the name→GID map swept from its charset, and the FontMatrix that carries charstring space
-// to em space.
+// cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for charstring interpretation,
+// the name→GID map swept from its charset, and the FontMatrix that carries charstring space to em space.
 type cffInfo struct {
 	font *cff.CFF
 	// names maps charset glyph names to GIDs (go-text exposes name-per-GID; the sweep inverts it once).
@@ -393,9 +392,9 @@ type cffInfo struct {
 	matrix [6]float32
 }
 
-// parseCFFGlyphs prepares a FontFile3/Type1C stream for glyph loading, tolerating hostile bytes (panics and
-// parse errors yield nil, and the caller renders through the substitute). top supplies the FontMatrix already
-// read by parseCFFTopFromStream.
+// parseCFFGlyphs prepares a FontFile3/Type1C stream for glyph loading, tolerating hostile bytes (panics and parse
+// errors yield nil, and the caller renders through the substitute). top supplies the FontMatrix already read by
+// parseCFFTopFromStream.
 func parseCFFGlyphs(d *cos.Document, s *cos.Stream, top *cffTop) *cffInfo {
 	raw, err := d.StreamData(s)
 	if err != nil || len(raw) == 0 {
@@ -404,8 +403,7 @@ func parseCFFGlyphs(d *cos.Document, s *cos.Stream, top *cffTop) *cffInfo {
 	return parseCFFGlyphBytes(raw, top)
 }
 
-// parseCFFGlyphBytes is the bytes-level half of parseCFFGlyphs (split out so the fuzzer can drive it
-// directly).
+// parseCFFGlyphBytes is the bytes-level half of parseCFFGlyphs (split out so the fuzzer can drive it directly).
 func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	defer func() {
 		if recover() != nil {
@@ -431,8 +429,8 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	return info
 }
 
-// gid maps a code to a GID for a bare CFF program: the encoding's glyph name against the charset sweep, with
-// the code itself as the last resort (subset programs with junk charsets).
+// gid maps a code to a GID for a bare CFF program: the encoding's glyph name against the charset sweep, with the code
+// itself as the last resort (subset programs with junk charsets).
 func (c *cffInfo) gid(code uint32, name string) uint32 {
 	if name != "" {
 		if g, ok := c.names[name]; ok {

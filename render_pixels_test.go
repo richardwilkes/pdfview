@@ -20,18 +20,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestVectorCorpusPixels enforces the vector corpus — content the graphics core alone must reproduce — against
-// the goldens at every recorded DPI. rotate90.pdf adds 24 pt rotated text on top of the vector content.
+// TestVectorCorpusPixels enforces the vector corpus — content the graphics core alone must reproduce — against the
+// goldens at every recorded DPI. rotate90.pdf adds 24 pt rotated text on top of the vector content.
 func TestVectorCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "vectors", "vectors", true)
 	comparePixelsToGolden(t, "rotate90", "rotate90", true)
 }
 
-// TestTextCorpusPixels enforces EVERY text corpus file: files inside the default gate directly, and the files
-// whose divergence is measured and understood — substitute-font letterform deltas (Liberation vs the oracle's
-// Nimbus) and AA-model edge redistribution on small embedded-font text — through their goldens'
-// thresholds.json ratchets. The six encrypted files are text-std14 variants and must render identically to it
-// once authenticated.
+// TestTextCorpusPixels enforces EVERY text corpus file: files inside the default gate directly, and the files whose
+// divergence is measured and understood — substitute-font letterform deltas (Liberation vs the oracle's Nimbus) and
+// AA-model edge redistribution on small embedded-font text — through their goldens' thresholds.json ratchets. The six
+// encrypted files are text-std14 variants and must render identically to it once authenticated.
 func TestTextCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"text-std14", "hit-quad-split",
@@ -45,15 +44,14 @@ func TestTextCorpusPixels(t *testing.T) {
 	}
 }
 
-// TestImageCorpusPixels enforces the image corpus — content the imaging pipeline must reproduce — against the
-// goldens at every recorded DPI.
+// TestImageCorpusPixels enforces the image corpus — content the imaging pipeline must reproduce — against the goldens
+// at every recorded DPI.
 //
-// The two stub-codec files pin the blank-not-error contract. For images-jpx that is the golden itself:
-// MuPDF's openjpeg rejects the payload and MuPDF drops the image, so its golden is the page with a blank image
-// area — exactly the stub's output. For images-jbig2 MuPDF instead pads the failed decode into a black square,
-// which a blank-rendering stub must not match; its render is compared against the
-// images-jpx golden instead, which is byte-identical page content (same MediaBox, same vector marks, same image
-// placement) with the image correctly absent.
+// The two stub-codec files pin the blank-not-error contract. For images-jpx that is the golden itself: MuPDF's openjpeg
+// rejects the payload and MuPDF drops the image, so its golden is the page with a blank image area — exactly the stub's
+// output. For images-jbig2 MuPDF instead pads the failed decode into a black square, which a blank-rendering stub must
+// not match; its render is compared against the images-jpx golden instead, which is byte-identical page content (same
+// MediaBox, same vector marks, same image placement) with the image correctly absent.
 func TestImageCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"images-dct", "images-raw", "images-indexed", "images-imagemask", "images-inline",
@@ -64,8 +62,8 @@ func TestImageCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "images-jbig2", "images-jpx", true)
 }
 
-// TestShadingCorpusPixels enforces the shading/pattern corpus — gradients (axial/radial), function-based
-// shadings, mesh types 4-7, and shading/tiling patterns — against the goldens at every recorded DPI.
+// TestShadingCorpusPixels enforces the shading/pattern corpus — gradients (axial/radial), function-based shadings, mesh
+// types 4-7, and shading/tiling patterns — against the goldens at every recorded DPI.
 func TestShadingCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"shading-axial", "shading-radial", "shading-function", "shading-mesh", "pattern-tiling",
@@ -75,10 +73,9 @@ func TestShadingCorpusPixels(t *testing.T) {
 	}
 }
 
-// TestTransparencyCorpusPixels enforces the transparency corpus — all 16 blend modes over mixed backdrops,
-// transparency groups (constant alphas, alpha reset, isolation, knockout), and soft masks (luminosity incl.
-// /BC and a sampled /TR, alpha subtype, /SMask /None reset, gs-time anchoring) — against the goldens at every
-// recorded DPI.
+// TestTransparencyCorpusPixels enforces the transparency corpus — all 16 blend modes over mixed backdrops, transparency
+// groups (constant alphas, alpha reset, isolation, knockout), and soft masks (luminosity incl. /BC and a sampled /TR,
+// alpha subtype, /SMask /None reset, gs-time anchoring) — against the goldens at every recorded DPI.
 func TestTransparencyCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"transparency-blend", "transparency-group", "transparency-smask-lum", "transparency-smask-alpha",
@@ -87,19 +84,18 @@ func TestTransparencyCorpusPixels(t *testing.T) {
 	}
 }
 
-// TestAnnotationCorpusPixels enforces the annotation corpus — /AP /N appearance streams with widget /FT
-// gating, /F flag suppression (Invisible/Hidden/NoView), /AS state selection, the Link/Popup never-render
-// gates, /CA-ignored, ISO 32000-2 12.5.5 placement (Matrix rotation, BBox clipping, nonzero-origin BBox,
-// reversed /Rect, degenerate skips), z-order after page content, and page-resource inheritance for
-// /Resources-less appearances — against the goldens at every recorded DPI. All semantics were pinned by
-// oracle probes before the corpus file was generated.
+// TestAnnotationCorpusPixels enforces the annotation corpus — /AP /N appearance streams with widget /FT gating, /F flag
+// suppression (Invisible/Hidden/NoView), /AS state selection, the Link/Popup never-render gates, /CA-ignored, ISO
+// 32000-2 12.5.5 placement (Matrix rotation, BBox clipping, nonzero-origin BBox, reversed /Rect, degenerate skips),
+// z-order after page content, and page-resource inheritance for /Resources-less appearances — against the goldens at
+// every recorded DPI. All semantics were pinned by oracle probes before the corpus file was generated.
 func TestAnnotationCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "annotations", "annotations", true)
 }
 
-// comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares
-// pixels against the golden's gate (its thresholds.json when present, else the default). goldenName equals
-// name except for the stub-codec cross-check described on TestImageCorpusPixels.
+// comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares pixels
+// against the golden's gate (its thresholds.json when present, else the default). goldenName equals name except for the
+// stub-codec cross-check described on TestImageCorpusPixels.
 func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", name+".pdf"))

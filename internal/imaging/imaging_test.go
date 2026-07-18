@@ -28,8 +28,8 @@ const (
 	keyColorSpace cos.Name = "ColorSpace"
 )
 
-// testDoc returns a minimal document for Resolve calls; the image dictionaries and mask streams in these tests
-// are built directly as cos values, so nothing needs to live in the file itself.
+// testDoc returns a minimal document for Resolve calls; the image dictionaries and mask streams in these tests are
+// built directly as cos values, so nothing needs to live in the file itself.
 func testDoc(t *testing.T) *cos.Document {
 	t.Helper()
 	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
@@ -157,8 +157,8 @@ func TestStencilPolarity(t *testing.T) {
 	}
 }
 
-// expectedCCITTBitmap mirrors the corpus generator's test bitmap: a 2-pixel border box plus 4×4 diagonal
-// stripes, 1 = black (see testfiles/corpus/README.md).
+// expectedCCITTBitmap mirrors the corpus generator's test bitmap: a 2-pixel border box plus 4×4 diagonal stripes, 1 =
+// black (see testfiles/corpus/README.md).
 func expectedCCITTBitmap() (bits []bool, w, h int) {
 	w, h = 32, 24
 	bits = make([]bool, w*h)

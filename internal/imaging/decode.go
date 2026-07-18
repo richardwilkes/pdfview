@@ -17,9 +17,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// decodeSamples handles the raw-sample path (no image codec, or CCITT whose output is repacked 1-bpc rows):
-// unpack per BitsPerComponent, map through /Decode, convert through the color space, then apply /SMask or
-// /Mask alpha.
+// decodeSamples handles the raw-sample path (no image codec, or CCITT whose output is repacked 1-bpc rows): unpack per
+// BitsPerComponent, map through /Decode, convert through the color space, then apply /SMask or /Mask alpha.
 func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	data := dec.data
 	rowStride := 0
@@ -28,8 +27,8 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		return nil, err
 	}
 	if isCCITT(dec.codec) {
-		// CCITT output is always one bit per sample; rows are byte-aligned at the decoder's column count,
-		// which may differ from /Width (extra columns are dropped, missing ones read as zero samples).
+		// CCITT output is always one bit per sample; rows are byte-aligned at the decoder's column count, which may
+		// differ from /Width (extra columns are dropped, missing ones read as zero samples).
 		var cols int
 		data, cols, err = dec.decodeCCITT(h)
 		if err != nil {
@@ -95,8 +94,8 @@ func (m *decodeMapping) apply(s uint32, c int) float32 {
 	return m.dmin[c] + float32(s)*m.dscale[c]
 }
 
-// decodeMapping computes the mapping for every component. The defaults are [0 1] per component, except Indexed,
-// whose default [0 2^bpc−1] passes the sample through as the palette index (ISO 32000-2 Table 87).
+// decodeMapping computes the mapping for every component. The defaults are [0 1] per component, except Indexed, whose
+// default [0 2^bpc−1] passes the sample through as the palette index (ISO 32000-2 Table 87).
 func (dec *decoder) decodeMapping(space pdfcolor.Space, bpc int) decodeMapping {
 	ncomp := space.NComponents()
 	maxVal := float32(uint32(1)<<bpc - 1)
@@ -117,8 +116,8 @@ func (dec *decoder) decodeMapping(space pdfcolor.Space, bpc int) decodeMapping {
 	return m
 }
 
-// decodeArray returns the /Decode array's entries when it is present, well-formed, and long enough, else nil
-// (the lenient fallback to the defaults).
+// decodeArray returns the /Decode array's entries when it is present, well-formed, and long enough, else nil (the
+// lenient fallback to the defaults).
 func (dec *decoder) decodeArray(ncomp int) []float32 {
 	arr, ok := dec.entry("Decode", "D").(cos.Array)
 	if !ok || len(arr) < 2*ncomp {
@@ -135,9 +134,9 @@ func (dec *decoder) decodeArray(ncomp int) []float32 {
 	return out
 }
 
-// lut precomputes the sample→NRGBA table for single-component spaces at 8 bits or fewer, covering the common
-// grayscale, indexed, and single-tint images without a per-pixel interface call. Multi-component and 16-bit
-// images convert per pixel.
+// lut precomputes the sample→NRGBA table for single-component spaces at 8 bits or fewer, covering the common grayscale,
+// indexed, and single-tint images without a per-pixel interface call. Multi-component and 16-bit images convert per
+// pixel.
 func (m *decodeMapping) lut(space pdfcolor.Space, bpc int) []color.NRGBA {
 	if space.NComponents() != 1 || bpc > 8 {
 		return nil
@@ -152,10 +151,9 @@ func (m *decodeMapping) lut(space pdfcolor.Space, bpc int) []color.NRGBA {
 	return table
 }
 
-// colorKeyRanges returns the /Mask color-key ranges as flat [min, max] pairs in raw sample space
-// (ISO 32000-2 8.9.6.5), or nil when /Mask is absent or not an array — or when an /SMask is present, which
-// overrides the /Mask entry entirely (8.9.6.6). Out-of-range and reversed entries are clamped rather than
-// rejected.
+// colorKeyRanges returns the /Mask color-key ranges as flat [min, max] pairs in raw sample space (ISO 32000-2 8.9.6.5),
+// or nil when /Mask is absent or not an array — or when an /SMask is present, which overrides the /Mask entry entirely
+// (8.9.6.6). Out-of-range and reversed entries are clamped rather than rejected.
 func (dec *decoder) colorKeyRanges(ncomp, bpc int) []uint32 {
 	if _, hasSMask := dec.softMaskStream(); hasSMask {
 		return nil
@@ -192,9 +190,9 @@ func inColorKey(samples, ranges []uint32) bool {
 	return true
 }
 
-// stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current
-// paint. A decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2).
-// CCITT payloads decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half.
+// stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current paint. A
+// decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT payloads
+// decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half.
 func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	invert := false
 	if arr, ok := dec.entry("Decode", "D").(cos.Array); ok && len(arr) >= 2 {
@@ -239,8 +237,8 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	return alpha, nil
 }
 
-// sampleReader unpacks big-endian packed samples of 1, 2, 4, 8, or 16 bits. Reads past the end of data return
-// zero samples, the lenient completion for truncated payloads.
+// sampleReader unpacks big-endian packed samples of 1, 2, 4, 8, or 16 bits. Reads past the end of data return zero
+// samples, the lenient completion for truncated payloads.
 type sampleReader struct {
 	data []byte
 	pos  int // bit position

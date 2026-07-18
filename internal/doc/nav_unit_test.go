@@ -17,9 +17,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/doc"
 )
 
-// The expected values in this file were captured by running the MuPDF oracle over probe documents with exactly
-// these structures (offset box origins, each rotation, each destination kind, crop intersections). They pin
-// behavior the committed corpus does not cover.
+// The expected values in this file were captured by running the MuPDF oracle over probe documents with exactly these
+// structures (offset box origins, each rotation, each destination kind, crop intersections). They pin behavior the
+// committed corpus does not cover.
 
 const (
 	pagesOneKid = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
@@ -82,8 +82,8 @@ func nan() float32 {
 	return float32(math.NaN())
 }
 
-// TestRotationMapping pins the top-left mapping for every rotation with an offset box origin, matching the
-// oracle probes: MediaBox [10 20 310 220], /Rect [30 50 80 70], /Dest [3 0 R /XYZ 40 60 0].
+// TestRotationMapping pins the top-left mapping for every rotation with an offset box origin, matching the oracle
+// probes: MediaBox [10 20 310 220], /Rect [30 50 80 70], /Dest [3 0 R /XYZ 40 60 0].
 func TestRotationMapping(t *testing.T) {
 	for _, tc := range []struct {
 		rect     [4]float32
@@ -108,8 +108,8 @@ func TestRotationMapping(t *testing.T) {
 	}
 }
 
-// TestRotateNormalization pins the rounding of out-of-spec /Rotate values to the nearest multiple of 90
-// (normalized into [0,360) first), observed by probing MuPDF: 45, 100, 450, -90, and -450 all swap the axes.
+// TestRotateNormalization pins the rounding of out-of-spec /Rotate values to the nearest multiple of 90 (normalized
+// into [0,360) first), observed by probing MuPDF: 45, 100, 450, -90, and -450 all swap the axes.
 func TestRotateNormalization(t *testing.T) {
 	for _, tc := range []struct {
 		rotate  string
@@ -138,8 +138,8 @@ func TestRotateNormalization(t *testing.T) {
 	}
 }
 
-// TestCropBoxIntersection pins CropBox ∩ MediaBox (oracle-probed): a crop inside the media box wins; a crop
-// larger than the media box is clipped to it; a crop that does not intersect it falls back to the media box.
+// TestCropBoxIntersection pins CropBox ∩ MediaBox (oracle-probed): a crop inside the media box wins; a crop larger than
+// the media box is clipped to it; a crop that does not intersect it falls back to the media box.
 func TestCropBoxIntersection(t *testing.T) {
 	d := navDoc(t, "/MediaBox [0 0 300 200] /CropBox [50 50 250 180]",
 		"<< /Type /Annot /Subtype /Link /Rect [60 60 100 80] /Dest [3 0 R /XYZ 70 90 0] >>")
@@ -165,8 +165,8 @@ func TestDefaultMediaBox(t *testing.T) {
 	checkSize(t, d, 0, 612, 792)
 }
 
-// TestInheritedPageAttributes: /MediaBox and /Rotate inherit from ancestor /Pages nodes, and a page's own
-// entries override them (ISO 32000-2 7.7.3.4).
+// TestInheritedPageAttributes: /MediaBox and /Rotate inherit from ancestor /Pages nodes, and a page's own entries
+// override them (ISO 32000-2 7.7.3.4).
 func TestInheritedPageAttributes(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: catalogObj,
@@ -178,8 +178,8 @@ func TestInheritedPageAttributes(t *testing.T) {
 	checkSize(t, d, 1, 100, 50)  // Own values override.
 }
 
-// TestDestinationKinds pins the coordinate semantics of each destination kind (oracle-probed): the mapped
-// point, with NaN for every slot the kind does not define or that is null.
+// TestDestinationKinds pins the coordinate semantics of each destination kind (oracle-probed): the mapped point, with
+// NaN for every slot the kind does not define or that is null.
 func TestDestinationKinds(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: catalogObj,
@@ -204,9 +204,9 @@ func TestDestinationKinds(t *testing.T) {
 	checkLink(t, links[5], [4]float32{90, 190, 95, 200}, 0, nan(), nan()) // Fit: no point at all.
 }
 
-// TestNamedDestinations covers both named-destination stores: the old-style /Dests dictionary (PDF 1.1,
-// name-keyed) and the /Names → /Dests name tree (byte-string keys, /Kids with /Limits), including a /GoTo
-// action naming the destination and a value wrapped in a /D dictionary.
+// TestNamedDestinations covers both named-destination stores: the old-style /Dests dictionary (PDF 1.1, name-keyed) and
+// the /Names → /Dests name tree (byte-string keys, /Kids with /Limits), including a /GoTo action naming the destination
+// and a value wrapped in a /D dictionary.
 func TestNamedDestinations(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: "<< /Type /Catalog /Pages 2 0 R /Dests 10 0 R /Names << /Dests 11 0 R >> >>",
@@ -237,8 +237,8 @@ func TestNamedDestinations(t *testing.T) {
 	}
 }
 
-// TestNamedDestinationMisses: unknown names and names outside every kid's limits resolve to page -1 (the
-// public API drops such links), while broken limits do not hide a kid's names.
+// TestNamedDestinationMisses: unknown names and names outside every kid's limits resolve to page -1 (the public API
+// drops such links), while broken limits do not hide a kid's names.
 func TestNamedDestinationMisses(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 11 0 R >> >>",
@@ -261,9 +261,9 @@ func TestNamedDestinationMisses(t *testing.T) {
 }
 
 // TestURIActionClassification pins fz_is_external_link semantics: a scheme makes a URI external; "#page=" and
-// "#nameddest=" fragments resolve internally (the zoom x,y values are already top-left coordinates); anything
-// else is an unresolvable internal link (page -1). Unsupported action kinds produce no link at all, and
-// non-link annotations are skipped.
+// "#nameddest=" fragments resolve internally (the zoom x,y values are already top-left coordinates); anything else is
+// an unresolvable internal link (page -1). Unsupported action kinds produce no link at all, and non-link annotations
+// are skipped.
 func TestURIActionClassification(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1:  "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 11 0 R >> >>",
@@ -304,8 +304,8 @@ func TestURIActionClassification(t *testing.T) {
 	}
 }
 
-// TestOutlineTree covers nesting, /GoTo action destinations, an item with a URI action (kept, page -1), and a
-// /Next cycle (the walk terminates and keeps the entries seen up to the repeat).
+// TestOutlineTree covers nesting, /GoTo action destinations, an item with a URI action (kept, page -1), and a /Next
+// cycle (the walk terminates and keeps the entries seen up to the repeat).
 func TestOutlineTree(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1:  "<< /Type /Catalog /Pages 2 0 R /Outlines 10 0 R >>",

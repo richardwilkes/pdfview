@@ -18,12 +18,11 @@ import (
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 )
 
-// decodeDCT handles DCTDecode payloads through the standard library's JPEG decoder, which performs the
-// YCbCr→RGB and Adobe APP14 CMYK/YCCK handling internally. The decoded component bytes then follow the same
-// path as raw samples: /Decode mapping, then conversion through the captured device-colorspace behavior in
-// internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands).
-// The JPEG's own dimensions are authoritative for the raster (the dictionary's /Width and /Height only position
-// the unit square, which the CTM maps regardless of resolution).
+// decodeDCT handles DCTDecode payloads through the standard library's JPEG decoder, which performs the YCbCr→RGB and
+// Adobe APP14 CMYK/YCCK handling internally. The decoded component bytes then follow the same path as raw samples:
+// /Decode mapping, then conversion through the captured device-colorspace behavior in internal/color (a CMYK JPEG pixel
+// converts exactly like a k operator's operands). The JPEG's own dimensions are authoritative for the raster (the
+// dictionary's /Width and /Height only position the unit square, which the CTM maps regardless of resolution).
 func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {
 	decoded, w, h, err := dec.dctImage()
 	if err != nil {
@@ -74,8 +73,8 @@ func (dec *decoder) dctImage() (img image.Image, w, h int, err error) {
 	return decoded, bounds.Dx(), bounds.Dy(), nil
 }
 
-// dctByteMapping precomputes the /Decode interpolation for every 8-bit sample value of ncomp components:
-// out[c][s] is the mapped component value for sample byte s.
+// dctByteMapping precomputes the /Decode interpolation for every 8-bit sample value of ncomp components: out[c][s] is
+// the mapped component value for sample byte s.
 func (dec *decoder) dctByteMapping(ncomp int) [][]float32 {
 	m := decodeMapping{dmin: make([]float32, ncomp), dscale: make([]float32, ncomp)}
 	arr := dec.decodeArray(ncomp)
@@ -127,8 +126,8 @@ func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *boo
 func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(3, 8)
 	mapping := dec.dctByteMapping(3)
-	// With the default (or absent) /Decode, DeviceRGB conversion is byte-identity — trunc(float32(s)/255×255)
-	// equals s for every byte — so the mapped bytes pass through exactly like the oracle's untransformed copy.
+	// With the default (or absent) /Decode, DeviceRGB conversion is byte-identity — trunc(float32(s)/255×255) equals s
+	// for every byte — so the mapped bytes pass through exactly like the oracle's untransformed copy.
 	var lut [3][256]uint8
 	for c := range 3 {
 		for s := range 256 {
@@ -153,14 +152,13 @@ func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *b
 	}
 }
 
-// dctCMYK converts a 4-component JPEG. The standard library undoes the Adobe inversion (its image.CMYK holds
-// true ink values), but the oracle pins the opposite convention for DCT streams inside PDFs: MuPDF consumes
-// libjpeg's raw output, which leaves Adobe CMYK/YCCK samples in their stored, inverted form, and applies no
-// inversion of its own — a transform-0 probe renders near-black under the identity /Decode. The stored samples
-// are therefore reconstructed here (255−v per channel, which also restores libjpeg's YCCK output for
-// transform-2 files), and /Decode plus color-key masking see those, like every other codec's raw samples.
-// Producers compensate with /Decode [1 0 1 0 1 0 1 0] when they intend true ink values, which then flows
-// through mapping below exactly as in MuPDF.
+// dctCMYK converts a 4-component JPEG. The standard library undoes the Adobe inversion (its image.CMYK holds true ink
+// values), but the oracle pins the opposite convention for DCT streams inside PDFs: MuPDF consumes libjpeg's raw
+// output, which leaves Adobe CMYK/YCCK samples in their stored, inverted form, and applies no inversion of its own — a
+// transform-0 probe renders near-black under the identity /Decode. The stored samples are therefore reconstructed here
+// (255−v per channel, which also restores libjpeg's YCCK output for transform-2 files), and /Decode plus color-key
+// masking see those, like every other codec's raw samples. Producers compensate with /Decode [1 0 1 0 1 0 1 0] when
+// they intend true ink values, which then flows through mapping below exactly as in MuPDF.
 func (dec *decoder) dctCMYK(pix []byte, src *image.CMYK, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(4, 8)
 	mapping := dec.dctByteMapping(4)
@@ -193,8 +191,8 @@ func rgbByteFor(v float32) uint8 {
 	return pdfcolor.DeviceRGB.ToNRGBA(comps[:]).R
 }
 
-// dctGrayPlane returns the JPEG's gray bytes for degenerate DCT stencil masks: the Y plane of a color JPEG, the
-// gray plane of a grayscale one.
+// dctGrayPlane returns the JPEG's gray bytes for degenerate DCT stencil masks: the Y plane of a color JPEG, the gray
+// plane of a grayscale one.
 func (dec *decoder) dctGrayPlane() (gray []byte, w, h int, err error) {
 	decoded, w, h, err := dec.dctImage()
 	if err != nil {

@@ -26,14 +26,14 @@ import (
 // glaiveName is the corpus name of the GLAIVE fixture.
 const glaiveName = "glaive"
 
-// TestDrawPage pins the DrawPage contract: drawing onto a caller-created raster surface with
-// ctm = geom.ScaleMatrix(dpi/72, dpi/72) reproduces RenderPage's output at that dpi. The page CTM composition is
-// bit-identical between the two paths, so content without text compares byte-exact. Text renders through
-// RenderPage's per-glyph coverage blits but DrawPage's merged-outline fills; the two composite identically except
-// where adjacent glyphs' antialiasing fringes overlap — the merged path unions the outlines where per-glyph
-// coverage composites twice — so pages with text compare on the fraction of diverging pixels (measured worst
-// across these arms: 0.004% of pixels over Δ24, 0.032% over Δ8, all of it isolated fringe pixels further
-// amplified by the straight-alpha comparison at near-zero alpha).
+// TestDrawPage pins the DrawPage contract: drawing onto a caller-created raster surface with ctm =
+// geom.ScaleMatrix(dpi/72, dpi/72) reproduces RenderPage's output at that dpi. The page CTM composition is
+// bit-identical between the two paths, so content without text compares byte-exact. Text renders through RenderPage's
+// per-glyph coverage blits but DrawPage's merged-outline fills; the two composite identically except where adjacent
+// glyphs' antialiasing fringes overlap — the merged path unions the outlines where per-glyph coverage composites twice
+// — so pages with text compare on the fraction of diverging pixels (measured worst across these arms: 0.004% of pixels
+// over Δ24, 0.032% over Δ8, all of it isolated fringe pixels further amplified by the straight-alpha comparison at
+// near-zero alpha).
 func TestDrawPage(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -106,8 +106,8 @@ func TestDrawPage(t *testing.T) {
 					over24++
 				}
 			}
-			// ~3x headroom over the measured worst (0.004% over Δ24, 0.032% over Δ8) so a genuine
-			// regression still trips.
+			// ~3x headroom over the measured worst (0.004% over Δ24, 0.032% over Δ8) so a genuine regression still
+			// trips.
 			if pctOver24 := 100 * float64(over24) / float64(total); pctOver24 > 0.012 {
 				t.Fatalf("DrawPage output diverges from RenderPage: %.4f%% of pixels over Δ24", pctOver24)
 			}
@@ -118,8 +118,8 @@ func TestDrawPage(t *testing.T) {
 	}
 }
 
-// readSurfaceNRGBA reads the surface back premultiplied and converts to straight alpha exactly as renderPage
-// does (round half up), so the bytes are comparable to RenderPage's image.
+// readSurfaceNRGBA reads the surface back premultiplied and converts to straight alpha exactly as renderPage does
+// (round half up), so the bytes are comparable to RenderPage's image.
 func readSurfaceNRGBA(t *testing.T, surf *surface.Surface, width, height int) []byte {
 	t.Helper()
 	snap := surf.MakeImageSnapshot()

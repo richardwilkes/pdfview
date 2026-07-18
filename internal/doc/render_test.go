@@ -15,8 +15,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// twoKidPages is the interior node shared by the multi-page fixtures here (and mirrored in the navigation
-// tests).
+// twoKidPages is the interior node shared by the multi-page fixtures here (and mirrored in the navigation tests).
 const twoKidPages = "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>"
 
 func TestPageContentsSingleAndArray(t *testing.T) {
@@ -31,8 +30,8 @@ func TestPageContentsSingleAndArray(t *testing.T) {
 	if got := string(d.PageContents(0)); got != "1 0 0 m" {
 		t.Errorf("single stream: %q", got)
 	}
-	// The array form joins parts with a newline so tokens cannot fuse across the boundary; the dangling
-	// reference (9 0 R) contributes nothing.
+	// The array form joins parts with a newline so tokens cannot fuse across the boundary; the dangling reference (9 0
+	// R) contributes nothing.
 	if got := string(d.PageContents(1)); got != "1 0 0 m\n10 5 l" {
 		t.Errorf("array: %q", got)
 	}
@@ -71,8 +70,8 @@ func TestPageCTM(t *testing.T) {
 		5: "<< /Type /Page /Parent 2 0 R /MediaBox [10 20 110 220] /Rotate 180 >>",
 		6: "<< /Type /Page /Parent 2 0 R /MediaBox [10 20 110 220] /Rotate 270 >>",
 	}))
-	// For each rotation, the box corners must land on the display rect [0, w']×[0, h'] at the mapped spots.
-	// These mappings mirror toTopLeft (pinned against MuPDF), scaled by 2.
+	// For each rotation, the box corners must land on the display rect [0, w']×[0, h'] at the mapped spots. These
+	// mappings mirror toTopLeft (pinned against MuPDF), scaled by 2.
 	type probe struct {
 		page  int
 		x, y  float32 // PDF-space point

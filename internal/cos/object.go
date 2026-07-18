@@ -13,8 +13,8 @@ import (
 	"math"
 )
 
-// Object is a COS object: one of Null, Boolean, Integer, Real, String, Name, Array, Dict, Ref, or *Stream. The
-// marker method keeps arbitrary types out of containers at compile time.
+// Object is a COS object: one of Null, Boolean, Integer, Real, String, Name, Array, Dict, Ref, or *Stream. The marker
+// method keeps arbitrary types out of containers at compile time.
 type Object interface {
 	isObject()
 }
@@ -31,8 +31,8 @@ type Integer int64
 // Real is the PDF real-number object.
 type Real float64
 
-// String is the PDF string object, holding the raw bytes after escape/hex decoding. Interpretation (text versus
-// binary) depends on context; DecodeTextString converts text strings to Go strings.
+// String is the PDF string object, holding the raw bytes after escape/hex decoding. Interpretation (text versus binary)
+// depends on context; DecodeTextString converts text strings to Go strings.
 type String []byte
 
 // Name is the PDF name object, holding the name's bytes after #xx escape decoding, without the leading solidus.
@@ -41,8 +41,8 @@ type Name string
 // Array is the PDF array object. Elements may be Refs; resolve them through a Document.
 type Array []Object
 
-// Dict is the PDF dictionary object, keyed by Name. Values may be Refs; resolve them through a Document. Absent
-// keys read as Go nil, which every consumer in this package treats as null.
+// Dict is the PDF dictionary object, keyed by Name. Values may be Refs; resolve them through a Document. Absent keys
+// read as Go nil, which every consumer in this package treats as null.
 type Dict map[Name]Object
 
 // Ref is an indirect object reference ("N G R").
@@ -53,8 +53,8 @@ type Ref struct {
 	Gen int
 }
 
-// Stream is the PDF stream object: a dictionary plus the raw, still-encoded bytes exactly as stored in the file.
-// Use Document.StreamData to apply the /Filter chain.
+// Stream is the PDF stream object: a dictionary plus the raw, still-encoded bytes exactly as stored in the file. Use
+// Document.StreamData to apply the /Filter chain.
 type Stream struct {
 	// Dict is the stream dictionary.
 	Dict Dict
@@ -73,8 +73,8 @@ func (Dict) isObject()    {}
 func (Ref) isObject()     {}
 func (*Stream) isObject() {}
 
-// AsInt returns obj as an integer. Reals are truncated toward zero, matching the tolerance PDF consumers extend
-// to keys that formally require integers; non-finite reals and every other type report false.
+// AsInt returns obj as an integer. Reals are truncated toward zero, matching the tolerance PDF consumers extend to keys
+// that formally require integers; non-finite reals and every other type report false.
 func AsInt(obj Object) (int64, bool) {
 	switch v := obj.(type) {
 	case Integer:
@@ -126,8 +126,8 @@ func AsArray(obj Object) (Array, bool) {
 	return v, ok
 }
 
-// AsDict returns obj as a Dict, also accepting a Stream (whose dictionary is returned), since many consumers
-// accept either.
+// AsDict returns obj as a Dict, also accepting a Stream (whose dictionary is returned), since many consumers accept
+// either.
 func AsDict(obj Object) (Dict, bool) {
 	switch v := obj.(type) {
 	case Dict:

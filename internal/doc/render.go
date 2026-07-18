@@ -16,12 +16,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// maxContentStreams caps how many streams a /Contents array contributes, bounding the decode work a hostile
-// page can demand (each stream's own decode is already capped by internal/filter).
+// maxContentStreams caps how many streams a /Contents array contributes, bounding the decode work a hostile page can
+// demand (each stream's own decode is already capped by internal/filter).
 const maxContentStreams = 8192
 
-// PageResources returns the given 0-based page's resolved (inheritable) /Resources dictionary, or nil when it
-// has none.
+// PageResources returns the given 0-based page's resolved (inheritable) /Resources dictionary, or nil when it has none.
 func (d *Document) PageResources(pageNumber int) cos.Dict {
 	if pageNumber < 0 || pageNumber >= len(d.resources) {
 		return nil
@@ -30,11 +29,11 @@ func (d *Document) PageResources(pageNumber int) cos.Dict {
 	return res
 }
 
-// PageContents returns the given 0-based page's decoded content: its /Contents stream, or the concatenation
-// of its /Contents array with a newline between parts (the array form splits one logical stream between
-// lexical tokens, so a separator is required and sufficient). Streams that cannot be decoded contribute what
-// they yielded (internal/filter returns partial output for corrupt-but-decodable input) or nothing; a page
-// with no usable content returns an empty slice, which renders blank.
+// PageContents returns the given 0-based page's decoded content: its /Contents stream, or the concatenation of its
+// /Contents array with a newline between parts (the array form splits one logical stream between lexical tokens, so a
+// separator is required and sufficient). Streams that cannot be decoded contribute what they yielded (internal/filter
+// returns partial output for corrupt-but-decodable input) or nothing; a page with no usable content returns an empty
+// slice, which renders blank.
 func (d *Document) PageContents(pageNumber int) []byte {
 	page, err := d.Page(pageNumber)
 	if err != nil {
@@ -75,10 +74,9 @@ func (d *Document) PageContents(pageNumber int) []byte {
 	return buf.Bytes()
 }
 
-// PageCTM returns the matrix mapping the given 0-based page's PDF user space to rendered-image space at the
-// given scale: the page's effective box maps to [0, w×scale] × [0, h×scale] with the top-left/y-down
-// orientation and /Rotate applied — the same mapping toTopLeft pins against MuPDF, expressed as a matrix and
-// composed with the scale.
+// PageCTM returns the matrix mapping the given 0-based page's PDF user space to rendered-image space at the given
+// scale: the page's effective box maps to [0, w×scale] × [0, h×scale] with the top-left/y-down orientation and /Rotate
+// applied — the same mapping toTopLeft pins against MuPDF, expressed as a matrix and composed with the scale.
 func (d *Document) PageCTM(pageNumber int, scale float32) (gfx.Matrix, error) {
 	if pageNumber < 0 || pageNumber >= len(d.geoms) {
 		return gfx.Matrix{}, errNoSuchPage

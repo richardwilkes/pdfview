@@ -7,14 +7,14 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package function implements PDF functions (ISO 32000-2 7.10): sampled (type 0), exponential interpolation
-// (type 2), stitching (type 3), and PostScript calculator (type 4) functions. Functions map m clamped inputs
-// to n clamped outputs; they parameterize Separation/DeviceN tint transforms (internal/color), shadings
-// (internal/shading), and transfer functions.
+// Package function implements PDF functions (ISO 32000-2 7.10): sampled (type 0), exponential interpolation (type 2),
+// stitching (type 3), and PostScript calculator (type 4) functions. Functions map m clamped inputs to n clamped
+// outputs; they parameterize Separation/DeviceN tint transforms (internal/color), shadings (internal/shading), and
+// transfer functions.
 //
-// Everything is bounded so hostile input cannot force unbounded work: input dimensionality, stitching/array
-// nesting, calculator program size, and calculator execution steps are all capped by the constants below;
-// termination is guaranteed by these caps.
+// Everything is bounded so hostile input cannot force unbounded work: input dimensionality, stitching/array nesting,
+// calculator program size, and calculator execution steps are all capped by the constants below; termination is
+// guaranteed by these caps.
 package function
 
 import (
@@ -24,12 +24,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Limits. maxInputs bounds type 0 multilinear interpolation (2^m corner samples per evaluation); real
-// functions rarely exceed 2 inputs. maxNesting bounds type 3 subfunction and type 4 procedure nesting.
-// maxProgramOps bounds a parsed calculator program's total instruction count, and maxExecSteps bounds one
-// evaluation's executed instructions (if/ifelse can re-run instructions; loops do not exist in the calculator
-// language, but the cap also hardens against implementation slips). psStackLimit is the standard's own limit
-// (ISO 32000-2 7.10.5.1).
+// Limits. maxInputs bounds type 0 multilinear interpolation (2^m corner samples per evaluation); real functions rarely
+// exceed 2 inputs. maxNesting bounds type 3 subfunction and type 4 procedure nesting. maxProgramOps bounds a parsed
+// calculator program's total instruction count, and maxExecSteps bounds one evaluation's executed instructions
+// (if/ifelse can re-run instructions; loops do not exist in the calculator language, but the cap also hardens against
+// implementation slips). psStackLimit is the standard's own limit (ISO 32000-2 7.10.5.1).
 const (
 	maxInputs     = 8
 	maxOutputs    = 64
@@ -54,8 +53,8 @@ type Func interface {
 	// NOutputs returns the number of output values the function produces.
 	NOutputs() int
 	// Eval evaluates the function. Missing inputs read as 0, extras are ignored, and inputs are clamped to the
-	// function's domain (and outputs to its range, when one is declared), so Eval never fails: malformed data
-	// yields clamped or zero values rather than errors.
+	// function's domain (and outputs to its range, when one is declared), so Eval never fails: malformed data yields
+	// clamped or zero values rather than errors.
 	Eval(in []float32) []float32
 }
 

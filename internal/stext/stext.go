@@ -7,16 +7,15 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package stext implements the structured-text device: it records every character the content-stream
-// interpreter emits — through any text verb, in emission order, unclipped — and provides
-// fz_search_stext_page-compatible search over the recorded characters.
+// Package stext implements the structured-text device: it records every character the content-stream interpreter emits
+// — through any text verb, in emission order, unclipped — and provides fz_search_stext_page-compatible search over the
+// recorded characters.
 //
-// The device deliberately ignores clip pushes: MuPDF's structured-text extraction is unclipped, so text
-// scissored away by a clip path is still searchable, and invisible text (render mode 3, arriving through
-// IgnoreText) is recorded too. Character quads are computed exactly as pinned against the oracle:
-// Trm × [0..advance, descender..ascender], in the coordinate space of the interpreter
-// pass's CTM. Search hits therefore come back in that same space; the engine seam runs the pass at scale 1 so
-// they are page-space values matching the goldens' searchRaw quads bit-for-bit.
+// The device deliberately ignores clip pushes: MuPDF's structured-text extraction is unclipped, so text scissored away
+// by a clip path is still searchable, and invisible text (render mode 3, arriving through IgnoreText) is recorded too.
+// Character quads are computed exactly as pinned against the oracle: Trm × [0..advance, descender..ascender], in the
+// coordinate space of the interpreter pass's CTM. Search hits therefore come back in that same space; the engine seam
+// runs the pass at scale 1 so they are page-space values matching the goldens' searchRaw quads bit-for-bit.
 package stext
 
 import (
@@ -28,17 +27,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Char is one positioned character as the interpreter emitted it: its bounding quad, baseline start and end,
-// and em size in the pass's device units, plus the extraction rune used for matching.
+// Char is one positioned character as the interpreter emitted it: its bounding quad, baseline start and end, and em
+// size in the pass's device units, plus the extraction rune used for matching.
 type Char struct {
-	// Quad is the character's bounds, Trm × [0..advance, descender..ascender]. Its corner order matches the
-	// oracle's searchRaw quads (upper-left, upper-right, lower-left, lower-right in the text's orientation).
+	// Quad is the character's bounds, Trm × [0..advance, descender..ascender]. Its corner order matches the oracle's
+	// searchRaw quads (upper-left, upper-right, lower-left, lower-right in the text's orientation).
 	Quad gfx.Quad
 	// Origin and End are the baseline start (Trm × (0,0)) and end (Trm × (advance,0)).
 	Origin gfx.Point
 	End    gfx.Point
-	// Rune is the extraction/search value (0 when the font provides no Unicode mapping; such characters never
-	// match a needle, exactly as pinned against the oracle).
+	// Rune is the extraction/search value (0 when the font provides no Unicode mapping; such characters never match a
+	// needle, exactly as pinned against the oracle).
 	Rune rune
 	// Size is the em size in device units (the vertical scale of the Trm).
 	Size float32
@@ -46,12 +45,12 @@ type Char struct {
 	Axis bool
 }
 
-// Device records the characters of every text run the interpreter emits. It implements device.Device; all
-// non-text operations (paths, images, clips, groups, masks) are ignored via the embedded Null.
+// Device records the characters of every text run the interpreter emits. It implements device.Device; all non-text
+// operations (paths, images, clips, groups, masks) are ignored via the embedded Null.
 type Device struct {
 	device.Null
-	// seen deduplicates runs the interpreter delivers through several verbs (fill+stroke for render mode 2,
-	// fill+clip for mode 4, ...) by run identity; each run's characters are recorded once, at first delivery.
+	// seen deduplicates runs the interpreter delivers through several verbs (fill+stroke for render mode 2, fill+clip
+	// for mode 4, ...) by run identity; each run's characters are recorded once, at first delivery.
 	seen  map[*device.TextRun]struct{}
 	chars []Char
 }
@@ -73,8 +72,8 @@ func (d *Device) ClipText(run *device.TextRun) { d.record(run) }
 // IgnoreText implements device.Device.
 func (d *Device) IgnoreText(run *device.TextRun) { d.record(run) }
 
-// Chars returns the recorded characters in emission order. The slice is owned by the device; callers must not
-// mutate it.
+// Chars returns the recorded characters in emission order. The slice is owned by the device; callers must not mutate
+// it.
 func (d *Device) Chars() []Char {
 	return d.chars
 }
@@ -103,33 +102,32 @@ func (d *Device) record(run *device.TextRun) {
 	}
 }
 
-// Search finds needle in the recorded characters and returns the hit quads in emission order, at most maxQuads
-// of them (a match that would overflow the budget is truncated and the search stops, so the count is exact —
-// matching the original implementation, whose fixed quad buffer fz_search_stext_page filled and no further).
-// The matching rules replicate fz_search_stext_page black-box, as pinned by the quad-parity tests and the
-// probe corpus: Unicode simple case folding for non-space runes; a needle
-// whitespace rune matches a run of extracted whitespace characters, a horizontal gap of at least gapSpaceEm
-// (a synthesized inter-word space), or a line break; a word never silently spans a line break; matches do not
-// overlap; each match yields one quad per line touched, split further by segmentQuads' vertical-extent rule. A
-// needle with no non-space rune returns no hits.
+// Search finds needle in the recorded characters and returns the hit quads in emission order, at most maxQuads of them
+// (a match that would overflow the budget is truncated and the search stops, so the count is exact — matching the
+// original implementation, whose fixed quad buffer fz_search_stext_page filled and no further). The matching rules
+// replicate fz_search_stext_page black-box, as pinned by the quad-parity tests and the probe corpus: Unicode simple
+// case folding for non-space runes; a needle whitespace rune matches a run of extracted whitespace characters, a
+// horizontal gap of at least gapSpaceEm (a synthesized inter-word space), or a line break; a word never silently spans
+// a line break; matches do not overlap; each match yields one quad per line touched, split further by segmentQuads'
+// vertical-extent rule. A needle with no non-space rune returns no hits.
 func (d *Device) Search(needle string, maxQuads int) []gfx.Quad {
 	return searchChars(d.chars, needle, maxQuads)
 }
 
-// Matcher thresholds, in em fractions of the preceding character's size, pinned behaviorally against the
-// oracle: a horizontal gap of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a
-// space there — text-std14's "Kerned Text" needle carries a 0.5 em TJ gap); baseline origins offset by more
-// than lineBreakEm perpendicular to the advance direction are different lines (measured perpendicular so
-// rotated text advancing through device y stays one line).
+// Matcher thresholds, in em fractions of the preceding character's size, pinned behaviorally against the oracle: a
+// horizontal gap of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a space there — text-std14's
+// "Kerned Text" needle carries a 0.5 em TJ gap); baseline origins offset by more than lineBreakEm perpendicular to the
+// advance direction are different lines (measured perpendicular so rotated text advancing through device y stays one
+// line).
 const (
 	gapSpaceEm  = 0.2
 	lineBreakEm = 0.1
 )
 
-// extentSplitFraction is the relative vertical-extent divergence beyond which the oracle starts a new hit
-// quad within one line. Probing brackets it in (0.101, 0.113) of the current quad's height (20-pt text merged
-// a 22.6-pt space and split a 22.9-pt one — hit-quad-split.pdf); 1/9 sits inside the bracket. Corpus quads all
-// sit far from the threshold; if a real file ever lands near it, re-bisect with more probes first.
+// extentSplitFraction is the relative vertical-extent divergence beyond which the oracle starts a new hit quad within
+// one line. Probing brackets it in (0.101, 0.113) of the current quad's height (20-pt text merged a 22.6-pt space and
+// split a 22.9-pt one — hit-quad-split.pdf); 1/9 sits inside the bracket. Corpus quads all sit far from the threshold;
+// if a real file ever lands near it, re-bisect with more probes first.
 const extentSplitFraction = 1.0 / 9
 
 func searchChars(chars []Char, needle string, maxQuads int) []gfx.Quad {
@@ -162,8 +160,8 @@ func searchChars(chars []Char, needle string, maxQuads int) []gfx.Quad {
 	return out
 }
 
-// matchAt attempts a needle match starting at chars[start], returning the per-line quads and the index just
-// past the match.
+// matchAt attempts a needle match starting at chars[start], returning the per-line quads and the index just past the
+// match.
 func matchAt(chars []Char, start int, needle []rune) (quads []gfx.Quad, end int, ok bool) {
 	pos := start
 	segStart := start
@@ -222,28 +220,27 @@ func advanceDir(c Char) (ux, uy float64) {
 	return dx / n, dy / n
 }
 
-// lineBreakBetween reports whether cur starts a new line: its baseline origin is offset from prev's
-// perpendicular to prev's advance direction.
+// lineBreakBetween reports whether cur starts a new line: its baseline origin is offset from prev's perpendicular to
+// prev's advance direction.
 func lineBreakBetween(prev, cur Char) bool {
 	ux, uy := advanceDir(prev)
 	dx, dy := float64(cur.Origin.X-prev.Origin.X), float64(cur.Origin.Y-prev.Origin.Y)
 	return math.Abs(ux*dy-uy*dx) > float64(lineBreakEm*prev.Size)
 }
 
-// gapBetween is the signed distance along prev's advance direction from prev's end to cur's origin (negative
-// when kerning tucks cur backward).
+// gapBetween is the signed distance along prev's advance direction from prev's end to cur's origin (negative when
+// kerning tucks cur backward).
 func gapBetween(prev, cur Char) float32 {
 	ux, uy := advanceDir(prev)
 	return float32(ux*float64(cur.Origin.X-prev.End.X) + uy*float64(cur.Origin.Y-prev.End.Y))
 }
 
-// segmentQuads assembles one line's matched characters into hit quads, reproducing the oracle's grouping
-// (pinned by irs-fw9 and hit-quad-split.pdf): characters extend the current quad
-// horizontally while their vertical extent stays within extentSplitFraction of the quad's height — measured
-// against the extent the quad's FIRST character established, which is never stretched by later merged
-// characters — and a character diverging further (such as a much larger inter-word space) closes the quad and
-// starts its own. Non-axis-aligned text (rotated) keeps the first/last-corner assembly; the corpus exercises
-// only uniform-extent rotated runs.
+// segmentQuads assembles one line's matched characters into hit quads, reproducing the oracle's grouping (pinned by
+// irs-fw9 and hit-quad-split.pdf): characters extend the current quad horizontally while their vertical extent stays
+// within extentSplitFraction of the quad's height — measured against the extent the quad's FIRST character established,
+// which is never stretched by later merged characters — and a character diverging further (such as a much larger
+// inter-word space) closes the quad and starts its own. Non-axis-aligned text (rotated) keeps the first/last-corner
+// assembly; the corpus exercises only uniform-extent rotated runs.
 func segmentQuads(seg []Char) []gfx.Quad {
 	axis := true
 	for _, c := range seg {

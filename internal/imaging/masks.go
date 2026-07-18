@@ -13,16 +13,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// softMaskStream returns the image's /SMask stream, if any. Soft masks exist only on image XObjects (inline
-// images cannot carry one), and when present they override the /Mask entry entirely (ISO 32000-2 8.9.6.6).
+// softMaskStream returns the image's /SMask stream, if any. Soft masks exist only on image XObjects (inline images
+// cannot carry one), and when present they override the /Mask entry entirely (ISO 32000-2 8.9.6.6).
 func (dec *decoder) softMaskStream() (*cos.Stream, bool) {
 	sm, ok := dec.entry("SMask", "").(*cos.Stream)
 	return sm, ok
 }
 
-// applyMasks applies the image's alpha source — /SMask first, else a stencil /Mask stream — to img in place.
-// colorKeyed reports that the /Mask entry was a color-key array already applied during sample conversion.
-// Broken or oversized masks are ignored, leaving the image opaque, the lenient viewer behavior.
+// applyMasks applies the image's alpha source — /SMask first, else a stencil /Mask stream — to img in place. colorKeyed
+// reports that the /Mask entry was a color-key array already applied during sample conversion. Broken or oversized
+// masks are ignored, leaving the image opaque, the lenient viewer behavior.
 func (dec *decoder) applyMasks(img *Image, colorKeyed bool) {
 	if sm, ok := dec.softMaskStream(); ok {
 		if plane, mw, mh, err := alphaPlane(dec.d, sm); err == nil {
@@ -38,10 +38,9 @@ func (dec *decoder) applyMasks(img *Image, colorKeyed bool) {
 	}
 }
 
-// applyStencilMask applies a stencil /Mask image: where the mask's decoded sample is 1 the base image is masked
-// out, where it is 0 the base is painted (ISO 32000-2 8.9.6.5); the mask's own /Decode array may flip its bits
-// first. stencilPlane returns 255 exactly where the decoded sample is 0, so its plane is the base's visibility
-// directly.
+// applyStencilMask applies a stencil /Mask image: where the mask's decoded sample is 1 the base image is masked out,
+// where it is 0 the base is painted (ISO 32000-2 8.9.6.5); the mask's own /Decode array may flip its bits first.
+// stencilPlane returns 255 exactly where the decoded sample is 0, so its plane is the base's visibility directly.
 func (dec *decoder) applyStencilMask(img *Image, ms *cos.Stream) {
 	data, codec, parms, err := dec.d.ImageFilterSplit(ms.Dict, ms.Raw)
 	if err != nil {
@@ -60,10 +59,9 @@ func (dec *decoder) applyStencilMask(img *Image, ms *cos.Stream) {
 	compositeAlpha(img, plane, int(mw), int(mh))
 }
 
-// alphaPlane decodes an /SMask stream to one alpha byte per pixel. The mask is DeviceGray by definition, so the
-// samples map through the mask's /Decode array straight to alpha — never through the painting gray→RGB curve,
-// which would distort coverage. Unsupported codecs (JBIG2, JPX) and malformed masks report an error and the
-// mask is ignored.
+// alphaPlane decodes an /SMask stream to one alpha byte per pixel. The mask is DeviceGray by definition, so the samples
+// map through the mask's /Decode array straight to alpha — never through the painting gray→RGB curve, which would
+// distort coverage. Unsupported codecs (JBIG2, JPX) and malformed masks report an error and the mask is ignored.
 func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err error) {
 	data, codec, parms, err := d.ImageFilterSplit(sm.Dict, sm.Raw)
 	if err != nil {
@@ -158,8 +156,8 @@ func alphaByte(v float32) byte {
 	return byte(v*255 + 0.5)
 }
 
-// compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (the
-// mask and the image both span the same unit square).
+// compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (the mask and
+// the image both span the same unit square).
 func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 	if mw <= 0 || mh <= 0 || len(plane) < mw*mh {
 		return

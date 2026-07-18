@@ -13,20 +13,19 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Outline-walk guards: depth is capped, reference cycles are cut
-// by a visited set shared across the whole walk, and the total number of nodes is capped so a hostile /Next
-// chain cannot balloon memory. The public API applies its own, configurable OverallMaxTOCEntries budget on top.
+// Outline-walk guards: depth is capped, reference cycles are cut by a visited set shared across the whole walk, and the
+// total number of nodes is capped so a hostile /Next chain cannot balloon memory. The public API applies its own,
+// configurable OverallMaxTOCEntries budget on top.
 const (
 	maxOutlineDepth = 64
 	maxOutlineNodes = 65536
 )
 
-// OutlineItem is one node of the document outline (/Outlines tree). Siblings link through Next and children
-// hang off Down, mirroring the /First–/Next chains in the file and the shape the engine seam consumes. X and Y
-// are the destination point mapped into the target page's top-left/y-down space (NaN when the destination
-// carries no explicit coordinate); Page is the 0-based target page, or -1 when the item has no resolvable
-// internal destination (including items whose action is an external URI). Title is the decoded text string,
-// unsanitized — the public API sanitizes.
+// OutlineItem is one node of the document outline (/Outlines tree). Siblings link through Next and children hang off
+// Down, mirroring the /First–/Next chains in the file and the shape the engine seam consumes. X and Y are the
+// destination point mapped into the target page's top-left/y-down space (NaN when the destination carries no explicit
+// coordinate); Page is the 0-based target page, or -1 when the item has no resolvable internal destination (including
+// items whose action is an external URI). Title is the decoded text string, unsanitized — the public API sanitizes.
 type OutlineItem struct {
 	Down  *OutlineItem
 	Next  *OutlineItem
@@ -49,8 +48,8 @@ func (d *Document) Outline() *OutlineItem {
 	return d.walkOutline(outlines["First"], 0, &budget, make(map[cos.Ref]bool))
 }
 
-// walkOutline builds the sibling chain starting at obj (a /First value), recursing into children. Siblings are
-// walked iteratively so only the tree depth — capped — consumes Go stack.
+// walkOutline builds the sibling chain starting at obj (a /First value), recursing into children. Siblings are walked
+// iteratively so only the tree depth — capped — consumes Go stack.
 func (d *Document) walkOutline(obj cos.Object, depth int, budget *int, visited map[cos.Ref]bool) *OutlineItem {
 	if depth > maxOutlineDepth {
 		return nil
@@ -89,9 +88,9 @@ func (d *Document) walkOutline(obj cos.Object, depth int, budget *int, visited m
 	return head
 }
 
-// destForNode extracts the destination an outline item carries: /Dest directly, or a /GoTo action's /D. Items
-// whose action is of any other kind (an external URI, JavaScript, ...) have no internal destination and yield
-// nil, leaving the item at page -1 — matching MuPDF, which still lists such entries.
+// destForNode extracts the destination an outline item carries: /Dest directly, or a /GoTo action's /D. Items whose
+// action is of any other kind (an external URI, JavaScript, ...) have no internal destination and yield nil, leaving
+// the item at page -1 — matching MuPDF, which still lists such entries.
 func (d *Document) destForNode(node cos.Dict) cos.Object {
 	if obj := node["Dest"]; obj != nil {
 		return obj

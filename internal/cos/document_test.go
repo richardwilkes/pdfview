@@ -121,8 +121,8 @@ func TestClassicXref(t *testing.T) {
 	}
 }
 
-// TestClassicXrefPrevChain exercises an incremental update: the newer section overrides object 2 and adds
-// object 4, and its trailer lacks /Root, which must be inherited from the older trailer.
+// TestClassicXrefPrevChain exercises an incremental update: the newer section overrides object 2 and adds object 4, and
+// its trailer lacks /Root, which must be inherited from the older trailer.
 func TestClassicXrefPrevChain(t *testing.T) {
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
@@ -158,9 +158,9 @@ func xrefStreamRow(typ byte, field2 int, field3 byte) []byte {
 	return []byte{typ, byte(field2 >> 24), byte(field2 >> 16), byte(field2 >> 8), byte(field2), field3}
 }
 
-// buildXrefStreamPDF assembles a PDF whose catalog and pages objects live in an object stream and whose xref is
-// a cross-reference stream, optionally compressed with Flate and the PNG up predictor — the exact shape modern
-// writers produce.
+// buildXrefStreamPDF assembles a PDF whose catalog and pages objects live in an object stream and whose xref is a
+// cross-reference stream, optionally compressed with Flate and the PNG up predictor — the exact shape modern writers
+// produce.
 func buildXrefStreamPDF(t *testing.T, usePredictor bool) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -223,8 +223,8 @@ func TestXrefStreamWithObjectStream(t *testing.T) {
 	}
 }
 
-// TestHybridXref builds a classic table whose trailer points at a supplemental xref stream via /XRefStm. The
-// classic table's own entries win over the stream's, and objects only the stream knows about are found.
+// TestHybridXref builds a classic table whose trailer points at a supplemental xref stream via /XRefStm. The classic
+// table's own entries win over the stream's, and objects only the stream knows about are found.
 func TestHybridXref(t *testing.T) {
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
@@ -234,8 +234,8 @@ func TestHybridXref(t *testing.T) {
 	buf.WriteString("2 0 obj\n" + pagesBody + "\nendobj\n")
 	off5 := buf.Len()
 	buf.WriteString("5 0 obj\n(stream-only)\nendobj\n")
-	// The xref stream claims objects 1 and 2 are free; the classic table's entries for them must win, while
-	// entry 5 (absent from the classic table) comes from the stream.
+	// The xref stream claims objects 1 and 2 are free; the classic table's entries for them must win, while entry 5
+	// (absent from the classic table) comes from the stream.
 	offStm := buf.Len()
 	rows := make([]byte, 0, 36)
 	rows = append(rows, xrefStreamRow(0, 0, 255)...)    // 0 free
@@ -282,8 +282,8 @@ func TestRepairNoTrailer(t *testing.T) {
 }
 
 func TestRepairBadOffsets(t *testing.T) {
-	// Build a valid classic file, then corrupt every xref offset by prepending junk before the first object,
-	// shifting the real offsets without updating the table.
+	// Build a valid classic file, then corrupt every xref offset by prepending junk before the first object, shifting
+	// the real offsets without updating the table.
 	b := newBuilder()
 	b.add(1, catalogBody)
 	b.add(2, pagesBody)
@@ -343,9 +343,9 @@ func TestOpenGarbageFails(t *testing.T) {
 	}
 }
 
-// TestOpenCorpus opens every committed corpus file — including the damaged trio and the encrypted set — and
-// requires a usable root, then resolves every object and decodes every unencrypted stream to shake out parsing
-// faults. Behavioral parity with the oracle is asserted separately by TestParity at the repository root.
+// TestOpenCorpus opens every committed corpus file — including the damaged trio and the encrypted set — and requires a
+// usable root, then resolves every object and decodes every unencrypted stream to shake out parsing faults. Behavioral
+// parity with the oracle is asserted separately by TestParity at the repository root.
 func TestOpenCorpus(t *testing.T) {
 	dir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(dir)
@@ -369,8 +369,8 @@ func TestOpenCorpus(t *testing.T) {
 			for _, num := range d.ObjectNums() {
 				obj := d.LoadObject(num)
 				if stream, ok := cos.AsStream(obj); ok && !encrypted {
-					// Stream decode failures are not fatal here (some corpus streams use image-only
-					// filters), but they must not panic.
+					// Stream decode failures are not fatal here (some corpus streams use image-only filters), but they
+					// must not panic.
 					d.StreamData(stream) //nolint:errcheck // See above.
 				}
 			}

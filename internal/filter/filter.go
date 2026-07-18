@@ -7,20 +7,20 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package filter implements the non-image PDF stream filters needed to decode document data — FlateDecode,
-// LZWDecode, ASCIIHexDecode, ASCII85Decode, and RunLengthDecode — together with the PNG and TIFF predictor
-// transforms and bounded chain application. The image-only filters (DCTDecode, CCITTFaxDecode, JBIG2Decode,
-// JPXDecode) are handled by internal/imaging at rasterization time and are rejected here, as is the Crypt filter
-// (internal/cos strips Identity crypt filters before building a chain and rejects named ones; document-level
-// encryption is undone at parse time by internal/crypt).
+// Package filter implements the non-image PDF stream filters needed to decode document data — FlateDecode, LZWDecode,
+// ASCIIHexDecode, ASCII85Decode, and RunLengthDecode — together with the PNG and TIFF predictor transforms and bounded
+// chain application. The image-only filters (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode) are handled by
+// internal/imaging at rasterization time and are rejected here, as is the Crypt filter (internal/cos strips Identity
+// crypt filters before building a chain and rejects named ones; document-level encryption is undone at parse time by
+// internal/crypt).
 //
-// Decoding enforces two caps so hostile input cannot force unbounded work: a chain may apply at most
-// MaxChainLength filters, and each stage's output may not exceed MaxDecodedSize(len(input)) bytes. Termination
-// is guaranteed by these caps; there are no timeouts.
+// Decoding enforces two caps so hostile input cannot force unbounded work: a chain may apply at most MaxChainLength
+// filters, and each stage's output may not exceed MaxDecodedSize(len(input)) bytes. Termination is guaranteed by these
+// caps; there are no timeouts.
 //
-// Decoding is otherwise deliberately fault-tolerant, matching the warn-and-continue behavior of widely deployed
-// PDF readers: corrupt input that still yields some output returns that partial output without an error.
-// Resource-limit violations are always hard errors.
+// Decoding is otherwise deliberately fault-tolerant, matching the warn-and-continue behavior of widely deployed PDF
+// readers: corrupt input that still yields some output returns that partial output without an error. Resource-limit
+// violations are always hard errors.
 package filter
 
 import (
@@ -44,13 +44,13 @@ var (
 	ErrUnsupportedFilter = errors.New("unsupported filter")
 )
 
-// MaxChainLength is the maximum number of filters DecodeChain applies. The spec places no limit on chain length,
-// but no legitimate producer chains more than two or three filters; the cap stops hostile input from forcing
-// unbounded decompression rounds.
+// MaxChainLength is the maximum number of filters DecodeChain applies. The spec places no limit on chain length, but no
+// legitimate producer chains more than two or three filters; the cap stops hostile input from forcing unbounded
+// decompression rounds.
 const MaxChainLength = 8
 
-// PDF filter names, including the abbreviated forms the spec permits for inline images. The abbreviations are
-// accepted everywhere as a harmless leniency.
+// PDF filter names, including the abbreviated forms the spec permits for inline images. The abbreviations are accepted
+// everywhere as a harmless leniency.
 const (
 	nameFlate      = "FlateDecode"
 	nameFlateAbbr  = "Fl"
@@ -67,9 +67,9 @@ const (
 // Params holds the decode parameters (from a stream's /DecodeParms dictionary) that the filters in this package
 // consume. The zero value is not meaningful; start from DefaultParams.
 type Params struct {
-	// Predictor selects the predictor transform applied after Flate or LZW decoding: 1 = none, 2 = TIFF
-	// horizontal differencing, 10-15 = the PNG filters (the specific value is irrelevant on decode; each row
-	// carries its own PNG filter type byte).
+	// Predictor selects the predictor transform applied after Flate or LZW decoding: 1 = none, 2 = TIFF horizontal
+	// differencing, 10-15 = the PNG filters (the specific value is irrelevant on decode; each row carries its own PNG
+	// filter type byte).
 	Predictor int
 	// Colors is the number of interleaved color components per sample (predictor transforms only).
 	Colors int
@@ -77,8 +77,8 @@ type Params struct {
 	BitsPerComponent int
 	// Columns is the number of samples per row (predictor transforms only).
 	Columns int
-	// EarlyChange selects the LZW code-width change convention: 1 (the default) increases the code width one
-	// code early, 0 increases it at the standard point.
+	// EarlyChange selects the LZW code-width change convention: 1 (the default) increases the code width one code
+	// early, 0 increases it at the standard point.
 	EarlyChange int
 }
 
@@ -101,9 +101,9 @@ type Spec struct {
 	Params Params
 }
 
-// MaxDecodedSize returns the largest output each decoding stage may produce for an original input of inputLen
-// bytes: max(64 MB, 256 × inputLen). The generous fixed floor accommodates small streams that legitimately expand
-// enormously (such as xref streams and bitmap data), while the multiplier scales the allowance for large inputs.
+// MaxDecodedSize returns the largest output each decoding stage may produce for an original input of inputLen bytes:
+// max(64 MB, 256 × inputLen). The generous fixed floor accommodates small streams that legitimately expand enormously
+// (such as xref streams and bitmap data), while the multiplier scales the allowance for large inputs.
 func MaxDecodedSize(inputLen int) int {
 	const floor = 64 << 20
 	if inputLen > math.MaxInt/256 {
@@ -112,9 +112,9 @@ func MaxDecodedSize(inputLen int) int {
 	return max(floor, 256*inputLen)
 }
 
-// DecodeChain applies each filter in specs to data in order, enforcing MaxChainLength and capping every stage's
-// output at MaxDecodedSize(len(data)) bytes. It returns the fully decoded bytes. data is never modified; the
-// result may alias it only when specs is empty.
+// DecodeChain applies each filter in specs to data in order, enforcing MaxChainLength and capping every stage's output
+// at MaxDecodedSize(len(data)) bytes. It returns the fully decoded bytes. data is never modified; the result may alias
+// it only when specs is empty.
 func DecodeChain(specs []Spec, data []byte) ([]byte, error) {
 	if len(specs) > MaxChainLength {
 		return nil, ErrChainTooLong
@@ -129,8 +129,8 @@ func DecodeChain(specs []Spec, data []byte) ([]byte, error) {
 	return data, nil
 }
 
-// Decode applies a single filter to data, capping the output at maxSize bytes. The returned slice never aliases
-// data. Decode owns and may modify its result buffers, but never data itself.
+// Decode applies a single filter to data, capping the output at maxSize bytes. The returned slice never aliases data.
+// Decode owns and may modify its result buffers, but never data itself.
 func Decode(spec Spec, data []byte, maxSize int) ([]byte, error) {
 	if maxSize <= 0 {
 		return nil, ErrTooLarge
@@ -162,9 +162,9 @@ func Decode(spec Spec, data []byte, maxSize int) ([]byte, error) {
 	return out, nil
 }
 
-// readCapped reads r to EOF, capping the output at maxSize bytes and returning ErrTooLarge when it would exceed
-// the cap. A read error after at least one byte of output is swallowed and the partial output returned, matching
-// the fault tolerance described in the package comment; an error before any output is reported.
+// readCapped reads r to EOF, capping the output at maxSize bytes and returning ErrTooLarge when it would exceed the
+// cap. A read error after at least one byte of output is swallowed and the partial output returned, matching the fault
+// tolerance described in the package comment; an error before any output is reported.
 func readCapped(r io.Reader, maxSize int) ([]byte, error) {
 	out, err := io.ReadAll(io.LimitReader(r, int64(maxSize)+1))
 	if len(out) > maxSize {
@@ -196,8 +196,8 @@ func flateDecode(data []byte, maxSize int) ([]byte, error) {
 	return out, err
 }
 
-// lzwDecode decompresses LZW data with the PDF flavor selected by earlyChange: the x/image/tiff/lzw reader
-// implements the EarlyChange=1 (default) convention, and the standard library reader implements EarlyChange=0.
+// lzwDecode decompresses LZW data with the PDF flavor selected by earlyChange: the x/image/tiff/lzw reader implements
+// the EarlyChange=1 (default) convention, and the standard library reader implements EarlyChange=0.
 func lzwDecode(data []byte, maxSize, earlyChange int) ([]byte, error) {
 	var r io.ReadCloser
 	if earlyChange == 0 {
@@ -210,8 +210,8 @@ func lzwDecode(data []byte, maxSize, earlyChange int) ([]byte, error) {
 	return out, err
 }
 
-// asciiHexDecode decodes pairs of hexadecimal digits. Whitespace and invalid characters are skipped (leniency),
-// '>' terminates the data, and a trailing odd digit is treated as if followed by '0', per ISO 32000-2 7.4.2.
+// asciiHexDecode decodes pairs of hexadecimal digits. Whitespace and invalid characters are skipped (leniency), '>'
+// terminates the data, and a trailing odd digit is treated as if followed by '0', per ISO 32000-2 7.4.2.
 func asciiHexDecode(data []byte, maxSize int) ([]byte, error) {
 	out := make([]byte, 0, min(len(data)/2+1, maxSize))
 	var hi byte
@@ -271,9 +271,9 @@ func ascii85Decode(data []byte, maxSize int) ([]byte, error) {
 	return readCapped(ascii85.NewDecoder(bytes.NewReader(data)), maxSize)
 }
 
-// runLengthDecode expands run-length encoded data per ISO 32000-2 7.4.5: a length byte L of 0-127 copies the next
-// L+1 bytes literally, 129-255 repeats the next byte 257-L times, and 128 marks the end of data. Truncated input
-// is tolerated, returning what was decoded.
+// runLengthDecode expands run-length encoded data per ISO 32000-2 7.4.5: a length byte L of 0-127 copies the next L+1
+// bytes literally, 129-255 repeats the next byte 257-L times, and 128 marks the end of data. Truncated input is
+// tolerated, returning what was decoded.
 func runLengthDecode(data []byte, maxSize int) ([]byte, error) {
 	out := make([]byte, 0, min(len(data), maxSize))
 	i := 0

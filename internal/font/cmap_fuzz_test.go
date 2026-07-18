@@ -13,9 +13,9 @@ import (
 	"testing"
 )
 
-// FuzzCMap drives the PDF CMap parser and its lookup surface with arbitrary bytes. Nothing may panic or spin:
-// the lexer guarantees forward progress, every range count is capped, and decoding must always consume at
-// least one byte per code.
+// FuzzCMap drives the PDF CMap parser and its lookup surface with arbitrary bytes. Nothing may panic or spin: the lexer
+// guarantees forward progress, every range count is capped, and decoding must always consume at least one byte per
+// code.
 func FuzzCMap(f *testing.F) {
 	f.Add([]byte(testCMapContent))
 	f.Add([]byte(testToUnicodeContent))

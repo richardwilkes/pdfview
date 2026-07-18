@@ -8,9 +8,9 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package testsupport loads the committed golden files (testfiles/goldens/<name>/truth.json plus rendered PNGs,
-// produced from testfiles/corpus by the oracle module's regen.sh) and provides the comparison helpers the parity
-// tests are built on. It is pure Go: the goldens are committed, so no cgo, MuPDF, or network access is ever needed
-// to run the tests.
+// produced from testfiles/corpus by the oracle module's regen.sh) and provides the comparison helpers the parity tests
+// are built on. It is pure Go: the goldens are committed, so no cgo, MuPDF, or network access is ever needed to run the
+// tests.
 package testsupport
 
 import (
@@ -25,18 +25,17 @@ import (
 )
 
 // The types below mirror the truth.json schema written by the oracle module (oracle/schema.go). The two modules
-// deliberately share no code — the oracle needs cgo and must never become a dependency of the library — so the
-// schema is maintained in both places; keep them in sync. LoadTruth rejects unknown fields, so drift between the
-// two surfaces as a test failure rather than silently ignored data.
+// deliberately share no code — the oracle needs cgo and must never become a dependency of the library — so the schema
+// is maintained in both places; keep them in sync. LoadTruth rejects unknown fields, so drift between the two surfaces
+// as a test failure rather than silently ignored data.
 //
-// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left
-// origin, y-down, in PDF points. All other geometry is in rendered-image pixel space for the DPI it is keyed
-// under, produced by the public API of the cgo binding (the behavioral contract this package's engine must match).
-// Floats that MuPDF reports as non-finite (a destination with no explicit coordinate, such as /Fit) are null in
-// the JSON and nil here.
+// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left origin,
+// y-down, in PDF points. All other geometry is in rendered-image pixel space for the DPI it is keyed under, produced by
+// the public API of the cgo binding (the behavioral contract this package's engine must match). Floats that MuPDF
+// reports as non-finite (a destination with no explicit coordinate, such as /Fit) are null in the JSON and nil here.
 
-// Truth is the top-level truth.json document, one per corpus file. (Field order here is dictated by
-// fieldalignment; the JSON field order truth.json is written with lives in oracle/schema.go.)
+// Truth is the top-level truth.json document, one per corpus file. (Field order here is dictated by fieldalignment; the
+// JSON field order truth.json is written with lives in oracle/schema.go.)
 type Truth struct {
 	// TOC holds TableOfContents(dpi) from the public API, keyed by DPI rendered with strconv.Itoa.
 	TOC map[string][]*TOCEntry `json:"toc,omitempty"`
@@ -45,16 +44,16 @@ type Truth struct {
 	SHA256 string `json:"sha256"`
 	// MuPDF is the FZ_VERSION of the MuPDF build that produced this golden.
 	MuPDF string `json:"mupdf"`
-	// AuthPassword is the password the dump authenticated with before extracting the rest of this file's data.
-	// It is empty when RequiresAuth is false.
+	// AuthPassword is the password the dump authenticated with before extracting the rest of this file's data. It is
+	// empty when RequiresAuth is false.
 	AuthPassword string `json:"authPassword,omitempty"`
 	// Auth records Authenticate(password) results, each attempted on its own freshly opened document.
 	Auth []AuthAttempt `json:"auth"`
 	DPIs []int         `json:"dpis"`
 	// Needles lists the search strings dumped for every page.
 	Needles []string `json:"needles,omitempty"`
-	// TOCRaw is the document outline as MuPDF reports it: raw titles and URIs, and unscaled page-space
-	// destination coordinates.
+	// TOCRaw is the document outline as MuPDF reports it: raw titles and URIs, and unscaled page-space destination
+	// coordinates.
 	TOCRaw    []*TOCRawEntry `json:"tocRaw,omitempty"`
 	Pages     []*Page        `json:"pages"`
 	PageCount int            `json:"pageCount"`
@@ -91,13 +90,13 @@ type TOCEntry struct {
 
 // Page holds everything dumped for one 0-based page.
 type Page struct {
-	// SearchRaw maps each needle to the raw hit quads in MuPDF emission order. Each quad is
-	// (ulx, uly, urx, ury, llx, lly, lrx, lry) in page space. A match that spans lines yields one quad per line.
+	// SearchRaw maps each needle to the raw hit quads in MuPDF emission order. Each quad is (ulx, uly, urx, ury, llx,
+	// lly, lrx, lry) in page space. A match that spans lines yields one quad per line.
 	SearchRaw map[string][][8]float32 `json:"searchRaw,omitempty"`
 	// Renders holds the public-API render results, keyed by DPI rendered with strconv.Itoa.
 	Renders map[string]*Render `json:"renders"`
-	// LinksRaw records every link MuPDF reports on the page, unfiltered — including entries the public API
-	// would drop (unresolvable internal links).
+	// LinksRaw records every link MuPDF reports on the page, unfiltered — including entries the public API would drop
+	// (unresolvable internal links).
 	LinksRaw []*RawLink `json:"linksRaw"`
 	// Bounds is the raw page bounding box (x0, y0, x1, y1) in page space.
 	Bounds [4]float32 `json:"bounds"`
@@ -121,8 +120,8 @@ type Render struct {
 	Search map[string][][4]int `json:"search,omitempty"`
 	// PNG is the file name (within the golden directory) of the losslessly encoded rendered page.
 	PNG string `json:"png"`
-	// Links is the public-API link list: URI empty for internal links, Page -1 for external links, bounds and
-	// dest in rendered-image pixel space.
+	// Links is the public-API link list: URI empty for internal links, Page -1 for external links, bounds and dest in
+	// rendered-image pixel space.
 	Links  []*Link `json:"links"`
 	Width  int     `json:"width"`
 	Height int     `json:"height"`
@@ -147,8 +146,8 @@ type Golden struct {
 	Dir string
 }
 
-// LoadTruth reads and decodes one truth.json. Unknown fields are rejected so schema drift between the oracle
-// module and this package cannot pass unnoticed.
+// LoadTruth reads and decodes one truth.json. Unknown fields are rejected so schema drift between the oracle module and
+// this package cannot pass unnoticed.
 func LoadTruth(path string) (*Truth, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -185,9 +184,9 @@ func LoadGoldens(dir string) ([]*Golden, error) {
 	return goldens, nil
 }
 
-// LoadImage decodes a golden PNG into straight-alpha NRGBA. The oracle encodes image.NRGBA data, but the PNG
-// format stores fully opaque images without an alpha channel, in which case the decoder hands back a different
-// image type; the conversion to NRGBA is exact for such opaque pixels.
+// LoadImage decodes a golden PNG into straight-alpha NRGBA. The oracle encodes image.NRGBA data, but the PNG format
+// stores fully opaque images without an alpha channel, in which case the decoder hands back a different image type; the
+// conversion to NRGBA is exact for such opaque pixels.
 func LoadImage(path string) (*image.NRGBA, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -207,8 +206,8 @@ func LoadImage(path string) (*image.NRGBA, error) {
 	return nrgba, nil
 }
 
-// PixelDiff summarizes a per-pixel comparison of two same-sized straight-alpha images. A pixel's delta is the
-// largest absolute difference across its R, G, B, and A channels.
+// PixelDiff summarizes a per-pixel comparison of two same-sized straight-alpha images. A pixel's delta is the largest
+// absolute difference across its R, G, B, and A channels.
 type PixelDiff struct {
 	// MeanDelta is the mean of the per-pixel deltas.
 	MeanDelta float64
@@ -222,8 +221,8 @@ type PixelDiff struct {
 	MaxDelta int
 }
 
-// ComparePixels compares two images of identical dimensions and reports the differences. Strides and rectangle
-// origins may differ; pixels are compared in corresponding positions.
+// ComparePixels compares two images of identical dimensions and reports the differences. Strides and rectangle origins
+// may differ; pixels are compared in corresponding positions.
 func ComparePixels(got, want *image.NRGBA) (*PixelDiff, error) {
 	gotBounds := got.Bounds()
 	wantBounds := want.Bounds()
@@ -266,30 +265,28 @@ func ComparePixels(got, want *image.NRGBA) (*PixelDiff, error) {
 	return diff, nil
 }
 
-// Thresholds is one golden's pixel gate. Every file is compared against DefaultThresholds unless its golden
-// directory carries a thresholds.json override, the sanctioned mechanism for files whose measured, UNDERSTOOD
-// divergence exceeds the default (substitute-font letterform deltas, AA-model edge redistribution on small
-// text). Overrides are a ratchet: once set they may only ever tighten as rendering fidelity improves, and
-// each must carry its justification.
+// Thresholds is one golden's pixel gate. Every file is compared against DefaultThresholds unless its golden directory
+// carries a thresholds.json override, the sanctioned mechanism for files whose measured, UNDERSTOOD divergence exceeds
+// the default (substitute-font letterform deltas, AA-model edge redistribution on small text). Overrides are a ratchet:
+// once set they may only ever tighten as rendering fidelity improves, and each must carry its justification.
 type Thresholds struct {
 	// Justification documents why this golden's gate differs from the default. Required in overrides.
 	Justification string `json:"justification"`
-	// MaxOver24Pct and MaxOver8Pct bound the percentage (0-100) of pixels whose max channel delta exceeds
-	// 24 and 8 respectively; MaxMeanDelta bounds the mean delta.
+	// MaxOver24Pct and MaxOver8Pct bound the percentage (0-100) of pixels whose max channel delta exceeds 24 and 8
+	// respectively; MaxMeanDelta bounds the mean delta.
 	MaxOver24Pct float64 `json:"maxOver24Pct"`
 	MaxOver8Pct  float64 `json:"maxOver8Pct"`
 	MaxMeanDelta float64 `json:"maxMeanDelta"`
 }
 
-// DefaultThresholds is the standard perceptual gate: at most 2% of pixels with a delta over 24, at most 10%
-// with a delta over 8, and a mean delta of at most 2.
+// DefaultThresholds is the standard perceptual gate: at most 2% of pixels with a delta over 24, at most 10% with a
+// delta over 8, and a mean delta of at most 2.
 func DefaultThresholds() Thresholds {
 	return Thresholds{MaxOver24Pct: 2, MaxOver8Pct: 10, MaxMeanDelta: 2}
 }
 
-// LoadThresholds returns the gate for a golden directory: the default unless <dir>/thresholds.json overrides
-// it. Unknown fields and malformed overrides are errors — a broken override must never silently widen (or
-// narrow) a gate.
+// LoadThresholds returns the gate for a golden directory: the default unless <dir>/thresholds.json overrides it.
+// Unknown fields and malformed overrides are errors — a broken override must never silently widen (or narrow) a gate.
 func LoadThresholds(dir string) (Thresholds, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "thresholds.json"))
 	if err != nil {

@@ -11,12 +11,11 @@ package content
 
 import "github.com/richardwilkes/pdfview/internal/cos"
 
-// opInlineImage consumes a BI … ID … EI inline image (ISO 32000-2 8.9.7), decodes it, draws it, and leaves the
-// lexer positioned just past the EI keyword. The dictionary entries between BI and ID are parsed with the
-// ordinary operand machinery; the binary payload after ID is isolated by length when the dictionary supplies a
-// usable /L (or /Length), and otherwise by scanning for the EI keyword delimited the way real encoders emit it.
-// Malformed constructs degrade to drawing nothing; the only hard obligation is not to desynchronize the
-// tokenizer.
+// opInlineImage consumes a BI … ID … EI inline image (ISO 32000-2 8.9.7), decodes it, draws it, and leaves the lexer
+// positioned just past the EI keyword. The dictionary entries between BI and ID are parsed with the ordinary operand
+// machinery; the binary payload after ID is isolated by length when the dictionary supplies a usable /L (or /Length),
+// and otherwise by scanning for the EI keyword delimited the way real encoders emit it. Malformed constructs degrade to
+// drawing nothing; the only hard obligation is not to desynchronize the tokenizer.
 func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 	dict, ok := parseInlineDict(lex)
 	if !ok {
@@ -36,8 +35,8 @@ func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 	in.drawImage(img)
 }
 
-// parseInlineDict parses the key/value entries between BI and ID. It reports false when the stream ends before
-// ID arrives (nothing to draw, nothing left to position past).
+// parseInlineDict parses the key/value entries between BI and ID. It reports false when the stream ends before ID
+// arrives (nothing to draw, nothing left to position past).
 func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 	dict := cos.Dict{}
 	for {
@@ -67,10 +66,9 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 	}
 }
 
-// isolatePayload returns the payload bytes starting at pos and the offset just past the terminating EI. A
-// direct /L (or /Length) delimits the payload without inspection when the claimed extent lands at an EI;
-// otherwise the payload ends at the first plausible EI keyword, with the single separating whitespace byte
-// before it excluded.
+// isolatePayload returns the payload bytes starting at pos and the offset just past the terminating EI. A direct /L (or
+// /Length) delimits the payload without inspection when the claimed extent lands at an EI; otherwise the payload ends
+// at the first plausible EI keyword, with the single separating whitespace byte before it excluded.
 func isolatePayload(dict cos.Dict, data []byte, pos int) (payload []byte, end int) {
 	if length := inlineLength(dict); length >= 0 && pos+length <= len(data) {
 		if eiEnd, ok := eiAt(data, pos+length); ok {
@@ -91,8 +89,7 @@ func inlineLength(dict cos.Dict) int {
 	return -1
 }
 
-// eiAt reports whether the EI keyword sits at pos (after optional whitespace), returning the offset just past
-// it.
+// eiAt reports whether the EI keyword sits at pos (after optional whitespace), returning the offset just past it.
 func eiAt(data []byte, pos int) (end int, ok bool) {
 	for pos < len(data) && cos.IsWhitespaceByte(data[pos]) {
 		pos++
@@ -104,12 +101,12 @@ func eiAt(data []byte, pos int) (end int, ok bool) {
 	return 0, false
 }
 
-// scanForEI finds the first plausible EI keyword at or after pos: preceded by whitespace (or the payload
-// start) and followed by whitespace, a delimiter, or end of input. Binary payloads can contain the letters
-// "EI", so the delimiting requirements matter; a payload byte pair that still satisfies them ends the payload
-// early, which is the standard failure mode every reader shares for undeclared-length inline images. With no
-// EI at all, everything to the end of input is consumed. The returned payloadEnd excludes the single
-// whitespace byte separating the payload from the EI keyword; end is just past the keyword.
+// scanForEI finds the first plausible EI keyword at or after pos: preceded by whitespace (or the payload start) and
+// followed by whitespace, a delimiter, or end of input. Binary payloads can contain the letters "EI", so the delimiting
+// requirements matter; a payload byte pair that still satisfies them ends the payload early, which is the standard
+// failure mode every reader shares for undeclared-length inline images. With no EI at all, everything to the end of
+// input is consumed. The returned payloadEnd excludes the single whitespace byte separating the payload from the EI
+// keyword; end is just past the keyword.
 func scanForEI(data []byte, pos int) (payloadEnd, end int) {
 	for i := pos; i+2 <= len(data); i++ {
 		if data[i] != 'E' || data[i+1] != 'I' {

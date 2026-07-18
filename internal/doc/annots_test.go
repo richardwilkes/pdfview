@@ -19,8 +19,8 @@ import (
 // apStream is a minimal form-XObject appearance stream body (object 5 in these fixtures).
 const apStream = "<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length 20 >>\nstream\n1 0 0 rg 0 0 10 10 re\nendstream"
 
-// annotDoc builds a one-page document whose /Annots array holds exactly the given annotation body (object 4);
-// object 5 is a 10x10 appearance stream and further objects may be supplied for /Parent chains and state dicts.
+// annotDoc builds a one-page document whose /Annots array holds exactly the given annotation body (object 4); object 5
+// is a 10x10 appearance stream and further objects may be supplied for /Parent chains and state dicts.
 func annotDoc(t *testing.T, annot string, extra map[int]string) *doc.Document {
 	t.Helper()
 	objects := map[int]string{
@@ -36,8 +36,8 @@ func annotDoc(t *testing.T, annot string, extra map[int]string) *doc.Document {
 	return mustOpen(t, pdf(objects))
 }
 
-// TestAnnotationSelection pins the probe-pinned gates: which annotations yield a renderable appearance at all
-// (each case was pinned by an oracle probe; see the selection rules in annots.go).
+// TestAnnotationSelection pins the probe-pinned gates: which annotations yield a renderable appearance at all (each
+// case was pinned by an oracle probe; see the selection rules in annots.go).
 func TestAnnotationSelection(t *testing.T) {
 	cases := []struct {
 		extra map[int]string
@@ -85,8 +85,8 @@ func TestAnnotationSelection(t *testing.T) {
 	}
 }
 
-// TestAnnotationTransform pins the ISO 32000-2 12.5.5 placement math: /BBox through /Matrix, the resulting
-// axis-aligned box carried onto the normalized /Rect.
+// TestAnnotationTransform pins the ISO 32000-2 12.5.5 placement math: /BBox through /Matrix, the resulting axis-aligned
+// box carried onto the normalized /Rect.
 func TestAnnotationTransform(t *testing.T) {
 	// Identity matrix: BBox [0 0 10 10] onto Rect [100 200 200 240] scales x by 10, y by 4.
 	d := annotDoc(t, "<< /Type /Annot /Subtype /Square /F 4 /Rect [100 200 200 240] /AP << /N 5 0 R >> >>", nil)
@@ -104,8 +104,8 @@ func TestAnnotationTransform(t *testing.T) {
 	checkPoint(annots[0].Transform, 0, 0, 100, 200)
 	checkPoint(annots[0].Transform, 10, 10, 200, 240)
 
-	// Rotation: BBox [0 0 10 20] through Matrix [0 1 -1 0 0 0] spans [-20 0 0 10]; onto Rect [200 700 300 740]
-	// the composite (Matrix then Transform) sends form (0,0) to (300,700) and form (10,20) to (200,740).
+	// Rotation: BBox [0 0 10 20] through Matrix [0 1 -1 0 0 0] spans [-20 0 0 10]; onto Rect [200 700 300 740] the
+	// composite (Matrix then Transform) sends form (0,0) to (300,700) and form (10,20) to (200,740).
 	rotAP := "<< /Type /XObject /Subtype /Form /BBox [0 0 10 20] /Matrix [0 1 -1 0 0 0] /Length 20 >>\nstream\n1 0 0 rg 0 0 10 20 re\nendstream"
 	d = annotDoc(t, "<< /Type /Annot /Subtype /Square /F 4 /Rect [200 700 300 740] /AP << /N 5 0 R >> >>",
 		map[int]string{5: rotAP})

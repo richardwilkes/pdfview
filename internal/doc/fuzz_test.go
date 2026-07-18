@@ -19,12 +19,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/doc"
 )
 
-// FuzzOpen drives the whole non-cryptographic engine surface with arbitrary bytes: document open (xref parsing
-// and the repair scan), the page-tree walk (including geometry capture), the navigation layer (outline walk,
-// link annotations, and through them destination arrays, named-destination lookup in both stores, and URI
-// classification), resolution of every cross-referenced object, and stream decoding through the filter chain.
-// Nothing here may panic or fail to terminate; errors are expected and fine. Every committed corpus file is a
-// seed, so the classic-xref, xref-stream, object-stream, damaged, and encrypted shapes all mutate.
+// FuzzOpen drives the whole non-cryptographic engine surface with arbitrary bytes: document open (xref parsing and the
+// repair scan), the page-tree walk (including geometry capture), the navigation layer (outline walk, link annotations,
+// and through them destination arrays, named-destination lookup in both stores, and URI classification), resolution of
+// every cross-referenced object, and stream decoding through the filter chain. Nothing here may panic or fail to
+// terminate; errors are expected and fine. Every committed corpus file is a seed, so the classic-xref, xref-stream,
+// object-stream, damaged, and encrypted shapes all mutate.
 func FuzzOpen(f *testing.F) {
 	corpusDir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(corpusDir)
@@ -78,11 +78,11 @@ func FuzzOpen(f *testing.F) {
 	})
 }
 
-// FuzzCrypt drives the standard security handler with mutated encrypted documents: malformed /Encrypt
-// dictionaries, truncated /O/U/OE/UE entries, and bogus V/R combinations. Seeded from the encrypted corpus, it
-// exercises handler construction, authentication (key derivation for every revision), and per-object stream
-// decryption. No input may panic or fail to terminate; a hostile document simply fails to open, fails to
-// authenticate, or leaves streams undecodable.
+// FuzzCrypt drives the standard security handler with mutated encrypted documents: malformed /Encrypt dictionaries,
+// truncated /O/U/OE/UE entries, and bogus V/R combinations. Seeded from the encrypted corpus, it exercises handler
+// construction, authentication (key derivation for every revision), and per-object stream decryption. No input may
+// panic or fail to terminate; a hostile document simply fails to open, fails to authenticate, or leaves streams
+// undecodable.
 func FuzzCrypt(f *testing.F) {
 	corpusDir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(corpusDir)

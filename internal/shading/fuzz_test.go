@@ -17,9 +17,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// FuzzShading drives the shading parser (and through it the mesh bit reader, tessellation, and function
-// sampling) over every object of an arbitrary document, seeded with the shading corpus files. The contract is
-// the usual one: hostile input may fail to parse, but must never panic, hang, or allocate unboundedly.
+// FuzzShading drives the shading parser (and through it the mesh bit reader, tessellation, and function sampling) over
+// every object of an arbitrary document, seeded with the shading corpus files. The contract is the usual one: hostile
+// input may fail to parse, but must never panic, hang, or allocate unboundedly.
 func FuzzShading(f *testing.F) {
 	for _, name := range []string{
 		"shading-axial.pdf", "shading-radial.pdf", "shading-function.pdf", "shading-mesh.pdf", "pattern-tiling.pdf",

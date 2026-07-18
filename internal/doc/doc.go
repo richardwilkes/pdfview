@@ -7,12 +7,11 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a
-// document builds the flat page list, honoring the tree structure with cycle and depth guards, that PageCount
-// and Page answer from), encryption setup, and navigation: page geometry (the effective
-// box and rotation, and the top-left/y-down coordinate space derived from them), destinations (explicit arrays
-// and named, via both the old-style /Dests dictionary and the /Names name tree), the document outline, and link
-// annotations.
+// Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a document builds
+// the flat page list, honoring the tree structure with cycle and depth guards, that PageCount and Page answer from),
+// encryption setup, and navigation: page geometry (the effective box and rotation, and the top-left/y-down coordinate
+// space derived from them), destinations (explicit arrays and named, via both the old-style /Dests dictionary and the
+// /Names name tree), the document outline, and link annotations.
 package doc
 
 import (
@@ -22,12 +21,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/crypt"
 )
 
-// maxPageTreeDepth caps page-tree recursion; combined with the visited set it guarantees the walk terminates on
-// hostile or cyclic trees.
+// maxPageTreeDepth caps page-tree recursion; combined with the visited set it guarantees the walk terminates on hostile
+// or cyclic trees.
 const maxPageTreeDepth = 64
 
-// Authentication-status bits, in the same layout as the public API's AuthenticationStatus so the root package
-// maps an AuthResult across the engine seam without reinterpreting it.
+// Authentication-status bits, in the same layout as the public API's AuthenticationStatus so the root package maps an
+// AuthResult across the engine seam without reinterpreting it.
 const (
 	// AuthNoneRequired means the document is not encrypted; any password "succeeds".
 	AuthNoneRequired byte = 1 << iota
@@ -42,19 +41,19 @@ var errNoSuchPage = errors.New("no such page")
 // Document is one open PDF document.
 type Document struct {
 	cos *cos.Document
-	// crypt is the standard security handler when the document is encrypted with a scheme we support; nil
-	// otherwise (unencrypted, or encrypted with an unsupported handler).
+	// crypt is the standard security handler when the document is encrypted with a scheme we support; nil otherwise
+	// (unencrypted, or encrypted with an unsupported handler).
 	crypt *crypt.Handler
-	// pageIndex maps each page's indirect reference to its 0-based page number; destination arrays name their
-	// target page by reference, and this is how those references resolve to page numbers.
+	// pageIndex maps each page's indirect reference to its 0-based page number; destination arrays name their target
+	// page by reference, and this is how those references resolve to page numbers.
 	pageIndex map[cos.Ref]int
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
-	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref
-	// otherwise); pageIndex is its inverse.
+	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref otherwise);
+	// pageIndex is its inverse.
 	pageRefs []cos.Ref
-	// geoms holds each page's effective display geometry (inherited /MediaBox ∩ /CropBox plus /Rotate),
-	// captured during the page-tree walk.
+	// geoms holds each page's effective display geometry (inherited /MediaBox ∩ /CropBox plus /Rotate), captured during
+	// the page-tree walk.
 	geoms []pageGeom
 	// resources holds each page's (inheritable) /Resources entry, unresolved, captured during the walk.
 	resources []cos.Object
@@ -62,11 +61,11 @@ type Document struct {
 	encrypted bool
 }
 
-// Open parses data as a PDF document, sets up decryption if it is encrypted, and builds its page list. The COS
-// layer runs its repair scan automatically when the file's cross-reference data is broken; Open fails only when
-// no usable document root can be found at all. A document whose catalog has no usable page tree opens with zero
-// pages. An encrypted document opens whether or not a password is available: its page tree (dictionaries,
-// names, and references) is never encrypted, so PageCount works before authentication.
+// Open parses data as a PDF document, sets up decryption if it is encrypted, and builds its page list. The COS layer
+// runs its repair scan automatically when the file's cross-reference data is broken; Open fails only when no usable
+// document root can be found at all. A document whose catalog has no usable page tree opens with zero pages. An
+// encrypted document opens whether or not a password is available: its page tree (dictionaries, names, and references)
+// is never encrypted, so PageCount works before authentication.
 func Open(data []byte) (*Document, error) {
 	c, err := cos.Open(data)
 	if err != nil {
@@ -78,9 +77,9 @@ func Open(data []byte) (*Document, error) {
 	return d, nil
 }
 
-// setupEncryption builds the security handler from the trailer's /Encrypt dictionary (if any) and installs it
-// as the COS layer's decryptor, trying the empty password so documents that need none become immediately
-// usable. An /Encrypt dictionary the handler cannot parse leaves the document flagged encrypted but locked.
+// setupEncryption builds the security handler from the trailer's /Encrypt dictionary (if any) and installs it as the
+// COS layer's decryptor, trying the empty password so documents that need none become immediately usable. An /Encrypt
+// dictionary the handler cannot parse leaves the document flagged encrypted but locked.
 func (d *Document) setupEncryption() {
 	encDict, ok := cos.AsDict(d.cos.Resolve(d.cos.Trailer()["Encrypt"]))
 	if !ok {
@@ -100,8 +99,8 @@ func (d *Document) IsEncrypted() bool {
 	return d.encrypted
 }
 
-// NeedsPassword reports whether a password must be supplied before the document's encrypted content can be
-// read. It is false for unencrypted documents and for encrypted documents the empty password already unlocked.
+// NeedsPassword reports whether a password must be supplied before the document's encrypted content can be read. It is
+// false for unencrypted documents and for encrypted documents the empty password already unlocked.
 func (d *Document) NeedsPassword() bool {
 	if d.crypt == nil {
 		return d.encrypted // Encrypted with an unsupported handler: unusable without support.
@@ -110,9 +109,9 @@ func (d *Document) NeedsPassword() bool {
 }
 
 // Authenticate tries password against the document and returns the status bits (AuthNoneRequired / AuthUser /
-// AuthOwner), matching MuPDF's fz_authenticate_password. An unencrypted document reports AuthNoneRequired for
-// any password. A successful authentication drops the object cache so objects read before the file key was
-// available are reparsed and decrypted.
+// AuthOwner), matching MuPDF's fz_authenticate_password. An unencrypted document reports AuthNoneRequired for any
+// password. A successful authentication drops the object cache so objects read before the file key was available are
+// reparsed and decrypted.
 func (d *Document) Authenticate(password string) byte {
 	if !d.encrypted {
 		return AuthNoneRequired
@@ -129,8 +128,8 @@ func (d *Document) Authenticate(password string) byte {
 		status |= AuthOwner
 	}
 	if status != 0 {
-		// The file key is now available: drop objects cached without it and rewalk the page tree so its
-		// dictionaries are recaptured decrypted.
+		// The file key is now available: drop objects cached without it and rewalk the page tree so its dictionaries
+		// are recaptured decrypted.
 		d.cos.DropCaches()
 		d.buildPageList()
 	}
@@ -155,9 +154,8 @@ func (d *Document) Page(pageNumber int) (cos.Dict, error) {
 	return d.pages[pageNumber], nil
 }
 
-// PageRef returns the indirect reference through which the given 0-based page was reached, or the zero Ref when
-// the page dictionary was inlined directly in its parent's /Kids. Destination resolution matches pages by this
-// identity.
+// PageRef returns the indirect reference through which the given 0-based page was reached, or the zero Ref when the
+// page dictionary was inlined directly in its parent's /Kids. Destination resolution matches pages by this identity.
 func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 	if pageNumber < 0 || pageNumber >= len(d.pageRefs) {
 		return cos.Ref{}, errNoSuchPage
@@ -165,12 +163,11 @@ func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 	return d.pageRefs[pageNumber], nil
 }
 
-// buildPageList walks the page tree from the catalog, collecting leaves in document order. The walk counts
-// actual leaf nodes rather than trusting /Count entries, which repair-recovered and hostile files get wrong. A
-// global visited set skips reference cycles and duplicated subtrees (each page has a single parent, so a
-// legitimate tree never revisits a node), and depth is capped by maxPageTreeDepth. It is idempotent: it resets
-// its output first, so it can be re-run after a successful authentication to recapture page dictionaries that
-// were first parsed without the file key.
+// buildPageList walks the page tree from the catalog, collecting leaves in document order. The walk counts actual leaf
+// nodes rather than trusting /Count entries, which repair-recovered and hostile files get wrong. A global visited set
+// skips reference cycles and duplicated subtrees (each page has a single parent, so a legitimate tree never revisits a
+// node), and depth is capped by maxPageTreeDepth. It is idempotent: it resets its output first, so it can be re-run
+// after a successful authentication to recapture page dictionaries that were first parsed without the file key.
 func (d *Document) buildPageList() {
 	d.pages = nil
 	d.pageRefs = nil
@@ -202,8 +199,8 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 	attrs = attrs.override(node)
 	typ, _ := d.cos.GetName(node, "Type")
 	kids, hasKids := d.cos.GetArray(node, "Kids")
-	// An explicit /Type /Page is a leaf even if it (incorrectly) carries /Kids; a node with kids is an interior
-	// node; a node with neither is treated as a page (leniency for repair-recovered trees with missing /Type).
+	// An explicit /Type /Page is a leaf even if it (incorrectly) carries /Kids; a node with kids is an interior node; a
+	// node with neither is treated as a page (leniency for repair-recovered trees with missing /Type).
 	if typ == "Page" || (!hasKids && typ != "Pages") {
 		if ref != (cos.Ref{}) {
 			d.pageIndex[ref] = len(d.pages)
@@ -231,8 +228,8 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 	}
 }
 
-// PageSize returns the given 0-based page's displayed width and height in PDF points: the extent of its
-// effective box (inherited /MediaBox ∩ /CropBox) after /Rotate is applied, so 90/270 rotations swap the axes.
+// PageSize returns the given 0-based page's displayed width and height in PDF points: the extent of its effective box
+// (inherited /MediaBox ∩ /CropBox) after /Rotate is applied, so 90/270 rotations swap the axes.
 func (d *Document) PageSize(pageNumber int) (width, height float32, err error) {
 	if pageNumber < 0 || pageNumber >= len(d.geoms) {
 		return 0, 0, errNoSuchPage

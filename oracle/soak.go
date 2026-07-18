@@ -22,9 +22,9 @@ import (
 	"github.com/richardwilkes/pdf"
 )
 
-// SoakRecord is what the oracle observed for one corpus file: whether MuPDF opened it, whether it demands a
-// password, and its page count. The pure-Go soak test (soak_test.go at the repo root) compares open-success and
-// PageCount against these records when PDFVIEW_SOAK_ORACLE points at the emitted JSON.
+// SoakRecord is what the oracle observed for one corpus file: whether MuPDF opened it, whether it demands a password,
+// and its page count. The pure-Go soak test (soak_test.go at the repo root) compares open-success and PageCount against
+// these records when PDFVIEW_SOAK_ORACLE points at the emitted JSON.
 type SoakRecord struct {
 	Open          bool `json:"open"`
 	NeedsPassword bool `json:"needsPassword,omitempty"`

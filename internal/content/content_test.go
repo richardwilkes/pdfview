@@ -43,8 +43,8 @@ const (
 	catPattern   cos.Name = "Pattern"
 )
 
-// call is one recorded device call. evenOdd doubles as the isolated (begingroup) / luminosity (beginmask)
-// flag, knockout as begingroup's knockout flag, and alpha as beginmask's transfer-LUT length.
+// call is one recorded device call. evenOdd doubles as the isolated (begingroup) / luminosity (beginmask) flag,
+// knockout as begingroup's knockout flag, and alpha as beginmask's transfer-LUT length.
 type call struct {
 	path     *gfx.Path
 	img      *imaging.Image
@@ -316,8 +316,8 @@ func TestTextObjectSkippedSafely(t *testing.T) {
 }
 
 func TestInlineImageDecodesAndDraws(t *testing.T) {
-	// Without /L: the payload contains a lone EI-lookalike inside binary that lacks the delimiters, then a
-	// real EI. The lexer must stay in sync and the image must decode from the scan-delimited payload.
+	// Without /L: the payload contains a lone EI-lookalike inside binary that lacks the delimiters, then a real EI. The
+	// lexer must stay in sync and the image must decode from the scan-delimited payload.
 	rec := run(t, nil, nil, "BI /W 2 /H 2 /BPC 8 /CS /G ID \x00EIx\xff\x01 EI 0 0 1 1 re f")
 	wantOps(t, rec, opFillImage, opFill)
 	img := rec.calls[0].img
@@ -554,9 +554,9 @@ func TestLineToWithoutCurrentPointIgnored(t *testing.T) {
 	wantOps(t, rec, opStroke)
 }
 
-// patternPDF builds the shared document for the shading/pattern operator tests: an axial shading (1), its
-// function (2), a shading pattern over it with a non-identity matrix (3), a colored tiling pattern (4), and
-// an uncolored tiling pattern whose cell tries to set its own color (5).
+// patternPDF builds the shared document for the shading/pattern operator tests: an axial shading (1), its function (2),
+// a shading pattern over it with a non-identity matrix (3), a colored tiling pattern (4), and an uncolored tiling
+// pattern whose cell tries to set its own color (5).
 func patternPDF(t *testing.T) (*cos.Document, cos.Dict) {
 	t.Helper()
 	coloredCell := "1 0 0 rg 0 0 2 2 re f"
@@ -595,8 +595,8 @@ func TestShOperator(t *testing.T) {
 
 func TestShadingPatternPaint(t *testing.T) {
 	d, res := patternPDF(t)
-	// The pattern is selected INSIDE a modified CTM, but pattern space anchors to the stream's default
-	// space: PatternCTM must be the pattern /Matrix alone (page CTM is identity here), not scaled by the cm.
+	// The pattern is selected INSIDE a modified CTM, but pattern space anchors to the stream's default space:
+	// PatternCTM must be the pattern /Matrix alone (page CTM is identity here), not scaled by the cm.
 	rec := run(t, d, res, "q 4 0 0 4 0 0 cm /Pattern cs /PS scn 0 0 5 5 re f Q")
 	wantOps(t, rec, opFill)
 	paint := rec.calls[0].paint

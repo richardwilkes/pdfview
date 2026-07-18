@@ -7,13 +7,12 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package shading parses PDF shading dictionaries (ISO 32000-2 8.7.4, types 1-7) into a normalized form the
-// raster device can draw without consulting COS objects or PDF functions again: axial and radial shadings
-// carry a sampled color ramp (at most maxStops stops, the resolution MuPDF itself uses), function-based
-// shadings carry their domain, matrix, and a color-evaluation closure, and the mesh types (4-7) are
-// tessellated at parse time into flat triangles whose vertex-color deltas are below one 8-bit quantization
-// step. All colors are resolved to the rendered RGB space through internal/color, so a Shading is pure
-// geometry + RGB.
+// Package shading parses PDF shading dictionaries (ISO 32000-2 8.7.4, types 1-7) into a normalized form the raster
+// device can draw without consulting COS objects or PDF functions again: axial and radial shadings carry a sampled
+// color ramp (at most maxStops stops, the resolution MuPDF itself uses), function-based shadings carry their domain,
+// matrix, and a color-evaluation closure, and the mesh types (4-7) are tessellated at parse time into flat triangles
+// whose vertex-color deltas are below one 8-bit quantization step. All colors are resolved to the rendered RGB space
+// through internal/color, so a Shading is pure geometry + RGB.
 package shading
 
 import (
@@ -39,12 +38,12 @@ const (
 	KindTensor          = 7
 )
 
-// Limits. maxStops is the ramp resolution for axial/radial shadings (a function is sampled to at most 256
-// stops). maxTriangles caps the tessellation output of one mesh shading; subdivision stops refining (emitting
-// flat triangles at the reached level) once the budget is hit, so hostile meshes degrade to banding, never to
-// unbounded memory. maxMeshVertices caps how many vertices or patches a mesh stream may declare through its
-// payload. maxSubdivDepth caps the recursive triangle split (4^8 = 65536 triangles from one input triangle is
-// beyond ΔRGB<1 for any color pair). maxPatchGrid caps the per-patch tessellation grid.
+// Limits. maxStops is the ramp resolution for axial/radial shadings (a function is sampled to at most 256 stops).
+// maxTriangles caps the tessellation output of one mesh shading; subdivision stops refining (emitting flat triangles at
+// the reached level) once the budget is hit, so hostile meshes degrade to banding, never to unbounded memory.
+// maxMeshVertices caps how many vertices or patches a mesh stream may declare through its payload. maxSubdivDepth caps
+// the recursive triangle split (4^8 = 65536 triangles from one input triangle is beyond ΔRGB<1 for any color pair).
+// maxPatchGrid caps the per-patch tessellation grid.
 const (
 	maxStops        = 256
 	maxTriangles    = 1 << 19
@@ -59,8 +58,8 @@ var (
 	errUnsupported = errors.New("unsupported shading type")
 )
 
-// Stop is one color stop of a sampled axial/radial ramp. Offset is in [0, 1] over the gradient's parametric
-// span (the /Domain mapping is folded into the sampling, so offset 0 is the t0 end and offset 1 the t1 end).
+// Stop is one color stop of a sampled axial/radial ramp. Offset is in [0, 1] over the gradient's parametric span (the
+// /Domain mapping is folded into the sampling, so offset 0 is the t0 end and offset 1 the t1 end).
 type Stop struct {
 	Offset float32
 	Color  color.NRGBA
@@ -72,12 +71,12 @@ type Triangle struct {
 	Color color.NRGBA
 }
 
-// Shading is one parsed shading dictionary in normalized form. Kind selects which of the payload fields are
-// meaningful: Coords+Extend+Stops for KindAxial/KindRadial, Domain+Matrix+ColorAt for KindFunction, and
-// Triangles for the mesh kinds. BBox, when non-nil, is a clip in the shading's target coordinate space.
+// Shading is one parsed shading dictionary in normalized form. Kind selects which of the payload fields are meaningful:
+// Coords+Extend+Stops for KindAxial/KindRadial, Domain+Matrix+ColorAt for KindFunction, and Triangles for the mesh
+// kinds. BBox, when non-nil, is a clip in the shading's target coordinate space.
 type Shading struct {
-	// ColorAt evaluates the function-based shading's color at a point in its (pre-/Matrix) domain space.
-	// Only set for KindFunction.
+	// ColorAt evaluates the function-based shading's color at a point in its (pre-/Matrix) domain space. Only set for
+	// KindFunction.
 	ColorAt func(x, y float32) color.NRGBA
 	// BBox is the optional /BBox clip in the shading's target space, already normalized.
 	BBox *gfx.Rect
@@ -89,8 +88,7 @@ type Shading struct {
 	Matrix gfx.Matrix
 	// Domain is KindFunction's /Domain as [x0, x1, y0, y1]; points outside it are not painted.
 	Domain [4]float32
-	// Coords holds /Coords: x0,y0,x1,y1 for KindAxial (in the first four slots); x0,y0,r0,x1,y1,r1 for
-	// KindRadial.
+	// Coords holds /Coords: x0,y0,x1,y1 for KindAxial (in the first four slots); x0,y0,r0,x1,y1,r1 for KindRadial.
 	Coords [6]float32
 	// Kind is the /ShadingType (1-7).
 	Kind int
@@ -98,9 +96,8 @@ type Shading struct {
 	Extend [2]bool
 }
 
-// Parse resolves and parses one shading dictionary (or stream, for the mesh types). Malformed dictionaries
-// return an error — the caller (the interpreter) skips the paint, matching viewer behavior for broken
-// shadings.
+// Parse resolves and parses one shading dictionary (or stream, for the mesh types). Malformed dictionaries return an
+// error — the caller (the interpreter) skips the paint, matching viewer behavior for broken shadings.
 func Parse(d *cos.Document, obj cos.Object) (*Shading, error) {
 	var dict cos.Dict
 	var stream *cos.Stream
@@ -149,9 +146,9 @@ func Parse(d *cos.Document, obj cos.Object) (*Shading, error) {
 	return sh, nil
 }
 
-// parseFunctions resolves the /Function entry: absent yields nil, a single function or an array of 1-output
-// functions yield an evaluator set. nComps is the color-space component count the evaluations must cover; a
-// function set that cannot produce that many outputs is rejected (nil).
+// parseFunctions resolves the /Function entry: absent yields nil, a single function or an array of 1-output functions
+// yield an evaluator set. nComps is the color-space component count the evaluations must cover; a function set that
+// cannot produce that many outputs is rejected (nil).
 func parseFunctions(d *cos.Document, obj cos.Object, nComps int) []function.Func {
 	if obj == nil {
 		return nil
@@ -235,8 +232,8 @@ func parseGradient(d *cos.Document, dict cos.Dict, sh *Shading, space pdfcolor.S
 		sh.Extend[0], _ = cos.AsBool(d.Resolve(arr[0]))
 		sh.Extend[1], _ = cos.AsBool(d.Resolve(arr[1]))
 	}
-	// Sample the function over [t0, t1] into a uniform ramp. maxStops samples bound both the work and the
-	// ramp's memory; uniform sampling reproduces MuPDF's own 256-sample ramp behavior.
+	// Sample the function over [t0, t1] into a uniform ramp. maxStops samples bound both the work and the ramp's
+	// memory; uniform sampling reproduces MuPDF's own 256-sample ramp behavior.
 	nComps := space.NComponents()
 	sh.Stops = make([]Stop, maxStops)
 	in := make([]float32, 1)

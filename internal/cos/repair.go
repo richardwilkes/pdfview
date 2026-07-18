@@ -16,11 +16,11 @@ import (
 
 var errRepairFoundNothing = errors.New("repair scan found no objects or trailer")
 
-// repair rebuilds the cross-reference data from scratch by sweeping the entire buffer for "N G obj" headers,
-// trailer dictionaries, and object streams. It runs when the file's own cross-reference information is missing,
-// unreadable, or inconsistent with the actual object layout (a load through it failed), the same recovery
-// deployed readers perform. Later definitions of an object number override earlier ones, matching
-// incremental-update semantics for files whose updates are intact but whose tables are broken.
+// repair rebuilds the cross-reference data from scratch by sweeping the entire buffer for "N G obj" headers, trailer
+// dictionaries, and object streams. It runs when the file's own cross-reference information is missing, unreadable, or
+// inconsistent with the actual object layout (a load through it failed), the same recovery deployed readers perform.
+// Later definitions of an object number override earlier ones, matching incremental-update semantics for files whose
+// updates are intact but whose tables are broken.
 func (d *Document) repair() error {
 	d.repaired = true
 	d.clearCaches()
@@ -70,8 +70,8 @@ func (d *Document) repair() error {
 	}
 	d.xref = xref
 	d.installRepairedTrailer(trailers, catalogNum)
-	// Register the contents of every object stream found by the sweep, without overriding directly swept
-	// definitions: an object written directly in the file is at least as authoritative as a compressed copy.
+	// Register the contents of every object stream found by the sweep, without overriding directly swept definitions:
+	// an object written directly in the file is at least as authoritative as a compressed copy.
 	for _, stmNum := range objStmNums {
 		stm, err := d.loadObjStm(stmNum)
 		if err != nil {
@@ -89,9 +89,9 @@ func (d *Document) repair() error {
 	return nil
 }
 
-// installRepairedTrailer rebuilds d.trailer from the recovered candidates. Newer candidates (later in the file)
-// win; the pre-repair trailer, if any, is the final fallback. When no candidate names a /Root, the last swept
-// /Type /Catalog object stands in.
+// installRepairedTrailer rebuilds d.trailer from the recovered candidates. Newer candidates (later in the file) win;
+// the pre-repair trailer, if any, is the final fallback. When no candidate names a /Root, the last swept /Type /Catalog
+// object stands in.
 func (d *Document) installRepairedTrailer(trailers []Dict, catalogNum int) {
 	merged := make([]Dict, 0, len(trailers)+1)
 	for i := len(trailers) - 1; i >= 0; i-- {
@@ -132,8 +132,8 @@ func (d *Document) scanTrailers() []Dict {
 	return trailers
 }
 
-// headerBefore backtracks from the "obj" keyword at idx over whitespace, a generation number, whitespace, and an
-// object number, returning the object number and its start offset.
+// headerBefore backtracks from the "obj" keyword at idx over whitespace, a generation number, whitespace, and an object
+// number, returning the object number and its start offset.
 func headerBefore(data []byte, idx int) (numStart, num int, ok bool) {
 	i := idx - 1
 	i = skipSpaceBackward(data, i)
@@ -166,8 +166,8 @@ func headerBefore(data []byte, idx int) (numStart, num int, ok bool) {
 	return numStart, num, true
 }
 
-// skipSpaceBackward moves i backward past whitespace. It may return -1 when the start of the buffer is reached;
-// the digit checks in headerBefore treat that as failure.
+// skipSpaceBackward moves i backward past whitespace. It may return -1 when the start of the buffer is reached; the
+// digit checks in headerBefore treat that as failure.
 func skipSpaceBackward(data []byte, i int) int {
 	for i >= 0 && isWhitespace(data[i]) {
 		i--

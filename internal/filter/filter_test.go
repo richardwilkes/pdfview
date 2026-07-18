@@ -55,8 +55,8 @@ func zlibCompress(t *testing.T, data []byte) []byte {
 	return buf.Bytes()
 }
 
-// sampleData returns moderately compressible but varied data (via a fixed linear congruential sequence), long
-// enough to push LZW past several code-width increases.
+// sampleData returns moderately compressible but varied data (via a fixed linear congruential sequence), long enough to
+// push LZW past several code-width increases.
 func sampleData() []byte {
 	data := make([]byte, 8192)
 	seed := uint32(42)
@@ -116,9 +116,9 @@ func TestDecodeTooLarge(t *testing.T) {
 	}
 }
 
-// TestLZWSpecExample decodes the worked example from ISO 32000-2 7.4.4.2 (input bytes 45 45 45 45 45 65 45 45 45
-// 66, in decimal, i.e. "-----A---B"). Its codes never exceed 9 bits, so both EarlyChange conventions must decode
-// it identically.
+// TestLZWSpecExample decodes the worked example from ISO 32000-2 7.4.4.2 (input bytes 45 45 45 45 45 65 45 45 45 66, in
+// decimal, i.e. "-----A---B"). Its codes never exceed 9 bits, so both EarlyChange conventions must decode it
+// identically.
 func TestLZWSpecExample(t *testing.T) {
 	encoded := []byte{0x80, 0x0b, 0x60, 0x50, 0x22, 0x0c, 0x0c, 0x85, 0x01}
 	want := []byte("-----A---B")
@@ -147,11 +147,11 @@ func TestLZWEarlyChangeModes(t *testing.T) {
 	}
 }
 
-// lzwEncode is a minimal LZW encoder (MSB packing, 8-bit literals) used only to produce test data for the two
-// decoder flavors. earlyChange selects when the code width grows, mirroring the convention the corresponding
-// decoder expects: both decoders bump their next-entry counter after every post-clear code they read (starting
-// from 258), widening once that counter reaches 1<<width minus earlyChange. A Clear code is emitted before any
-// 12-bit code would be needed, sidestepping the decoders' divergent full-table behavior.
+// lzwEncode is a minimal LZW encoder (MSB packing, 8-bit literals) used only to produce test data for the two decoder
+// flavors. earlyChange selects when the code width grows, mirroring the convention the corresponding decoder expects:
+// both decoders bump their next-entry counter after every post-clear code they read (starting from 258), widening once
+// that counter reaches 1<<width minus earlyChange. A Clear code is emitted before any 12-bit code would be needed,
+// sidestepping the decoders' divergent full-table behavior.
 func lzwEncode(data []byte, earlyChange int) []byte {
 	const (
 		clearCode = 256
@@ -272,8 +272,8 @@ func TestRunLength(t *testing.T) {
 	}
 }
 
-// pngFilterForward applies PNG filtering to raw so the decoder's inversion can be verified. Rows are filtered
-// with the given per-row filter types.
+// pngFilterForward applies PNG filtering to raw so the decoder's inversion can be verified. Rows are filtered with the
+// given per-row filter types.
 func pngFilterForward(raw []byte, rowLen, bpp int, filters []byte) []byte {
 	var out []byte
 	prev := make([]byte, rowLen)

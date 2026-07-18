@@ -19,8 +19,8 @@ import (
 type xrefKind uint8
 
 const (
-	// xrefFree marks a free (deleted) object. Free entries are stored, not skipped, so a deletion recorded in a
-	// newer increment shadows the object's definition in an older one.
+	// xrefFree marks a free (deleted) object. Free entries are stored, not skipped, so a deletion recorded in a newer
+	// increment shadows the object's definition in an older one.
 	xrefFree xrefKind = iota
 	// xrefInFile locates an object at a byte offset in the file.
 	xrefInFile
@@ -45,12 +45,12 @@ var (
 	errBadXrefStream = errors.New("cannot parse cross-reference stream")
 )
 
-// typeXRef is the /Type value of a cross-reference stream. Such streams are never encrypted (ISO 32000-2
-// 7.5.8.2), so the decryptor skips them.
+// typeXRef is the /Type value of a cross-reference stream. Such streams are never encrypted (ISO 32000-2 7.5.8.2), so
+// the decryptor skips them.
 const typeXRef Name = "XRef"
 
-// startXrefWindow is how far from the end of the file the startxref keyword is searched for. The spec says the
-// last line holds the offset, but real files carry trailing junk; this matches the tolerance of deployed readers.
+// startXrefWindow is how far from the end of the file the startxref keyword is searched for. The spec says the last
+// line holds the offset, but real files carry trailing junk; this matches the tolerance of deployed readers.
 const startXrefWindow = 2048
 
 // findStartXref locates the last startxref keyword near the end of the file and returns the offset it names.
@@ -74,8 +74,8 @@ func (d *Document) findStartXref() (int64, error) {
 }
 
 // loadXref reads the cross-reference chain starting from the startxref offset, following /Prev (and hybrid-file
-// /XRefStm) links. Sections are processed newest first and the first entry seen for an object number wins,
-// implementing incremental-update precedence. The trailer is merged the same way.
+// /XRefStm) links. Sections are processed newest first and the first entry seen for an object number wins, implementing
+// incremental-update precedence. The trailer is merged the same way.
 func (d *Document) loadXref() error {
 	start, err := d.findStartXref()
 	if err != nil {
@@ -107,8 +107,8 @@ func (d *Document) loadXref() error {
 	return nil
 }
 
-// mergeTrailers combines the trailer dictionaries of a cross-reference chain, newest first: the newest trailer
-// wins, with the document-level keys filled in from older trailers when the newer ones lack them.
+// mergeTrailers combines the trailer dictionaries of a cross-reference chain, newest first: the newest trailer wins,
+// with the document-level keys filled in from older trailers when the newer ones lack them.
 func mergeTrailers(trailers []Dict) Dict {
 	if len(trailers) == 0 {
 		return Dict{}
@@ -126,10 +126,9 @@ func mergeTrailers(trailers []Dict) Dict {
 	return merged
 }
 
-// readXrefSection reads the classic table or cross-reference stream at offset, adds its entries (first seen
-// wins), and returns its trailer dictionary. For a classic section in a hybrid file, the /XRefStm stream is
-// processed after the table itself, giving the table precedence over the stream and both precedence over /Prev,
-// per ISO 32000-2 7.5.8.4.
+// readXrefSection reads the classic table or cross-reference stream at offset, adds its entries (first seen wins), and
+// returns its trailer dictionary. For a classic section in a hybrid file, the /XRefStm stream is processed after the
+// table itself, giving the table precedence over the stream and both precedence over /Prev, per ISO 32000-2 7.5.8.4.
 func (d *Document) readXrefSection(offset int64) (Dict, error) {
 	p := newParser(d.data, int(offset))
 	tok, err := p.next()
@@ -153,8 +152,8 @@ func (d *Document) readXrefSection(offset int64) (Dict, error) {
 	return nil, fmt.Errorf("%w: neither xref table nor xref stream at offset %d", errBadXref, offset)
 }
 
-// readClassicXref reads the subsections of a classic xref table (the "xref" keyword has been consumed) and the
-// trailer dictionary that follows.
+// readClassicXref reads the subsections of a classic xref table (the "xref" keyword has been consumed) and the trailer
+// dictionary that follows.
 func (d *Document) readClassicXref(p *parser) (Dict, error) {
 	for {
 		tok, err := p.next()
@@ -218,8 +217,8 @@ func (d *Document) readClassicSubsection(p *parser, start int64) error {
 	return nil
 }
 
-// setEntry records an entry for an object number unless one is already present (the first entry seen comes from
-// the newest increment and wins). Object numbers outside the supported range are ignored.
+// setEntry records an entry for an object number unless one is already present (the first entry seen comes from the
+// newest increment and wins). Object numbers outside the supported range are ignored.
 func (d *Document) setEntry(num int64, entry xrefEntry) {
 	if num <= 0 || num > maxObjectNumber {
 		return
@@ -229,8 +228,8 @@ func (d *Document) setEntry(num int64, entry xrefEntry) {
 	}
 }
 
-// readXrefStream reads the cross-reference stream at offset and returns its dictionary, which doubles as the
-// trailer, per ISO 32000-2 7.5.8.
+// readXrefStream reads the cross-reference stream at offset and returns its dictionary, which doubles as the trailer,
+// per ISO 32000-2 7.5.8.
 func (d *Document) readXrefStream(offset int64) (Dict, error) {
 	obj, _, _, err := parseIndirectAt(d.data, offset, -1)
 	if err != nil {
@@ -250,8 +249,8 @@ func (d *Document) readXrefStream(offset int64) (Dict, error) {
 }
 
 func (d *Document) readXrefStreamEntries(stream *Stream) error {
-	// Cross-reference streams are never encrypted and use only direct values in /W and /Index, so decoding here
-	// cannot recurse into object loading.
+	// Cross-reference streams are never encrypted and use only direct values in /W and /Index, so decoding here cannot
+	// recurse into object loading.
 	data, err := d.StreamData(stream)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errBadXrefStream, err)
@@ -324,8 +323,8 @@ func (d *Document) xrefStreamIndex(dict Dict) []int64 {
 	return []int64{0, size}
 }
 
-// readField reads an n-byte big-endian unsigned value, returning def when n is zero. Values that would exceed
-// 63 bits saturate rather than wrap.
+// readField reads an n-byte big-endian unsigned value, returning def when n is zero. Values that would exceed 63 bits
+// saturate rather than wrap.
 func readField(data []byte, n int, def uint64) uint64 {
 	if n == 0 {
 		return def

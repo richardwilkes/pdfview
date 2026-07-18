@@ -14,8 +14,7 @@ import (
 	"fmt"
 )
 
-// objStm is a parsed object stream (/Type /ObjStm): the decoded payload plus the header's object-number/offset
-// pairs.
+// objStm is a parsed object stream (/Type /ObjStm): the decoded payload plus the header's object-number/offset pairs.
 type objStm struct {
 	data  []byte
 	nums  []int
@@ -28,9 +27,9 @@ var (
 	errObjStmSelf  = errors.New("object stream is not stored directly in the file")
 )
 
-// loadObjStm parses and caches the object stream with the given object number. The stream object itself must be
-// stored directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2
-// 7.5.7), which also rules out recursion here.
+// loadObjStm parses and caches the object stream with the given object number. The stream object itself must be stored
+// directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2 7.5.7), which also
+// rules out recursion here.
 func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if stm, ok := d.objStms[num]; ok {
 		return stm, nil
@@ -47,9 +46,9 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if !ok {
 		return nil, errNotObjStm
 	}
-	// The object stream is stored directly in the file, so its payload is encrypted under its own number.
-	// Decrypting it here (before the /Filter chain) means the objects parsed out of it need no further
-	// decryption, matching ISO 32000-2 7.6.2.
+	// The object stream is stored directly in the file, so its payload is encrypted under its own number. Decrypting it
+	// here (before the /Filter chain) means the objects parsed out of it need no further decryption, matching ISO
+	// 32000-2 7.6.2.
 	d.decryptDirect(num, gen, stream)
 	stm, err := d.parseObjStm(stream)
 	if err != nil {
@@ -73,8 +72,8 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Each header pair needs at least three bytes ("N 0"), so /N values beyond that are lies; clamping keeps the
-	// slice allocations proportional to real data.
+	// Each header pair needs at least three bytes ("N 0"), so /N values beyond that are lies; clamping keeps the slice
+	// allocations proportional to real data.
 	n = min(n, int64(len(data))/2)
 	stm := &objStm{
 		data:  data,
@@ -98,8 +97,8 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	return stm, nil
 }
 
-// objFromStm loads the object wantNum recorded at index idx of the object stream stmNum. When the recorded index
-// does not name wantNum (stale or inconsistent cross-reference data), the header is searched for it (leniency).
+// objFromStm loads the object wantNum recorded at index idx of the object stream stmNum. When the recorded index does
+// not name wantNum (stale or inconsistent cross-reference data), the header is searched for it (leniency).
 func (d *Document) objFromStm(stmNum, idx, wantNum int) (Object, error) {
 	stm, err := d.loadObjStm(stmNum)
 	if err != nil {

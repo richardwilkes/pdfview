@@ -17,13 +17,13 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// FuzzImaging drives the image decoder with hostile documents: the input is opened as a PDF and every stream
-// object is decoded both as an image XObject (when it declares /Subtype /Image, exercising /SMask and /Mask
-// references) and as an inline-image dictionary over its raw payload (exercising the abbreviated keys and the
-// filter split against arbitrary dictionaries). The decoder must neither panic nor hang — malformed dictionaries
-// and payloads, truncated codec data, and absurd dimension claims are all bounded by the caps documented in the
-// package (maxImagePixels and maxPixelsFor run before any pixel allocation) — and every successful decode must
-// return a pixel buffer consistent with its own dimensions. The image corpus files are the seeds.
+// FuzzImaging drives the image decoder with hostile documents: the input is opened as a PDF and every stream object is
+// decoded both as an image XObject (when it declares /Subtype /Image, exercising /SMask and /Mask references) and as an
+// inline-image dictionary over its raw payload (exercising the abbreviated keys and the filter split against arbitrary
+// dictionaries). The decoder must neither panic nor hang — malformed dictionaries and payloads, truncated codec data,
+// and absurd dimension claims are all bounded by the caps documented in the package (maxImagePixels and maxPixelsFor
+// run before any pixel allocation) — and every successful decode must return a pixel buffer consistent with its own
+// dimensions. The image corpus files are the seeds.
 func FuzzImaging(f *testing.F) {
 	corpus, err := filepath.Glob(filepath.Join("..", "..", "testfiles", "corpus", "images-*.pdf"))
 	if err != nil {

@@ -24,8 +24,8 @@ const (
 	keyBitsPerFlag cos.Name = "BitsPerFlag"
 )
 
-// testDoc opens a minimal document; the shading objects under test are built directly as cos values, so the
-// document only supplies Resolve/StreamData plumbing.
+// testDoc opens a minimal document; the shading objects under test are built directly as cos values, so the document
+// only supplies Resolve/StreamData plumbing.
 func testDoc(t *testing.T) *cos.Document {
 	t.Helper()
 	pdf := "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
@@ -223,8 +223,8 @@ func TestParseMeshType5(t *testing.T) {
 
 func TestParseMeshPatches(t *testing.T) {
 	d := testDoc(t)
-	// A flat uniform Coons patch (flag 0) plus a flag-1 continuation with the same color: both should
-	// tessellate (geometry floor) with every triangle the same color.
+	// A flat uniform Coons patch (flag 0) plus a flag-1 continuation with the same color: both should tessellate
+	// (geometry floor) with every triangle the same color.
 	boundary := [][2]float64{
 		{0, 0},
 		{0, 33},

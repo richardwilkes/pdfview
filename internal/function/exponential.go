@@ -18,8 +18,8 @@ import (
 
 var errBadExponential = errors.New("invalid exponential function")
 
-// exponential is a type 2 (exponential interpolation) function (ISO 32000-2 7.10.4):
-// y_j = C0_j + x^N × (C1_j − C0_j) over a one-input domain.
+// exponential is a type 2 (exponential interpolation) function (ISO 32000-2 7.10.4): y_j = C0_j + x^N × (C1_j − C0_j)
+// over a one-input domain.
 type exponential struct {
 	common
 	c0, c1 []float32
@@ -63,8 +63,8 @@ func (e *exponential) NOutputs() int {
 
 func (e *exponential) Eval(in []float32) []float32 {
 	x := float64(e.clampIn(in)[0])
-	// x^N of a negative base with a fractional exponent is undefined; math.Pow yields NaN there, which the
-	// range clamp (or the caller's own clamping) maps to the low bound, matching lenient-reader behavior.
+	// x^N of a negative base with a fractional exponent is undefined; math.Pow yields NaN there, which the range clamp
+	// (or the caller's own clamping) maps to the low bound, matching lenient-reader behavior.
 	p := math.Pow(x, e.n)
 	out := make([]float32, len(e.c0))
 	for j := range out {

@@ -76,8 +76,8 @@ var psOps = map[string]psOp{
 	"copy": opCopy, "dup": opDup, "exch": opExch, "index": opIndex, "pop": opPop, "roll": opRoll,
 }
 
-// psInstr is one parsed calculator instruction. Procedures appear only as the bodies of if/ifelse, so the
-// parser folds each `{...} if` / `{...} {...} ifelse` sequence into a single instruction carrying its bodies.
+// psInstr is one parsed calculator instruction. Procedures appear only as the bodies of if/ifelse, so the parser folds
+// each `{...} if` / `{...} {...} ifelse` sequence into a single instruction carrying its bodies.
 type psInstr struct {
 	thenProc []psInstr
 	elseProc []psInstr
@@ -114,8 +114,8 @@ func parseCalculator(d *cos.Document, stream *cos.Stream, c common) (Func, error
 	return &calculator{common: c, program: program, nOut: len(c.rng) / 2}, nil
 }
 
-// parseProc parses instructions until the procedure's closing brace. A nested procedure is legal only as the
-// body of an if/ifelse that immediately follows it; anything else is an error, as the standard requires.
+// parseProc parses instructions until the procedure's closing brace. A nested procedure is legal only as the body of an
+// if/ifelse that immediately follows it; anything else is an error, as the standard requires.
 func parseProc(lex *cos.Lexer, depth int, budget *int) ([]psInstr, error) {
 	if depth > maxNesting {
 		return nil, errTooDeep
@@ -181,9 +181,9 @@ func (c *calculator) NOutputs() int {
 	return c.nOut
 }
 
-// psStack is the calculator's operand stack. Values are float64 with a parallel bool flag; the boolean
-// operators are logical on booleans and bitwise on numbers (treated as 32-bit integers), matching the
-// standard's typed semantics closely enough for real-world transfer and tint functions.
+// psStack is the calculator's operand stack. Values are float64 with a parallel bool flag; the boolean operators are
+// logical on booleans and bitwise on numbers (treated as 32-bit integers), matching the standard's typed semantics
+// closely enough for real-world transfer and tint functions.
 type psStack struct {
 	vals   [psStackLimit]float64
 	n      int
@@ -417,8 +417,7 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 	}
 }
 
-// execPSBits implements and/or/xor: logical when both operands are booleans, bitwise on 32-bit integers
-// otherwise.
+// execPSBits implements and/or/xor: logical when both operands are booleans, bitwise on 32-bit integers otherwise.
 func execPSBits(op psOp, s *psStack) {
 	bothBool := s.n >= 2 && s.bools[s.n-1] && s.bools[s.n-2]
 	b, a := s.pop(), s.pop()
@@ -445,8 +444,8 @@ func execPSBits(op psOp, s *psStack) {
 	}
 }
 
-// rollSlice rotates v by j positions toward the top of the stack (positive j moves elements up), PostScript
-// roll semantics.
+// rollSlice rotates v by j positions toward the top of the stack (positive j moves elements up), PostScript roll
+// semantics.
 func rollSlice(v []float64, j int) {
 	n := len(v)
 	j = ((j % n) + n) % n

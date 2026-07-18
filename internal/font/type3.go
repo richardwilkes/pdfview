@@ -18,9 +18,8 @@ import (
 )
 
 // Type 3 fonts (ISO 32000-2 9.6.4): glyphs are content streams (/CharProcs) executed by the interpreter under
-// FontMatrix ∘ Trm — there are no outlines, so GlyphPath reports none and internal/content recurses instead.
-// /Widths values are in glyph space and map through the FontMatrix; /Encoding Differences are the required
-// code→name source.
+// FontMatrix ∘ Trm — there are no outlines, so GlyphPath reports none and internal/content recurses instead. /Widths
+// values are in glyph space and map through the FontMatrix; /Encoding Differences are the required code→name source.
 
 // type3Info carries a Type 3 font's execution material.
 type type3Info struct {
@@ -79,8 +78,8 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.Flags = desc.flags
 	f.missingWidth = desc.missingWidth
 
-	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults.
-	// (No search needles pin Type 3 quads; the corpus probe pins pixels.)
+	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults. (No search
+	// needles pin Type 3 quads; the corpus probe pins pixels.)
 	f.ascender, f.descender = 0.8, -0.2
 	if arr, has := d.GetArray(dict, "FontBBox"); has && len(arr) >= 4 {
 		if y0, okY0 := cos.AsReal(d.Resolve(arr[1])); okY0 {
@@ -98,8 +97,8 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	}
 
-	// Encoding: the /Differences are the operative mapping (required for Type 3); the standard base applies
-	// beneath them, leniently.
+	// Encoding: the /Differences are the operative mapping (required for Type 3); the standard base applies beneath
+	// them, leniently.
 	f.enc = resolveEncoding(d, dict, "", nil)
 	f.toUni = loadToUnicode(d, dict)
 	buildUnicode(f)
@@ -131,8 +130,8 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 // IsType3 reports whether the font is a Type 3 font (glyphs execute as content streams).
 func (f *Font) IsType3() bool { return f.type3 != nil }
 
-// Type3Proc returns the charproc stream for a code, with the /CharProcs entry's reference (zero when the
-// stream was direct) for recursion cycle guarding.
+// Type3Proc returns the charproc stream for a code, with the /CharProcs entry's reference (zero when the stream was
+// direct) for recursion cycle guarding.
 func (f *Font) Type3Proc(code uint32) (stream *cos.Stream, ref cos.Ref, ok bool) {
 	if f.type3 == nil {
 		return nil, cos.Ref{}, false

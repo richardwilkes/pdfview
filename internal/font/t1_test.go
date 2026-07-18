@@ -15,9 +15,9 @@ import (
 	"testing"
 )
 
-// buildT1Program assembles a minimal but conformant Type 1 program (compare internal/type1's full test
-// builder; this compact variant keeps the font package's fixture self-contained): three glyphs — .notdef, a
-// 600-wide box "A", and a 400-wide wedge "T" bound to a non-ASCII code by the built-in encoding.
+// buildT1Program assembles a minimal but conformant Type 1 program (compare internal/type1's full test builder; this
+// compact variant keeps the font package's fixture self-contained): three glyphs — .notdef, a 600-wide box "A", and a
+// 400-wide wedge "T" bound to a non-ASCII code by the built-in encoding.
 func buildT1Program() []byte {
 	encrypt := func(plain []byte, r uint16, lead int) []byte {
 		const c1, c2 = 52845, 22719
@@ -100,7 +100,8 @@ func loadT1TestFont(t *testing.T, withWidths bool) *Font {
 	if withWidths {
 		widths = "/FirstChar 65 /Widths [650]"
 	}
-	f, err := loadFromDict(t,
+	f, err := loadFromDict(
+		t,
 		fmt.Sprintf("<< /Type /Font /Subtype /Type1 /BaseFont /FontT1 %s /FontDescriptor 2 0 R >>", widths),
 		"<< /Type /FontDescriptor /FontName /FontT1 /Flags 4 /FontFile 3 0 R >>",
 		fmt.Sprintf("<< /Length %d /Length1 1 /Length2 1 /Length3 0 >>\nstream\n%s\nendstream", len(prog), prog),
@@ -134,13 +135,13 @@ func TestType1Embedded(t *testing.T) {
 	if f.sub != nil {
 		t.Errorf("substitute loaded despite embedded program")
 	}
-	// Quad metrics from the FontBBox over the FontMatrix-implied upem (FreeType rule; the float32 matrix
-	// reciprocal is inexact, exactly as in the pinned bare-CFF path).
+	// Quad metrics from the FontBBox over the FontMatrix-implied upem (FreeType rule; the float32 matrix reciprocal is
+	// inexact, exactly as in the pinned bare-CFF path).
 	if a, d := f.Ascender(), f.Descender(); a < 0.7499 || a > 0.7501 || d > -0.2499 || d < -0.2501 {
 		t.Errorf("metrics = %v/%v, want ~0.75/-0.25", a, d)
 	}
-	// Built-in encoding is the base without /Encoding. Only explicit dup entries fill the table (the
-	// "0 1 255 {...} for" idiom is not executed — an unmapped code means .notdef, same net effect).
+	// Built-in encoding is the base without /Encoding. Only explicit dup entries fill the table (the "0 1 255 {...}
+	// for" idiom is not executed — an unmapped code means .notdef, same net effect).
 	if f.GlyphName(65) != "A" || f.GlyphName(200) != "T" || f.GlyphName(66) != "" {
 		t.Errorf("built-in encoding not applied: %q %q %q", f.GlyphName(65), f.GlyphName(200), f.GlyphName(66))
 	}
@@ -180,7 +181,8 @@ func TestType1WidthsPrecedence(t *testing.T) {
 func TestType1EncodingOverride(t *testing.T) {
 	// An explicit /Encoding dictionary applies its Differences over the built-in base.
 	prog := buildT1Program()
-	f, err := loadFromDict(t,
+	f, err := loadFromDict(
+		t,
 		"<< /Type /Font /Subtype /Type1 /BaseFont /FontT1 /Encoding << /Differences [65 /T] >> /FontDescriptor 2 0 R >>",
 		"<< /Type /FontDescriptor /FontName /FontT1 /Flags 4 /FontFile 3 0 R >>",
 		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(prog), prog),

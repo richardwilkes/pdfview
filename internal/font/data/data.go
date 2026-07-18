@@ -7,12 +7,12 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package data holds the embedded font bundle: width tables and built-in encodings compiled from the Adobe
-// Core 14 AFMs, the Adobe Glyph List, and the Liberation fonts used as metric-compatible substitutes for
-// non-embedded fonts. Everything is embedded compressed and decompressed lazily on first use; README.md in
-// this directory documents the upstream sources, and the gen subdirectory holds the generator that produced
-// the committed files. All accessors are safe for concurrent use and treat the embedded data as trusted (it
-// is generated and covered by unit tests): a blob that fails to load simply reports "not present".
+// Package data holds the embedded font bundle: width tables and built-in encodings compiled from the Adobe Core 14
+// AFMs, the Adobe Glyph List, and the Liberation fonts used as metric-compatible substitutes for non-embedded fonts.
+// Everything is embedded compressed and decompressed lazily on first use; README.md in this directory documents the
+// upstream sources, and the gen subdirectory holds the generator that produced the committed files. All accessors are
+// safe for concurrent use and treat the embedded data as trusted (it is generated and covered by unit tests): a blob
+// that fails to load simply reports "not present".
 package data
 
 import (
@@ -56,8 +56,8 @@ var (
 	fontLoaded map[string]bool
 )
 
-// loadAFM parses afm.txt.gz: "font <name>" starts a width table of "<width> <glyph>" lines, "enc <name>"
-// starts a built-in encoding table of "<code> <glyph>" lines.
+// loadAFM parses afm.txt.gz: "font <name>" starts a width table of "<width> <glyph>" lines, "enc <name>" starts a
+// built-in encoding table of "<code> <glyph>" lines.
 func loadAFM() {
 	afmWidths = map[string]map[string]uint16{}
 	afmCodes = map[string]*[256]string{}
@@ -91,22 +91,22 @@ func loadAFM() {
 	}
 }
 
-// AFMWidths returns the glyph-name→width table (1000-unit em space) for one of the 14 standard fonts, named
-// by its canonical PostScript name (such as "Helvetica-Bold"), or nil when the name is not one of the 14.
+// AFMWidths returns the glyph-name→width table (1000-unit em space) for one of the 14 standard fonts, named by its
+// canonical PostScript name (such as "Helvetica-Bold"), or nil when the name is not one of the 14.
 func AFMWidths(name string) map[string]uint16 {
 	afmOnce.Do(loadAFM)
 	return afmWidths[name]
 }
 
-// BuiltinEncoding returns the built-in encoding (code→glyph name, "" for unused codes) for "Symbol" or
-// "ZapfDingbats", the two standard fonts whose encodings are not one of the Annex D tables. Nil otherwise.
+// BuiltinEncoding returns the built-in encoding (code→glyph name, "" for unused codes) for "Symbol" or "ZapfDingbats",
+// the two standard fonts whose encodings are not one of the Annex D tables. Nil otherwise.
 func BuiltinEncoding(name string) *[256]string {
 	afmOnce.Do(loadAFM)
 	return afmCodes[name]
 }
 
-// AGL returns the Adobe Glyph List: glyph name → Unicode string (usually one rune; ligature entries carry
-// several). The returned map is shared — callers must not modify it.
+// AGL returns the Adobe Glyph List: glyph name → Unicode string (usually one rune; ligature entries carry several). The
+// returned map is shared — callers must not modify it.
 func AGL() map[string]string {
 	aglOnce.Do(func() {
 		aglNames = map[string]string{}
@@ -132,8 +132,8 @@ func AGL() map[string]string {
 	return aglNames
 }
 
-// Liberation returns the named Liberation font (such as "LiberationSans-Bold"), decompressed, or nil when no
-// such font is bundled. The decompressed bytes are cached — callers must not modify them.
+// Liberation returns the named Liberation font (such as "LiberationSans-Bold"), decompressed, or nil when no such font
+// is bundled. The decompressed bytes are cached — callers must not modify them.
 func Liberation(name string) []byte {
 	fontMu.Lock()
 	defer fontMu.Unlock()

@@ -17,9 +17,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// Tee returns a Device that forwards every operation to each of devices in order, so one interpreter pass can
-// drive several consumers (the raster and structured-text devices) at once. With zero or one argument it
-// avoids the indirection: zero devices yields Null and one is returned as-is.
+// Tee returns a Device that forwards every operation to each of devices in order, so one interpreter pass can drive
+// several consumers (the raster and structured-text devices) at once. With zero or one argument it avoids the
+// indirection: zero devices yields Null and one is returned as-is.
 func Tee(devices ...Device) Device {
 	switch len(devices) {
 	case 0:

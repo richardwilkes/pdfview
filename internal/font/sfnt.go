@@ -20,16 +20,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// sfntInfo is a parsed embedded TrueType/OpenType program: the quad metrics, the cmap subtables the code→GID
-// chains consult, and the go-text face that supplies glyph outlines and fallback advances.
+// sfntInfo is a parsed embedded TrueType/OpenType program: the quad metrics, the cmap subtables the code→GID chains
+// consult, and the go-text face that supplies glyph outlines and fallback advances.
 type sfntInfo struct {
-	// face is the go-text view of the program, used for glyph outlines (GlyphDataOutline) and hmtx advances.
-	// It is nil when go-text rejects the program (such as a subset with no cmap table at all — go-text
-	// requires one); metrics and cmap lookups still work then, and TrueType-flavored programs fall back to
-	// the direct glyf walker below for outlines.
+	// face is the go-text view of the program, used for glyph outlines (GlyphDataOutline) and hmtx advances. It is nil
+	// when go-text rejects the program (such as a subset with no cmap table at all — go-text requires one); metrics and
+	// cmap lookups still work then, and TrueType-flavored programs fall back to the direct glyf walker below for
+	// outlines.
 	face *otfont.Face
-	// glyf is the direct glyf outline walker (glyf.go): the only outline source for CIDFontType2 programs
-	// (whose subsets routinely omit cmap) and the fallback for cmap-less simple TrueType programs.
+	// glyf is the direct glyf outline walker (glyf.go): the only outline source for CIDFontType2 programs (whose
+	// subsets routinely omit cmap) and the fallback for cmap-less simple TrueType programs.
 	glyf *glyfInfo
 	// cmapUnicode/cmapSymbol/cmapMacRoman are the subtables of the pinned lookup chains (nil when absent).
 	cmapUnicode  *cmapTable
@@ -42,8 +42,8 @@ type sfntInfo struct {
 	nGlyphs      int
 }
 
-// parseSFNTStream decodes and parses a FontFile2/FontFile3(OpenType) stream. Any failure — undecodable
-// stream, unparseable font, hostile bytes that panic the parser — yields nil, and the caller substitutes.
+// parseSFNTStream decodes and parses a FontFile2/FontFile3(OpenType) stream. Any failure — undecodable stream,
+// unparseable font, hostile bytes that panic the parser — yields nil, and the caller substitutes.
 func parseSFNTStream(d *cos.Document, s *cos.Stream) (info *sfntInfo) {
 	defer func() {
 		if recover() != nil {
@@ -57,11 +57,11 @@ func parseSFNTStream(d *cos.Document, s *cos.Stream) (info *sfntInfo) {
 	return parseSFNT(raw)
 }
 
-// parseSFNT reads the metrics tables of an sfnt font, following FreeType's rules (which the oracle's MuPDF
-// build inherits — FreeType is BSD-licensed and fine to consult): ascender/descender come from hhea; when
-// both are zero, from OS/2 sTypoAscender/sTypoDescender; when those are zero too, from usWinAscent and
-// -usWinDescent. All divided by head's unitsPerEm. Hostile bytes that panic the parser yield nil (the guard
-// lives here, not only in parseSFNTStream, so the fuzzer exercises the same contract).
+// parseSFNT reads the metrics tables of an sfnt font, following FreeType's rules (which the oracle's MuPDF build
+// inherits — FreeType is BSD-licensed and fine to consult): ascender/descender come from hhea; when both are zero, from
+// OS/2 sTypoAscender/sTypoDescender; when those are zero too, from usWinAscent and -usWinDescent. All divided by head's
+// unitsPerEm. Hostile bytes that panic the parser yield nil (the guard lives here, not only in parseSFNTStream, so the
+// fuzzer exercises the same contract).
 func parseSFNT(raw []byte) (info *sfntInfo) {
 	defer func() {
 		if recover() != nil {
@@ -93,8 +93,8 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 			if os2, _, parseErr := tables.ParseOs2(os2Raw); parseErr == nil {
 				asc, desc = float32(os2.STypoAscender), float32(os2.STypoDescender)
 				if asc == 0 && desc == 0 && len(os2Raw) >= 78 {
-					// usWinAscent/usWinDescent sit at fixed offsets 74/76; both are unsigned, with the
-					// descent measured downward.
+					// usWinAscent/usWinDescent sit at fixed offsets 74/76; both are unsigned, with the descent measured
+					// downward.
 					asc = float32(binary.BigEndian.Uint16(os2Raw[74:]))
 					desc = -float32(binary.BigEndian.Uint16(os2Raw[76:]))
 				}
@@ -121,14 +121,13 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 	return info
 }
 
-// gid runs the pinned code→GID chain for an embedded sfnt program (verified against the glaive golden
-// pixels):
+// gid runs the pinned code→GID chain for an embedded sfnt program (verified against the glaive golden pixels):
 //
-//   - non-symbolic fonts: the encoding's glyph name, first through the AGL to Unicode into the Unicode cmap,
-//     then through the reverse Mac Roman encoding into the (1,0) cmap (standard viewer practice — glaive's
-//     macOS subsets carry only a (1,0) table);
-//   - then, or for symbolic fonts directly: the raw code into (3,0) — bare, then folded into the 0xF000
-//     symbol page — and the raw code into (1,0);
+//   - non-symbolic fonts: the encoding's glyph name, first through the AGL to Unicode into the Unicode cmap, then
+//     through the reverse Mac Roman encoding into the (1,0) cmap (standard viewer practice — glaive's macOS subsets
+//     carry only a (1,0) table);
+//   - then, or for symbolic fonts directly: the raw code into (3,0) — bare, then folded into the 0xF000 symbol page —
+//     and the raw code into (1,0);
 //   - last resort: the code as the GID (subset fonts with no usable cmap).
 //
 // Returns 0 (.notdef) when nothing maps.

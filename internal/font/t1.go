@@ -15,10 +15,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/type1"
 )
 
-// Embedded Type 1 programs (FontFile). internal/type1 owns the container and charstring work; this file
-// adapts it to the Font seam: synthetic GIDs from the program's name list, glyph-space outlines through the
-// FontMatrix, quad metrics from the FontBBox (FreeType's rule for Type 1, like bare CFF — see the package
-// comment), and hsbw advances as the /Widths-absent fallback.
+// Embedded Type 1 programs (FontFile). internal/type1 owns the container and charstring work; this file adapts it to
+// the Font seam: synthetic GIDs from the program's name list, glyph-space outlines through the FontMatrix, quad metrics
+// from the FontBBox (FreeType's rule for Type 1, like bare CFF — see the package comment), and hsbw advances as the
+// /Widths-absent fallback.
 
 // t1Info is a parsed embedded Type 1 program prepared for glyph work.
 type t1Info struct {
@@ -60,8 +60,8 @@ func parseType1Bytes(raw []byte, stdEnc *[256]string) *t1Info {
 	return info
 }
 
-// metrics returns the em-normalized ascender/descender the FreeType way (FontBBox yMax/yMin over the
-// FontMatrix-implied upem), reusing the bare-CFF rule.
+// metrics returns the em-normalized ascender/descender the FreeType way (FontBBox yMax/yMin over the FontMatrix-implied
+// upem), reusing the bare-CFF rule.
 func (t *t1Info) metrics() (asc, desc float32, ok bool) {
 	top := cffTop{bbox: t.font.FontBBox, matrix: t.matrix, hasBBox: t.font.HasBBox, hasMatrix: t.font.HasMatrix}
 	return top.metrics()
@@ -99,9 +99,9 @@ func (t *t1Info) glyphPath(gid uint32) *gfx.Path {
 	return segmentsToPath(segs, gfx.Matrix{A: m[0], B: m[1], C: m[2], D: m[3], E: m[4], F: m[5]})
 }
 
-// buildAdvances precomputes the hsbw advances of every encoded glyph, keyed by GID and in text space (glyph
-// units through the FontMatrix's x scale — advances are x-directional). Only called at Load, and only for
-// fonts without /Widths, so Font stays immutable afterwards.
+// buildAdvances precomputes the hsbw advances of every encoded glyph, keyed by GID and in text space (glyph units
+// through the FontMatrix's x scale — advances are x-directional). Only called at Load, and only for fonts without
+// /Widths, so Font stays immutable afterwards.
 func (t *t1Info) buildAdvances(enc *[256]string) {
 	t.advances = make(map[uint32]float32, 64)
 	for code := range 256 {

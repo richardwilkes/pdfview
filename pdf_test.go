@@ -214,10 +214,10 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	}
 }
 
-// internalLinkPDF is a minimal two-page document with two internal links on page 0, both targeting the second page:
-// one via an explicit /XYZ destination ([4 0 R /XYZ 30 150 0]) and one via a named destination
-// (/A /GoTo /D (Chapter2), which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so
-// MuPDF rebuilds it; only the link resolution matters here.
+// internalLinkPDF is a minimal two-page document with two internal links on page 0, both targeting the second page: one
+// via an explicit /XYZ destination ([4 0 R /XYZ 30 150 0]) and one via a named destination (/A /GoTo /D (Chapter2),
+// which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so MuPDF rebuilds it; only the
+// link resolution matters here.
 const internalLinkPDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R /Names << /Dests 6 0 R >> >>

@@ -22,12 +22,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestTextQuadParity is the pre-scale half of the search-parity bar: it runs each corpus page's content
-// through the interpreter against the production structured-text device (internal/stext) at scale 1, searches
-// for every needle the goldens record, and requires the hit quads to match MuPDF's recorded raw page-space
-// quads POSITIONALLY — same count, same emission order — with every corner within quadTolerance points. The
-// post-scale half lives in TestParity, which compares the public API's scaled integer hit rectangles against
-// the goldens at every recorded DPI.
+// TestTextQuadParity is the pre-scale half of the search-parity bar: it runs each corpus page's content through the
+// interpreter against the production structured-text device (internal/stext) at scale 1, searches for every needle the
+// goldens record, and requires the hit quads to match MuPDF's recorded raw page-space quads POSITIONALLY — same count,
+// same emission order — with every corner within quadTolerance points. The post-scale half lives in TestParity, which
+// compares the public API's scaled integer hit rectangles against the goldens at every recorded DPI.
 func TestTextQuadParity(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -44,12 +43,12 @@ func TestTextQuadParity(t *testing.T) {
 	}
 }
 
-// quadTolerance is the pre-scale corner tolerance: 0.01 page-space points. (The measured worst across the
-// corpus is glaive at 0.0022 pt, so the production gate holds this tight bound comfortably.)
+// quadTolerance is the pre-scale corner tolerance: 0.01 page-space points. (The measured worst across the corpus is
+// glaive at 0.0022 pt, so the production gate holds this tight bound comfortably.)
 const quadTolerance = 0.01
 
-// diffGoldenQuads compares one golden's recorded search quads against the structured-text device's search
-// results, reporting the largest and mean corner errors seen.
+// diffGoldenQuads compares one golden's recorded search quads against the structured-text device's search results,
+// reporting the largest and mean corner errors seen.
 func diffGoldenQuads(t *testing.T, golden *testsupport.Golden) (maxErr, meanErr float64, totalQuads int) {
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", golden.Truth.File))
 	if err != nil {
@@ -117,8 +116,8 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// extractText interprets one page's content at scale 1 (page space) against a fresh structured-text device,
-// exactly as the engine's search seam does.
+// extractText interprets one page's content at scale 1 (page space) against a fresh structured-text device, exactly as
+// the engine's search seam does.
 func extractText(t *testing.T, document *doc.Document, pageNumber int) *stext.Device {
 	ctm, err := document.PageCTM(pageNumber, 1)
 	if err != nil {
@@ -128,8 +127,8 @@ func extractText(t *testing.T, document *doc.Document, pageNumber int) *stext.De
 	if data := document.PageContents(pageNumber); len(data) > 0 {
 		content.Run(document.COS(), document.PageResources(pageNumber), data, ctm, dev, nil)
 	}
-	// Annotation appearance text is part of MuPDF's structured text; the engine's search seam runs the
-	// appearances after the page content, and so does this capture.
+	// Annotation appearance text is part of MuPDF's structured text; the engine's search seam runs the appearances
+	// after the page content, and so does this capture.
 	for _, a := range document.Annotations(pageNumber) {
 		content.RunAnnot(document.COS(), document.PageResources(pageNumber), a.Raw, a.Stream, a.Transform.Mul(ctm), dev, nil)
 	}

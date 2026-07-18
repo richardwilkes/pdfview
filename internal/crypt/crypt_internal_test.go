@@ -15,8 +15,8 @@ import (
 	"testing"
 )
 
-// TestPadPassword checks the password padding of Algorithm 2: an empty password is exactly the padding string,
-// and a full-length password is truncated to 32 bytes with no padding appended.
+// TestPadPassword checks the password padding of Algorithm 2: an empty password is exactly the padding string, and a
+// full-length password is truncated to 32 bytes with no padding appended.
 func TestPadPassword(t *testing.T) {
 	if got := padPassword(nil); !bytes.Equal(got, padding) {
 		t.Errorf("padPassword(nil) = %x, want the padding string", got)
@@ -28,10 +28,10 @@ func TestPadPassword(t *testing.T) {
 	}
 }
 
-// TestDeriveAES256R5RoundTrip exercises the R5 path (plain SHA-256, no hardened hash), which the corpus — all
-// R6 — does not reach. It hand-builds a valid /U and /UE for a known file key and password, then confirms
-// deriveAES256 recovers the key for the right password as the user and rejects the wrong one. The owner slot is
-// left as zeros, so the owner check simply fails.
+// TestDeriveAES256R5RoundTrip exercises the R5 path (plain SHA-256, no hardened hash), which the corpus — all R6 — does
+// not reach. It hand-builds a valid /U and /UE for a known file key and password, then confirms deriveAES256 recovers
+// the key for the right password as the user and rejects the wrong one. The owner slot is left as zeros, so the owner
+// check simply fails.
 func TestDeriveAES256R5RoundTrip(t *testing.T) {
 	fileKey := make([]byte, 32)
 	for i := range fileKey {
@@ -75,8 +75,8 @@ func TestDeriveAES256R5RoundTrip(t *testing.T) {
 	}
 }
 
-// TestObjectKeyLength checks the per-object key length rule of Algorithm 1: min(fileKeyLen+5, 16) bytes, and
-// that the "sAlT" suffix for AESV2 changes the key.
+// TestObjectKeyLength checks the per-object key length rule of Algorithm 1: min(fileKeyLen+5, 16) bytes, and that the
+// "sAlT" suffix for AESV2 changes the key.
 func TestObjectKeyLength(t *testing.T) {
 	h := &Handler{fileKey: bytes.Repeat([]byte{0xAB}, 16)}
 	rc4Key := h.objectKey(3, 0, false)

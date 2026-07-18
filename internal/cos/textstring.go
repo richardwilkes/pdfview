@@ -15,10 +15,10 @@ import (
 	"unicode/utf8"
 )
 
-// DecodeTextString converts a PDF text string (outline titles, document information, and similar
-// human-readable values) to a Go string per ISO 32000-2 7.9.2.2: a UTF-16BE byte-order mark selects UTF-16BE, a
-// UTF-8 byte-order mark (PDF 2.0) selects UTF-8, and everything else is PDFDocEncoding. Undecodable content maps
-// to U+FFFD, which the public API's sanitizer strips.
+// DecodeTextString converts a PDF text string (outline titles, document information, and similar human-readable values)
+// to a Go string per ISO 32000-2 7.9.2.2: a UTF-16BE byte-order mark selects UTF-16BE, a UTF-8 byte-order mark (PDF
+// 2.0) selects UTF-8, and everything else is PDFDocEncoding. Undecodable content maps to U+FFFD, which the public API's
+// sanitizer strips.
 func DecodeTextString(s String) string {
 	b := []byte(s)
 	switch {
@@ -48,8 +48,8 @@ func decodePDFDoc(b []byte) string {
 	return string(out)
 }
 
-// pdfDocEncoding maps PDFDocEncoding bytes to Unicode per ISO 32000-2 Table D.2. Positions the table leaves
-// undefined map to U+FFFD.
+// pdfDocEncoding maps PDFDocEncoding bytes to Unicode per ISO 32000-2 Table D.2. Positions the table leaves undefined
+// map to U+FFFD.
 var pdfDocEncoding = buildPDFDocEncoding()
 
 func buildPDFDocEncoding() [256]rune {

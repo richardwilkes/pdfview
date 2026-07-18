@@ -13,20 +13,20 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Type0 (composite) fonts, ISO 32000-2 9.7: a CMap decodes the multi-byte string codes to CIDs, and one
-// descendant CIDFont supplies the glyphs — CIDFontType2 (TrueType: CID→GID via /CIDToGIDMap, outlines through
-// the direct glyf walker, never gated on go-text's cmap requirement) or CIDFontType0 (CFF: CID→GID via the
-// program's own charset, outlines through go-text's CFF loader, which handles FDSelect internally). Widths
-// come from /W with /DW as the default (1000 when absent); vertical mode adds /W2 and /DW2. The PDF /Widths
-// rules for simple fonts do not apply here.
+// Type0 (composite) fonts, ISO 32000-2 9.7: a CMap decodes the multi-byte string codes to CIDs, and one descendant
+// CIDFont supplies the glyphs — CIDFontType2 (TrueType: CID→GID via /CIDToGIDMap, outlines through the direct glyf
+// walker, never gated on go-text's cmap requirement) or CIDFontType0 (CFF: CID→GID via the program's own charset,
+// outlines through go-text's CFF loader, which handles FDSelect internally). Widths come from /W with /DW as the
+// default (1000 when absent); vertical mode adds /W2 and /DW2. The PDF /Widths rules for simple fonts do not apply
+// here.
 
 // type0Info carries the composite-font state hanging off Font.
 type type0Info struct {
 	cmap *cmapPDF
 	// cidToGID is the decoded /CIDToGIDMap stream (CIDFontType2), nil for /Identity.
 	cidToGID []uint16
-	// cffCID maps CIDs to GIDs for CID-keyed CFF programs; nil for CIDFontType2 (and for non-CID-keyed CFF
-	// descendants, where CID = GID per ISO 32000-2 9.7.4.2).
+	// cffCID maps CIDs to GIDs for CID-keyed CFF programs; nil for CIDFontType2 (and for non-CID-keyed CFF descendants,
+	// where CID = GID per ISO 32000-2 9.7.4.2).
 	cffCID *cffCID
 	// glyf is the outline source for CIDFontType2 (the descendant's sfnt info holds the parsed program).
 	sfnt *sfntInfo
@@ -39,8 +39,8 @@ type type0Info struct {
 	vertical bool
 }
 
-// wRange is one /W entry: CIDs [lo, hi] with per-CID widths (ws indexed from lo) or one uniform width
-// (len(ws) == 1), in text space.
+// wRange is one /W entry: CIDs [lo, hi] with per-CID widths (ws indexed from lo) or one uniform width (len(ws) == 1),
+// in text space.
 type wRange struct {
 	ws     []float32
 	lo, hi uint32
@@ -52,8 +52,8 @@ type w2Range struct {
 	lo, hi  uint32
 }
 
-// maxCIDToGIDBytes bounds the /CIDToGIDMap stream read: CIDs and GIDs are 16-bit, so 2×65536 covers every
-// addressable entry.
+// maxCIDToGIDBytes bounds the /CIDToGIDMap stream read: CIDs and GIDs are 16-bit, so 2×65536 covers every addressable
+// entry.
 const maxCIDToGIDBytes = 2 * 65536
 
 // loadType0 loads a Type0 font dictionary.
@@ -87,8 +87,8 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 		info.cidToGID = loadCIDToGID(d, descendant["CIDToGIDMap"])
 	case desc.fontFile3 != nil:
-		// CIDFontType0: a CFF program (bare CID-keyed CFF or Type1C). Metrics follow the bare-CFF FontBBox
-		// rule; CID→GID comes from the program's charset when it is CID-keyed, else CID = GID.
+		// CIDFontType0: a CFF program (bare CID-keyed CFF or Type1C). Metrics follow the bare-CFF FontBBox rule;
+		// CID→GID comes from the program's charset when it is CID-keyed, else CID = GID.
 		if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {
 			if asc, dsc, ok := top.metrics(); ok {
 				f.ascender, f.descender = asc, dsc
@@ -101,9 +101,8 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	}
 	if !embedded {
-		// Non-embedded CID fonts substitute like simple fonts: pinned substitute metrics and Liberation
-		// shapes through Unicode (which needs ToUnicode; without one, nothing renders — accepted until a
-		// corpus file demands better).
+		// Non-embedded CID fonts substitute like simple fonts: pinned substitute metrics and Liberation shapes through
+		// Unicode (which needs ToUnicode; without one, nothing renders — accepted until a corpus file demands better).
 		std14 := standard14Name(f.BaseFont, desc.flags)
 		f.ascender, f.descender = substituteMetrics(&desc, std14)
 		f.sub = loadSubstitute(std14)
@@ -129,9 +128,9 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 	return f, nil
 }
 
-// loadToUnicode parses the /ToUnicode CMap stream of any font dictionary (ISO 32000-2 9.10.3), nil when
-// absent or unusable. Its bf entries map character codes (not CIDs) to Unicode strings and take precedence
-// over every other Unicode source.
+// loadToUnicode parses the /ToUnicode CMap stream of any font dictionary (ISO 32000-2 9.10.3), nil when absent or
+// unusable. Its bf entries map character codes (not CIDs) to Unicode strings and take precedence over every other
+// Unicode source.
 func loadToUnicode(d *cos.Document, dict cos.Dict) *cmapPDF {
 	stream, ok := cos.AsStream(d.Resolve(dict["ToUnicode"]))
 	if !ok {
@@ -148,8 +147,8 @@ func loadToUnicode(d *cos.Document, dict cos.Dict) *cmapPDF {
 	return cm
 }
 
-// loadEncodingCMap resolves the /Encoding entry: a predefined CMap name (Identity-H/V) or an embedded CMap
-// stream, whose /UseCMap chains resolve recursively.
+// loadEncodingCMap resolves the /Encoding entry: a predefined CMap name (Identity-H/V) or an embedded CMap stream,
+// whose /UseCMap chains resolve recursively.
 func loadEncodingCMap(d *cos.Document, obj cos.Object, depth int) *cmapPDF {
 	if depth > maxCMapDepth {
 		return nil
@@ -196,8 +195,8 @@ func type0Descendant(d *cos.Document, dict cos.Dict) cos.Dict {
 	return descendant
 }
 
-// loadCIDToGID decodes /CIDToGIDMap: nil for /Identity (or anything unusable — identity is the lenient
-// reading), else the stream's big-endian 16-bit GID per CID.
+// loadCIDToGID decodes /CIDToGIDMap: nil for /Identity (or anything unusable — identity is the lenient reading), else
+// the stream's big-endian 16-bit GID per CID.
 func loadCIDToGID(d *cos.Document, obj cos.Object) []uint16 {
 	stream, ok := cos.AsStream(d.Resolve(obj))
 	if !ok {
@@ -217,8 +216,8 @@ func loadCIDToGID(d *cos.Document, obj cos.Object) []uint16 {
 	return out
 }
 
-// parseWArray decodes /W (ISO 32000-2 9.7.4.3): "c [w1 w2 ...]" gives consecutive per-CID widths from c;
-// "c1 c2 w" gives one width for the whole range.
+// parseWArray decodes /W (ISO 32000-2 9.7.4.3): "c [w1 w2 ...]" gives consecutive per-CID widths from c; "c1 c2 w"
+// gives one width for the whole range.
 func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 	var out []wRange
 	for i := 0; i+1 < len(arr) && len(out) < maxCMapRanges; {
@@ -324,8 +323,8 @@ func (t *type0Info) cidWidth(cid uint32) float32 {
 	return t.dw
 }
 
-// cidVMetrics returns the vertical displacement w1y and origin vector (vx, vy) for a CID in text space:
-// /W2, else vx = w0/2 with /DW2's (vy, w1y).
+// cidVMetrics returns the vertical displacement w1y and origin vector (vx, vy) for a CID in text space: /W2, else vx =
+// w0/2 with /DW2's (vy, w1y).
 func (t *type0Info) cidVMetrics(cid uint32, w0 float32) (w1y, vx, vy float32) {
 	for i := range t.w2 {
 		r := &t.w2[i]

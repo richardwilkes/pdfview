@@ -8,13 +8,12 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package type1 parses Adobe Type 1 font programs (the FontFile stream of a PDF font dictionary): the PFA/PFB
-// container, eexec decryption, the built-in /Encoding, /FontMatrix and /FontBBox from the clear-text portion,
-// and the /Subrs and /CharStrings charstrings (decrypted with r=4330 and their lenIV bytes stripped) from the
-// private portion. Charstrings execute through go-text's psinterpreter (whose Type1Charstring context supplies
-// the number parsing and subroutine machinery); this package contributes only the operator handler — see
-// charstring.go. The format authority is Adobe's published "Adobe Type 1
-// Font Format" specification; the eexec and charstring encryption algorithm (r=55665 / r=4330, c1=52845,
-// c2=22719) is printed there in full.
+// container, eexec decryption, the built-in /Encoding, /FontMatrix and /FontBBox from the clear-text portion, and the
+// /Subrs and /CharStrings charstrings (decrypted with r=4330 and their lenIV bytes stripped) from the private portion.
+// Charstrings execute through go-text's psinterpreter (whose Type1Charstring context supplies the number parsing and
+// subroutine machinery); this package contributes only the operator handler — see charstring.go. The format authority
+// is Adobe's published "Adobe Type 1 Font Format" specification; the eexec and charstring encryption algorithm (r=55665
+// / r=4330, c1=52845, c2=22719) is printed there in full.
 //
 // Hostile input never panics Parse or Glyph: both recover into errors, and all counts and lengths are capped.
 package type1
@@ -25,8 +24,8 @@ import (
 	"strconv"
 )
 
-// Errors reported by this package. Callers degrade a failed parse to font substitution and a failed glyph to a
-// missing outline; nothing here escalates to the page level.
+// Errors reported by this package. Callers degrade a failed parse to font substitution and a failed glyph to a missing
+// outline; nothing here escalates to the page level.
 var (
 	// ErrBadType1 marks a font program too malformed to use.
 	ErrBadType1 = errors.New("malformed Type 1 font program")
@@ -34,8 +33,8 @@ var (
 	ErrBadCharstring = errors.New("malformed Type 1 charstring")
 )
 
-// Caps against hostile input: counts are bounded so a small file cannot claim huge tables, and every byte read
-// is bounded by the input length.
+// Caps against hostile input: counts are bounded so a small file cannot claim huge tables, and every byte read is
+// bounded by the input length.
 const (
 	maxCharstrings = 65536
 	maxSubrs       = 65536
@@ -48,19 +47,19 @@ const (
 	kwDef      = "def"
 )
 
-// Font is a parsed Type 1 font program. It is immutable after Parse except for StdEnc, which the caller may
-// set once before glyph interpretation; concurrent Glyph calls are safe (each builds its own interpreter).
+// Font is a parsed Type 1 font program. It is immutable after Parse except for StdEnc, which the caller may set once
+// before glyph interpretation; concurrent Glyph calls are safe (each builds its own interpreter).
 type Font struct {
 	// CharStrings maps glyph names to decrypted charstrings (lenIV bytes already stripped).
 	CharStrings map[string][]byte
 	// Encoding is the program's explicit built-in encoding array, nil when it declares none (see StdEncoding).
 	Encoding *[256]string
 	// StdEnc supplies the StandardEncoding code→name table consulted by the seac operator (the composite
-	// accented-character operator addresses its components by standard-encoding code). The caller sets it after
-	// Parse — internal/font owns the generated Annex D tables — and seac degrades to the base glyph when nil.
+	// accented-character operator addresses its components by standard-encoding code). The caller sets it after Parse —
+	// internal/font owns the generated Annex D tables — and seac degrades to the base glyph when nil.
 	StdEnc *[256]string
-	// Names lists the charstring names with notdefName forced to index 0, giving each glyph a stable synthetic
-	// GID (Type 1 programs address glyphs by name; the engine's device seam addresses them by index).
+	// Names lists the charstring names with notdefName forced to index 0, giving each glyph a stable synthetic GID
+	// (Type 1 programs address glyphs by name; the engine's device seam addresses them by index).
 	Names []string
 	// Subrs holds the decrypted local subroutines.
 	Subrs [][]byte
@@ -101,9 +100,9 @@ func Parse(data []byte) (f *Font, err error) {
 	return f, nil
 }
 
-// splitProgram divides the program into its clear-text and encrypted portions, handling PFB segmentation and
-// locating the eexec boundary. The PDF stream's /Length1//Length2 are deliberately not trusted (real files get
-// them wrong); the eexec keyword is authoritative, as in deployed parsers.
+// splitProgram divides the program into its clear-text and encrypted portions, handling PFB segmentation and locating
+// the eexec boundary. The PDF stream's /Length1//Length2 are deliberately not trusted (real files get them wrong); the
+// eexec keyword is authoritative, as in deployed parsers.
 func splitProgram(data []byte) (clearPart, encPart []byte, err error) {
 	if len(data) >= 2 && data[0] == 0x80 {
 		data, err = joinPFB(data)
@@ -118,17 +117,17 @@ func splitProgram(data []byte) (clearPart, encPart []byte, err error) {
 	clearPart = data[:idx]
 	pos := idx + len("eexec")
 	// The encrypted portion begins after the whitespace following the keyword (FreeType-compatible: skip all
-	// immediately following whitespace bytes; the first ciphertext byte is effectively random, so a ciphertext
-	// byte is mistaken for whitespace with negligible probability — and hex form tolerates it regardless).
+	// immediately following whitespace bytes; the first ciphertext byte is effectively random, so a ciphertext byte is
+	// mistaken for whitespace with negligible probability — and hex form tolerates it regardless).
 	for pos < len(data) && isWhite(data[pos]) {
 		pos++
 	}
 	return clearPart, data[pos:], nil
 }
 
-// joinPFB reassembles the segments of a PFB container: 0x80 0x01 ASCII and 0x80 0x02 binary segments, each
-// with a 4-byte little-endian length, terminated by 0x80 0x03. The concatenation in file order reproduces the
-// raw program (clear text, encrypted portion, trailer).
+// joinPFB reassembles the segments of a PFB container: 0x80 0x01 ASCII and 0x80 0x02 binary segments, each with a
+// 4-byte little-endian length, terminated by 0x80 0x03. The concatenation in file order reproduces the raw program
+// (clear text, encrypted portion, trailer).
 func joinPFB(data []byte) ([]byte, error) {
 	var out []byte
 	pos := 0
@@ -178,8 +177,8 @@ func indexToken(data []byte, word string) int {
 	return -1
 }
 
-// isHexEexec reports whether the encrypted portion is hex-encoded (PFA form): per the Type 1 spec, the first
-// four non-whitespace bytes all being hex digits marks ASCII form.
+// isHexEexec reports whether the encrypted portion is hex-encoded (PFA form): per the Type 1 spec, the first four
+// non-whitespace bytes all being hex digits marks ASCII form.
 func isHexEexec(data []byte) bool {
 	seen := 0
 	for _, b := range data {
@@ -247,9 +246,9 @@ const (
 	defaultLenIV = 4
 )
 
-// decrypt runs the Type 1 decryption algorithm with initial key r, dropping the first skip plaintext bytes
-// (4 for eexec, lenIV for charstrings). A negative skip means the data is not encrypted at all (the lenIV -1
-// convention some generators use) and returns the input unchanged.
+// decrypt runs the Type 1 decryption algorithm with initial key r, dropping the first skip plaintext bytes (4 for
+// eexec, lenIV for charstrings). A negative skip means the data is not encrypted at all (the lenIV -1 convention some
+// generators use) and returns the input unchanged.
 func decrypt(data []byte, r uint16, skip int) []byte {
 	if skip < 0 {
 		return data
@@ -300,8 +299,8 @@ func (f *Font) parseClear(data []byte) {
 	}
 }
 
-// parseEncoding handles the token stream after /Encoding: either the StandardEncoding keyword or an array
-// built with "dup <code> /<name> put" entries, terminated by def (or readonly def).
+// parseEncoding handles the token stream after /Encoding: either the StandardEncoding keyword or an array built with
+// "dup <code> /<name> put" entries, terminated by def (or readonly def).
 func (f *Font) parseEncoding(s *scanner) {
 	tok, ok := s.next()
 	if !ok {
@@ -377,8 +376,8 @@ func (f *Font) parsePrivate(data []byte) {
 	}
 }
 
-// parseSubrs reads "dup <index> <length> RD <binary> NP" entries. The binary-read operator's name is defined
-// by the font itself (conventionally RD or -|), so any keyword token in that position is accepted.
+// parseSubrs reads "dup <index> <length> RD <binary> NP" entries. The binary-read operator's name is defined by the
+// font itself (conventionally RD or -|), so any keyword token in that position is accepted.
 func (f *Font) parseSubrs(s *scanner, lenIV int) {
 	count, ok := s.integer()
 	if !ok || count < 0 || count > maxSubrs {
@@ -459,8 +458,8 @@ func (f *Font) parseCharStrings(s *scanner, lenIV int) {
 	}
 }
 
-// buildNames assigns stable synthetic glyph indices: notdefName at 0 (present or not), then every other
-// charstring name in sorted order (map iteration is randomized; sorting keeps GIDs deterministic per program).
+// buildNames assigns stable synthetic glyph indices: notdefName at 0 (present or not), then every other charstring name
+// in sorted order (map iteration is randomized; sorting keeps GIDs deterministic per program).
 func (f *Font) buildNames() {
 	names := make([]string, 1, len(f.CharStrings)+1)
 	names[0] = notdefName
@@ -490,9 +489,9 @@ type token struct {
 	kind  tokKind
 }
 
-// scanner is a minimal PostScript-shaped tokenizer: whitespace and %-comments separate tokens; names begin
-// with /; numbers parse leniently; anything else is a keyword or delimiter. It never backtracks (pos always
-// advances), so scanning terminates on any input.
+// scanner is a minimal PostScript-shaped tokenizer: whitespace and %-comments separate tokens; names begin with /;
+// numbers parse leniently; anything else is a keyword or delimiter. It never backtracks (pos always advances), so
+// scanning terminates on any input.
 type scanner struct {
 	data []byte
 	pos  int
@@ -571,8 +570,8 @@ func (s *scanner) next() (token, bool) {
 		s.pos++
 	}
 	if s.pos == start {
-		// An unhandled delimiter byte (a stray ')' in decrypted junk, say): consume it so the scan always
-		// advances — the termination guarantee everything above relies on.
+		// An unhandled delimiter byte (a stray ')' in decrypted junk, say): consume it so the scan always advances —
+		// the termination guarantee everything above relies on.
 		s.pos++
 		return token{kind: tokOther, text: string(b)}, true
 	}
@@ -618,9 +617,9 @@ func (s *scanner) numbers(n int) ([]float64, bool) {
 	return nil, false
 }
 
-// binary consumes the RD-style binary-read token (whatever the font named it — conventionally RD or -|),
-// exactly one separator byte after it, and then length raw bytes. This mirrors the PostScript definition the
-// fonts carry ("{string currentfile exch readstring pop}"): readstring begins after a single whitespace byte.
+// binary consumes the RD-style binary-read token (whatever the font named it — conventionally RD or -|), exactly one
+// separator byte after it, and then length raw bytes. This mirrors the PostScript definition the fonts carry ("{string
+// currentfile exch readstring pop}"): readstring begins after a single whitespace byte.
 func (s *scanner) binary(length int64) ([]byte, bool) {
 	if length < 0 {
 		return nil, false

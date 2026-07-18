@@ -18,10 +18,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestGoldensSelfConsistent validates the committed goldens themselves: every truth.json loads under the strict
-// schema, agrees with its own page/DPI/needle structure, and every referenced PNG decodes to the recorded
-// dimensions. This guards the committed artifacts (for example against line-ending or encoding corruption)
-// independently of how much of the engine exists yet.
+// TestGoldensSelfConsistent validates the committed goldens themselves: every truth.json loads under the strict schema,
+// agrees with its own page/DPI/needle structure, and every referenced PNG decodes to the recorded dimensions. This
+// guards the committed artifacts (for example against line-ending or encoding corruption) independently of how much of
+// the engine exists yet.
 func TestGoldensSelfConsistent(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {

@@ -16,10 +16,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// FuzzStext drives the search matcher with an arbitrary needle over an arbitrary synthetic character layout
-// (decoded from the fuzz bytes: rune choice, gaps, line breaks, size jumps, rotation, and non-finite
-// coordinates). Nothing may panic — degenerate sizes, NaN/Inf geometry, unmapped runes, and hostile needles
-// included — and the quad budget must be respected exactly (the search seam's contract).
+// FuzzStext drives the search matcher with an arbitrary needle over an arbitrary synthetic character layout (decoded
+// from the fuzz bytes: rune choice, gaps, line breaks, size jumps, rotation, and non-finite coordinates). Nothing may
+// panic — degenerate sizes, NaN/Inf geometry, unmapped runes, and hostile needles included — and the quad budget must
+// be respected exactly (the search seam's contract).
 func FuzzStext(f *testing.F) {
 	f.Add("GURPS", []byte{'G', 2, 0, 'U', 2, 0, 'R', 2, 0, 'P', 2, 0, 'S', 2, 0}, 10)
 	f.Add("brown fox", []byte{'b', 2, 0, 'r', 2, 0, 'o', 2, 0, 'w', 2, 0, 'n', 2, 1, 'f', 2, 0, 'o', 2, 0, 'x', 2, 0}, 2)
@@ -40,9 +40,9 @@ func FuzzStext(f *testing.F) {
 	})
 }
 
-// charsFromLayout decodes fuzz bytes into a character stream: each 3-byte group is (rune byte, gap nibble ×
-// advance, flags). Flag bits: 1 = line break before, 2 = double size, 4 = zero size, 8 = non-finite
-// coordinate, 16 = rotated (non-axis). The count is capped to keep individual executions fast.
+// charsFromLayout decodes fuzz bytes into a character stream: each 3-byte group is (rune byte, gap nibble × advance,
+// flags). Flag bits: 1 = line break before, 2 = double size, 4 = zero size, 8 = non-finite coordinate, 16 = rotated
+// (non-axis). The count is capped to keep individual executions fast.
 func charsFromLayout(layout []byte) []Char {
 	const maxChars = 2048
 	var chars []Char

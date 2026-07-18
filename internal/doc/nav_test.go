@@ -21,10 +21,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestCorpusNavigation compares everything the navigation layer produces — page geometry, the raw outline tree,
-// and raw link annotations — against the oracle-recorded raw (unscaled, page-space) values in every golden. The
-// scaled public-API forms are covered by TestParity and pdf_test.go in the root package; this test pins the
-// float32 page-space values they are derived from.
+// TestCorpusNavigation compares everything the navigation layer produces — page geometry, the raw outline tree, and raw
+// link annotations — against the oracle-recorded raw (unscaled, page-space) values in every golden. The scaled
+// public-API forms are covered by TestParity and pdf_test.go in the root package; this test pins the float32 page-space
+// values they are derived from.
 func TestCorpusNavigation(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {
@@ -65,8 +65,8 @@ func comparePageGeometry(t *testing.T, d *doc.Document, page *testsupport.Page) 
 		t.Errorf("PageSize(%d): %v", page.Page, err)
 		return
 	}
-	// MuPDF normalizes the effective box to the origin, so the recorded raw bounds are always [0, 0, w, h];
-	// PageSize's extent must match the recorded corner exactly (float32 for float32).
+	// MuPDF normalizes the effective box to the origin, so the recorded raw bounds are always [0, 0, w, h]; PageSize's
+	// extent must match the recorded corner exactly (float32 for float32).
 	if page.Bounds[0] != 0 || page.Bounds[1] != 0 {
 		t.Errorf("page %d: recorded bounds %v do not start at the origin; the geometry model needs revisiting",
 			page.Page, page.Bounds)
@@ -77,8 +77,8 @@ func comparePageGeometry(t *testing.T, d *doc.Document, page *testsupport.Page) 
 }
 
 // compareOutlineLevel checks one sibling chain of the outline against the recorded raw entries, recursing into
-// children. Raw titles are compared before any sanitizing; nil recorded coordinates mean MuPDF reported a
-// non-finite value, which the engine represents as NaN.
+// children. Raw titles are compared before any sanitizing; nil recorded coordinates mean MuPDF reported a non-finite
+// value, which the engine represents as NaN.
 func compareOutlineLevel(t *testing.T, label string, got *doc.OutlineItem, want []*testsupport.TOCRawEntry) {
 	t.Helper()
 	count := 0
@@ -122,8 +122,8 @@ func comparePageLinks(t *testing.T, d *doc.Document, page *testsupport.Page) {
 		if got.External != want.External {
 			t.Errorf("page %d link %d External = %v, oracle says %v", page.Page, i, got.External, want.External)
 		}
-		// The oracle records MuPDF's synthesized intra-document URI ("#page=...") for internal links; the
-		// engine leaves internal URIs empty (the public API never surfaces them), so only external URIs compare.
+		// The oracle records MuPDF's synthesized intra-document URI ("#page=...") for internal links; the engine leaves
+		// internal URIs empty (the public API never surfaces them), so only external URIs compare.
 		if want.External && got.URI != want.URI {
 			t.Errorf("page %d link %d URI = %q, oracle says %q", page.Page, i, got.URI, want.URI)
 		}
@@ -141,8 +141,8 @@ func comparePageLinks(t *testing.T, d *doc.Document, page *testsupport.Page) {
 	}
 }
 
-// coordMatches compares an engine coordinate with a recorded one: nil records a non-finite oracle value and
-// must be NaN here; anything else must match exactly (the goldens record float32 at full round-trip precision).
+// coordMatches compares an engine coordinate with a recorded one: nil records a non-finite oracle value and must be NaN
+// here; anything else must match exactly (the goldens record float32 at full round-trip precision).
 func coordMatches(got float32, want *float32) bool {
 	if want == nil {
 		return math.IsNaN(float64(got))

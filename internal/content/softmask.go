@@ -19,17 +19,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Soft masks (ISO 32000-2 11.6.5). The ExtGState /SMask entry installs a mask that gates every subsequent
-// painting operation's alpha until /SMask /None (or Q) clears it. The mask's coordinates are anchored to the
-// CTM in effect when the gs operator set it — NOT the CTM at paint time (oracle-pinned: a cm between gs and
-// the paint does not move the mask) — composed with the mask form's own /Matrix. For each wrapped painting
-// operation the interpreter emits BeginMask, replays the mask form's content (as an isolated group: alpha,
-// blend, and soft mask reset), then EndMask, the operation itself (with its constant alpha and blend lifted
-// into an enclosing BeginGroup so the mask gates alpha BEFORE the blend composite — oracle-pinned by the
-// blend-under-mask probe), then PopMask.
+// Soft masks (ISO 32000-2 11.6.5). The ExtGState /SMask entry installs a mask that gates every subsequent painting
+// operation's alpha until /SMask /None (or Q) clears it. The mask's coordinates are anchored to the CTM in effect when
+// the gs operator set it — NOT the CTM at paint time (oracle-pinned: a cm between gs and the paint does not move the
+// mask) — composed with the mask form's own /Matrix. For each wrapped painting operation the interpreter emits
+// BeginMask, replays the mask form's content (as an isolated group: alpha, blend, and soft mask reset), then EndMask,
+// the operation itself (with its constant alpha and blend lifted into an enclosing BeginGroup so the mask gates alpha
+// BEFORE the blend composite — oracle-pinned by the blend-under-mask probe), then PopMask.
 
-// softMaskRes is one parsed ExtGState /SMask value (the CTM-independent part; the anchoring CTM is captured
-// separately in the graphics state, mirroring fillPattern/fillPatCTM).
+// softMaskRes is one parsed ExtGState /SMask value (the CTM-independent part; the anchoring CTM is captured separately
+// in the graphics state, mirroring fillPattern/fillPatCTM).
 type softMaskRes struct {
 	resources  cos.Dict
 	body       []byte
@@ -42,8 +41,8 @@ type softMaskRes struct {
 	luminosity bool
 }
 
-// parseSoftMask resolves an ExtGState /SMask entry: nil for /None (and anything unusable, the viewer-
-// conventional degrade — an unusable mask must not silently erase content).
+// parseSoftMask resolves an ExtGState /SMask entry: nil for /None (and anything unusable, the viewer- conventional
+// degrade — an unusable mask must not silently erase content).
 func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	resolved := in.doc.Resolve(obj)
 	dict, ok := cos.AsDict(resolved)
@@ -74,9 +73,9 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	s, _ := in.doc.GetName(dict, "S")
 	sm.luminosity = s == "Luminosity"
 	if sm.luminosity {
-		// /BC is interpreted in the mask group's /CS color space; default black. The converted NRGBA is the
-		// mask surface's prefill, so areas outside the group's BBox take the backdrop's luminosity
-		// (oracle-pinned: /BC [1] with a small BBox leaves the outside fully unmasked).
+		// /BC is interpreted in the mask group's /CS color space; default black. The converted NRGBA is the mask
+		// surface's prefill, so areas outside the group's BBox take the backdrop's luminosity (oracle-pinned: /BC [1]
+		// with a small BBox leaves the outside fully unmasked).
 		space := pdfcolor.DeviceGray // Space-typed; the /CS default for luminosity masks.
 		if groupDict, has := in.doc.GetDict(stream.Dict, "Group"); has {
 			if csObj, hasCS := groupDict["CS"]; hasCS {
@@ -102,8 +101,8 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	return sm
 }
 
-// parseTransfer samples a /TR transfer function into a 256-entry LUT; nil means identity (/Identity, absent,
-// or unusable).
+// parseTransfer samples a /TR transfer function into a 256-entry LUT; nil means identity (/Identity, absent, or
+// unusable).
 func (in *interp) parseTransfer(obj cos.Object) []byte {
 	if obj == nil {
 		return nil
@@ -149,10 +148,9 @@ func transformAABB(r gfx.Rect, m gfx.Matrix) gfx.Rect {
 	}
 }
 
-// masked wraps one painting emission in the active soft mask: BeginGroup (lifting the op's constant alpha and
-// blend to the composite), mask replay, the op itself with alpha 1 / blend Normal / no mask, PopMask,
-// EndGroup. Without an active mask the op emits directly. alpha is the op's constant alpha (fill or stroke
-// side, per the caller).
+// masked wraps one painting emission in the active soft mask: BeginGroup (lifting the op's constant alpha and blend to
+// the composite), mask replay, the op itself with alpha 1 / blend Normal / no mask, PopMask, EndGroup. Without an
+// active mask the op emits directly. alpha is the op's constant alpha (fill or stroke side, per the caller).
 func (in *interp) masked(alpha float64, body func()) {
 	sm := in.gs.softMask
 	if sm == nil {
@@ -175,10 +173,10 @@ func (in *interp) masked(alpha float64, body func()) {
 	}
 }
 
-// replayMask emits BeginMask, runs the mask form's content with the form-XObject discipline (depth cap, cycle
-// set, shared budget; the mask group renders as an isolated group: alpha 1, blend Normal, no soft mask), and
-// emits EndMask. anchor is the CTM captured when the gs operator installed the mask. When the content cannot
-// replay (recursion limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
+// replayMask emits BeginMask, runs the mask form's content with the form-XObject discipline (depth cap, cycle set,
+// shared budget; the mask group renders as an isolated group: alpha 1, blend Normal, no soft mask), and emits EndMask.
+// anchor is the CTM captured when the gs operator installed the mask. When the content cannot replay (recursion
+// limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
 func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
 	ctm := sm.matrix.Mul(anchor)
 	in.dev.BeginMask(transformAABB(sm.bbox, ctm), sm.luminosity, sm.backdrop, sm.transfer)

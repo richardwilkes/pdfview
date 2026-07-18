@@ -11,15 +11,14 @@ package content
 
 import "github.com/richardwilkes/pdfview/internal/cos"
 
-// maxNesting caps array/dictionary nesting inside content-stream operands, mirroring the COS parser's own
-// container cap.
+// maxNesting caps array/dictionary nesting inside content-stream operands, mirroring the COS parser's own container
+// cap.
 const maxNesting = 512
 
-// parseOperand assembles one operand object whose first token has already been read. Content streams carry
-// only direct objects — "R" is not an operator there, so integers are never reference lookahead candidates —
-// which is why this small assembler exists alongside the COS object parser. Malformed containers are returned
-// as parsed so far (leniency; the enclosing operator will typically be skipped anyway), with ok reporting
-// whether the value is usable at all.
+// parseOperand assembles one operand object whose first token has already been read. Content streams carry only direct
+// objects — "R" is not an operator there, so integers are never reference lookahead candidates — which is why this
+// small assembler exists alongside the COS object parser. Malformed containers are returned as parsed so far (leniency;
+// the enclosing operator will typically be skipped anyway), with ok reporting whether the value is usable at all.
 func parseOperand(lex *cos.Lexer, tok cos.Token, depth int) (obj cos.Object, ok bool) {
 	switch tok.Kind {
 	case cos.TokenInt:
@@ -75,8 +74,8 @@ func parseArray(lex *cos.Lexer, depth int) cos.Array {
 	}
 }
 
-// parseDict parses to the closing >> (or end of input). Non-name keys are skipped along with their values'
-// tokens as encountered (leniency).
+// parseDict parses to the closing >> (or end of input). Non-name keys are skipped along with their values' tokens as
+// encountered (leniency).
 func parseDict(lex *cos.Lexer, depth int) cos.Dict {
 	dict := cos.Dict{}
 	for {

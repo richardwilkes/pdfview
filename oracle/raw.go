@@ -10,9 +10,9 @@
 package main
 
 // This file extracts the raw, unscaled values that the public API of github.com/richardwilkes/pdf never exposes
-// (page-space floats for outline destinations, link rectangles, and search quads, plus the MuPDF version), by
-// calling MuPDF directly through the same vendored headers and static libraries the binding uses. The wrapper
-// pattern (run every throwing MuPDF call inside fz_try/fz_catch) is adapted from that binding's own preamble.
+// (page-space floats for outline destinations, link rectangles, and search quads, plus the MuPDF version), by calling
+// MuPDF directly through the same vendored headers and static libraries the binding uses. The wrapper pattern (run
+// every throwing MuPDF call inside fz_try/fz_catch) is adapted from that binding's own preamble.
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../pdf/include
@@ -209,8 +209,7 @@ import (
 	"unsafe"
 )
 
-// rawSearchMax caps the number of quads a single raw search can return, mirroring the binding's OverallMaxHits
-// default.
+// rawSearchMax caps the number of quads a single raw search can return, mirroring the binding's OverallMaxHits default.
 const rawSearchMax = 1000
 
 // mupdfVersion returns the FZ_VERSION string of the linked MuPDF build.
@@ -218,17 +217,17 @@ func mupdfVersion() string {
 	return C.GoString(C.oracle_fz_version())
 }
 
-// rawDoc is a document opened directly against MuPDF for raw dumping. It is independent of any document the
-// binding has open.
+// rawDoc is a document opened directly against MuPDF for raw dumping. It is independent of any document the binding has
+// open.
 type rawDoc struct {
 	ctx  *C.fz_context
 	doc  *C.fz_document
 	data unsafe.Pointer
 }
 
-// openRaw opens the document and, when password is non-empty, authenticates with it. Documents that need no
-// password (including encrypted documents with an empty user password, which MuPDF auto-authenticates at open)
-// must pass password as "".
+// openRaw opens the document and, when password is non-empty, authenticates with it. Documents that need no password
+// (including encrypted documents with an empty user password, which MuPDF auto-authenticates at open) must pass
+// password as "".
 func openRaw(buffer []byte, password string) (*rawDoc, error) {
 	r := &rawDoc{ctx: C.oracle_fz_new_context(0)}
 	if r.ctx == nil {
@@ -350,8 +349,7 @@ func (r *rawDoc) rawLinks(page *C.fz_page) []*RawLink {
 	return links
 }
 
-// rawSearch returns the raw hit quads for each needle, searching the page's display list exactly as the binding
-// does.
+// rawSearch returns the raw hit quads for each needle, searching the page's display list exactly as the binding does.
 func (r *rawDoc) rawSearch(page *C.fz_page, needles []string) (map[string][][8]float32, error) {
 	list := C.oracle_fz_new_display_list_from_page(r.ctx, page)
 	if list == nil {
@@ -386,8 +384,8 @@ func goStringOrEmpty(s *C.char) string {
 	return C.GoString(s)
 }
 
-// finiteOrNull returns a pointer to v, or nil when v is not finite (MuPDF's encoding for "no explicit
-// coordinate"), so it marshals to JSON null.
+// finiteOrNull returns a pointer to v, or nil when v is not finite (MuPDF's encoding for "no explicit coordinate"), so
+// it marshals to JSON null.
 func finiteOrNull(v float32) *float32 {
 	if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
 		return nil
@@ -395,8 +393,8 @@ func finiteOrNull(v float32) *float32 {
 	return &v
 }
 
-// finite32 maps non-finite values to 0 so they can be marshaled; rectangle and quad geometry from MuPDF is
-// expected to always be finite, this is only a safeguard.
+// finite32 maps non-finite values to 0 so they can be marshaled; rectangle and quad geometry from MuPDF is expected to
+// always be finite, this is only a safeguard.
 func finite32(v float32) float32 {
 	if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0

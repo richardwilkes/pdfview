@@ -174,8 +174,8 @@ func TestStandard14Name(t *testing.T) {
 }
 
 func TestLoadSimpleFont(t *testing.T) {
-	// A Type1 with Differences, explicit widths, and a descriptor: /Widths wins, MissingWidth covers the
-	// rest, the Differences name resolves through the AGL, and the descriptor supplies quad metrics.
+	// A Type1 with Differences, explicit widths, and a descriptor: /Widths wins, MissingWidth covers the rest, the
+	// Differences name resolves through the AGL, and the descriptor supplies quad metrics.
 	f, err := loadFromDict(t,
 		`<< /Type /Font /Subtype /Type1 /BaseFont /GHIJKL+Whatever-Bold /FirstChar 65 /LastChar 66
 		    /Widths [123 456] /FontDescriptor 2 0 R

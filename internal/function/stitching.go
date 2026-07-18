@@ -17,8 +17,8 @@ import (
 
 var errBadStitching = errors.New("invalid stitching function")
 
-// stitching is a type 3 (stitching) function (ISO 32000-2 7.10.5): a one-input domain partitioned by Bounds
-// into k subdomains, each encoded into a subfunction.
+// stitching is a type 3 (stitching) function (ISO 32000-2 7.10.5): a one-input domain partitioned by Bounds into k
+// subdomains, each encoded into a subfunction.
 type stitching struct {
 	common
 	funcs  []Func
@@ -69,8 +69,8 @@ func (s *stitching) NOutputs() int {
 
 func (s *stitching) Eval(in []float32) []float32 {
 	x := s.clampIn(in)[0]
-	// Select the subdomain: subfunction i covers [bounds[i-1], bounds[i]), with the domain edges at the ends
-	// and the final subdomain closed on the right (ISO 32000-2 7.10.5).
+	// Select the subdomain: subfunction i covers [bounds[i-1], bounds[i]), with the domain edges at the ends and the
+	// final subdomain closed on the right (ISO 32000-2 7.10.5).
 	i := 0
 	for i < len(s.bounds) && x >= s.bounds[i] {
 		i++

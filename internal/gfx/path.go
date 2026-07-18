@@ -12,8 +12,8 @@ package gfx
 // PathVerb is one path-construction step.
 type PathVerb uint8
 
-// PathVerb values. The number of points each verb consumes from Path.Points: MoveTo and LineTo one, QuadTo
-// two, CubicTo three, ClosePath none.
+// PathVerb values. The number of points each verb consumes from Path.Points: MoveTo and LineTo one, QuadTo two, CubicTo
+// three, ClosePath none.
 const (
 	MoveTo PathVerb = iota
 	LineTo
@@ -22,9 +22,9 @@ const (
 	ClosePath
 )
 
-// Path is a sequence of subpaths in some coordinate space: verbs plus the points they consume. It carries no
-// fill rule — the painting call that consumes the path supplies one — and does no validation; the interpreter
-// that builds it enforces PDF's construction rules (such as a subpath starting with a moveto).
+// Path is a sequence of subpaths in some coordinate space: verbs plus the points they consume. It carries no fill rule
+// — the painting call that consumes the path supplies one — and does no validation; the interpreter that builds it
+// enforces PDF's construction rules (such as a subpath starting with a moveto).
 type Path struct {
 	Verbs  []PathVerb
 	Points []Point
@@ -59,8 +59,8 @@ func (p *Path) Close() {
 	p.Verbs = append(p.Verbs, ClosePath)
 }
 
-// Rect appends an axis-aligned rectangle as a complete closed subpath, matching the re operator's expansion
-// (ISO 32000-2 8.5.2.1: moveto, three linetos, closepath, counterclockwise for positive extents).
+// Rect appends an axis-aligned rectangle as a complete closed subpath, matching the re operator's expansion (ISO
+// 32000-2 8.5.2.1: moveto, three linetos, closepath, counterclockwise for positive extents).
 func (p *Path) Rect(x, y, w, h float32) {
 	p.MoveTo(x, y)
 	p.LineTo(x+w, y)

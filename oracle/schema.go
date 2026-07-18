@@ -9,22 +9,22 @@
 
 package main
 
-// This file defines the truth.json schema. internal/testsupport in the root module mirrors these types read-side
-// (the two modules deliberately share no code, so the library never depends on this module); keep the two in sync.
-// Struct field order here is the key order truth.json is emitted with (encoding/json marshals fields in declaration
-// order), so fieldalignment is suppressed rather than allowed to scramble the committed goldens; the testsupport
-// mirror carries the alignment-optimized ordering.
+// This file defines the truth.json schema. internal/testsupport in the root module mirrors these types read-side (the
+// two modules deliberately share no code, so the library never depends on this module); keep the two in sync. Struct
+// field order here is the key order truth.json is emitted with (encoding/json marshals fields in declaration order), so
+// fieldalignment is suppressed rather than allowed to scramble the committed goldens; the testsupport mirror carries
+// the alignment-optimized ordering.
 //
-// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left
-// origin, y-down, in PDF points, after the page's /Rotate and MediaBox/CropBox handling have been folded in by
-// MuPDF. All other geometry is in rendered-image pixel space for the DPI it is keyed under, produced by the public
-// API of github.com/richardwilkes/pdf (the behavioral contract pdfview must match). Floats that MuPDF reports as
-// non-finite (a destination with no explicit coordinate, such as /Fit) are encoded as JSON null.
+// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left origin,
+// y-down, in PDF points, after the page's /Rotate and MediaBox/CropBox handling have been folded in by MuPDF. All other
+// geometry is in rendered-image pixel space for the DPI it is keyed under, produced by the public API of
+// github.com/richardwilkes/pdf (the behavioral contract pdfview must match). Floats that MuPDF reports as non-finite (a
+// destination with no explicit coordinate, such as /Fit) are encoded as JSON null.
 
 // Truth is the top-level truth.json document, one per corpus file.
 type Truth struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
-	// File is the corpus file's base name (the corpus lives in testfiles/corpus, goldens in
-	// testfiles/goldens/<name> where <name> is File without its extension).
+	// File is the corpus file's base name (the corpus lives in testfiles/corpus, goldens in testfiles/goldens/<name>
+	// where <name> is File without its extension).
 	File   string `json:"file"`
 	SHA256 string `json:"sha256"`
 	// MuPDF is the FZ_VERSION of the MuPDF build that produced this golden.
@@ -32,19 +32,18 @@ type Truth struct { //nolint:govet // Field order is truth.json's emitted key or
 	PageCount int    `json:"pageCount"`
 	// RequiresAuth is RequiresAuthentication() on a freshly opened document.
 	RequiresAuth bool `json:"requiresAuth"`
-	// Auth records Authenticate(password) results, each attempted on its own freshly opened document. The list
-	// always includes the empty password and a deliberately invalid password, plus every password passed to the
-	// dump command.
+	// Auth records Authenticate(password) results, each attempted on its own freshly opened document. The list always
+	// includes the empty password and a deliberately invalid password, plus every password passed to the dump command.
 	Auth []AuthAttempt `json:"auth"`
-	// AuthPassword is the password the dump authenticated with before extracting the rest of this file's data. It
-	// is present only when RequiresAuth is true; documents with an empty user password need no authentication call.
+	// AuthPassword is the password the dump authenticated with before extracting the rest of this file's data. It is
+	// present only when RequiresAuth is true; documents with an empty user password need no authentication call.
 	AuthPassword string `json:"authPassword,omitempty"`
 	DPIs         []int  `json:"dpis"`
-	// Needles lists the search strings dumped for every page, in searchRaw (raw quads) and renders[dpi].search
-	// (scaled hit rectangles).
+	// Needles lists the search strings dumped for every page, in searchRaw (raw quads) and renders[dpi].search (scaled
+	// hit rectangles).
 	Needles []string `json:"needles,omitempty"`
-	// TOCRaw is the document outline as MuPDF reports it: raw titles and URIs, and unscaled page-space
-	// destination coordinates.
+	// TOCRaw is the document outline as MuPDF reports it: raw titles and URIs, and unscaled page-space destination
+	// coordinates.
 	TOCRaw []*TOCRawEntry `json:"tocRaw,omitempty"`
 	// TOC holds TableOfContents(dpi) from the public API, keyed by DPI: sanitized titles and scaled integer
 	// coordinates.
@@ -84,11 +83,11 @@ type Page struct { //nolint:govet // Field order is truth.json's emitted key ord
 	Page int `json:"page"`
 	// Bounds is the raw page bounding box (x0, y0, x1, y1) in page space.
 	Bounds [4]float32 `json:"bounds"`
-	// LinksRaw records every link MuPDF reports on the page, unfiltered — including entries the public API would
-	// drop (unresolvable internal links).
+	// LinksRaw records every link MuPDF reports on the page, unfiltered — including entries the public API would drop
+	// (unresolvable internal links).
 	LinksRaw []*RawLink `json:"linksRaw"`
-	// SearchRaw maps each needle to the raw hit quads in MuPDF emission order. Each quad is
-	// (ulx, uly, urx, ury, llx, lly, lrx, lry) in page space. A match that spans lines yields one quad per line.
+	// SearchRaw maps each needle to the raw hit quads in MuPDF emission order. Each quad is (ulx, uly, urx, ury, llx,
+	// lly, lrx, lry) in page space. A match that spans lines yields one quad per line.
 	SearchRaw map[string][][8]float32 `json:"searchRaw,omitempty"`
 	// Renders holds the public-API render results, keyed by DPI.
 	Renders map[string]*Render `json:"renders"`
@@ -96,8 +95,8 @@ type Page struct { //nolint:govet // Field order is truth.json's emitted key ord
 
 // RawLink is one link as MuPDF reports it, before the public API's filtering and scaling.
 type RawLink struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
-	// URI is the raw link URI (for internal links this is MuPDF's synthesized destination URI, which the public
-	// API discards).
+	// URI is the raw link URI (for internal links this is MuPDF's synthesized destination URI, which the public API
+	// discards).
 	URI      string     `json:"uri,omitempty"`
 	External bool       `json:"external"`
 	Rect     [4]float32 `json:"rect"`
@@ -114,8 +113,8 @@ type Render struct { //nolint:govet // Field order is truth.json's emitted key o
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 	Stride int    `json:"stride"`
-	// Links is the public-API link list: URI empty for internal links, Page -1 for external links, bounds and
-	// dest in rendered-image pixel space.
+	// Links is the public-API link list: URI empty for internal links, Page -1 for external links, bounds and dest in
+	// rendered-image pixel space.
 	Links []*Link `json:"links"`
 	// Search maps each needle to the public-API hit rectangles (x0, y0, x1, y1).
 	Search map[string][][4]int `json:"search,omitempty"`

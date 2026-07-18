@@ -26,24 +26,24 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// The glyph coverage cache: filling every glyph outline through the analytic-AA rasterizer on every render
-// dominated the profile, so ordinary fill-mode text instead rasterizes each distinct glyph appearance ONCE into
-// an Alpha8 coverage plane and blits it at integer device positions — the same idea as MuPDF's glyph bitmap
-// cache. A cache entry is keyed by the glyph identity plus the FULL float32 Trm linear part and the exact
-// subpixel phase of the glyph origin, so a cached blit reproduces the coverage the direct fill would have
-// produced bit-for-bit (the mask is rendered by the same analytic-AA fill at the same subpixel position; only
-// the final color application can differ by ±1 rounding — see TestGlyphBlitMatchesDirectFill). No quantization
-// means the first render of a page mostly misses (each glyph instance has its own x phase) and re-renders hit
-// 100%; that is exactly the warm protocol both the recorded perf numbers and real consumers (re-render on
-// scroll/zoom) care about, and it keeps the pixel gates honest. Entries live in the document's budgeted store
-// when one is wired (kind-separated by the dedicated key type), else in a per-render map.
+// The glyph coverage cache: filling every glyph outline through the analytic-AA rasterizer on every render dominated
+// the profile, so ordinary fill-mode text instead rasterizes each distinct glyph appearance ONCE into an Alpha8
+// coverage plane and blits it at integer device positions — the same idea as MuPDF's glyph bitmap cache. A cache entry
+// is keyed by the glyph identity plus the FULL float32 Trm linear part and the exact subpixel phase of the glyph
+// origin, so a cached blit reproduces the coverage the direct fill would have produced bit-for-bit (the mask is
+// rendered by the same analytic-AA fill at the same subpixel position; only the final color application can differ by
+// ±1 rounding — see TestGlyphBlitMatchesDirectFill). No quantization means the first render of a page mostly misses
+// (each glyph instance has its own x phase) and re-renders hit 100%; that is exactly the warm protocol both the
+// recorded perf numbers and real consumers (re-render on scroll/zoom) care about, and it keeps the pixel gates honest.
+// Entries live in the document's budgeted store when one is wired (kind-separated by the dedicated key type), else in a
+// per-render map.
 
-// maxGlyphMaskDim caps a cached coverage plane's extent; glyphs rendering larger than this (display-size
-// text) fall back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.
+// maxGlyphMaskDim caps a cached coverage plane's extent; glyphs rendering larger than this (display-size text) fall
+// back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.
 const maxGlyphMaskDim = 256
 
-// glyphMaskKey identifies one cached glyph coverage plane: glyph identity, the Trm linear part, and the
-// subpixel phase of the glyph origin. Distinct store key type per the store's kind-separation rule.
+// glyphMaskKey identifies one cached glyph coverage plane: glyph identity, the Trm linear part, and the subpixel phase
+// of the glyph origin. Distinct store key type per the store's kind-separation rule.
 type glyphMaskKey struct {
 	font   *font.Font
 	gid    uint32
@@ -53,9 +53,8 @@ type glyphMaskKey struct {
 }
 
 // glyphMask is one cached coverage plane. plane is nil for glyphs the blit path cannot handle (too large or
-// unrasterizable) — a cached "use the outline fill" verdict. img wraps the same coverage as a canvas image
-// for the DrawImage route, created lazily since the direct composite (the overwhelmingly common route) reads
-// plane straight.
+// unrasterizable) — a cached "use the outline fill" verdict. img wraps the same coverage as a canvas image for the
+// DrawImage route, created lazily since the direct composite (the overwhelmingly common route) reads plane straight.
 type glyphMask struct {
 	img   *imagecore.Image
 	plane []byte
@@ -81,11 +80,11 @@ func (m *glyphMask) image() *imagecore.Image {
 // glyphMaskSize estimates a mask's cache footprint for the store budget.
 func glyphMaskSize(w, h int) uint64 { return uint64(w*h) + 96 }
 
-// blitTextRun is FillText's fast path: draw the run's glyphs from cached coverage planes. It handles only
-// plain solid fills — an opaque folded color, Normal blend, no pattern/shading paint, not inside a knockout
-// group (whose BlendSrc rewrite must not clear pixels around the glyph) — and reports false otherwise so the
-// caller runs the merged-outline path. Glyphs the mask path cannot handle (oversized, degenerate) accumulate
-// into a leftover outline filled exactly like the slow path.
+// blitTextRun is FillText's fast path: draw the run's glyphs from cached coverage planes. It handles only plain solid
+// fills — an opaque folded color, Normal blend, no pattern/shading paint, not inside a knockout group (whose BlendSrc
+// rewrite must not clear pixels around the glyph) — and reports false otherwise so the caller runs the merged-outline
+// path. Glyphs the mask path cannot handle (oversized, degenerate) accumulate into a leftover outline filled exactly
+// like the slow path.
 func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 	if p.Shading != nil || p.Tiling != nil || p.Blend != device.BlendNormal || d.knockoutSrc() {
 		return false
@@ -97,16 +96,16 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 		alpha = 1
 	}
 	if uint8(alpha*float64(p.Color.A)+0.5) != 255 {
-		// Translucent text composites per glyph differently from the merged outline where fringes overlap;
-		// keep the pinned merged behavior for it.
+		// Translucent text composites per glyph differently from the merged outline where fringes overlap; keep the
+		// pinned merged behavior for it.
 		return false
 	}
-	// With no group or soft-mask layer open, no untracked canvas state, and every open clip level an
-	// axis-aligned rectangle, the canvas draw target is the base surface at identity, and a glyph whose
-	// mask rect stays inside the tracked clip interior composites identically whether canvas draws it or
-	// we do — so composite straight into the surface pixmap. canvas's Alpha8 image draws always run the
-	// general float shader pipeline (no sprite fast path exists for Alpha8), which the profile showed
-	// dominating warm renders. Everything else goes through DrawImage so canvas applies clip and layer.
+	// With no group or soft-mask layer open, no untracked canvas state, and every open clip level an axis-aligned
+	// rectangle, the canvas draw target is the base surface at identity, and a glyph whose mask rect stays inside the
+	// tracked clip interior composites identically whether canvas draws it or we do — so composite straight into the
+	// surface pixmap. canvas's Alpha8 image draws always run the general float shader pipeline (no sprite fast path
+	// exists for Alpha8), which the profile showed dominating warm renders. Everything else goes through DrawImage so
+	// canvas applies clip and layer.
 	interior := d.clipInterior()
 	direct := interior.rect && len(d.groupStack) == 0 && len(d.maskStack) == 0 && d.untrackedState == 0
 	paint := canvas.NewPaint()
@@ -154,8 +153,8 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 	return true
 }
 
-// glyphMask returns the cached coverage plane for one glyph appearance, rendering it on first use. fx, fy
-// are the subpixel phase of the glyph origin in [0, 1).
+// glyphMask returns the cached coverage plane for one glyph appearance, rendering it on first use. fx, fy are the
+// subpixel phase of the glyph origin in [0, 1).
 func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy float32) *glyphMask {
 	key := glyphMaskKey{font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy}
 	if d.store != nil {
@@ -182,10 +181,10 @@ func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy 
 	return mask
 }
 
-// renderGlyphMask fills the glyph outline at its exact subpixel position into a scratch surface and captures
-// the coverage as an Alpha8 image. The mask carries the glyph's device bounding box relative to its floored
-// origin, padded a pixel so analytic-AA bleed is never clipped. Returns the mask (img nil when the glyph must
-// use the outline fill) and its store size estimate.
+// renderGlyphMask fills the glyph outline at its exact subpixel position into a scratch surface and captures the
+// coverage as an Alpha8 image. The mask carries the glyph's device bounding box relative to its floored origin, padded
+// a pixel so analytic-AA bleed is never clipped. Returns the mask (img nil when the glyph must use the outline fill)
+// and its store size estimate.
 func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32) (mask *glyphMask, size uint64) {
 	local := gfx.Matrix{A: g.Trm.A, B: g.Trm.B, C: g.Trm.C, D: g.Trm.D, E: fx, F: fy}
 	b := gp.Bounds()
@@ -251,10 +250,10 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 		glyphMaskSize(w, h) * 2
 }
 
-// compositeMask source-over-composites a coverage plane, tinted by the opaque color r,g,b, straight into the
-// surface pixmap at integer device position (x0, y0). Callers guarantee the canvas is at its base state
-// (no clip, no layer, identity matrix) so this is exactly the draw canvas would perform, minus the general
-// image pipeline's per-pixel float cost. out = src·c/255 + dst·(255−c)/255 per channel, single-rounded.
+// compositeMask source-over-composites a coverage plane, tinted by the opaque color r,g,b, straight into the surface
+// pixmap at integer device position (x0, y0). Callers guarantee the canvas is at its base state (no clip, no layer,
+// identity matrix) so this is exactly the draw canvas would perform, minus the general image pipeline's per-pixel float
+// cost. out = src·c/255 + dst·(255−c)/255 per channel, single-rounded.
 func (d *Device) compositeMask(mask *glyphMask, x0, y0 int, r, g, b uint8) {
 	pm := d.surf.Pixmap()
 	if pm == nil {
@@ -290,8 +289,8 @@ func (d *Device) compositeMask(mask *glyphMask, x0, y0 int, r, g, b uint8) {
 	}
 }
 
-// maskScratchSurface returns a scratch surface at least w×h, growing the cached one as needed (its contents
-// are cleared by the caller). Reuse keeps mask misses from allocating a surface each.
+// maskScratchSurface returns a scratch surface at least w×h, growing the cached one as needed (its contents are cleared
+// by the caller). Reuse keeps mask misses from allocating a surface each.
 func (d *Device) maskScratchSurface(w, h int) *surface.Surface {
 	if d.maskScratch == nil || int(d.maskScratch.Width()) < w || int(d.maskScratch.Height()) < h {
 		nw := max(w, 64)

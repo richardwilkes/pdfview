@@ -18,18 +18,18 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped
-// and reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting
-// (name → dictionary → name ...) is cut off after maxDestChain steps.
+// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped and
+// reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting (name → dictionary
+// → name ...) is cut off after maxDestChain steps.
 const (
 	maxNameTreeDepth = 64
 	maxDestChain     = 8
 )
 
-// Dest is a resolved internal destination: a 0-based target page plus the explicit point on it, already mapped
-// into the page's top-left/y-down space. X and Y are NaN when the destination carries no explicit coordinate on
-// that axis (a /Fit destination has no point at all; /FitH has only Y; a /XYZ slot may be null). Page is -1 when
-// the destination cannot be resolved to a page in this document.
+// Dest is a resolved internal destination: a 0-based target page plus the explicit point on it, already mapped into the
+// page's top-left/y-down space. X and Y are NaN when the destination carries no explicit coordinate on that axis (a
+// /Fit destination has no point at all; /FitH has only Y; a /XYZ slot may be null). Page is -1 when the destination
+// cannot be resolved to a page in this document.
 type Dest struct {
 	X, Y float32
 	Page int
@@ -45,10 +45,9 @@ func unresolvedDest() Dest {
 	return Dest{X: nan32(), Y: nan32(), Page: -1}
 }
 
-// resolveDest resolves a destination object — an explicit array, a name or byte string naming a destination, or
-// a dictionary wrapping one in /D (both the old-style /Dests values and /GoTo actions use that shape) — to a
-// page and point. It always returns a usable Dest; failures come back as unresolvedDest (page -1), which the
-// public API drops.
+// resolveDest resolves a destination object — an explicit array, a name or byte string naming a destination, or a
+// dictionary wrapping one in /D (both the old-style /Dests values and /GoTo actions use that shape) — to a page and
+// point. It always returns a usable Dest; failures come back as unresolvedDest (page -1), which the public API drops.
 func (d *Document) resolveDest(obj cos.Object) Dest {
 	for range maxDestChain {
 		obj = d.cos.Resolve(obj)
@@ -68,11 +67,11 @@ func (d *Document) resolveDest(obj cos.Object) Dest {
 	return unresolvedDest()
 }
 
-// destFromArray interprets an explicit destination array (ISO 32000-2 12.3.2.2): the target page (an indirect
-// reference to a page object, or — as some writers produce — a 0-based page index), the fit kind, and the kind's
-// coordinate operands. Coordinates the kind does not define, null/absent slots, and non-numeric operands are
-// NaN. The extracted PDF-space point is mapped into the target page's top-left space, exactly as MuPDF reports
-// destination points (pinned by probes for /XYZ, /FitH, /FitV, /FitR, and null slots).
+// destFromArray interprets an explicit destination array (ISO 32000-2 12.3.2.2): the target page (an indirect reference
+// to a page object, or — as some writers produce — a 0-based page index), the fit kind, and the kind's coordinate
+// operands. Coordinates the kind does not define, null/absent slots, and non-numeric operands are NaN. The extracted
+// PDF-space point is mapped into the target page's top-left space, exactly as MuPDF reports destination points (pinned
+// by probes for /XYZ, /FitH, /FitV, /FitR, and null slots).
 func (d *Document) destFromArray(arr cos.Array) Dest {
 	if len(arr) == 0 {
 		return unresolvedDest()
@@ -120,8 +119,7 @@ func destElem(arr cos.Array, index int) cos.Object {
 	return nil
 }
 
-// destCoord extracts one numeric destination operand as float32, or NaN when the slot is absent, null, or not a
-// number.
+// destCoord extracts one numeric destination operand as float32, or NaN when the slot is absent, null, or not a number.
 func (d *Document) destCoord(arr cos.Array, index int) float32 {
 	if f, ok := cos.AsReal(d.cos.Resolve(destElem(arr, index))); ok {
 		return float32(f)
@@ -129,10 +127,10 @@ func (d *Document) destCoord(arr cos.Array, index int) float32 {
 	return nan32()
 }
 
-// lookupNamedDest finds the destination a name or byte string refers to, trying the old-style /Dests dictionary
-// in the catalog (PDF 1.1) first and the /Names → /Dests name tree (PDF 1.2+) second. Both stores accept both
-// key flavors — a name's text and a byte string's bytes compare identically — since real files mix them. It
-// returns nil (null) when the name is unknown.
+// lookupNamedDest finds the destination a name or byte string refers to, trying the old-style /Dests dictionary in the
+// catalog (PDF 1.1) first and the /Names → /Dests name tree (PDF 1.2+) second. Both stores accept both key flavors — a
+// name's text and a byte string's bytes compare identically — since real files mix them. It returns nil (null) when the
+// name is unknown.
 func (d *Document) lookupNamedDest(key []byte) cos.Object {
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
@@ -153,10 +151,10 @@ func (d *Document) lookupNamedDest(key []byte) cos.Object {
 	return nil
 }
 
-// lookupNameTree searches a name tree (ISO 32000-2 7.9.6) for key. Leaf /Names arrays are scanned linearly —
-// robust against the unsorted arrays repaired files exhibit — and /Kids are pruned by their /Limits only when
-// the limits are well-formed, so a node with broken limits is still descended into rather than silently
-// skipped. Depth is capped and reference cycles are skipped.
+// lookupNameTree searches a name tree (ISO 32000-2 7.9.6) for key. Leaf /Names arrays are scanned linearly — robust
+// against the unsorted arrays repaired files exhibit — and /Kids are pruned by their /Limits only when the limits are
+// well-formed, so a node with broken limits is still descended into rather than silently skipped. Depth is capped and
+// reference cycles are skipped.
 func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited map[cos.Ref]bool) (cos.Object, bool) {
 	if depth > maxNameTreeDepth {
 		return nil, false
@@ -197,9 +195,9 @@ func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited 
 	return nil, false
 }
 
-// hasURIScheme reports whether uri begins with a URI scheme (RFC 3986: a letter followed by letters, digits,
-// "+", "-", or ".", terminated by ":"). This is the classification fz_is_external_link applies: a scheme makes
-// a link external; anything else is treated as an intra-document reference.
+// hasURIScheme reports whether uri begins with a URI scheme (RFC 3986: a letter followed by letters, digits, "+", "-",
+// or ".", terminated by ":"). This is the classification fz_is_external_link applies: a scheme makes a link external;
+// anything else is treated as an intra-document reference.
 func hasURIScheme(uri string) bool {
 	for i := range len(uri) {
 		switch ch := uri[i]; {
@@ -214,10 +212,10 @@ func hasURIScheme(uri string) bool {
 	return false
 }
 
-// resolveURIFragment resolves the intra-document URI forms MuPDF itself synthesizes and accepts for links
-// without an external scheme: "#page=N&zoom=z,x,y" (N is 1-based; x and y are already top-left page-space
-// values and are applied without further mapping; absent or unparseable values are NaN) and "#nameddest=NAME"
-// (percent-decoded, then resolved like any named destination). Anything else is unresolvable.
+// resolveURIFragment resolves the intra-document URI forms MuPDF itself synthesizes and accepts for links without an
+// external scheme: "#page=N&zoom=z,x,y" (N is 1-based; x and y are already top-left page-space values and are applied
+// without further mapping; absent or unparseable values are NaN) and "#nameddest=NAME" (percent-decoded, then resolved
+// like any named destination). Anything else is unresolvable.
 func (d *Document) resolveURIFragment(uri string) Dest {
 	frag, ok := strings.CutPrefix(uri, "#")
 	if !ok {
@@ -249,8 +247,8 @@ func (d *Document) resolveURIFragment(uri string) Dest {
 	return dest
 }
 
-// parseFloat32 parses s as a float32, returning NaN when it does not parse ("nan" itself parses to NaN, which
-// MuPDF emits for absent coordinates in the URIs it synthesizes).
+// parseFloat32 parses s as a float32, returning NaN when it does not parse ("nan" itself parses to NaN, which MuPDF
+// emits for absent coordinates in the URIs it synthesizes).
 func parseFloat32(s string) float32 {
 	f, err := strconv.ParseFloat(strings.TrimSpace(s), 32)
 	if err != nil {

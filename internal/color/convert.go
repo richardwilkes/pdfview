@@ -21,20 +21,20 @@ import (
 	_ "embed"
 )
 
-// The device-colorspace conversions below reproduce, byte for byte at the observation points, what the MuPDF
-// build behind the oracle produces when painting solid colors into its RGB pixmap (that build routes device
-// colorspaces through ICC profiles). They were captured behaviorally — probe PDFs of flat patches rendered
-// through the oracle, never from MuPDF source — by oracle/colorprobe, which regenerates the two data files:
+// The device-colorspace conversions below reproduce, byte for byte at the observation points, what the MuPDF build
+// behind the oracle produces when painting solid colors into its RGB pixmap (that build routes device colorspaces
+// through ICC profiles). They were captured behaviorally — probe PDFs of flat patches rendered through the oracle,
+// never from MuPDF source — by oracle/colorprobe, which regenerates the two data files:
 //
-//   - data/gray1021.bin: DeviceGray sampled at v = i/1020 (every quarter-byte step) → 3 RGB bytes each. The
-//     ICC gray→RGB transform is not perfectly neutral (some grays land with B one below R/G), so all three
-//     channels are recorded.
+//   - data/gray1021.bin: DeviceGray sampled at v = i/1020 (every quarter-byte step) → 3 RGB bytes each. The ICC
+//     gray→RGB transform is not perfectly neutral (some grays land with B one below R/G), so all three channels are
+//     recorded.
 //   - data/cmyk17.bin.gz: DeviceCMYK sampled on the 17^4 grid (step 1/16) → 3 RGB bytes per node. Multilinear
 //     interpolation between nodes matched 2516 off-grid oracle observations with mean error 0.25 and max 1.7,
 //     comfortably inside the pixel-diff thresholds.
 //
-// DeviceRGB needs no table: observation shows the component bytes are trunc(v×255) computed in float32 (510 of
-// 1021 ramp points contradict round-to-nearest; all match truncation).
+// DeviceRGB needs no table: observation shows the component bytes are trunc(v×255) computed in float32 (510 of 1021
+// ramp points contradict round-to-nearest; all match truncation).
 
 //go:embed data/gray1021.bin
 var grayTable []byte
@@ -73,8 +73,8 @@ func clamp01(v float32) float32 {
 	return v
 }
 
-// rgbByte converts one DeviceRGB component to its rendered byte: truncation of the float32 product, the
-// observed MuPDF behavior.
+// rgbByte converts one DeviceRGB component to its rendered byte: truncation of the float32 product, the observed MuPDF
+// behavior.
 func rgbByte(v float32) uint8 {
 	return uint8(clamp01(v) * 255)
 }
@@ -101,8 +101,8 @@ func grayToNRGBA(v float32) color.NRGBA {
 func cmykToNRGBA(c, m, y, k float32) color.NRGBA {
 	table, err := cmykOnce()
 	if err != nil {
-		// The embedded table is validated at build time by the package tests; this fallback (the classical
-		// additive formula) only runs if the binary's data is somehow corrupt.
+		// The embedded table is validated at build time by the package tests; this fallback (the classical additive
+		// formula) only runs if the binary's data is somehow corrupt.
 		cc, mm, yy, kk := float64(clamp01(c)), float64(clamp01(m)), float64(clamp01(y)), float64(clamp01(k))
 		return color.NRGBA{
 			R: uint8(255 * (1 - math.Min(1, cc+kk))),

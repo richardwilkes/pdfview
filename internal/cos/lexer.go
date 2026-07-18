@@ -32,10 +32,10 @@ const (
 	tkBraceClose
 )
 
-// token is one lexical token. The payload field used depends on kind: i for tkInt, f for tkReal, and s for
-// tkString (decoded bytes), tkName (decoded name), and tkKeyword (keyword text). pos is the byte offset of the
-// token's first character (or of the end of input for tkEOF), which survives parser pushback so callers can
-// recover accurate object-extent positions.
+// token is one lexical token. The payload field used depends on kind: i for tkInt, f for tkReal, and s for tkString
+// (decoded bytes), tkName (decoded name), and tkKeyword (keyword text). pos is the byte offset of the token's first
+// character (or of the end of input for tkEOF), which survives parser pushback so callers can recover accurate
+// object-extent positions.
 type token struct {
 	s    []byte
 	i    int64
@@ -76,8 +76,8 @@ func isRegular(c byte) bool {
 	return !isWhitespace(c) && !isDelimiter(c)
 }
 
-// lexer tokenizes PDF syntax from data starting at pos. It never allocates for tokens that can alias data (names
-// and keywords without escapes); decoded strings are built fresh.
+// lexer tokenizes PDF syntax from data starting at pos. It never allocates for tokens that can alias data (names and
+// keywords without escapes); decoded strings are built fresh.
 type lexer struct {
 	data []byte
 	pos  int
@@ -155,8 +155,8 @@ func (l *lexer) lexTokenAt() (token, error) {
 	}
 }
 
-// lexNumber scans an integer or real. PDF numbers have no exponent notation. Out-of-range integers and other
-// oddities (multiple signs or decimal points) are handled leniently, converting what can be converted.
+// lexNumber scans an integer or real. PDF numbers have no exponent notation. Out-of-range integers and other oddities
+// (multiple signs or decimal points) are handled leniently, converting what can be converted.
 func (l *lexer) lexNumber() token {
 	start := l.pos
 	for l.pos < len(l.data) {
@@ -189,8 +189,8 @@ func (l *lexer) lexNumber() token {
 		i++
 	}
 	if i < len(span) && span[i] == '.' {
-		// Real: parse the mantissa span with strconv for correct rounding, ignoring any junk beyond a second
-		// decimal point.
+		// Real: parse the mantissa span with strconv for correct rounding, ignoring any junk beyond a second decimal
+		// point.
 		end := i + 1
 		for end < len(span) && span[end] >= '0' && span[end] <= '9' {
 			end++
@@ -220,8 +220,8 @@ func (l *lexer) lexNumber() token {
 	return token{kind: tkInt, i: whole}
 }
 
-// lexName scans a name object, decoding #xx escapes. An invalid escape keeps the '#' literally (leniency; the
-// spec calls it an error).
+// lexName scans a name object, decoding #xx escapes. An invalid escape keeps the '#' literally (leniency; the spec
+// calls it an error).
 func (l *lexer) lexName() token {
 	l.pos++ // consume '/'
 	start := l.pos
@@ -265,12 +265,12 @@ func hexVal(c byte) int {
 	}
 }
 
-// maxStringNesting caps parenthesis nesting inside literal strings, a cheap guard against pathological input
-// (nesting requires one byte per level, so this is generous for real documents).
+// maxStringNesting caps parenthesis nesting inside literal strings, a cheap guard against pathological input (nesting
+// requires one byte per level, so this is generous for real documents).
 const maxStringNesting = 4096
 
-// lexLiteralString scans a (...) string, decoding backslash escapes and normalizing unescaped end-of-line
-// markers to a single line feed, per ISO 32000-2 7.3.4.2.
+// lexLiteralString scans a (...) string, decoding backslash escapes and normalizing unescaped end-of-line markers to a
+// single line feed, per ISO 32000-2 7.3.4.2.
 func (l *lexer) lexLiteralString() (token, error) {
 	l.pos++ // consume '('
 	out := make([]byte, 0, 32)
@@ -343,8 +343,8 @@ func (l *lexer) lexLiteralString() (token, error) {
 	return token{}, errUnterminatedString
 }
 
-// lexHexString scans a <...> string. Whitespace and invalid characters between the digits are skipped
-// (leniency), and a missing final digit is treated as 0, per ISO 32000-2 7.3.4.3.
+// lexHexString scans a <...> string. Whitespace and invalid characters between the digits are skipped (leniency), and a
+// missing final digit is treated as 0, per ISO 32000-2 7.3.4.3.
 func (l *lexer) lexHexString() (token, error) {
 	l.pos++ // consume '<'
 	out := make([]byte, 0, 16)

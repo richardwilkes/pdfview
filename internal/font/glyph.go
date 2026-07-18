@@ -22,10 +22,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Glyph identification and outlines. Codes map to GIDs once at Load (simple fonts have at most 256 codes) via
-// the per-font-type chains — the embedded program's cmaps for sfnt, the charset name sweep for bare CFF, and
-// Unicode into the bundled Liberation face for substituted fonts. GlyphPath converts one glyph's outline to
-// the em-normalized glyph space the device seam's Trm matrices expect (y up, 1.0 = one em).
+// Glyph identification and outlines. Codes map to GIDs once at Load (simple fonts have at most 256 codes) via the
+// per-font-type chains — the embedded program's cmaps for sfnt, the charset name sweep for bare CFF, and Unicode into
+// the bundled Liberation face for substituted fonts. GlyphPath converts one glyph's outline to the em-normalized glyph
+// space the device seam's Trm matrices expect (y up, 1.0 = one em).
 
 // subInfo carries the bundled substitute face used to render a non-embedded (or unparseable-embedded) font.
 type subInfo struct {
@@ -33,11 +33,10 @@ type subInfo struct {
 	upem float32
 }
 
-// liberationFor maps a canonical standard-14 name to the bundled Liberation family member that substitutes
-// for it (substitution is deterministic — never system fonts). Symbol has no dingbat/pi-font stand-in; it
-// renders through LiberationSans by Unicode value, which covers its Greek and most of its operators.
-// ZapfDingbats resolves no Unicode from its aN glyph names, so it produces no outlines unless a
-// dingbat-capable bundle is added.
+// liberationFor maps a canonical standard-14 name to the bundled Liberation family member that substitutes for it
+// (substitution is deterministic — never system fonts). Symbol has no dingbat/pi-font stand-in; it renders through
+// LiberationSans by Unicode value, which covers its Greek and most of its operators. ZapfDingbats resolves no Unicode
+// from its aN glyph names, so it produces no outlines unless a dingbat-capable bundle is added.
 func liberationFor(std14 string) string {
 	family, style := "LiberationSans", "Regular"
 	switch std14 {
@@ -57,8 +56,8 @@ func liberationFor(std14 string) string {
 	return family + "-" + style
 }
 
-// libFonts caches the parsed Liberation font programs (shared, immutable go-text Fonts; the per-Font Faces
-// wrapping them are never shared because Face caches lookups without locking).
+// libFonts caches the parsed Liberation font programs (shared, immutable go-text Fonts; the per-Font Faces wrapping
+// them are never shared because Face caches lookups without locking).
 var (
 	libFontsMu sync.Mutex
 	libFonts   = map[string]*otfont.Font{}
@@ -94,8 +93,8 @@ func loadSubstitute(std14 string) *subInfo {
 	return &subInfo{face: otfont.NewFace(ft), upem: upem}
 }
 
-// macRomanReverse maps glyph names to Mac Roman codes for the sfnt (1,0) cmap chain, inverted once from the
-// generated MacRomanEncoding table (first code wins; the table has no duplicate names).
+// macRomanReverse maps glyph names to Mac Roman codes for the sfnt (1,0) cmap chain, inverted once from the generated
+// MacRomanEncoding table (first code wins; the table has no duplicate names).
 var (
 	macRomanReverseOnce sync.Once
 	macRomanReverse     map[string]uint32
@@ -116,8 +115,8 @@ func macRomanCode(name string) (uint32, bool) {
 	return code, ok
 }
 
-// symbolicFlags reports whether the descriptor flags mark the font symbolic (bit 3 set and bit 6, its
-// mutually exclusive partner, clear — fonts claiming both are treated as non-symbolic).
+// symbolicFlags reports whether the descriptor flags mark the font symbolic (bit 3 set and bit 6, its mutually
+// exclusive partner, clear — fonts claiming both are treated as non-symbolic).
 func symbolicFlags(flags int) bool {
 	return flags&FlagSymbolic != 0 && flags&FlagNonsymbolic == 0
 }
@@ -131,11 +130,11 @@ func firstRune(s string) rune {
 	return r
 }
 
-// buildGIDs precomputes the code→GID table for a simple font once its encoding, embedded program, and
-// substitute are all settled. Codes that map nowhere stay 0 (.notdef). Substituted fonts map only through
-// AGL-resolved glyph names — never the ASCII-identity Unicode fallback the extraction table carries — because
-// a name the AGL cannot resolve (ZapfDingbats' aN names, private-use names) means the substitute has no
-// version of that glyph; drawing the fallback letterform would be the WRONG glyph, worse than none.
+// buildGIDs precomputes the code→GID table for a simple font once its encoding, embedded program, and substitute are
+// all settled. Codes that map nowhere stay 0 (.notdef). Substituted fonts map only through AGL-resolved glyph names —
+// never the ASCII-identity Unicode fallback the extraction table carries — because a name the AGL cannot resolve
+// (ZapfDingbats' aN names, private-use names) means the substitute has no version of that glyph; drawing the fallback
+// letterform would be the WRONG glyph, worse than none.
 func (f *Font) buildGIDs() {
 	symbolic := symbolicFlags(f.Flags)
 	for code := range uint32(256) {
@@ -160,8 +159,8 @@ func (f *Font) buildGIDs() {
 func (f *Font) GID(code uint32) uint32 {
 	if f.type0 != nil {
 		if f.sub != nil {
-			// A substituted (non-embedded) composite font has no CID→GID program; mapping through the
-			// substitute's cmap needs Unicode, which ToUnicode supplies when present.
+			// A substituted (non-embedded) composite font has no CID→GID program; mapping through the substitute's cmap
+			// needs Unicode, which ToUnicode supplies when present.
 			if r := f.Unicode(code); r != 0 {
 				if g, ok := f.sub.face.Cmap.Lookup(r); ok {
 					return uint32(g)
@@ -177,10 +176,10 @@ func (f *Font) GID(code uint32) uint32 {
 	return 0
 }
 
-// GlyphPath returns the glyph's outline in em-normalized glyph space (y up, advance 1.0 = one em), or nil
-// when the glyph has no outline source (substituted fonts with no shape for it, hostile font programs, pure
-// spacing glyphs report an empty — non-nil — path only when the program defines an empty outline). The
-// result is freshly built on each call; the raster device caches converted paths per (font, GID).
+// GlyphPath returns the glyph's outline in em-normalized glyph space (y up, advance 1.0 = one em), or nil when the
+// glyph has no outline source (substituted fonts with no shape for it, hostile font programs, pure spacing glyphs
+// report an empty — non-nil — path only when the program defines an empty outline). The result is freshly built on each
+// call; the raster device caches converted paths per (font, GID).
 func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	defer func() {
 		if recover() != nil { // Hostile font programs must degrade to a missing glyph, never break the render.
@@ -194,8 +193,8 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 		return nil // Type 3 glyphs are content streams; the interpreter executes them (no outlines exist).
 	}
 	if f.type0 != nil && f.type0.sfnt != nil {
-		// CIDFontType2: always the direct glyf walker — CID TrueType subsets routinely lack the cmap table
-		// go-text's Font layer requires, and one deterministic outline path beats two.
+		// CIDFontType2: always the direct glyf walker — CID TrueType subsets routinely lack the cmap table go-text's
+		// Font layer requires, and one deterministic outline path beats two.
 		if f.type0.sfnt.glyf != nil {
 			return f.type0.sfnt.glyf.path(gid)
 		}
@@ -225,9 +224,8 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 		return f.t1.glyphPath(gid)
 	case f.sub != nil:
 		if gid == 0 {
-			// A substituted code that mapped nowhere renders nothing: the substitute's .notdef box would be
-			// ink the original font never had (the embedded cases keep gid 0 — MuPDF draws an embedded
-			// program's own .notdef).
+			// A substituted code that mapped nowhere renders nothing: the substitute's .notdef box would be ink the
+			// original font never had (the embedded cases keep gid 0 — MuPDF draws an embedded program's own .notdef).
 			return nil
 		}
 		outline, ok := f.sub.face.GlyphDataOutline(tables.GlyphID(gid))

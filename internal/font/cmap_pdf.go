@@ -15,12 +15,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// PDF CMaps (ISO 32000-2 9.7.5, 9.10.3): the code→CID maps of Type0 font /Encoding entries and — through the
-// bf operators — ToUnicode maps. CMap content is lexically PDF surface syntax, so the exported cos.Lexer
-// tokenizes it (exactly as content streams do); the operators consulted are begincodespacerange/endcodespace-
-// range, begincidrange/begincidchar, beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the
-// CIDSystemInfo boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the
-// content interpreter uses.
+// PDF CMaps (ISO 32000-2 9.7.5, 9.10.3): the code→CID maps of Type0 font /Encoding entries and — through the bf
+// operators — ToUnicode maps. CMap content is lexically PDF surface syntax, so the exported cos.Lexer tokenizes it
+// (exactly as content streams do); the operators consulted are begincodespacerange/endcodespace- range,
+// begincidrange/begincidchar, beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the CIDSystemInfo
+// boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the content interpreter uses.
 
 // CMap resource caps.
 const (
@@ -42,8 +41,8 @@ type cidRangeEntry struct {
 	nBytes      uint8
 }
 
-// bfEntry maps the code range [lo, hi] to target strings: dst for a contiguous mapping (the last UTF-16 code
-// unit increments across the range), dstArray for an explicit per-code list.
+// bfEntry maps the code range [lo, hi] to target strings: dst for a contiguous mapping (the last UTF-16 code unit
+// increments across the range), dstArray for an explicit per-code list.
 type bfEntry struct {
 	dst      []byte
 	dstArray [][]byte
@@ -62,8 +61,8 @@ type cmapPDF struct {
 	identity   bool // Identity mapping: CID = code (Identity-H/V)
 }
 
-// predefinedCMap returns the built-in CMaps: Identity-H and Identity-V (ISO 32000-2 9.7.5.2). Every other
-// predefined name returns nil (bundling the Adobe cmap-resources corpus is deferred until real files need it).
+// predefinedCMap returns the built-in CMaps: Identity-H and Identity-V (ISO 32000-2 9.7.5.2). Every other predefined
+// name returns nil (bundling the Adobe cmap-resources corpus is deferred until real files need it).
 func predefinedCMap(name cos.Name) *cmapPDF {
 	switch name {
 	case "Identity-H":
@@ -80,8 +79,8 @@ func predefinedCMap(name cos.Name) *cmapPDF {
 	}
 }
 
-// parseCMap parses CMap content. resolveUse maps a usecmap name to its CMap (predefined or, for embedded
-// /UseCMap streams, loaded by the caller); depth caps usecmap chains.
+// parseCMap parses CMap content. resolveUse maps a usecmap name to its CMap (predefined or, for embedded /UseCMap
+// streams, loaded by the caller); depth caps usecmap chains.
 func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmapPDF {
 	if depth > maxCMapDepth {
 		return nil
@@ -107,8 +106,8 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 			break
 		}
 		if tok.Kind != cos.TokenKeyword {
-			// Bytes may alias the lexer's input, which is stable here (data is fully materialized), so
-			// tokens can be retained without copying.
+			// Bytes may alias the lexer's input, which is stable here (data is fully materialized), so tokens can be
+			// retained without copying.
 			push(tok)
 			continue
 		}
@@ -297,9 +296,9 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 	}
 }
 
-// nextCode decodes the next character code from b (ISO 32000-2 9.7.6.3): the codespace ranges determine how
-// many bytes one code spans. Codes outside every codespace consume bytes per the partial-match rule (the
-// shortest codespace length whose first byte brackets the input's first byte), defaulting to one byte.
+// nextCode decodes the next character code from b (ISO 32000-2 9.7.6.3): the codespace ranges determine how many bytes
+// one code spans. Codes outside every codespace consume bytes per the partial-match rule (the shortest codespace length
+// whose first byte brackets the input's first byte), defaulting to one byte.
 func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
 	for length := 1; length <= 4 && length <= len(b); length++ {
 		var v uint32
@@ -377,9 +376,9 @@ func (cm *cmapPDF) bfString(code uint32) string {
 	return ""
 }
 
-// utf16BEToString decodes UTF-16BE bytes, adding inc to the final code unit (the bfrange increment rule:
-// "the last byte of the string shall be incremented", which for UTF-16 targets is the final code unit).
-// Odd-length input drops the trailing byte, matching lenient viewers.
+// utf16BEToString decodes UTF-16BE bytes, adding inc to the final code unit (the bfrange increment rule: "the last byte
+// of the string shall be incremented", which for UTF-16 targets is the final code unit). Odd-length input drops the
+// trailing byte, matching lenient viewers.
 func utf16BEToString(b []byte, inc uint16) string {
 	if len(b) < 2 {
 		if len(b) == 1 { // A single byte: treat as one 8-bit unit (some producers write <41>).

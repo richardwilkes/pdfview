@@ -47,8 +47,8 @@ func (b *balanceDevice) StrokePath(_ *gfx.Path, _ *gfx.StrokeParams, _ gfx.Matri
 }
 func (b *balanceDevice) ClipPath(*gfx.Path, bool, gfx.Matrix) { b.depth++ }
 
-// replayTiling exercises a tiling paint's Replay closure exactly like the raster device would, so the child
-// interpreter it spawns (with its recursion guards and shared work budget) is under fuzz too.
+// replayTiling exercises a tiling paint's Replay closure exactly like the raster device would, so the child interpreter
+// it spawns (with its recursion guards and shared work budget) is under fuzz too.
 func (b *balanceDevice) replayTiling(paint device.Paint) {
 	if paint.Tiling != nil {
 		paint.Tiling.Replay(b, gfx.Identity())
@@ -108,8 +108,8 @@ func (b *balanceDevice) PopMask() {
 
 func (b *balanceDevice) FillShading(*shading.Shading, gfx.Matrix, device.Paint) {}
 
-// fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, an ExtGState, an
-// Indexed color space, and a Separation with a calculator tint.
+// fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, an ExtGState, an Indexed
+// color space, and a Separation with a calculator tint.
 const fuzzResourcePDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog >>
@@ -213,9 +213,8 @@ func fuzzResources() (*cos.Document, cos.Dict) {
 	return d, res
 }
 
-// FuzzContent drives the interpreter with arbitrary content streams against the canned resource set. The
-// balance device turns any push/pop violation into a panic, and Run must neither panic nor hang: all work is
-// cap-bounded.
+// FuzzContent drives the interpreter with arbitrary content streams against the canned resource set. The balance device
+// turns any push/pop violation into a panic, and Run must neither panic nor hang: all work is cap-bounded.
 func FuzzContent(f *testing.F) {
 	for _, name := range []string{"vectors.pdf", "rotate90.pdf"} {
 		if data, err := os.ReadFile(filepath.Join("..", "..", "testfiles", "corpus", name)); err == nil {
@@ -244,8 +243,8 @@ func FuzzContent(f *testing.F) {
 	doc, res := fuzzResources()
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dev := &balanceDevice{}
-		// Alternate between a tiny budgeted store (constant eviction) and none (per-Run caches) so both
-		// cache layers fuzz.
+		// Alternate between a tiny budgeted store (constant eviction) and none (per-Run caches) so both cache layers
+		// fuzz.
 		var st *store.Store
 		if len(data)%2 == 0 {
 			st = store.New(256)

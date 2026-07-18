@@ -10,9 +10,9 @@
 package cos
 
 // This file exports the package's lexer for the other consumers of PDF's surface syntax: content streams
-// (internal/content) and PostScript-calculator function programs (internal/function). Both share COS's lexical
-// rules exactly (ISO 32000-2 7.2) but assemble tokens differently from the object parser — content streams have
-// operators and no indirect references — so they consume tokens, not parsed objects.
+// (internal/content) and PostScript-calculator function programs (internal/function). Both share COS's lexical rules
+// exactly (ISO 32000-2 7.2) but assemble tokens differently from the object parser — content streams have operators and
+// no indirect references — so they consume tokens, not parsed objects.
 
 // TokenKind identifies the lexical class of a Token.
 type TokenKind uint8
@@ -33,9 +33,9 @@ const (
 	TokenBraceClose
 )
 
-// Token is one lexical token. The payload field depends on Kind: Int for TokenInt, Real for TokenReal, and
-// Bytes for TokenString (decoded bytes), TokenName (decoded name), and TokenKeyword (keyword text). Bytes may
-// alias the input buffer. Pos is the byte offset of the token's first character (end of input for TokenEOF).
+// Token is one lexical token. The payload field depends on Kind: Int for TokenInt, Real for TokenReal, and Bytes for
+// TokenString (decoded bytes), TokenName (decoded name), and TokenKeyword (keyword text). Bytes may alias the input
+// buffer. Pos is the byte offset of the token's first character (end of input for TokenEOF).
 type Token struct {
 	Bytes []byte
 	Int   int64
@@ -54,10 +54,9 @@ func NewLexer(data []byte, pos int) *Lexer {
 	return &Lexer{lex: lexer{data: data, pos: pos}}
 }
 
-// Next returns the next token. At end of input it returns a TokenEOF token with ok true. Lexical errors —
-// an unterminated string, a stray delimiter — report ok false with the position already advanced past the
-// offending input, so a lenient caller can simply continue scanning: the position never sticks, guaranteeing
-// forward progress.
+// Next returns the next token. At end of input it returns a TokenEOF token with ok true. Lexical errors — an
+// unterminated string, a stray delimiter — report ok false with the position already advanced past the offending input,
+// so a lenient caller can simply continue scanning: the position never sticks, guaranteeing forward progress.
 func (l *Lexer) Next() (tok Token, ok bool) {
 	t, err := l.lex.next()
 	if err != nil {
@@ -77,8 +76,8 @@ func (l *Lexer) Pos() int {
 	return l.lex.pos
 }
 
-// SetPos moves the read offset (used to skip non-lexical spans such as inline-image payloads). Offsets outside
-// the data are clamped to its end.
+// SetPos moves the read offset (used to skip non-lexical spans such as inline-image payloads). Offsets outside the data
+// are clamped to its end.
 func (l *Lexer) SetPos(pos int) {
 	if pos < 0 || pos > len(l.lex.data) {
 		pos = len(l.lex.data)
@@ -86,8 +85,8 @@ func (l *Lexer) SetPos(pos int) {
 	l.lex.pos = pos
 }
 
-// publicKind maps the internal token kinds to the exported ones. The internal set is a superset in ordering
-// only; map explicitly so neither enum constrains the other.
+// publicKind maps the internal token kinds to the exported ones. The internal set is a superset in ordering only; map
+// explicitly so neither enum constrains the other.
 func publicKind(k tokenKind) TokenKind {
 	switch k {
 	case tkInt:

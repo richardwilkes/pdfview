@@ -18,8 +18,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// docWith parses a minimal PDF whose numbered objects are the given bodies (object 1 first); the repair scan
-// handles the deliberately missing xref.
+// docWith parses a minimal PDF whose numbered objects are the given bodies (object 1 first); the repair scan handles
+// the deliberately missing xref.
 func docWith(t *testing.T, bodies ...string) *cos.Document {
 	t.Helper()
 	var b strings.Builder

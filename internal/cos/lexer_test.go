@@ -230,8 +230,8 @@ func TestParseIndirectWithStream(t *testing.T) {
 }
 
 func TestParseIndirectEmptyStream(t *testing.T) {
-	// A zero-length payload whose post-stream EOL directly abuts endstream must not underflow the EOL trim
-	// (found by FuzzOpen; the input is preserved under testdata/fuzz).
+	// A zero-length payload whose post-stream EOL directly abuts endstream must not underflow the EOL trim (found by
+	// FuzzOpen; the input is preserved under testdata/fuzz).
 	for _, src := range []string{
 		"0 0obj<<>>stream\nendstream0",
 		"1 0 obj << >> stream\nendstream endobj",
@@ -252,8 +252,8 @@ func TestParseIndirectEmptyStream(t *testing.T) {
 }
 
 func TestParseIndirectEndPosition(t *testing.T) {
-	// The value 42 requires lookahead that pushes tokens back; the reported end must still point before the
-	// next object's header.
+	// The value 42 requires lookahead that pushes tokens back; the reported end must still point before the next
+	// object's header.
 	src := []byte("5 0 obj 42\n6 0 obj null endobj")
 	obj, _, end, err := parseIndirectAt(src, 0, 5)
 	if err != nil {

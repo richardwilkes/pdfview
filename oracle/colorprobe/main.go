@@ -7,21 +7,20 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Command colorprobe regenerates internal/color's behavioral conversion tables by rendering flat-patch probe
-// PDFs through github.com/richardwilkes/pdf (MuPDF via cgo) and sampling the resulting pixels — run-only
-// behavioral observation (the clean-room rule: observe rendered output, never read MuPDF source). Like the
-// golden dumps, it is a local development tool: rerun it (and review the diffs) when the oracle's MuPDF build
-// moves.
+// Command colorprobe regenerates internal/color's behavioral conversion tables by rendering flat-patch probe PDFs
+// through github.com/richardwilkes/pdf (MuPDF via cgo) and sampling the resulting pixels — run-only behavioral
+// observation (the clean-room rule: observe rendered output, never read MuPDF source). Like the golden dumps, it is a
+// local development tool: rerun it (and review the diffs) when the oracle's MuPDF build moves.
 //
 // Usage:
 //
 //	go run ./colorprobe [-out ../internal/color/data]
 //
-// It writes gray1021.bin (DeviceGray sampled at i/1020 → RGB bytes) and cmyk17.bin.gz (DeviceCMYK on the 17^4
-// grid → RGB bytes, gzipped), then validates that internal/color's evaluation strategies reproduce fresh
-// off-grid observations: DeviceRGB as trunc(v×255) per channel exactly, and the CMYK grid under multilinear
-// interpolation within a small tolerance. Validation failure means MuPDF's conversion behavior changed shape,
-// not just values — internal/color then needs rework, not just new tables.
+// It writes gray1021.bin (DeviceGray sampled at i/1020 → RGB bytes) and cmyk17.bin.gz (DeviceCMYK on the 17^4 grid →
+// RGB bytes, gzipped), then validates that internal/color's evaluation strategies reproduce fresh off-grid
+// observations: DeviceRGB as trunc(v×255) per channel exactly, and the CMYK grid under multilinear interpolation within
+// a small tolerance. Validation failure means MuPDF's conversion behavior changed shape, not just values —
+// internal/color then needs rework, not just new tables.
 package main
 
 import (
@@ -79,8 +78,8 @@ func main() {
 		filepath.Join(*out, "cmyk17.bin.gz"), gz.Len())
 }
 
-// render builds a single-page PDF filling one patch per comps entry with the given operator, renders it at
-// 72 dpi, and returns the patches (with sample coordinates) plus the image.
+// render builds a single-page PDF filling one patch per comps entry with the given operator, renders it at 72 dpi, and
+// returns the patches (with sample coordinates) plus the image.
 func render(op string, pats [][]float64) ([]patch, *image.NRGBA) {
 	const cols = 96
 	rows := (len(pats) + cols - 1) / cols
@@ -134,8 +133,8 @@ func probeGray() []byte {
 	return table
 }
 
-// verifyRGB asserts the DeviceRGB model internal/color hard-codes: each channel is trunc(float32(v)×255),
-// independent of the others.
+// verifyRGB asserts the DeviceRGB model internal/color hard-codes: each channel is trunc(float32(v)×255), independent
+// of the others.
 func verifyRGB() {
 	rng := rand.New(rand.NewSource(7)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 3*1021+500)
@@ -181,8 +180,8 @@ func probeCMYK() []byte {
 	return table
 }
 
-// validateCMYK renders off-grid colors and checks multilinear interpolation of the freshly captured grid
-// against them, mirroring internal/color's evaluation.
+// validateCMYK renders off-grid colors and checks multilinear interpolation of the freshly captured grid against them,
+// mirroring internal/color's evaluation.
 func validateCMYK(table []byte) {
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 2000)

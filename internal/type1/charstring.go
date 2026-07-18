@@ -14,27 +14,26 @@ import (
 	ot "github.com/go-text/typesetting/font/opentype"
 )
 
-// Charstring execution: go-text's psinterpreter supplies the Type1Charstring machine (number encodings,
-// argument stack, subroutine calls without bias) and the shared CharstringReader geometry helpers; this file
-// contributes the Type 1 operator handler — hsbw/sbw, seac, the flex and hint-replacement othersubr protocol,
-// and div/pop — per the Adobe Type 1 Font Format specification chapter 6-8.
+// Charstring execution: go-text's psinterpreter supplies the Type1Charstring machine (number encodings, argument stack,
+// subroutine calls without bias) and the shared CharstringReader geometry helpers; this file contributes the Type 1
+// operator handler — hsbw/sbw, seac, the flex and hint-replacement othersubr protocol, and div/pop — per the Adobe Type
+// 1 Font Format specification chapter 6-8.
 
 // Caps against hostile charstrings.
 const (
 	maxPSStack    = 64 // The othersubr communication stack (real fonts use at most 2 slots).
 	maxFlexPoints = 64 // Collected flex reference points (the protocol produces exactly 7).
-	// maxHandlerOps bounds one glyph's executed operators: subroutines can be re-called O(charstring) times,
-	// so without a counter a hostile program amplifies its input length quadratically. Real glyphs run a few
-	// hundred operators.
+	// maxHandlerOps bounds one glyph's executed operators: subroutines can be re-called O(charstring) times, so without
+	// a counter a hostile program amplifies its input length quadratically. Real glyphs run a few hundred operators.
 	maxHandlerOps = 1 << 18
 	// maxSegments bounds one glyph's emitted outline segments (real glyphs have well under a thousand).
 	maxSegments = 1 << 14
 )
 
-// Glyph interprets the named glyph's charstring, returning its outline segments (in glyph units, y up — the
-// caller maps them through FontMatrix) and its advance width from hsbw/sbw. Unknown names and execution
-// failures return ErrBadCharstring; hostile programs cannot panic (the machine and handler are bounds-checked
-// throughout, and a recover guard backstops them).
+// Glyph interprets the named glyph's charstring, returning its outline segments (in glyph units, y up — the caller maps
+// them through FontMatrix) and its advance width from hsbw/sbw. Unknown names and execution failures return
+// ErrBadCharstring; hostile programs cannot panic (the machine and handler are bounds-checked throughout, and a recover
+// guard backstops them).
 func (f *Font) Glyph(name string) (segs []ot.Segment, advance float32, err error) {
 	defer func() {
 		if recover() != nil {
@@ -48,8 +47,8 @@ func (f *Font) Glyph(name string) (segs []ot.Segment, advance float32, err error
 	return h.reader.Segments, float32(h.advance), nil
 }
 
-// Advance interprets only up to the width operator (hsbw/sbw arrives first in every valid charstring),
-// returning the glyph's advance in glyph units.
+// Advance interprets only up to the width operator (hsbw/sbw arrives first in every valid charstring), returning the
+// glyph's advance in glyph units.
 func (f *Font) Advance(name string) (adv float32, ok bool) {
 	defer func() {
 		if recover() != nil { // A hostile program degrades to no advance.
@@ -80,26 +79,26 @@ func (f *Font) run(name string, widthOnly bool) (*handler, error) {
 
 // handler implements psi.OperatorHandler for Type 1 charstrings.
 //
-// Path-state notes: CharstringReader implements Type 2 semantics, where contours close only implicitly (on
-// the next moveto or at the end). Type 1 adds the explicit closepath operator — which per its spec does NOT
-// reposition the current point — so the handler tracks contour state itself (contourStart, justClosed,
-// needClose) to suppress the duplicate closing segments the reader would otherwise emit, and folds the
-// hsbw/sbw sidebearing origin into the first path operation instead of faking a move.
+// Path-state notes: CharstringReader implements Type 2 semantics, where contours close only implicitly (on the next
+// moveto or at the end). Type 1 adds the explicit closepath operator — which per its spec does NOT reposition the
+// current point — so the handler tracks contour state itself (contourStart, justClosed, needClose) to suppress the
+// duplicate closing segments the reader would otherwise emit, and folds the hsbw/sbw sidebearing origin into the first
+// path operation instead of faking a move.
 type handler struct {
 	font *Font
-	// psStack is the PostScript communication stack of the othersubr protocol: callothersubr pushes results
-	// (or unhandled arguments), pop retrieves them.
+	// psStack is the PostScript communication stack of the othersubr protocol: callothersubr pushes results (or
+	// unhandled arguments), pop retrieves them.
 	psStack []float64
 	// flexPoints collects the reference points delivered through rmoveto while a flex sequence is active.
 	flexPoints []psi.Point
 	reader     psi.CharstringReader
-	// flexCur tracks the moving point during flex (reader.CurrentPoint intentionally stays at the flex start
-	// so the two curves emit with correct relative geometry).
+	// flexCur tracks the moving point during flex (reader.CurrentPoint intentionally stays at the flex start so the two
+	// curves emit with correct relative geometry).
 	flexCur psi.Point
 	// contourStart is where the current contour began (the last moveto's target).
 	contourStart psi.Point
-	// transX/transY translate the glyph being interpreted: zero normally, (adx-asb, ady) for the accent
-	// component of a seac composite. hsbw/sbw apply it to their sidebearing point.
+	// transX/transY translate the glyph being interpreted: zero normally, (adx-asb, ady) for the accent component of a
+	// seac composite. hsbw/sbw apply it to their sidebearing point.
 	transX, transY float64
 	// pendingX/pendingY hold the sidebearing origin set by hsbw/sbw until the first path operation uses it.
 	pendingX, pendingY float64
@@ -126,21 +125,20 @@ func (h *handler) finish() {
 	}
 }
 
-// moveTo starts a new contour displaced (dx, dy) from the current point, folding in a pending sidebearing
-// origin and suppressing the reader's automatic close when closepath already closed the contour.
+// moveTo starts a new contour displaced (dx, dy) from the current point, folding in a pending sidebearing origin and
+// suppressing the reader's automatic close when closepath already closed the contour.
 func (h *handler) moveTo(state *psi.Machine, dx, dy float64) error {
 	if h.hasPending {
-		// The first path operation of this charstring run: the displacement is from the sidebearing origin,
-		// an absolute position (the reader's current point is elsewhere when a seac component follows the
-		// base glyph).
+		// The first path operation of this charstring run: the displacement is from the sidebearing origin, an absolute
+		// position (the reader's current point is elsewhere when a seac component follows the base glyph).
 		target := psi.Point{X: h.pendingX + dx, Y: h.pendingY + dy}
 		dx = target.X - h.reader.CurrentPoint.X
 		dy = target.Y - h.reader.CurrentPoint.Y
 		h.hasPending = false
 	}
 	if h.justClosed {
-		// The reader's move() would append a second closing segment (its current point is off the contour
-		// start after an explicit closepath); align them while preserving the absolute target.
+		// The reader's move() would append a second closing segment (its current point is off the contour start after
+		// an explicit closepath); align them while preserving the absolute target.
 		target := psi.Point{X: h.reader.CurrentPoint.X + dx, Y: h.reader.CurrentPoint.Y + dy}
 		h.reader.CurrentPoint = h.contourStart
 		dx, dy = target.X-h.contourStart.X, target.Y-h.contourStart.Y
@@ -200,8 +198,8 @@ const (
 	opEscSetCurPt  = 33
 )
 
-// Apply implements psi.OperatorHandler. Type 1 semantics clear the argument stack after every operator except
-// the stack-manipulating ones (callsubr/return/div/pop and the othersubr protocol).
+// Apply implements psi.OperatorHandler. Type 1 semantics clear the argument stack after every operator except the
+// stack-manipulating ones (callsubr/return/div/pop and the othersubr protocol).
 func (h *handler) Apply(state *psi.Machine, op psi.Operator) error {
 	h.ops++
 	if h.ops > maxHandlerOps || len(h.reader.Segments) > maxSegments {
@@ -331,9 +329,9 @@ func (h *handler) applyEscaped(state *psi.Machine, op byte) error {
 	return nil
 }
 
-// setSidebearing implements hsbw/sbw: record the advance (unless running a seac component, whose widths are
-// the composite's concern) and stage the (possibly seac-translated) sidebearing point as the origin of the
-// first path operation.
+// setSidebearing implements hsbw/sbw: record the advance (unless running a seac component, whose widths are the
+// composite's concern) and stage the (possibly seac-translated) sidebearing point as the origin of the first path
+// operation.
 func (h *handler) setSidebearing(state *psi.Machine, sbx, sby, wx float64) error {
 	if !h.inSeac {
 		h.advance = wx
@@ -347,8 +345,8 @@ func (h *handler) setSidebearing(state *psi.Machine, sbx, sby, wx float64) error
 	return nil
 }
 
-// flexMove collects one flex reference point delivered via a moveto while flex is active. op selects the
-// operand layout (rmoveto: dx dy; hmoveto: dx; vmoveto: dy).
+// flexMove collects one flex reference point delivered via a moveto while flex is active. op selects the operand layout
+// (rmoveto: dx dy; hmoveto: dx; vmoveto: dy).
 func (h *handler) flexMove(state *psi.Machine, op byte) error {
 	var dx, dy float64
 	switch op {
@@ -420,8 +418,8 @@ func (h *handler) pushPS(args []float64) {
 }
 
 // flexEnd assembles the two collected flex curves. The protocol collects exactly 7 points: the reference point
-// (discarded — it exists for the hint mechanism) and the 6 control/end points of the two Béziers. The end
-// coordinates duplicated in args feed the two pops that follow.
+// (discarded — it exists for the hint mechanism) and the 6 control/end points of the two Béziers. The end coordinates
+// duplicated in args feed the two pops that follow.
 func (h *handler) flexEnd(args []float64) error {
 	h.inFlex = false
 	if len(h.flexPoints) < 7 {
@@ -433,21 +431,23 @@ func (h *handler) flexEnd(args []float64) error {
 	h.reader.RelativeCurveTo(
 		psi.Point{X: p[1].X - cur.X, Y: p[1].Y - cur.Y},
 		psi.Point{X: p[2].X - p[1].X, Y: p[2].Y - p[1].Y},
-		psi.Point{X: p[3].X - p[2].X, Y: p[3].Y - p[2].Y})
+		psi.Point{X: p[3].X - p[2].X, Y: p[3].Y - p[2].Y},
+	)
 	h.reader.RelativeCurveTo(
 		psi.Point{X: p[4].X - p[3].X, Y: p[4].Y - p[3].Y},
 		psi.Point{X: p[5].X - p[4].X, Y: p[5].Y - p[4].Y},
-		psi.Point{X: p[6].X - p[5].X, Y: p[6].Y - p[5].Y})
+		psi.Point{X: p[6].X - p[5].X, Y: p[6].Y - p[5].Y},
+	)
 	if len(args) >= 3 { // Feed endX, endY to the two following pops (endX pops first).
 		h.pushPS(args[1:3])
 	}
 	return nil
 }
 
-// seac draws a composite accented character (spec 8.6.1): the base and accent glyphs are looked up by
-// StandardEncoding code and interpreted into the same reader, the accent translated so its sidebearing point
-// lands at (adx, ady) relative to the composite's origin (its own hsbw contributes its sbx, which the spec
-// requires to equal asb). seac terminates the charstring like endchar.
+// seac draws a composite accented character (spec 8.6.1): the base and accent glyphs are looked up by StandardEncoding
+// code and interpreted into the same reader, the accent translated so its sidebearing point lands at (adx, ady)
+// relative to the composite's origin (its own hsbw contributes its sbx, which the spec requires to equal asb). seac
+// terminates the charstring like endchar.
 func (h *handler) seac(state *psi.Machine) error {
 	if h.inSeac { // The spec forbids nested composites; hostile programs try.
 		return ErrBadCharstring

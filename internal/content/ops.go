@@ -16,16 +16,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// op dispatches one operator. Operators with missing or mistyped operands are skipped, as are unknown ones —
-// the operand list is discarded either way by the caller, which is the viewer-conventional recovery that keeps
-// hostile or sloppy content from desynchronizing anything.
+// op dispatches one operator. Operators with missing or mistyped operands are skipped, as are unknown ones — the
+// operand list is discarded either way by the caller, which is the viewer-conventional recovery that keeps hostile or
+// sloppy content from desynchronizing anything.
 //
 //nolint:gocyclo // A flat dispatch table over the content operator set; a map of closures would just hide the same fan-out.
 func (in *interp) op(word string) {
 	if in.t3Shape == t3Mask || in.suppressColor {
-		// After d1, a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill
-		// color paints the glyph (ISO 32000-2 9.6.4). An uncolored tiling pattern's cell is likewise a
-		// stencil painted with the pattern color (8.7.3.3), so its color operators are suppressed too.
+		// After d1, a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill color
+		// paints the glyph (ISO 32000-2 9.6.4). An uncolored tiling pattern's cell is likewise a stencil painted with
+		// the pattern color (8.7.3.3), so its color operators are suppressed too.
 		switch word {
 		case "g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN":
 			return
@@ -270,8 +270,8 @@ func (in *interp) opSave() {
 	in.gs.clips = 0
 }
 
-// opRestore implements Q. Restores are ignored when they would cross the executing stream's boundary (qFloor)
-// or match an ignored overflow push.
+// opRestore implements Q. Restores are ignored when they would cross the executing stream's boundary (qFloor) or match
+// an ignored overflow push.
 func (in *interp) opRestore() {
 	if in.qOverflow > 0 {
 		in.qOverflow--
@@ -283,8 +283,8 @@ func (in *interp) opRestore() {
 	in.restoreState()
 }
 
-// paintPath implements the path-painting operators: optional close, fill, stroke, then the deferred W/W* clip,
-// and finally the path reset. Fill precedes stroke (B and friends), which matters under transparency.
+// paintPath implements the path-painting operators: optional close, fill, stroke, then the deferred W/W* clip, and
+// finally the path reset. Fill precedes stroke (B and friends), which matters under transparency.
 func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 	if closeFirst && in.hasCur {
 		in.path.Close()
@@ -312,8 +312,8 @@ func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 	in.hasCur = false
 }
 
-// marks reports whether painting with the space produces marks: a /Pattern space marks only once an scn has
-// selected a usable pattern; Separation /None never marks by definition (its color resolves transparent).
+// marks reports whether painting with the space produces marks: a /Pattern space marks only once an scn has selected a
+// usable pattern; Separation /None never marks by definition (its color resolves transparent).
 func (in *interp) marks(space pdfcolor.Space, pat *patternRes) bool {
 	if _, isPattern := space.(*pdfcolor.Pattern); isPattern {
 		return pat != nil
@@ -351,9 +351,9 @@ func (in *interp) componentsFor(space pdfcolor.Space) []float32 {
 	return in.leadingFloats(maxN)
 }
 
-// opDash implements d: a dash array plus phase. The array is truncated to maxDashEntries and non-finite or
-// negative entries invalidate it (rendered solid), the leniency deployed viewers apply; deeper sanitization
-// (odd counts, all-zero patterns) is the raster device's concern.
+// opDash implements d: a dash array plus phase. The array is truncated to maxDashEntries and non-finite or negative
+// entries invalidate it (rendered solid), the leniency deployed viewers apply; deeper sanitization (odd counts,
+// all-zero patterns) is the raster device's concern.
 func (in *interp) opDash() {
 	if len(in.operands) < 2 {
 		return
@@ -381,8 +381,8 @@ func (in *interp) opDash() {
 	in.gs.sp.DashPhase = float32(phase)
 }
 
-// opExtGState implements gs: apply the supported subset of an ExtGState dictionary (line parameters, dash,
-// constant alpha, blend mode, soft mask). The remaining entries (font, transfer functions, ...) are ignored.
+// opExtGState implements gs: apply the supported subset of an ExtGState dictionary (line parameters, dash, constant
+// alpha, blend mode, soft mask). The remaining entries (font, transfer functions, ...) are ignored.
 func (in *interp) opExtGState() {
 	name, ok := in.name1()
 	if !ok {
@@ -429,8 +429,8 @@ func (in *interp) opExtGState() {
 	}
 }
 
-// softMaskFor parses an ExtGState /SMask entry with per-frame caching keyed by the ExtGState resource name
-// (the CTM-independent part is cached; the anchor CTM is captured per invocation).
+// softMaskFor parses an ExtGState /SMask entry with per-frame caching keyed by the ExtGState resource name (the
+// CTM-independent part is cached; the anchor CTM is captured per invocation).
 func (in *interp) softMaskFor(gsName cos.Name, obj cos.Object) *softMaskRes {
 	frame := &in.frames[len(in.frames)-1]
 	if frame.softMasks == nil {
@@ -449,8 +449,8 @@ func d64(d *cos.Document, dict cos.Dict, key cos.Name) (float64, bool) {
 	return cos.AsReal(d.Resolve(dict[key]))
 }
 
-// blendFor maps a /BM value (a name, or an array whose first supported name wins) to a blend mode.
-// Unrecognized names mean Normal, as the standard requires.
+// blendFor maps a /BM value (a name, or an array whose first supported name wins) to a blend mode. Unrecognized names
+// mean Normal, as the standard requires.
 func blendFor(d *cos.Document, obj cos.Object) device.Blend {
 	resolved := d.Resolve(obj)
 	if arr, ok := resolved.(cos.Array); ok {
@@ -506,10 +506,10 @@ func (in *interp) opDo() {
 	in.execForm(raw, stream)
 }
 
-// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle
-// set, q + /Matrix concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the
-// current graphics state. opDo dispatches here; RunAnnot enters here directly for annotation appearance streams
-// (which are form XObjects positioned by the caller's CTM).
+// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle set, q +
+// /Matrix concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the current graphics
+// state. opDo dispatches here; RunAnnot enters here directly for annotation appearance streams (which are form XObjects
+// positioned by the caller's CTM).
 func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if in.formDepth >= maxFormDepth {
 		return
@@ -526,8 +526,8 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if err != nil {
 		return
 	}
-	// A form executes like q; cm /Matrix; W-clip /BBox; its content; Q — with its own resources and a fresh
-	// per-stream state (operand list, path, pending clip).
+	// A form executes like q; cm /Matrix; W-clip /BBox; its content; Q — with its own resources and a fresh per-stream
+	// state (operand list, path, pending clip).
 	if len(in.gsStack) >= maxQDepth {
 		return // No room to save state; skipping the form entirely is the only balanced choice.
 	}
@@ -535,10 +535,10 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if v, has := numbers6(in.doc, stream.Dict, "Matrix"); has {
 		in.gs.ctm = gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}.Mul(in.gs.ctm)
 	}
-	// A /Group /S /Transparency form composites as a transparency group (ISO 32000-2 11.6.6): the current
-	// soft mask, constant alpha, and blend apply once to the group's composite (the mask via the replay, the
-	// alpha/blend via BeginGroup), and the group's interior starts with those reset. Painting a group via Do
-	// is a nonstroking operation, so the FILL alpha composites it.
+	// A /Group /S /Transparency form composites as a transparency group (ISO 32000-2 11.6.6): the current soft mask,
+	// constant alpha, and blend apply once to the group's composite (the mask via the replay, the alpha/blend via
+	// BeginGroup), and the group's interior starts with those reset. Painting a group via Do is a nonstroking
+	// operation, so the FILL alpha composites it.
 	inGroup, isolated, knockout := in.transparencyGroup(stream.Dict)
 	maskWrapped := false
 	if inGroup {
@@ -574,8 +574,8 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	in.frames = in.frames[:len(in.frames)-1]
 	in.res = in.res[:len(in.res)-1]
 	if inGroup {
-		// The BBox clip must pop before the mask/group layers close, keeping the device's push/pop nesting
-		// well-formed; opRestore then only restores the graphics state.
+		// The BBox clip must pop before the mask/group layers close, keeping the device's push/pop nesting well-formed;
+		// opRestore then only restores the graphics state.
 		in.popClips(0)
 		if maskWrapped {
 			in.dev.PopMask()
@@ -585,8 +585,8 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	in.opRestore()
 }
 
-// transparencyGroup reports whether a form XObject's dictionary declares a transparency group, with its
-// isolation (/I) and knockout (/K) attributes.
+// transparencyGroup reports whether a form XObject's dictionary declares a transparency group, with its isolation (/I)
+// and knockout (/K) attributes.
 func (in *interp) transparencyGroup(dict cos.Dict) (isGroup, isolated, knockout bool) {
 	groupDict, has := in.doc.GetDict(dict, "Group")
 	if !has {

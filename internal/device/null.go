@@ -17,9 +17,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// Null is a Device that ignores every operation. It exists so the interpreter can be driven without a
-// consumer — most importantly by FuzzContent, which exercises the interpreter's robustness against hostile
-// content streams without paying for rasterization.
+// Null is a Device that ignores every operation. It exists so the interpreter can be driven without a consumer — most
+// importantly by FuzzContent, which exercises the interpreter's robustness against hostile content streams without
+// paying for rasterization.
 type Null struct{}
 
 // FillPath implements Device.

@@ -25,17 +25,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Transparency groups and soft masks. A group maps to SaveLayer with the group's constant alpha and
-// blend mode on the restore paint; a NON-isolated group whose composite is trivial (alpha 1, blend Normal,
-// no knockout) is passed through without a layer, which reproduces non-isolated semantics exactly — interior
-// blend modes then see the true backdrop, as MuPDF does (oracle-pinned by the isolation probe). A
-// non-isolated group with a non-trivial composite still gets a layer, an accepted isolated approximation.
+// Transparency groups and soft masks. A group maps to SaveLayer with the group's constant alpha and blend mode on the
+// restore paint; a NON-isolated group whose composite is trivial (alpha 1, blend Normal, no knockout) is passed through
+// without a layer, which reproduces non-isolated semantics exactly — interior blend modes then see the true backdrop,
+// as MuPDF does (oracle-pinned by the isolation probe). A non-isolated group with a non-trivial composite still gets a
+// layer, an accepted isolated approximation.
 //
-// Soft masks render their content to a separate offscreen surface: BeginMask swaps the canvas, EndMask reads
-// the surface back, reduces it to an 8-bit coverage plane (rendered alpha for /S /Alpha; the captured MuPDF
-// luminosity response for /S /Luminosity — see maskLuma), applies the /TR LUT, and opens the masked-content
-// layer on the main canvas; PopMask multiplies the layer by the plane (BlendDstIn over the full canvas) and
-// restores it.
+// Soft masks render their content to a separate offscreen surface: BeginMask swaps the canvas, EndMask reads the
+// surface back, reduces it to an 8-bit coverage plane (rendered alpha for /S /Alpha; the captured MuPDF luminosity
+// response for /S /Luminosity — see maskLuma), applies the /TR LUT, and opens the masked-content layer on the main
+// canvas; PopMask multiplies the layer by the plane (BlendDstIn over the full canvas) and restores it.
 
 // groupState is one BeginGroup's record.
 type groupState struct {
@@ -60,8 +59,8 @@ type maskState struct {
 func (d *Device) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
 	trivial := alpha >= 1 && blend == device.BlendNormal && !knockout
 	if !isolated && trivial {
-		// Non-isolated with nothing to composite: drawing inline IS the group semantics (interior blends
-		// composite against the true backdrop).
+		// Non-isolated with nothing to composite: drawing inline IS the group semantics (interior blends composite
+		// against the true backdrop).
 		d.groupStack = append(d.groupStack, groupState{})
 		return
 	}
@@ -85,11 +84,11 @@ func (d *Device) EndGroup() {
 	}
 }
 
-// knockoutSrc reports whether solid draws must composite with BlendSrc: inside a knockout group, each object
-// replaces what earlier objects painted where it covers (ISO 32000-2 11.4.5; with the group's layer starting
-// transparent, compositing the object against the initial backdrop then replacing is exactly BlendSrc under
-// coverage). Suppressed while a soft-mask span is open — mask content composites normally, and a masked op
-// lives in its own layer where Src has nothing to knock out.
+// knockoutSrc reports whether solid draws must composite with BlendSrc: inside a knockout group, each object replaces
+// what earlier objects painted where it covers (ISO 32000-2 11.4.5; with the group's layer starting transparent,
+// compositing the object against the initial backdrop then replacing is exactly BlendSrc under coverage). Suppressed
+// while a soft-mask span is open — mask content composites normally, and a masked op lives in its own layer where Src
+// has nothing to knock out.
 func (d *Device) knockoutSrc() bool {
 	return len(d.maskStack) == 0 && len(d.groupStack) > 0 && d.groupStack[len(d.groupStack)-1].knockout
 }
@@ -107,14 +106,14 @@ func (d *Device) BeginMask(_ gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA,
 	d.textClip = nil
 	ms.surf = surface.NewRasterN32Premul(int32(d.width), int32(d.height), nil)
 	if ms.surf == nil {
-		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page; the
-		// masked op then draws unmasked (degrade, never erase).
+		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page; the masked op
+		// then draws unmasked (degrade, never erase).
 		ms.guard = d.c.SaveLayerAlpha(nil, 0)
 	} else {
 		d.c = ms.surf.Canvas()
 		if luminosity {
-			// The mask group composites over the /BC backdrop before luminance extraction; prefilling the
-			// whole surface also gives areas outside the group's BBox the backdrop's luminosity.
+			// The mask group composites over the /BC backdrop before luminance extraction; prefilling the whole surface
+			// also gives areas outside the group's BBox the backdrop's luminosity.
 			p := canvas.NewPaint()
 			p.Color = colorcore.ARGB(255, backdrop.R, backdrop.G, backdrop.B)
 			d.c.DrawPaint(p)
@@ -178,8 +177,8 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 	}
 	plane := make([]byte, d.width*d.height)
 	if ms.luminosity {
-		// The luminosity surface is opaque (prefilled with the backdrop), so the premultiplied bytes are the
-		// straight color values.
+		// The luminosity surface is opaque (prefilled with the backdrop), so the premultiplied bytes are the straight
+		// color values.
 		for i, j := 0, 0; j < len(plane); i, j = i+4, j+1 {
 			plane[j] = maskLuma(pix[i], pix[i+1], pix[i+2])
 		}
@@ -202,21 +201,21 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 	return imagecore.NewRasterData(ainfo, plane, d.width)
 }
 
-// maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed,
-// like the device-color tables in internal/color) was captured behaviorally from per-channel and neutral
-// ramps: the response is a weighted sum of the ENCODED channel values — weights 78/159/15 out of 252,
-// measured at the ramp tops — followed by the captured neutral response curve. Neutral inputs reproduce the
-// oracle exactly by construction; primaries and mixtures land within ±2 of the oracle across the 800-sample
-// probe set (the oracle itself converts DeviceGray-sourced mask content through a slightly different
-// gray→gray ICC path, also within ±2). Entry 255 is pinned to 255 rather than the measured RGB-path 254 so
-// fully lit mask areas pass content through unchanged (the oracle's gray-path white does the same).
+// maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed, like the
+// device-color tables in internal/color) was captured behaviorally from per-channel and neutral ramps: the response is
+// a weighted sum of the ENCODED channel values — weights 78/159/15 out of 252, measured at the ramp tops — followed by
+// the captured neutral response curve. Neutral inputs reproduce the oracle exactly by construction; primaries and
+// mixtures land within ±2 of the oracle across the 800-sample probe set (the oracle itself converts DeviceGray-sourced
+// mask content through a slightly different gray→gray ICC path, also within ±2). Entry 255 is pinned to 255 rather than
+// the measured RGB-path 254 so fully lit mask areas pass content through unchanged (the oracle's gray-path white does
+// the same).
 func maskLuma(r, g, b uint8) uint8 {
 	t := (78*uint32(r) + 159*uint32(g) + 15*uint32(b) + 126) / 252
 	return maskNeutralLUT[t]
 }
 
-// maskNeutralLUT is the captured neutral-ramp response of the oracle's RGB→luminosity conversion (256 RGB
-// neutral fills through a luminosity soft mask over solid content, dpi 72; see maskLuma).
+// maskNeutralLUT is the captured neutral-ramp response of the oracle's RGB→luminosity conversion (256 RGB neutral fills
+// through a luminosity soft mask over solid content, dpi 72; see maskLuma).
 var maskNeutralLUT = [256]uint8{
 	0, 0, 1, 2, 2, 3, 4, 6, 7, 8, 9, 9, 10, 11, 13, 14,
 	15, 16, 17, 17, 18, 20, 21, 22, 23, 24, 24, 25, 27, 28, 29, 30,

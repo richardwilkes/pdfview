@@ -17,8 +17,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// docWith parses a minimal PDF whose object 1 is the given body, returning the document; the repair scan
-// handles the deliberately missing xref.
+// docWith parses a minimal PDF whose object 1 is the given body, returning the document; the repair scan handles the
+// deliberately missing xref.
 func docWith(t *testing.T, body string) *cos.Document {
 	t.Helper()
 	pdf := "%PDF-1.7\n1 0 obj\n" + body + "\nendobj\n" +
@@ -108,8 +108,8 @@ func TestSampled(t *testing.T) {
 }
 
 func TestSampledMultiOut4Bit(t *testing.T) {
-	// Two samples × two outputs at 4 bits each: values 0x0F, 0xF0 → sample0 = (0, 15), sample1 = (15, 0),
-	// decoded over [0,1] as (0,1) and (1,0).
+	// Two samples × two outputs at 4 bits each: values 0x0F, 0xF0 → sample0 = (0, 15), sample1 = (15, 0), decoded over
+	// [0,1] as (0,1) and (1,0).
 	payload := string([]byte{0x0F, 0xF0})
 	d := docWithStream(t, "/FunctionType 0 /Domain [0 1] /Range [0 1 0 1] /Size [2] /BitsPerSample 4", payload)
 	fn := parseObj1(t, d)

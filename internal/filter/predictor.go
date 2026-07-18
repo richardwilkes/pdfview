@@ -13,10 +13,10 @@ import (
 	"fmt"
 )
 
-// applyPredictor reverses the predictor transform named by p on decompressed data. Predictor 1 (or less, treated
-// as 1) is a no-op, 2 is TIFF horizontal differencing, and 10-15 are the PNG filters (each row carries its own
-// filter-type byte, so the specific value does not matter on decode). data is owned by the caller's decode stage
-// and may be modified in place; the result is capped at maxSize bytes.
+// applyPredictor reverses the predictor transform named by p on decompressed data. Predictor 1 (or less, treated as 1)
+// is a no-op, 2 is TIFF horizontal differencing, and 10-15 are the PNG filters (each row carries its own filter-type
+// byte, so the specific value does not matter on decode). data is owned by the caller's decode stage and may be
+// modified in place; the result is capped at maxSize bytes.
 func applyPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	switch {
 	case p.Predictor <= 1:
@@ -30,8 +30,8 @@ func applyPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	}
 }
 
-// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow and
-// hostile parameters cannot force absurd allocations.
+// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow and hostile
+// parameters cannot force absurd allocations.
 func validatePredictorParams(p Params) error {
 	if p.Colors < 1 || p.Colors > 64 {
 		return fmt.Errorf("%w: predictor with %d colors", ErrUnsupportedFilter, p.Colors)
@@ -47,18 +47,18 @@ func validatePredictorParams(p Params) error {
 	return nil
 }
 
-// pngPredictor reverses the PNG row filters (RFC 2083 section 6): every row is one filter-type byte followed by
-// the filtered row bytes. A truncated final row is processed as far as the data goes.
+// pngPredictor reverses the PNG row filters (RFC 2083 section 6): every row is one filter-type byte followed by the
+// filtered row bytes. A truncated final row is processed as far as the data goes.
 func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	if err := validatePredictorParams(p); err != nil {
 		return nil, err
 	}
 	rowLen := (p.Colors*p.BitsPerComponent*p.Columns + 7) / 8
-	// The number of bytes per complete pixel, rounded up to at least one, per the PNG specification's filtering
-	// model. Sub-byte components always use 1.
+	// The number of bytes per complete pixel, rounded up to at least one, per the PNG specification's filtering model.
+	// Sub-byte components always use 1.
 	bpp := max(1, p.Colors*p.BitsPerComponent/8)
-	// A row cannot be longer than the data itself; clamping keeps hostile Columns values from forcing large
-	// allocations for a file that does not actually contain such rows.
+	// A row cannot be longer than the data itself; clamping keeps hostile Columns values from forcing large allocations
+	// for a file that does not actually contain such rows.
 	rowLen = min(rowLen, len(data))
 	if rowLen == 0 {
 		return nil, nil
@@ -76,8 +76,8 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 		pos++
 		n := min(rowLen, len(data)-pos)
 		copy(row, data[pos:pos+n])
-		// Zero-fill the remainder of a truncated final row so the filter arithmetic below stays in bounds; only
-		// the n bytes actually present are emitted.
+		// Zero-fill the remainder of a truncated final row so the filter arithmetic below stays in bounds; only the n
+		// bytes actually present are emitted.
 		for i := n; i < rowLen; i++ {
 			row[i] = 0
 		}

@@ -30,11 +30,11 @@ func baseEncodingTable(name cos.Name) *[256]string {
 	}
 }
 
-// resolveEncoding builds a simple font's code→glyph-name table (ISO 32000-2 9.6.5): the font's built-in
-// encoding as the base — the embedded program's own table when it declares one (builtin non-nil, Type 1),
-// else for the standard Symbol and ZapfDingbats fonts their generated tables, else StandardEncoding —
-// overridden by an /Encoding name or dictionary (whose /BaseEncoding, then /Differences, apply in order).
-// The returned table is never mutated after Load; unmodified base tables are shared.
+// resolveEncoding builds a simple font's code→glyph-name table (ISO 32000-2 9.6.5): the font's built-in encoding as the
+// base — the embedded program's own table when it declares one (builtin non-nil, Type 1), else for the standard Symbol
+// and ZapfDingbats fonts their generated tables, else StandardEncoding — overridden by an /Encoding name or dictionary
+// (whose /BaseEncoding, then /Differences, apply in order). The returned table is never mutated after Load; unmodified
+// base tables are shared.
 func resolveEncoding(d *cos.Document, dict cos.Dict, std14 string, builtin *[256]string) *[256]string {
 	base := &standardEncoding
 	switch {

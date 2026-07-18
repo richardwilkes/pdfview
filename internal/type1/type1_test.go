@@ -20,9 +20,9 @@ import (
 
 // ---- test font builder ----------------------------------------------------------------------------------------
 //
-// buildTestFont assembles a complete, spec-conformant Type 1 program from scratch (clear text, eexec-encrypted
-// private dict, encrypted charstrings) so the parser and interpreter are tested against known geometry. The
-// corpus generator used the same construction; only its output is committed (testfiles/corpus README pattern).
+// buildTestFont assembles a complete, spec-conformant Type 1 program from scratch (clear text, eexec-encrypted private
+// dict, encrypted charstrings) so the parser and interpreter are tested against known geometry. The corpus generator
+// used the same construction; only its output is committed (testfiles/corpus README pattern).
 
 // csNum encodes one charstring number (spec 6.2).
 func csNum(v int) []byte {
@@ -83,8 +83,7 @@ var (
 	oSetCurPt  = []byte{12, 33}
 )
 
-// encryptT1 runs the Type 1 encryption with lead prepended plaintext bytes (4 for eexec, lenIV for
-// charstrings).
+// encryptT1 runs the Type 1 encryption with lead prepended plaintext bytes (4 for eexec, lenIV for charstrings).
 func encryptT1(plain []byte, r uint16, lead int) []byte {
 	full := append(bytes.Repeat([]byte{0x55}, lead), plain...)
 	out := make([]byte, len(full))
@@ -122,7 +121,8 @@ func testGlyphs() map[string][]byte {
 		34, 20, oRmoveto, 2, oCallsubr,
 		50, 300, 100, 0, oCallsubr,
 		0, -100, oRlineto,
-		oClosepath, oEndchar)
+		oClosepath, oEndchar,
+	)
 	return map[string][]byte{
 		notdefName: cs(0, 500, oHsbw, oEndchar),
 		"A": cs(0, 600, oHsbw, 100, 0, oRmoveto, 400, oHlineto, 0, 700, oRlineto,
@@ -142,8 +142,8 @@ func testGlyphs() map[string][]byte {
 	}
 }
 
-// buildTestFont assembles the full program. hexForm selects PFA-style hex eexec data; pfb wraps the result in
-// PFB segments.
+// buildTestFont assembles the full program. hexForm selects PFA-style hex eexec data; pfb wraps the result in PFB
+// segments.
 func buildTestFont(hexForm, pfb, stdEncoding bool) []byte {
 	var clearBuf bytes.Buffer
 	clearBuf.WriteString("%!PS-AdobeFont-1.0: TestT1 001.000\n")
@@ -400,8 +400,8 @@ func TestGlyphSeac(t *testing.T) {
 	if adv != 550 { // The composite's own hsbw wins over both components'.
 		t.Errorf("advance = %v, want 550", adv)
 	}
-	// Base "e" at its natural position, accent translated by (adx-asb, ady) = (220, 350): its own sbx 30
-	// lands its sidebearing point at x = 250.
+	// Base "e" at its natural position, accent translated by (adx-asb, ady) = (220, 350): its own sbx 30 lands its
+	// sidebearing point at x = 250.
 	wantSegs(t, segs, []seg{
 		{op: ot.SegmentOpMoveTo, args: []float32{50, 0}},
 		{op: ot.SegmentOpLineTo, args: []float32{350, 0}},

@@ -25,9 +25,9 @@ stream
 1 g 0 0 25 50 re f
 endstream`
 
-// TestSoftMaskEmission pins the per-op soft-mask protocol: mask replay (BeginMask, BBox clip, mask content,
-// PopClip via unwind, EndMask), the op with its alpha/blend lifted, PopMask — and the composite group only
-// when the op's constant alpha or blend is non-trivial. /SMask /None clears the mask.
+// TestSoftMaskEmission pins the per-op soft-mask protocol: mask replay (BeginMask, BBox clip, mask content, PopClip via
+// unwind, EndMask), the op with its alpha/blend lifted, PopMask — and the composite group only when the op's constant
+// alpha or blend is non-trivial. /SMask /None clears the mask.
 func TestSoftMaskEmission(t *testing.T) {
 	pdf := minimalPDF(
 		maskFormBody,
@@ -74,8 +74,8 @@ func TestSoftMaskEmission(t *testing.T) {
 	}
 }
 
-// TestSoftMaskAnchor pins the gs-time CTM anchoring: a cm issued after gs moves the paint but not the mask
-// (the mask replay's BBox clip runs under the CTM captured at gs).
+// TestSoftMaskAnchor pins the gs-time CTM anchoring: a cm issued after gs moves the paint but not the mask (the mask
+// replay's BBox clip runs under the CTM captured at gs).
 func TestSoftMaskAnchor(t *testing.T) {
 	pdf := minimalPDF(maskFormBody, `<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R >> >>`)
 	d, err := cos.Open([]byte(pdf))
@@ -93,9 +93,9 @@ func TestSoftMaskAnchor(t *testing.T) {
 	}
 }
 
-// TestTransparencyGroupEmission pins the Do protocol for /Group /S /Transparency forms: BeginGroup carries
-// the isolation/knockout attributes plus the caller's blend and FILL alpha, and the interior runs with
-// alpha/blend/mask reset (ISO 32000-2 11.6.6).
+// TestTransparencyGroupEmission pins the Do protocol for /Group /S /Transparency forms: BeginGroup carries the
+// isolation/knockout attributes plus the caller's blend and FILL alpha, and the interior runs with alpha/blend/mask
+// reset (ISO 32000-2 11.6.6).
 func TestTransparencyGroupEmission(t *testing.T) {
 	pdf := minimalPDF(
 		`<< /Type /XObject /Subtype /Form /BBox [0 0 10 10]

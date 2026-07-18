@@ -7,12 +7,11 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth the engine requires: the device
-// spaces (Gray/RGB/CMYK, matched byte-for-byte to the oracle's observed ICC-backed conversions — see
-// convert.go), CalGray/CalRGB (approximated by their device analogs), ICCBased (N-component fallback to the
-// matching device space), Indexed, and Separation/DeviceN with their tint transforms (internal/function).
-// Everything converts to the rendered RGB space via ToNRGBA. Lab and the full CalGray/CalRGB math are
-// deliberately omitted.
+// Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth the engine requires: the device spaces
+// (Gray/RGB/CMYK, matched byte-for-byte to the oracle's observed ICC-backed conversions — see convert.go),
+// CalGray/CalRGB (approximated by their device analogs), ICCBased (N-component fallback to the matching device space),
+// Indexed, and Separation/DeviceN with their tint transforms (internal/function). Everything converts to the rendered
+// RGB space via ToNRGBA. Lab and the full CalGray/CalRGB math are deliberately omitted.
 package color
 
 import (
@@ -36,15 +35,15 @@ var (
 	errTooDeep          = errors.New("color spaces nested too deeply")
 )
 
-// Space is one color space: it knows its component count, its initial color (ISO 32000-2 8.6.3: the color a
-// cs/CS operator resets to), and how to convert component values to the rendered RGB space.
+// Space is one color space: it knows its component count, its initial color (ISO 32000-2 8.6.3: the color a cs/CS
+// operator resets to), and how to convert component values to the rendered RGB space.
 type Space interface {
 	// NComponents returns the number of components a color in this space carries.
 	NComponents() int
 	// Initial returns the initial color components for this space.
 	Initial() []float32
-	// ToNRGBA converts components to the rendered color. Component values are clamped as needed; missing
-	// components read as 0. The result always has A=255 except for spaces that never mark (Separation /None).
+	// ToNRGBA converts components to the rendered color. Component values are clamped as needed; missing components
+	// read as 0. The result always has A=255 except for spaces that never mark (Separation /None).
 	ToNRGBA(comps []float32) color.NRGBA
 }
 
@@ -102,8 +101,8 @@ func (x *Indexed) NComponents() int { return 1 }
 // Initial implements Space.
 func (x *Indexed) Initial() []float32 { return []float32{0} }
 
-// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; table bytes map
-// linearly onto [0, 1] per base component, which is exact for the device-family bases this package supports.
+// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; table bytes map linearly
+// onto [0, 1] per base component, which is exact for the device-family bases this package supports.
 func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
 	idx := int(comp(comps, 0))
 	if idx < 0 {
@@ -122,9 +121,9 @@ func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
 	return x.base.ToNRGBA(baseComps)
 }
 
-// Separation is a /Separation or /DeviceN color space: tint components transformed into an alternate space.
-// A /Separation /None space never marks the page; its ToNRGBA reports a fully transparent color, which
-// paints nothing under the normal blend mode.
+// Separation is a /Separation or /DeviceN color space: tint components transformed into an alternate space. A
+// /Separation /None space never marks the page; its ToNRGBA reports a fully transparent color, which paints nothing
+// under the normal blend mode.
 type Separation struct {
 	alt  Space
 	tint function.Func
@@ -152,16 +151,16 @@ func (s *Separation) ToNRGBA(comps []float32) color.NRGBA {
 	return s.alt.ToNRGBA(s.tint.Eval(comps))
 }
 
-// Pattern is the /Pattern color space. Painting with it selects a pattern resource rather than component
-// values; the interpreter (internal/content) resolves the scn-selected pattern and skips paint operations
-// while no pattern is selected.
+// Pattern is the /Pattern color space. Painting with it selects a pattern resource rather than component values; the
+// interpreter (internal/content) resolves the scn-selected pattern and skips paint operations while no pattern is
+// selected.
 type Pattern struct {
 	// Base is the underlying space of an uncolored pattern space (/Pattern base), nil otherwise.
 	Base Space
 }
 
-// NComponents implements Space. An uncolored pattern carries its base components; a colored one carries none
-// (the operand list holds only the pattern name, which the interpreter consumes separately).
+// NComponents implements Space. An uncolored pattern carries its base components; a colored one carries none (the
+// operand list holds only the pattern name, which the interpreter consumes separately).
 func (p *Pattern) NComponents() int {
 	if p.Base != nil {
 		return p.Base.NComponents()
@@ -175,8 +174,8 @@ func (p *Pattern) Initial() []float32 { return nil }
 // ToNRGBA implements Space; a pattern has no intrinsic color, so this reports transparent (never marks).
 func (p *Pattern) ToNRGBA([]float32) color.NRGBA { return color.NRGBA{} }
 
-// Parse parses obj (a name or array, resolving references) as a color space. It fails with an error for the
-// space kinds this package does not support yet; callers fall back per their own policy.
+// Parse parses obj (a name or array, resolving references) as a color space. It fails with an error for the space kinds
+// this package does not support yet; callers fall back per their own policy.
 func Parse(d *cos.Document, obj cos.Object) (Space, error) {
 	return parseSpace(d, obj, 0)
 }
@@ -247,9 +246,8 @@ func parseSpaceArray(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	}
 }
 
-// parseICCBased maps an ICC profile stream to the device space matching its component count (the profile
-// itself is deliberately not interpreted). /N is authoritative; a parseable /Alternate is used when /N is
-// absent or nonsensical.
+// parseICCBased maps an ICC profile stream to the device space matching its component count (the profile itself is
+// deliberately not interpreted). /N is authoritative; a parseable /Alternate is used when /N is absent or nonsensical.
 func parseICCBased(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	if len(arr) < 2 {
 		return nil, errBadSpace

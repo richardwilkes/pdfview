@@ -16,13 +16,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Direct 'glyf' outline extraction, independent of go-text's Font/Face layer. CIDFontType2 programs are
-// TrueType subsets that frequently carry no 'cmap' table at all — their code→glyph mapping lives in the PDF
-// (CMap + CIDToGIDMap) — and go-text's otfont.NewFont refuses cmap-less programs. This walker reads
-// head/maxp/loca lazily and converts one glyph at a time: TrueType quadratic
-// contours (on/off-curve points with implied midpoints) plus composite glyphs (transformed component
-// recursion). go-text's tables package supplies the low-level record parsing; the outline semantics here
-// follow the OpenType specification's glyf description.
+// Direct 'glyf' outline extraction, independent of go-text's Font/Face layer. CIDFontType2 programs are TrueType
+// subsets that frequently carry no 'cmap' table at all — their code→glyph mapping lives in the PDF (CMap + CIDToGIDMap)
+// — and go-text's otfont.NewFont refuses cmap-less programs. This walker reads head/maxp/loca lazily and converts one
+// glyph at a time: TrueType quadratic contours (on/off-curve points with implied midpoints) plus composite glyphs
+// (transformed component recursion). go-text's tables package supplies the low-level record parsing; the outline
+// semantics here follow the OpenType specification's glyf description.
 
 // glyfInfo is a lazily indexed glyf outline source.
 type glyfInfo struct {
@@ -74,8 +73,8 @@ func (g *glyfInfo) glyphData(gid uint32) []byte {
 	return g.glyfData[start:end]
 }
 
-// path converts one glyph to an em-normalized gfx.Path (nil only when gid is out of range; empty glyphs
-// yield an empty path).
+// path converts one glyph to an em-normalized gfx.Path (nil only when gid is out of range; empty glyphs yield an empty
+// path).
 func (g *glyfInfo) path(gid uint32) *gfx.Path {
 	if int(gid)+1 >= len(g.loca) {
 		return nil
@@ -113,9 +112,9 @@ func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int)
 	}
 }
 
-// componentMatrix builds a composite component's transform: the 2x2 scale matrix plus the args translation.
-// Anchored (point-matching) placement is not supported — the component lands untranslated, the degradation
-// deployed rasterizers apply when point indices are unusable; no real corpus file has exercised it.
+// componentMatrix builds a composite component's transform: the 2x2 scale matrix plus the args translation. Anchored
+// (point-matching) placement is not supported — the component lands untranslated, the degradation deployed rasterizers
+// apply when point indices are unusable; no real corpus file has exercised it.
 func componentMatrix(part *tables.CompositeGlyphPart) gfx.Matrix {
 	var tx, ty float32
 	if !part.IsAnchored() {
@@ -131,8 +130,8 @@ func componentMatrix(part *tables.CompositeGlyphPart) gfx.Matrix {
 	return gfx.Matrix{A: s[0], B: s[1], C: s[2], D: s[3], E: tx, F: ty}
 }
 
-// appendSimpleContours converts a simple glyph's quadratic contours: runs of off-curve points imply on-curve
-// midpoints between them; a contour with no on-curve point starts at the midpoint of its first two points.
+// appendSimpleContours converts a simple glyph's quadratic contours: runs of off-curve points imply on-curve midpoints
+// between them; a contour with no on-curve point starts at the midpoint of its first two points.
 func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix) {
 	pts := sg.Points
 	start := 0
@@ -146,10 +145,10 @@ func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix) {
 	}
 }
 
-// appendContour emits one closed quadratic contour. Start-point selection follows the convention every
-// TrueType rasterizer shares: the first point when it is on-curve, else the last point when that is on-curve,
-// else the midpoint of the two (a fully off-curve contour) — with every unconsumed point then processed once
-// in order and the contour closed back to the start.
+// appendContour emits one closed quadratic contour. Start-point selection follows the convention every TrueType
+// rasterizer shares: the first point when it is on-curve, else the last point when that is on-curve, else the midpoint
+// of the two (a fully off-curve contour) — with every unconsumed point then processed once in order and the contour
+// closed back to the start.
 func appendContour(p *gfx.Path, pts []tables.GlyphContourPoint, m gfx.Matrix) {
 	const flagOnCurve = 1
 	n := len(pts)
