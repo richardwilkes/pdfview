@@ -53,7 +53,7 @@ func (d *Document) DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) e
 
 // drawPage wraps the caller's canvas in a raster device and runs the page through the interpreter under the
 // composed page-space→canvas matrix. The canvas state is restored to its entry depth on every path out,
-// including a hostile-content panic (invariant 6), which maps to ErrInternal.
+// including a hostile-content panic, which maps to ErrInternal.
 func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (err error) {
 	dev, derr := render.Wrap(c)
 	if derr != nil {

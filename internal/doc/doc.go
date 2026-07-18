@@ -9,7 +9,7 @@
 
 // Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a
 // document builds the flat page list, honoring the tree structure with cycle and depth guards, that PageCount
-// and Page answer from), encryption setup, and — since milestone M3 — navigation: page geometry (the effective
+// and Page answer from), encryption setup, and navigation: page geometry (the effective
 // box and rotation, and the top-left/y-down coordinate space derived from them), destinations (explicit arrays
 // and named, via both the old-style /Dests dictionary and the /Names name tree), the document outline, and link
 // annotations.
@@ -23,7 +23,7 @@ import (
 )
 
 // maxPageTreeDepth caps page-tree recursion; combined with the visited set it guarantees the walk terminates on
-// hostile or cyclic trees (see plan.md "Resource limits & robustness").
+// hostile or cyclic trees.
 const maxPageTreeDepth = 64
 
 // Authentication-status bits, in the same layout as the public API's AuthenticationStatus so the root package
@@ -156,8 +156,8 @@ func (d *Document) Page(pageNumber int) (cos.Dict, error) {
 }
 
 // PageRef returns the indirect reference through which the given 0-based page was reached, or the zero Ref when
-// the page dictionary was inlined directly in its parent's /Kids. Destination resolution (M3) matches pages by
-// this identity.
+// the page dictionary was inlined directly in its parent's /Kids. Destination resolution matches pages by this
+// identity.
 func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 	if pageNumber < 0 || pageNumber >= len(d.pageRefs) {
 		return cos.Ref{}, errNoSuchPage

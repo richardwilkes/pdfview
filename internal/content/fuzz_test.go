@@ -215,7 +215,7 @@ func fuzzResources() (*cos.Document, cos.Dict) {
 
 // FuzzContent drives the interpreter with arbitrary content streams against the canned resource set. The
 // balance device turns any push/pop violation into a panic, and Run must neither panic nor hang: all work is
-// cap-bounded (plan.md "Resource limits & robustness").
+// cap-bounded.
 func FuzzContent(f *testing.F) {
 	for _, name := range []string{"vectors.pdf", "rotate90.pdf"} {
 		if data, err := os.ReadFile(filepath.Join("..", "..", "testfiles", "corpus", name)); err == nil {

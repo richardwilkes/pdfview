@@ -7,16 +7,17 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package render is the raster device: the only package that imports github.com/richardwilkes/canvas (plan.md
-// invariant 3; canvas/gpu is never imported, keeping the build cgo- and purego-free). It draws the interpreter's
+// Package render is the raster device: the only package that imports github.com/richardwilkes/canvas
+// (canvas/gpu is never imported, keeping the build cgo- and purego-free). It draws the interpreter's
 // device calls onto a premultiplied N32 raster surface and hands the premultiplied pixels back through Pixels;
 // the root package's unpremultiply loop converts them to the straight alpha image.NRGBA the public API promises
-// (reading back premultiplied is deliberate — see the 2026-07-11 decision-log entry on rounding parity).
+// (reading back premultiplied is deliberate, keeping the unpremultiply rounding under the root package's
+// control for pixel parity).
 //
-// Milestone M4 implemented path fills, strokes (with dashing), and clips; M5 added images (RGBA draws and
-// Alpha8 stencil tinting under the image CTM); M6 added text: glyph outlines cached in glyph space and
-// filled/stroked/clipped under each glyph's Trm; M8 added shadings/patterns (shading.go) and transparency —
-// groups, soft masks, blend modes, knockout (mask.go).
+// The device covers path fills, strokes (with dashing), and clips; images (RGBA draws and Alpha8 stencil
+// tinting under the image CTM); text — glyph outlines cached in glyph space and filled/stroked/clipped under
+// each glyph's Trm; shadings and patterns (shading.go); and transparency — groups, soft masks, blend modes,
+// knockout (mask.go).
 package render
 
 import (
@@ -78,7 +79,7 @@ type Device struct {
 }
 
 // SetStore wires the document's budgeted resource store into the device, migrating the glyph-path cache from
-// per-render to document scope (plan.md internal/store).
+// per-render to document scope.
 func (d *Device) SetStore(st *store.Store) { d.store = st }
 
 // Size reports the surface dimensions in pixels, for the caller's reuse check (see Reset).
@@ -146,7 +147,7 @@ func (d *Device) Pixels() (pix []byte, stride int, err error) {
 // Reset returns the device to its just-created state — canvas state unwound, pixels cleared to transparent,
 // per-render caches dropped — so one surface can serve a document's successive renders at the same size
 // (fresh multi-megabyte surfaces per render made the page-fault cost of faulting them in a top profile
-// entry; see the M8 perf decision log). Store-backed caches survive: their keys hold the *font.Font pointers
+// entry). Store-backed caches survive: their keys hold the *font.Font pointers
 // they reference, so entries can never collide with a later font instance. The per-render maps are dropped
 // because without a store nothing keeps their keyed font pointers alive across renders.
 func (d *Device) Reset() {
@@ -373,8 +374,8 @@ func (d *Device) ClipPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) {
 	d.c.ClipPath(cp, raster.ClipIntersect, true)
 }
 
-// ClipStrokePath implements device.Device. No M4 content produces it (W clips use the fill region); it clips
-// to the stroke's bounding region conservatively until the text-clip work (M6) needs better.
+// ClipStrokePath implements device.Device. The interpreter never produces it (W clips use the fill region and
+// text clips arrive through the text-clip calls); it degrades to the fill-region clip.
 func (d *Device) ClipStrokePath(p *gfx.Path, _ *gfx.StrokeParams, ctm gfx.Matrix) {
 	d.ClipPath(p, false, ctm)
 }
@@ -749,9 +750,9 @@ func (d *Device) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.
 	})
 }
 
-// ClipImageMask implements device.Device. No producer exists until tiling patterns and Type3 glyphs recurse
-// (M6/M8), so the mask bits are not yet consulted: the clip is the mask's unit square under the ctm, a correct
-// outer bound (a mask can only mark inside its square).
+// ClipImageMask implements device.Device. The interpreter never produces it, so the mask bits are not
+// consulted: the clip is the mask's unit square under the ctm, a correct outer bound (a mask can only mark
+// inside its square).
 func (d *Device) ClipImageMask(_ *imaging.Image, ctm gfx.Matrix) {
 	square := &gfx.Path{}
 	square.Rect(0, 0, 1, 1)

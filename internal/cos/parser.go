@@ -16,7 +16,7 @@ import (
 )
 
 // maxNestingDepth caps how deeply arrays and dictionaries may nest, guarding against stack exhaustion from
-// hostile input (see plan.md "Resource limits & robustness").
+// hostile input.
 const maxNestingDepth = 512
 
 // maxObjectNumber bounds accepted object numbers. ISO 32000-2 Annex C suggests 8388607 as an implementation

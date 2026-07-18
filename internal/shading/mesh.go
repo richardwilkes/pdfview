@@ -21,9 +21,9 @@ import (
 // Mesh shadings (ISO 32000-2 8.7.4.5.5-8) are tessellated at parse time into flat triangles: vertex colors are
 // converted to the rendered RGB space first (MuPDF likewise converts mesh vertex colors to the destination
 // space and interpolates RGB), then triangles are subdivided until the color difference across each is below
-// one 8-bit step, so drawing them flat is visually equivalent to Gouraud interpolation (plan.md "Rendering
-// mapping"). Truncated or malformed stream data degrades to however many complete primitives were read —
-// never an error — matching the leniency both MuPDF and the filter layer apply.
+// one 8-bit step, so drawing them flat is visually equivalent to Gouraud interpolation. Truncated or malformed
+// stream data degrades to however many complete primitives were read — never an error — matching the leniency
+// both MuPDF and the filter layer apply.
 
 // vert is one mesh vertex: a shading-space position plus its resolved RGB color (0-255 range, kept in float
 // for exact midpoint interpolation).

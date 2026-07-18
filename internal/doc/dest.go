@@ -18,9 +18,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Traversal guards (see plan.md "Resource limits & robustness"): hostile documents cannot force unbounded work
-// because name-tree recursion is depth-capped and reference cycles are skipped via a visited set, and a chain of
-// destinations that keeps indirecting (name → dictionary → name ...) is cut off after maxDestChain steps.
+// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped
+// and reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting
+// (name → dictionary → name ...) is cut off after maxDestChain steps.
 const (
 	maxNameTreeDepth = 64
 	maxDestChain     = 8
@@ -72,7 +72,7 @@ func (d *Document) resolveDest(obj cos.Object) Dest {
 // reference to a page object, or — as some writers produce — a 0-based page index), the fit kind, and the kind's
 // coordinate operands. Coordinates the kind does not define, null/absent slots, and non-numeric operands are
 // NaN. The extracted PDF-space point is mapped into the target page's top-left space, exactly as MuPDF reports
-// destination points (pinned by probes for /XYZ, /FitH, /FitV, /FitR, and null slots — see the M3 decision log).
+// destination points (pinned by probes for /XYZ, /FitH, /FitV, /FitR, and null slots).
 func (d *Document) destFromArray(arr cos.Array) Dest {
 	if len(arr) == 0 {
 		return unresolvedDest()

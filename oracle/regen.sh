@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 # Regenerates every golden under ../testfiles/goldens from ../testfiles/corpus by running MuPDF — via the published
-# cgo binding checked out at ../../pdf — as the behavioral oracle (see plan.md). This script is local/manual only:
+# cgo binding checked out at ../../pdf — as the behavioral oracle. This script is local/manual only:
 # it needs cgo, a C toolchain, and that sibling checkout. CI never runs it; the corpus and the goldens it produces
 # are committed, and regeneration diffs are reviewed at commit time. Output is deterministic for a given corpus,
 # MuPDF build, and Go release, so running it twice must leave the working tree unchanged.

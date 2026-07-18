@@ -148,9 +148,9 @@ func TestEmbeddedJunkFallsBackToSubstitute(t *testing.T) {
 	}
 }
 
-// TestSFNTGIDChainOrder pins the pinned code→GID fallback order on hand-built subtables, independent of any
-// real font file (plan.md font-pipeline table: non-symbolic name→AGL→(3,1) then name→MacRoman→(1,0);
-// symbolic (3,0) bare then 0xF000-folded, then (1,0) raw; last-resort code→GID).
+// TestSFNTGIDChainOrder pins the code→GID fallback order on hand-built subtables, independent of any real
+// font file: non-symbolic name→AGL→(3,1) then name→MacRoman→(1,0); symbolic (3,0) bare then 0xF000-folded,
+// then (1,0) raw; last-resort code→GID.
 func TestSFNTGIDChainOrder(t *testing.T) {
 	uni := &cmapTable{sub: tables.CmapSubtable12{Groups: []tables.SequentialMapGroup{
 		{StartCharCode: 'A', EndCharCode: 'Z', StartGlyphID: 100},

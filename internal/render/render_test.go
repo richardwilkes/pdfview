@@ -487,10 +487,10 @@ func TestEvenOddFill(t *testing.T) {
 	}
 }
 
-// TestTilingDenormalStepTerminates is the regression test for the only hang the M8 veraPDF soak found
-// (verapdf-a018-tiling.pdf, decision log 2026-07-11): a denormal tile step overflows the float32 lattice
-// division to ±Inf, whose int conversion saturates to MaxInt64, and the pre-fix replay loop `for j := j0;
-// j <= j1; j++` never terminated because j++ wraps past MaxInt64. The fill must complete (via the bounded
+// TestTilingDenormalStepTerminates is the regression test for the only hang the veraPDF corpus soak found
+// (verapdf-a018-tiling.pdf): a denormal tile step overflows the float32 lattice division to ±Inf, whose int
+// conversion saturates to MaxInt64, and the pre-fix replay loop `for j := j0; j <= j1; j++` never terminated
+// because j++ wraps past MaxInt64. The fill must complete (via the bounded
 // image-shader fallback) — run under a watchdog so a regression fails fast instead of hanging the suite.
 func TestTilingDenormalStepTerminates(t *testing.T) {
 	d := newDevice(t, 50, 50)
@@ -522,7 +522,7 @@ func TestTilingDenormalStepTerminates(t *testing.T) {
 	}
 }
 
-// TestGlyphBlitMatchesDirectFill pins the M8 glyph-coverage-cache invariants: the three ways a solid-color
+// TestGlyphBlitMatchesDirectFill pins the glyph-coverage-cache invariants: the three ways a solid-color
 // glyph can reach pixels — the direct pixmap composite (no clip), the DrawImage route (under a non-rect
 // clip), and the merged-outline DrawPath fill (translucent paint forces it) — must agree everywhere within
 // ±2 per channel, since all three apply the same analytic-AA coverage and differ only in compositing

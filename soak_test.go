@@ -26,7 +26,7 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// The veraPDF corpus soak (plan.md M8): opens and renders EVERY file of an external corpus, asserting that the
+// The veraPDF corpus soak: opens and renders EVERY file of an external corpus, asserting that the
 // engine never panics, never hangs (each file must complete within soakFileTimeout — the internal caps guarantee
 // termination, so a timeout is a bug), and fails only with the public sentinel errors. It is local-only: CI never
 // has the files. Fetch the corpus with testfiles/external/fetch-verapdf.sh and run

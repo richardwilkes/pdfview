@@ -381,9 +381,8 @@ func (in *interp) opDash() {
 	in.gs.sp.DashPhase = float32(phase)
 }
 
-// opExtGState implements gs: apply the M4 subset of an ExtGState dictionary (line parameters, dash, constant
-// alpha, blend mode). The remaining entries (font, soft mask, transfer functions, ...) are ignored until their
-// milestones.
+// opExtGState implements gs: apply the supported subset of an ExtGState dictionary (line parameters, dash,
+// constant alpha, blend mode, soft mask). The remaining entries (font, transfer functions, ...) are ignored.
 func (in *interp) opExtGState() {
 	name, ok := in.name1()
 	if !ok {

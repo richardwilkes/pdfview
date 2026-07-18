@@ -265,9 +265,9 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 }
 
 // emitRun dispatches a completed run per the text render mode (ISO 32000-2 9.3.6): modes 0-2 paint, 3 is
-// recorded but invisible, and 4-7 additionally (or only) accumulate the text clip. Pattern color spaces do
-// not paint until M8, exactly like path painting. Type 3 runs paint by interpreter recursion into their
-// CharProcs instead of outline drawing.
+// recorded but invisible, and 4-7 additionally (or only) accumulate the text clip. Pattern color spaces paint
+// only once an scn has selected a pattern, exactly like path painting. Type 3 runs paint by interpreter
+// recursion into their CharProcs instead of outline drawing.
 func (in *interp) emitRun(run *device.TextRun) {
 	if run == nil || len(run.Glyphs) == 0 {
 		return

@@ -9,9 +9,9 @@
 
 // Package gfx holds the shared geometry types the engine's graphics pipeline is built on: points, rectangles,
 // quads, an affine matrix, paths, and stroke parameters. Everything is float32 — the precision the original
-// cgo/MuPDF implementation carried (C floats), which the exact-value tests were baselined against (plan.md
-// invariant 4). Matrix composition follows PDF's row-vector convention: a point is transformed as
-// [x y 1]·M, and M1.Mul(M2) applies M1 first.
+// cgo/MuPDF implementation carried (C floats), which the exact-value tests were baselined against. Matrix
+// composition follows PDF's row-vector convention: a point is transformed as [x y 1]·M, and M1.Mul(M2) applies
+// M1 first.
 package gfx
 
 import "math"

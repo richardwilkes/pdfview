@@ -18,7 +18,7 @@ import (
 // FuzzFontProgram drives the embedded-font-program surface with arbitrary bytes: sfnt parsing (go-text loader
 // + metrics/cmap table reads), bare-CFF parsing (go-text cff + the TN5176 Top DICT reader), the code→GID
 // chains over every simple-font code, and outline extraction for the mapped GIDs. Nothing may panic — hostile
-// programs must degrade to nil (which Load turns into Liberation substitution) per plan.md invariant 6.
+// programs must degrade to nil (which Load turns into Liberation substitution).
 func FuzzFontProgram(f *testing.F) {
 	if ttf := data.Liberation("LiberationSans-Regular"); ttf != nil {
 		f.Add(ttf)

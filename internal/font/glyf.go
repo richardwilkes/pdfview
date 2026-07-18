@@ -18,8 +18,8 @@ import (
 
 // Direct 'glyf' outline extraction, independent of go-text's Font/Face layer. CIDFontType2 programs are
 // TrueType subsets that frequently carry no 'cmap' table at all — their code→glyph mapping lives in the PDF
-// (CMap + CIDToGIDMap) — and go-text's otfont.NewFont refuses cmap-less programs (the M6 decision-log
-// warning). This walker reads head/maxp/loca lazily and converts one glyph at a time: TrueType quadratic
+// (CMap + CIDToGIDMap) — and go-text's otfont.NewFont refuses cmap-less programs. This walker reads
+// head/maxp/loca lazily and converts one glyph at a time: TrueType quadratic
 // contours (on/off-curve points with implied midpoints) plus composite glyphs (transformed component
 // recursion). go-text's tables package supplies the low-level record parsing; the outline semantics here
 // follow the OpenType specification's glyf description.

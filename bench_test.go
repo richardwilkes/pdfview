@@ -16,9 +16,8 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// BenchmarkRenderGlaive150 is the M8 perf-box protocol (plan.md): warm renders of the fixture's pages at
-// 150 dpi, no search. The cgo baseline for comparison is measured the same way against the published
-// github.com/richardwilkes/pdf binding (see the perf decision-log entries for recorded numbers).
+// BenchmarkRenderGlaive150 measures warm renders of the fixture's pages at 150 dpi, no search. The cgo
+// baseline for comparison is measured the same way against the published github.com/richardwilkes/pdf binding.
 func BenchmarkRenderGlaive150(b *testing.B) {
 	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {

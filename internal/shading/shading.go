@@ -12,8 +12,8 @@
 // carry a sampled color ramp (at most maxStops stops, the resolution MuPDF itself uses), function-based
 // shadings carry their domain, matrix, and a color-evaluation closure, and the mesh types (4-7) are
 // tessellated at parse time into flat triangles whose vertex-color deltas are below one 8-bit quantization
-// step (plan.md "Rendering mapping"). All colors are resolved to the rendered RGB space through
-// internal/color, so a Shading is pure geometry + RGB.
+// step. All colors are resolved to the rendered RGB space through internal/color, so a Shading is pure
+// geometry + RGB.
 package shading
 
 import (
@@ -39,13 +39,12 @@ const (
 	KindTensor          = 7
 )
 
-// Limits (plan.md "Resource limits & robustness"). maxStops is the ramp resolution for axial/radial shadings
-// (matching the "Function sampled to <=256 stops" plan rule). maxTriangles caps the tessellation output of one
-// mesh shading; subdivision stops refining (emitting flat triangles at the reached level) once the budget is
-// hit, so hostile meshes degrade to banding, never to unbounded memory. maxMeshVertices caps how many vertices
-// or patches a mesh stream may declare through its payload. maxSubdivDepth caps the recursive triangle split
-// (4^8 = 65536 triangles from one input triangle is beyond ΔRGB<1 for any color pair). maxPatchGrid caps the
-// per-patch tessellation grid.
+// Limits. maxStops is the ramp resolution for axial/radial shadings (a function is sampled to at most 256
+// stops). maxTriangles caps the tessellation output of one mesh shading; subdivision stops refining (emitting
+// flat triangles at the reached level) once the budget is hit, so hostile meshes degrade to banding, never to
+// unbounded memory. maxMeshVertices caps how many vertices or patches a mesh stream may declare through its
+// payload. maxSubdivDepth caps the recursive triangle split (4^8 = 65536 triangles from one input triangle is
+// beyond ΔRGB<1 for any color pair). maxPatchGrid caps the per-patch tessellation grid.
 const (
 	maxStops        = 256
 	maxTriangles    = 1 << 19

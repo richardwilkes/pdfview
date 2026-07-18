@@ -25,14 +25,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// Shadings map to canvas shaders per plan.md's rendering-mapping table: axial → linear gradient, radial →
-// two-point conical gradient (Skia's conical implements the PDF/PostScript circle-interpolation semantics),
-// function-based → a domain-grid image shader, and the mesh kinds → flat tessellated triangles drawn
-// directly. /Extend uses TileClamp when both ends extend and TileDecal when neither does; MIXED extend is
-// realized as a single decal draw over parametrically extended geometry (the boundary color duplicated over
-// the extension), which is behaviorally identical to the plan's two-draw sketch with one code path — see the
-// M8 decision log. Tiling patterns render one cell into an offscreen surface wrapped in a repeating image
-// shader.
+// Shadings map to canvas shaders: axial → linear gradient, radial → two-point conical gradient (Skia's
+// conical implements the PDF/PostScript circle-interpolation semantics), function-based → a domain-grid image
+// shader, and the mesh kinds → flat tessellated triangles drawn directly. /Extend uses TileClamp when both
+// ends extend and TileDecal when neither does; MIXED extend is realized as a single decal draw over
+// parametrically extended geometry (the boundary color duplicated over the extension). Tiling patterns render
+// one cell into an offscreen surface wrapped in a repeating image shader.
 
 // Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates
 // its function once per grid cell (maxFunctionArea bounds that work); a tiling cell rasterizes at the

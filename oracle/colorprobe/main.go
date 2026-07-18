@@ -9,8 +9,9 @@
 
 // Command colorprobe regenerates internal/color's behavioral conversion tables by rendering flat-patch probe
 // PDFs through github.com/richardwilkes/pdf (MuPDF via cgo) and sampling the resulting pixels — run-only
-// behavioral observation, per plan.md's clean-room rules. Like the golden dumps, it is a local development
-// tool: rerun it (and review the diffs) when the oracle's MuPDF build moves.
+// behavioral observation (the clean-room rule: observe rendered output, never read MuPDF source). Like the
+// golden dumps, it is a local development tool: rerun it (and review the diffs) when the oracle's MuPDF build
+// moves.
 //
 // Usage:
 //

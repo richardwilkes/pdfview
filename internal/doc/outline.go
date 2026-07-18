@@ -13,7 +13,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Outline-walk guards (see plan.md "Resource limits & robustness"): depth is capped, reference cycles are cut
+// Outline-walk guards: depth is capped, reference cycles are cut
 // by a visited set shared across the whole walk, and the total number of nodes is capped so a hostile /Next
 // chain cannot balloon memory. The public API applies its own, configurable OverallMaxTOCEntries budget on top.
 const (

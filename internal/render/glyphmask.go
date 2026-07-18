@@ -26,18 +26,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// The glyph coverage cache (plan.md M8 perf box): filling every glyph outline through the analytic-AA
-// rasterizer on every render dominated the profile, so ordinary fill-mode text instead rasterizes each
-// distinct glyph appearance ONCE into an Alpha8 coverage plane and blits it at integer device positions —
-// the same idea as MuPDF's glyph bitmap cache. A cache entry is keyed by the glyph identity plus the FULL
-// float32 Trm linear part and the exact subpixel phase of the glyph origin, so a cached blit reproduces the
-// coverage the direct fill would have produced bit-for-bit (the mask is rendered by the same analytic-AA
-// fill at the same subpixel position; only the final color application can differ by ±1 rounding — see
-// TestGlyphBlitMatchesDirectFill). No quantization means the first render of a page mostly misses (each
-// glyph instance has its own x phase) and re-renders hit 100%; that is exactly the warm protocol both the
-// recorded perf numbers and real consumers (re-render on scroll/zoom) care about, and it keeps the pixel
-// gates honest. Entries live in the document's budgeted store when one is wired (kind-separated by the
-// dedicated key type), else in a per-render map.
+// The glyph coverage cache: filling every glyph outline through the analytic-AA rasterizer on every render
+// dominated the profile, so ordinary fill-mode text instead rasterizes each distinct glyph appearance ONCE into
+// an Alpha8 coverage plane and blits it at integer device positions — the same idea as MuPDF's glyph bitmap
+// cache. A cache entry is keyed by the glyph identity plus the FULL float32 Trm linear part and the exact
+// subpixel phase of the glyph origin, so a cached blit reproduces the coverage the direct fill would have
+// produced bit-for-bit (the mask is rendered by the same analytic-AA fill at the same subpixel position; only
+// the final color application can differ by ±1 rounding — see TestGlyphBlitMatchesDirectFill). No quantization
+// means the first render of a page mostly misses (each glyph instance has its own x phase) and re-renders hit
+// 100%; that is exactly the warm protocol both the recorded perf numbers and real consumers (re-render on
+// scroll/zoom) care about, and it keeps the pixel gates honest. Entries live in the document's budgeted store
+// when one is wired (kind-separated by the dedicated key type), else in a per-render map.
 
 // maxGlyphMaskDim caps a cached coverage plane's extent; glyphs rendering larger than this (display-size
 // text) fall back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.

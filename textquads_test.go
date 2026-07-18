@@ -22,12 +22,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestTextQuadParity began as the M6 quad-parity spike and is now the pre-scale half of the M7 search-parity
-// bar: it runs each corpus page's content through the interpreter against the production structured-text
-// device (internal/stext) at scale 1, searches for every needle the goldens record, and requires the hit
-// quads to match MuPDF's recorded raw page-space quads POSITIONALLY — same count, same emission order — with
-// every corner within quadTolerance points. The post-scale half lives in TestParity, which compares the
-// public API's scaled integer hit rectangles against the goldens at every recorded DPI from M7 on.
+// TestTextQuadParity is the pre-scale half of the search-parity bar: it runs each corpus page's content
+// through the interpreter against the production structured-text device (internal/stext) at scale 1, searches
+// for every needle the goldens record, and requires the hit quads to match MuPDF's recorded raw page-space
+// quads POSITIONALLY — same count, same emission order — with every corner within quadTolerance points. The
+// post-scale half lives in TestParity, which compares the public API's scaled integer hit rectangles against
+// the goldens at every recorded DPI.
 func TestTextQuadParity(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -44,9 +44,8 @@ func TestTextQuadParity(t *testing.T) {
 	}
 }
 
-// quadTolerance is the pre-scale corner tolerance from plan.md's search-compatibility spec: 0.01 page-space
-// points. (The M6 spike's exit bar was 0.5 pt; the measured worst is glaive at 0.0022 pt, so the production
-// gate holds the tighter bound.)
+// quadTolerance is the pre-scale corner tolerance: 0.01 page-space points. (The measured worst across the
+// corpus is glaive at 0.0022 pt, so the production gate holds this tight bound comfortably.)
 const quadTolerance = 0.01
 
 // diffGoldenQuads compares one golden's recorded search quads against the structured-text device's search

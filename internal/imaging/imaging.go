@@ -17,14 +17,14 @@
 // BitsPerComponent (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through
 // internal/color (whose device conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG
 // pixels flow through the same captured tables as the k operator). /SMask soft masks and /Mask entries (stencil
-// stream or color-key array) become the alpha channel. JBIG2Decode and JPXDecode are stubs per the plan's
-// decision log: they return ErrUnsupportedCodec, the interpreter skips the draw, and the page renders blank
-// where the image would be — never an error to the caller.
+// stream or color-key array) become the alpha channel. JBIG2Decode and JPXDecode are deliberate stubs: they
+// return ErrUnsupportedCodec, the interpreter skips the draw, and the page renders blank where the image would
+// be — never an error to the caller.
 //
-// Robustness (plan.md "Resource limits & robustness"): image dimensions are capped before any allocation, both
-// absolutely (maxImagePixels) and in proportion to the encoded payload's size (maxPixelsFor), so hostile
-// dictionaries claiming absurd dimensions over a few payload bytes cannot force giant allocations. Sample data
-// shorter than the claimed dimensions reads as zero samples (the warn-and-continue analog of deployed viewers).
+// Robustness: image dimensions are capped before any allocation, both absolutely (maxImagePixels) and in
+// proportion to the encoded payload's size (maxPixelsFor), so hostile dictionaries claiming absurd dimensions
+// over a few payload bytes cannot force giant allocations. Sample data shorter than the claimed dimensions
+// reads as zero samples (the warn-and-continue analog of deployed viewers).
 package imaging
 
 import (
@@ -40,8 +40,8 @@ import (
 var (
 	// ErrBadImage is reported for malformed image dictionaries or undecodable payloads.
 	ErrBadImage = errors.New("malformed image")
-	// ErrUnsupportedCodec is reported for the JBIG2Decode and JPXDecode stubs (plan.md decision log 2026-07-05:
-	// JBIG2 stubbed until a minimal decoder lands, JPX shipped without): the image renders blank, not an error.
+	// ErrUnsupportedCodec is reported for the JBIG2Decode and JPXDecode stubs: the image renders blank, not an
+	// error.
 	ErrUnsupportedCodec = errors.New("unsupported image codec")
 	// ErrTooLarge is reported when the claimed dimensions exceed the allocation caps.
 	ErrTooLarge = errors.New("image too large")
@@ -167,7 +167,7 @@ func (dec *decoder) run() (*Image, error) {
 	}
 	interpolate := dec.boolEntry("Interpolate", "I")
 	if dec.codec == codecJBIG2Names || dec.codec == codecJPXNames {
-		// Stubs per the decision log: blank, not an error, with a debug-level note for diagnosability.
+		// Deliberate stubs: blank, not an error, with a debug-level note for diagnosability.
 		slog.Debug("pdfview: unsupported image codec; rendering blank", "codec", string(dec.codec))
 		return nil, ErrUnsupportedCodec
 	}

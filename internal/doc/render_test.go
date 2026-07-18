@@ -72,7 +72,7 @@ func TestPageCTM(t *testing.T) {
 		6: "<< /Type /Page /Parent 2 0 R /MediaBox [10 20 110 220] /Rotate 270 >>",
 	}))
 	// For each rotation, the box corners must land on the display rect [0, w']×[0, h'] at the mapped spots.
-	// These mappings mirror toTopLeft (pinned against MuPDF in the M3 decision log), scaled by 2.
+	// These mappings mirror toTopLeft (pinned against MuPDF), scaled by 2.
 	type probe struct {
 		page  int
 		x, y  float32 // PDF-space point

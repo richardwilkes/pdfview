@@ -34,10 +34,10 @@ type subInfo struct {
 }
 
 // liberationFor maps a canonical standard-14 name to the bundled Liberation family member that substitutes
-// for it (plan.md: deterministic substitution, never system fonts). Symbol has no dingbat/pi-font stand-in
-// yet; it renders through LiberationSans by Unicode value, which covers its Greek and most of its operators.
-// ZapfDingbats resolves no Unicode from its aN glyph names, so it produces no outlines until a dingbat-capable
-// bundle lands (decision log).
+// for it (substitution is deterministic — never system fonts). Symbol has no dingbat/pi-font stand-in; it
+// renders through LiberationSans by Unicode value, which covers its Greek and most of its operators.
+// ZapfDingbats resolves no Unicode from its aN glyph names, so it produces no outlines unless a
+// dingbat-capable bundle is added.
 func liberationFor(std14 string) string {
 	family, style := "LiberationSans", "Regular"
 	switch std14 {
@@ -195,8 +195,7 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	}
 	if f.type0 != nil && f.type0.sfnt != nil {
 		// CIDFontType2: always the direct glyf walker — CID TrueType subsets routinely lack the cmap table
-		// go-text's Font layer requires (M6 decision-log warning), and one deterministic outline path beats
-		// two.
+		// go-text's Font layer requires, and one deterministic outline path beats two.
 		if f.type0.sfnt.glyf != nil {
 			return f.type0.sfnt.glyf.path(gid)
 		}
@@ -241,8 +240,8 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	}
 }
 
-// programAdvance returns the embedded program's advance for a glyph in em units (the /Widths-absent fallback;
-// plan.md width rules), reporting false when no program supplies one.
+// programAdvance returns the embedded program's advance for a glyph in em units (the /Widths-absent fallback),
+// reporting false when no program supplies one.
 func (f *Font) programAdvance(gid uint32) (float32, bool) {
 	if f.sfnt != nil && f.sfnt.face != nil && f.sfnt.upem > 0 {
 		return f.sfnt.face.HorizontalAdvance(opentype.GID(gid)) / f.sfnt.upem, true

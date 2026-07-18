@@ -133,8 +133,8 @@ func standard14Name(base string, flags int) string {
 }
 
 // substituteMetrics returns the text-space ascender/descender used for quads when a font is substituted,
-// reproducing the oracle's rules (pinned by the subst-metrics, std14-styles, and text-std14 corpus probes —
-// see the 2026-07-11 M6 decision-log entry): when the font dictionary carries a descriptor, each slot comes
+// reproducing the oracle's rules (pinned by the subst-metrics, std14-styles, and text-std14 corpus
+// probes): when the font dictionary carries a descriptor, each slot comes
 // from its /Ascent or /Descent when that value is nonzero, else that slot's default (0.8 / -0.2) — even for
 // standard-14 BaseFont names. Only descriptor-less fonts use the substitute font program's own metrics,
 // which for the 14 standard fonts are the pinned FontBBox values of MuPDF's bundled replacements.

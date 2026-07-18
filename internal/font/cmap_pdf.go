@@ -22,7 +22,7 @@ import (
 // CIDSystemInfo boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the
 // content interpreter uses.
 
-// CMap resource caps (plan.md "Resource limits & robustness": CMap ranges 65536).
+// CMap resource caps.
 const (
 	maxCMapRanges  = 65536
 	maxCMapDepth   = 4       // usecmap chains
@@ -63,7 +63,7 @@ type cmapPDF struct {
 }
 
 // predefinedCMap returns the built-in CMaps: Identity-H and Identity-V (ISO 32000-2 9.7.5.2). Every other
-// predefined name returns nil (the plan defers the Adobe cmap-resources corpus until real files need it).
+// predefined name returns nil (bundling the Adobe cmap-resources corpus is deferred until real files need it).
 func predefinedCMap(name cos.Name) *cmapPDF {
 	switch name {
 	case "Identity-H":

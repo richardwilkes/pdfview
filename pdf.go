@@ -18,7 +18,7 @@
 // text search returns MuPDF-compatible hit rectangles; and DrawPage draws a page's content onto a caller-owned
 // canvas. The engine's behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it
 // succeeds: coordinates exactly, pixels within committed perceptual thresholds. See README.md for the
-// architecture and plan.md for the port's historical record and decision log.
+// architecture.
 package pdfview
 
 import (
@@ -444,8 +444,8 @@ func (d *document) release() {
 // ------------------------------------------------------------------------------------------------------------------
 // Engine seam. Everything below is the boundary between the frozen public API above — validation, budgeting, and
 // coordinate conversion — and the engine in the internal packages. The seam types deliberately carry float32
-// geometry (plan.md invariant 4): every value the original cgo implementation received as a C float must
-// round-trip through float32 before the float64 scale/floor/ceil math, or the exact-value tests show off-by-ones.
+// geometry: every value the original cgo implementation received as a C float must round-trip through float32
+// before the float64 scale/floor/ceil math, or the exact-value tests show off-by-ones.
 // ------------------------------------------------------------------------------------------------------------------
 
 // engineDocument holds the engine-side state for an open document. It is created by openEngine and discarded by
@@ -457,8 +457,8 @@ type engineDocument struct {
 	store *store.Store
 	// dev is the raster device reused across renders while the output dimensions repeat (the common case:
 	// re-rendering pages of one size at one scale). Reuse avoids allocating and page-faulting a fresh
-	// multi-megabyte surface per render (see the M8 perf decision log); it is dropped on a dimension change
-	// or a render panic. Safe under the document mutex like every other engine field.
+	// multi-megabyte surface per render; it is dropped on a dimension change or a render panic. Safe under the
+	// document mutex like every other engine field.
 	dev *render.Device
 }
 
@@ -500,8 +500,8 @@ type pageLinkInfo struct {
 }
 
 // openEngine parses the raw PDF bytes into the engine's document state, honoring maxCacheSize as the resource-cache
-// budget (0 = unlimited). Any parse failure — and, per plan.md invariant 6, any panic provoked by hostile input —
-// surfaces as ErrUnableToOpenPDF rather than escaping to the caller.
+// budget (0 = unlimited). Any parse failure — and any panic provoked by hostile input — surfaces as
+// ErrUnableToOpenPDF rather than escaping to the caller.
 func openEngine(buffer []byte, maxCacheSize uint64) (eng *engineDocument, err error) {
 	defer func() {
 		if recover() != nil {
@@ -596,13 +596,13 @@ func (e *engineDocument) links(pg *page) []pageLinkInfo {
 
 // rasterize renders the page at the given scale into premultiplied RGBA pixels (4 bytes per pixel, stride bytes per
 // row): the page's content streams run through the interpreter (internal/content) against the raster device
-// (internal/render), and the surface is read back still premultiplied (renderPage unpremultiplies; see the
-// decision log on rounding parity). The output extent must round exactly as MuPDF's fz_round_rect does, since the
-// dimension goldens (and TestPDF's stride/bounds literals) were captured from it: the page extent is scaled in
-// float32, then the max corner is ceiled with a small epsilon so float slop just above a whole number does not
-// spill into an extra pixel row (pinned against all recorded corpus dimensions; see the M3 decision log). Per
-// plan.md invariant 6, a panic provoked by hostile content anywhere under the render surfaces as ErrInternal
-// rather than escaping the public API.
+// (internal/render), and the surface is read back still premultiplied (renderPage unpremultiplies, keeping the
+// rounding of that conversion under the public API's control for pixel parity). The output extent must round
+// exactly as MuPDF's fz_round_rect does, since the dimension goldens (and TestPDF's stride/bounds literals) were
+// captured from it: the page extent is scaled in float32, then the max corner is ceiled with a small epsilon so
+// float slop just above a whole number does not spill into an extra pixel row (pinned against all recorded corpus
+// dimensions). A panic provoked by hostile content anywhere under the render surfaces as ErrInternal rather than
+// escaping the public API.
 func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, height, stride int, err error) {
 	defer func() {
 		if recover() != nil {
@@ -689,8 +689,8 @@ func (p *page) bounds() (width, height float32) {
 // — the same space MuPDF's fz_search_stext_page reported them in through the C float funnel — and quadToRect
 // applies the render scale in float64 exactly as the original implementation did. Running the pass at the
 // render scale instead (sharing the rasterize pass via device.Tee) would compose every quad corner in scaled
-// float32 and break that funnel; see the M7 decision log. Per plan.md invariant 6, a panic provoked by hostile
-// content surfaces as no hits rather than escaping the public API.
+// float32 and break that funnel. A panic provoked by hostile content surfaces as no hits rather than escaping
+// the public API.
 func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []quad) {
 	defer func() {
 		if recover() != nil {

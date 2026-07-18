@@ -106,7 +106,7 @@ func TestNeedsPasswordMatchesGoldens(t *testing.T) {
 }
 
 // TestAuthBitsMatchGoldens replays every recorded Authenticate attempt on a fresh document and checks the
-// status bits against the oracle — the M2 exit-criteria parity table (corpus × {"", user, owner, wrong}).
+// status bits against the oracle — the full parity table (corpus × {"", user, owner, wrong}).
 func TestAuthBitsMatchGoldens(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {

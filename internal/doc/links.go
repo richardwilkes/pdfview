@@ -13,9 +13,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// maxPageLinks caps the links collected from one page so a hostile /Annots array cannot balloon memory (see
-// plan.md "Resource limits & robustness"). The public API applies its own, configurable OverallMaxLinks budget
-// on top.
+// maxPageLinks caps the links collected from one page so a hostile /Annots array cannot balloon memory. The
+// public API applies its own, configurable OverallMaxLinks budget on top.
 const maxPageLinks = 65536
 
 // Link is one link annotation on a page. The rectangle and — for internal links — the destination point are in

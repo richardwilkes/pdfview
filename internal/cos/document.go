@@ -12,10 +12,9 @@
 // parsing with /Prev chains and hybrid files, object streams, a repair scan for files whose cross-reference data
 // is broken or inconsistent, an indirect-reference resolver with a cycle guard, and text-string decoding.
 //
-// Everything is bounded so hostile input cannot force unbounded work (see plan.md "Resource limits &
-// robustness"): reference chains are capped at maxResolveDepth, container nesting at maxNestingDepth, and stream
-// decoding inherits internal/filter's chain and expansion caps. Termination is guaranteed by these caps; there
-// are no timeouts.
+// Everything is bounded so hostile input cannot force unbounded work: reference chains are capped at
+// maxResolveDepth, container nesting at maxNestingDepth, and stream decoding inherits internal/filter's chain
+// and expansion caps. Termination is guaranteed by these caps; there are no timeouts.
 package cos
 
 import (
@@ -26,7 +25,7 @@ import (
 )
 
 // maxResolveDepth caps how many indirect references Resolve follows before giving up, terminating reference
-// cycles (see plan.md "Resource limits & robustness").
+// cycles.
 const maxResolveDepth = 64
 
 var (
@@ -199,8 +198,8 @@ func (d *Document) GetString(dict Dict, key Name) (String, bool) {
 }
 
 // StreamData applies s's /Filter chain to its raw bytes and returns the decoded data. Filter chain length and
-// output size are capped by internal/filter. Encrypted streams are rejected until the standard security handler
-// lands (M2).
+// output size are capped by internal/filter. Document-level encryption is already undone at parse time by the
+// installed Decryptor (see crypt.go); a non-Identity /Crypt filter in the chain is an error.
 func (d *Document) StreamData(s *Stream) ([]byte, error) {
 	specs, err := d.filterSpecs(s.Dict)
 	if err != nil {
@@ -271,7 +270,7 @@ func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec N
 
 // filterSpecs converts a stream dictionary's /Filter and /DecodeParms entries into filter.Specs. A /Crypt filter
 // whose /Name is /Identity (or absent, the default) is dropped from the chain, since Identity is a no-op; any
-// other crypt filter is an error until M2.
+// other (named) crypt filter is unsupported and is an error.
 func (d *Document) filterSpecs(dict Dict) ([]filter.Spec, error) {
 	names, parms, err := d.filterNamesAndParms(dict)
 	if err != nil {

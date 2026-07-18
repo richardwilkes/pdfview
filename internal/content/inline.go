@@ -16,7 +16,7 @@ import "github.com/richardwilkes/pdfview/internal/cos"
 // ordinary operand machinery; the binary payload after ID is isolated by length when the dictionary supplies a
 // usable /L (or /Length), and otherwise by scanning for the EI keyword delimited the way real encoders emit it.
 // Malformed constructs degrade to drawing nothing; the only hard obligation is not to desynchronize the
-// tokenizer, exactly as the M4 skip-only version guaranteed.
+// tokenizer.
 func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 	dict, ok := parseInlineDict(lex)
 	if !ok {

@@ -25,12 +25,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// Transparency groups and soft masks (M8). A group maps to SaveLayer with the group's constant alpha and
+// Transparency groups and soft masks. A group maps to SaveLayer with the group's constant alpha and
 // blend mode on the restore paint; a NON-isolated group whose composite is trivial (alpha 1, blend Normal,
 // no knockout) is passed through without a layer, which reproduces non-isolated semantics exactly — interior
 // blend modes then see the true backdrop, as MuPDF does (oracle-pinned by the isolation probe). A
-// non-isolated group with a non-trivial composite still gets a layer, an accepted isolated approximation
-// (see the M8 decision log).
+// non-isolated group with a non-trivial composite still gets a layer, an accepted isolated approximation.
 //
 // Soft masks render their content to a separate offscreen surface: BeginMask swaps the canvas, EndMask reads
 // the surface back, reduces it to an 8-bit coverage plane (rendered alpha for /S /Alpha; the captured MuPDF
@@ -204,8 +203,8 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 }
 
 // maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed,
-// like the M4 device-color tables) was captured behaviorally from per-channel and neutral ramps (2026-07-11
-// probes): the response is a weighted sum of the ENCODED channel values — weights 78/159/15 out of 252,
+// like the device-color tables in internal/color) was captured behaviorally from per-channel and neutral
+// ramps: the response is a weighted sum of the ENCODED channel values — weights 78/159/15 out of 252,
 // measured at the ramp tops — followed by the captured neutral response curve. Neutral inputs reproduce the
 // oracle exactly by construction; primaries and mixtures land within ±2 of the oracle across the 800-sample
 // probe set (the oracle itself converts DeviceGray-sourced mask content through a slightly different

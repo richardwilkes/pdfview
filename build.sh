@@ -30,6 +30,16 @@ done
 echo -e "\033[33mBuilding...\033[0m"
 go build -v ./...
 
+# Run the tests
+if [ "$TEST"x == "1x" ]; then
+  if [ -n "$RACE" ]; then
+    echo -e "\033[33mTesting with -race enabled...\033[0m"
+  else
+    echo -e "\033[33mTesting...\033[0m"
+  fi
+  go test $RACE ./...
+fi
+
 # Run the linters
 if [ "$LINT"x == "1x" ]; then
   GOLANGCI_LINT_VERSION=$(curl --head -s https://github.com/golangci/golangci-lint/releases/latest | grep -i location: | sed 's/^.*v//' | tr -d '\r\n' )
@@ -40,15 +50,6 @@ if [ "$LINT"x == "1x" ]; then
     curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$TOOLS_DIR" v$GOLANGCI_LINT_VERSION
   fi
   echo -e "\033[33mLinting...\033[0m"
-  "$TOOLS_DIR/golangci-lint" run
-fi
-
-# Run the tests
-if [ "$TEST"x == "1x" ]; then
-  if [ -n "$RACE" ]; then
-    echo -e "\033[33mTesting with -race enabled...\033[0m"
-  else
-    echo -e "\033[33mTesting...\033[0m"
-  fi
-  go test $RACE ./...
+  "$TOOLS_DIR/golangci-lint" run ./...
+  (cd oracle; "$TOOLS_DIR/golangci-lint" run -c ../.golangci.yml ./...)
 fi

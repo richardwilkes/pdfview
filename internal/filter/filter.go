@@ -11,12 +11,12 @@
 // LZWDecode, ASCIIHexDecode, ASCII85Decode, and RunLengthDecode — together with the PNG and TIFF predictor
 // transforms and bounded chain application. The image-only filters (DCTDecode, CCITTFaxDecode, JBIG2Decode,
 // JPXDecode) are handled by internal/imaging at rasterization time and are rejected here, as is the Crypt filter
-// (internal/cos strips Identity crypt filters before building a chain; real crypt filters arrive with
-// internal/crypt at M2).
+// (internal/cos strips Identity crypt filters before building a chain and rejects named ones; document-level
+// encryption is undone at parse time by internal/crypt).
 //
-// Decoding enforces two caps so hostile input cannot force unbounded work (see plan.md "Resource limits &
-// robustness"): a chain may apply at most MaxChainLength filters, and each stage's output may not exceed
-// MaxDecodedSize(len(input)) bytes. Termination is guaranteed by these caps; there are no timeouts.
+// Decoding enforces two caps so hostile input cannot force unbounded work: a chain may apply at most
+// MaxChainLength filters, and each stage's output may not exceed MaxDecodedSize(len(input)) bytes. Termination
+// is guaranteed by these caps; there are no timeouts.
 //
 // Decoding is otherwise deliberately fault-tolerant, matching the warn-and-continue behavior of widely deployed
 // PDF readers: corrupt input that still yields some output returns that partial output without an error.

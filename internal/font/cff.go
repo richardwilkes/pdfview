@@ -24,7 +24,7 @@ import (
 // provides charstring interpretation and glyph loading but does not expose the Top DICT's FontBBox or
 // FontMatrix, which the engine needs because FreeType — and therefore the oracle's MuPDF build — takes a bare
 // CFF font's ascender/descender from its FontBBox (see internal/font's package comment). The INDEX and DICT
-// walkers here are also the base for the CID-keyed charset/FDSelect reader that lands with Type0 support.
+// walkers here are also the base for the CID-keyed charset/FDSelect reader Type0 support uses.
 
 var errBadCFF = errors.New("malformed CFF data")
 

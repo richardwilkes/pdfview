@@ -29,7 +29,7 @@ import (
 // Authenticate status bits for every recorded attempt, TableOfContents at every recorded DPI, render dimensions,
 // stride, and links, search hit rectangles for every recorded needle (exact), and pixel content within each
 // golden's gate — its thresholds.json ratchet when present (the measured, understood divergences such as
-// substitute-font letterforms; see plan.md), else the default thresholds.
+// substitute-font letterforms), else the default thresholds.
 func TestParity(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -175,9 +175,9 @@ func parityRender(t *testing.T, golden *testsupport.Golden, doc *pdfview.Documen
 		}
 	}
 	// images-jbig2's own golden records MuPDF padding its failed JBIG2 decode into a black square, which the
-	// blank-rendering stub deliberately does not reproduce (see the M5 stub-codec decision log); its pixel
-	// content is enforced in TestImageCorpusPixels against the images-jpx golden, whose page content is
-	// byte-identical apart from the codec name. Everything else about it (dims, stride, links) compares above.
+	// blank-rendering stub deliberately does not reproduce; its pixel content is enforced in
+	// TestImageCorpusPixels against the images-jpx golden, whose page content is byte-identical apart from the
+	// codec name. Everything else about it (dims, stride, links) compares above.
 	if golden.Name == "images-jbig2" {
 		return
 	}

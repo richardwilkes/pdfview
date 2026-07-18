@@ -16,7 +16,7 @@ import (
 // FuzzType1 drives the full Type 1 surface with arbitrary bytes: container splitting (raw/PFA/PFB), eexec
 // decryption, clear-text and private-dict scanning, and charstring interpretation (including seac, flex, and
 // the othersubr protocol) for every parsed glyph. Nothing may panic and nothing may loop: the scanner always
-// advances and the interpreter's stacks and counts are capped (plan.md invariant 6).
+// advances and the interpreter's stacks and counts are capped.
 func FuzzType1(f *testing.F) {
 	f.Add(buildTestFont(false, false, false))
 	f.Add(buildTestFont(true, false, false))

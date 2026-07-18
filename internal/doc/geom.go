@@ -20,7 +20,7 @@ import (
 // matching MuPDF's fz_bound_page semantics — that every coordinate crossing the engine seam (page bounds,
 // link rectangles, destination points, outline positions) is expressed in. All arithmetic is float32: the
 // exact-value tests were baselined against the C float precision of the MuPDF-based implementation, and wider
-// intermediate math would produce off-by-one pixel differences after scaling (plan.md invariant 4).
+// intermediate math would produce off-by-one pixel differences after scaling.
 type pageGeom struct {
 	x0, y0, x1, y1 float32
 	rotate         int
@@ -58,7 +58,7 @@ var defaultMediaBox = [4]float32{0, 0, 612, 792}
 // resolveGeom converts the inherited attributes of one page into its effective geometry: /MediaBox (falling
 // back to US Letter when absent or degenerate), intersected with /CropBox when one is present (an empty
 // intersection falls back to the MediaBox), plus the normalized rotation. Verified against MuPDF across box
-// origins and all four rotations (see the M3 decision log).
+// origins and all four rotations.
 func (d *Document) resolveGeom(attrs inheritedAttrs) pageGeom {
 	media, ok := d.rectFromObj(attrs.mediaBox)
 	if !ok {
@@ -132,7 +132,7 @@ func (g pageGeom) displaySize() (width, height float32) {
 // displayed page's top-left/y-down space, applying the rotation. NaN coordinates (destinations with no
 // explicit position) propagate through the arithmetic exactly as they do through MuPDF's float matrix
 // transform — note that for 90/270 rotations a NaN switches axes with its source coordinate. The four cases
-// were pinned against MuPDF with an offset box origin (see the M3 decision log).
+// were pinned against MuPDF with an offset box origin.
 func (g pageGeom) toTopLeft(x, y float32) (u, v float32) {
 	switch g.rotate {
 	case 90:

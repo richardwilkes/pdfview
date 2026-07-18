@@ -266,11 +266,11 @@ func ComparePixels(got, want *image.NRGBA) (*PixelDiff, error) {
 	return diff, nil
 }
 
-// Thresholds is one golden's pixel gate. Every file is compared against the default gate from plan.md unless
-// its golden directory carries a thresholds.json override, the sanctioned mechanism for files whose measured,
-// UNDERSTOOD divergence exceeds the default (substitute-font letterform deltas, AA-model edge redistribution
-// on small text — see the M6 decision log). Overrides are a ratchet: once set they may only ever tighten as
-// rendering fidelity improves, and each must carry its justification.
+// Thresholds is one golden's pixel gate. Every file is compared against DefaultThresholds unless its golden
+// directory carries a thresholds.json override, the sanctioned mechanism for files whose measured, UNDERSTOOD
+// divergence exceeds the default (substitute-font letterform deltas, AA-model edge redistribution on small
+// text). Overrides are a ratchet: once set they may only ever tighten as rendering fidelity improves, and
+// each must carry its justification.
 type Thresholds struct {
 	// Justification documents why this golden's gate differs from the default. Required in overrides.
 	Justification string `json:"justification"`
@@ -281,8 +281,8 @@ type Thresholds struct {
 	MaxMeanDelta float64 `json:"maxMeanDelta"`
 }
 
-// DefaultThresholds is the initial perceptual gate from plan.md: at most 2% of pixels with a delta over 24,
-// at most 10% with a delta over 8, and a mean delta of at most 2.
+// DefaultThresholds is the standard perceptual gate: at most 2% of pixels with a delta over 24, at most 10%
+// with a delta over 8, and a mean delta of at most 2.
 func DefaultThresholds() Thresholds {
 	return Thresholds{MaxOver24Pct: 2, MaxOver8Pct: 10, MaxMeanDelta: 2}
 }

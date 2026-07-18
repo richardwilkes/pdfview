@@ -17,8 +17,7 @@ import (
 )
 
 // maxContentStreams caps how many streams a /Contents array contributes, bounding the decode work a hostile
-// page can demand (each stream's own decode is already capped by internal/filter; see plan.md "Resource limits
-// & robustness").
+// page can demand (each stream's own decode is already capped by internal/filter).
 const maxContentStreams = 8192
 
 // PageResources returns the given 0-based page's resolved (inheritable) /Resources dictionary, or nil when it
@@ -78,8 +77,8 @@ func (d *Document) PageContents(pageNumber int) []byte {
 
 // PageCTM returns the matrix mapping the given 0-based page's PDF user space to rendered-image space at the
 // given scale: the page's effective box maps to [0, w×scale] × [0, h×scale] with the top-left/y-down
-// orientation and /Rotate applied — the same mapping toTopLeft pins against MuPDF (M3 decision log), expressed
-// as a matrix and composed with the scale.
+// orientation and /Rotate applied — the same mapping toTopLeft pins against MuPDF, expressed as a matrix and
+// composed with the scale.
 func (d *Document) PageCTM(pageNumber int, scale float32) (gfx.Matrix, error) {
 	if pageNumber < 0 || pageNumber >= len(d.geoms) {
 		return gfx.Matrix{}, errNoSuchPage

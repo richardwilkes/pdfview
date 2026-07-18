@@ -7,19 +7,18 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package content tokenizes and interprets PDF content streams (ISO 32000-2 8–9), driving a device.Device.
-// Milestone M4 covered the graphics core: path construction and painting, graphics-state management (q/Q/cm,
-// the ExtGState subset below), clipping (W/W*), color operators, and form XObject recursion. M5 added image
-// XObjects and inline images (decoded by internal/imaging). Text objects and shadings are recognized and
-// skipped safely — the tokenizer stays in sync across them — with their real handling arriving at M6 and M8
-// respectively.
+// Package content tokenizes and interprets PDF content streams (ISO 32000-2 8–9), driving a device.Device:
+// path construction and painting, graphics-state management (q/Q/cm, the ExtGState subset below), clipping
+// (W/W*), color operators, form XObject recursion, image XObjects and inline images (decoded by
+// internal/imaging), text objects (fonts via internal/font), shadings and patterns (internal/shading), and
+// transparency — groups, soft masks, and blend modes.
 //
-// Robustness contract (plan.md "Resource limits & robustness"): unknown operators are skipped with the operand
-// list reset (the convention every deployed viewer follows); operators with missing or mistyped operands are
-// skipped likewise; unbalanced q/Q at stream end auto-unwinds; and all work is bounded — graphics-state depth,
-// form recursion (with a cycle set), operand count, container nesting, and total executed operators are all
-// capped — so hostile input terminates without timeouts. The interpreter guarantees the device's push/pop
-// balance no matter how malformed the content is.
+// Robustness contract: unknown operators are skipped with the operand list reset (the convention every
+// deployed viewer follows); operators with missing or mistyped operands are skipped likewise; unbalanced q/Q
+// at stream end auto-unwinds; and all work is bounded — graphics-state depth, form recursion (with a cycle
+// set), operand count, container nesting, and total executed operators are all capped — so hostile input
+// terminates without timeouts. The interpreter guarantees the device's push/pop balance no matter how
+// malformed the content is.
 package content
 
 import (
@@ -42,7 +41,7 @@ type (
 	imageKey struct{ ref cos.Ref }
 )
 
-// Limits. maxQDepth matches the q/Q cap in plan.md; pushes beyond it are ignored (with their matching Qs
+// Limits. maxQDepth caps q/Q nesting; pushes beyond it are ignored (with their matching Qs
 // ignored too, so pairing survives). maxFormDepth is the XObject recursion cap; the per-page cycle set makes
 // self-referential forms terminate even below it. maxOperands bounds the operand list — when content pushes
 // more, the oldest are dropped, keeping the operands an operator actually consumes. maxDashEntries matches the
@@ -190,7 +189,7 @@ const (
 // has none); ctm maps user space to device space; st is the document's budgeted resource store (nil degrades
 // to per-Run caching only — correct, just re-parsing across runs). Malformed content degrades — operators are
 // skipped, never escalated — so Run does not fail; panics from truly hostile input are the caller's concern
-// (the public API wraps rendering in a recover guard per plan.md invariant 6).
+// (the public API wraps rendering in a recover guard).
 func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev device.Device, st *store.Store) {
 	in := newInterp(d, resources, ctm, dev, st)
 	in.exec(data)
@@ -204,8 +203,8 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 // RunAnnot interprets one annotation appearance stream (a form XObject) against dev. ctm must already compose
 // the ISO 32000-2 12.5.5 placement matrix (internal/doc's Annot.Transform) with the page CTM; the form's own
 // /Matrix and /BBox clip apply inside, exactly as for a form invoked by Do. pageResources is the page's resource
-// dictionary: an appearance stream without /Resources of its own inherits it (probe-pinned — see the M8 /AP
-// decision-log entry). Malformed content degrades exactly as in Run.
+// dictionary: an appearance stream without /Resources of its own inherits it (probe-pinned). Malformed content
+// degrades exactly as in Run.
 func RunAnnot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *cos.Stream, ctm gfx.Matrix, dev device.Device, st *store.Store) {
 	in := newInterp(d, pageResources, ctm, dev, st)
 	in.execForm(raw, stream)

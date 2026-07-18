@@ -15,9 +15,9 @@ import (
 	"testing"
 )
 
-// TestCacheBudget pins the maxCacheSize contract (M6 exit criterion "budget honored under a tiny
-// maxCacheSize"): the store is a pure cache, so any budget — unlimited, comfortable, or one byte (nothing
-// ever fits) — must produce byte-identical renders, and a bounded store must never hold more than its budget.
+// TestCacheBudget pins the maxCacheSize contract: the store is a pure cache, so any budget — unlimited,
+// comfortable, or one byte (nothing ever fits) — must produce byte-identical renders, and a bounded store
+// must never hold more than its budget.
 // glaive exercises all three cached kinds: parsed fonts, glyph outlines, and (across its pages) images.
 func TestCacheBudget(t *testing.T) {
 	buffer, err := os.ReadFile("testfiles/corpus/glaive.pdf")

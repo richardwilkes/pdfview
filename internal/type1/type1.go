@@ -12,7 +12,7 @@
 // and the /Subrs and /CharStrings charstrings (decrypted with r=4330 and their lenIV bytes stripped) from the
 // private portion. Charstrings execute through go-text's psinterpreter (whose Type1Charstring context supplies
 // the number parsing and subroutine machinery); this package contributes only the operator handler — see
-// charstring.go — per plan.md's building-block note. The format authority is Adobe's published "Adobe Type 1
+// charstring.go. The format authority is Adobe's published "Adobe Type 1
 // Font Format" specification; the eexec and charstring encryption algorithm (r=55665 / r=4330, c1=52845,
 // c2=22719) is printed there in full.
 //
@@ -34,8 +34,8 @@ var (
 	ErrBadCharstring = errors.New("malformed Type 1 charstring")
 )
 
-// Caps against hostile input (plan.md "Resource limits & robustness"): counts are bounded so a small file
-// cannot claim huge tables, and every byte read is bounded by the input length.
+// Caps against hostile input: counts are bounded so a small file cannot claim huge tables, and every byte read
+// is bounded by the input length.
 const (
 	maxCharstrings = 65536
 	maxSubrs       = 65536
@@ -78,7 +78,7 @@ type Font struct {
 // Parse reads a Type 1 font program in PFB, PFA, or raw (PDF FontFile) form.
 func Parse(data []byte) (f *Font, err error) {
 	defer func() {
-		if recover() != nil { // Hostile input must degrade, never panic (plan.md invariant 6).
+		if recover() != nil { // Hostile input must degrade, never panic.
 			f = nil
 			err = ErrBadType1
 		}

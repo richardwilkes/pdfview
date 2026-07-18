@@ -7,12 +7,12 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth milestone M4 requires: the device
+// Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth the engine requires: the device
 // spaces (Gray/RGB/CMYK, matched byte-for-byte to the oracle's observed ICC-backed conversions — see
 // convert.go), CalGray/CalRGB (approximated by their device analogs), ICCBased (N-component fallback to the
 // matching device space), Indexed, and Separation/DeviceN with their tint transforms (internal/function).
 // Everything converts to the rendered RGB space via ToNRGBA. Lab and the full CalGray/CalRGB math are
-// deliberately deferred (plan.md package table).
+// deliberately omitted.
 package color
 
 import (
@@ -24,7 +24,7 @@ import (
 )
 
 // maxSpaceDepth caps color-space nesting (Indexed bases, ICC alternates, Separation alternates), guaranteeing
-// termination on hostile self-referential spaces (see plan.md "Resource limits & robustness").
+// termination on hostile self-referential spaces.
 const maxSpaceDepth = 8
 
 // maxComponents caps DeviceN component counts; the standard's own limit is 32.
@@ -153,7 +153,8 @@ func (s *Separation) ToNRGBA(comps []float32) color.NRGBA {
 }
 
 // Pattern is the /Pattern color space. Painting with it selects a pattern resource rather than component
-// values; until patterns land (M8), the interpreter skips paint operations whose active space is a Pattern.
+// values; the interpreter (internal/content) resolves the scn-selected pattern and skips paint operations
+// while no pattern is selected.
 type Pattern struct {
 	// Base is the underlying space of an uncolored pattern space (/Pattern base), nil otherwise.
 	Base Space
@@ -241,14 +242,14 @@ func parseSpaceArray(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 		}
 		return &Pattern{Base: base}, nil
 	default:
-		// Lab and anything unrecognized are unsupported for now.
+		// Lab and anything unrecognized are unsupported.
 		return nil, errUnsupportedSpace
 	}
 }
 
-// parseICCBased maps an ICC profile stream to the device space matching its component count — the fallback the
-// plan calls for (the profile itself is not interpreted). /N is authoritative; a parseable /Alternate is used
-// when /N is absent or nonsensical.
+// parseICCBased maps an ICC profile stream to the device space matching its component count (the profile
+// itself is deliberately not interpreted). /N is authoritative; a parseable /Alternate is used when /N is
+// absent or nonsensical.
 func parseICCBased(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	if len(arr) < 2 {
 		return nil, errBadSpace

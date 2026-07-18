@@ -21,7 +21,7 @@ import (
 // decodeDCT handles DCTDecode payloads through the standard library's JPEG decoder, which performs the
 // YCbCr→RGB and Adobe APP14 CMYK/YCCK handling internally. The decoded component bytes then follow the same
 // path as raw samples: /Decode mapping, then conversion through the captured device-colorspace behavior in
-// internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands — see the M4 decision log).
+// internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands).
 // The JPEG's own dimensions are authoritative for the raster (the dictionary's /Width and /Height only position
 // the unit square, which the CTM maps regardless of resolution).
 func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {

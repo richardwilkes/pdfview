@@ -7,8 +7,8 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package store implements the document-scoped, byte-budgeted resource cache (the fz-store analog; plan.md
-// architecture table): parsed fonts, decoded images, and converted glyph paths register here with byte-size
+// Package store implements the document-scoped, byte-budgeted resource cache (the fz-store analog): parsed
+// fonts, decoded images, and converted glyph paths register here with byte-size
 // estimates, and least-recently-used entries evict when a New(maxCacheSize) budget would be exceeded. A zero
 // budget means unlimited (nothing ever evicts), matching the public API's documented maxCacheSize semantics.
 //

@@ -12,7 +12,7 @@ package content
 import "github.com/richardwilkes/pdfview/internal/cos"
 
 // maxNesting caps array/dictionary nesting inside content-stream operands, mirroring the COS parser's own
-// container cap (see plan.md "Resource limits & robustness").
+// container cap.
 const maxNesting = 512
 
 // parseOperand assembles one operand object whose first token has already been read. Content streams carry

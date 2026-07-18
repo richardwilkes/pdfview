@@ -36,8 +36,8 @@ func annotDoc(t *testing.T, annot string, extra map[int]string) *doc.Document {
 	return mustOpen(t, pdf(objects))
 }
 
-// TestAnnotationSelection pins the probe-pinned gates: which annotations yield a renderable appearance at all.
-// See the M8 /AP decision-log entry in plan.md for the oracle probes behind each case.
+// TestAnnotationSelection pins the probe-pinned gates: which annotations yield a renderable appearance at all
+// (each case was pinned by an oracle probe; see the selection rules in annots.go).
 func TestAnnotationSelection(t *testing.T) {
 	cases := []struct {
 		extra map[int]string

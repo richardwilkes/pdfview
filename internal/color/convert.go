@@ -30,8 +30,8 @@ import (
 //     ICC gray→RGB transform is not perfectly neutral (some grays land with B one below R/G), so all three
 //     channels are recorded.
 //   - data/cmyk17.bin.gz: DeviceCMYK sampled on the 17^4 grid (step 1/16) → 3 RGB bytes per node. Multilinear
-//     interpolation between nodes matched 2516 off-grid oracle observations with mean error 0.25 and max 1.7
-//     (see plan.md's M4 notes), comfortably inside the pixel-diff thresholds.
+//     interpolation between nodes matched 2516 off-grid oracle observations with mean error 0.25 and max 1.7,
+//     comfortably inside the pixel-diff thresholds.
 //
 // DeviceRGB needs no table: observation shows the component bytes are trunc(v×255) computed in float32 (510 of
 // 1021 ramp points contradict round-to-nearest; all match truncation).

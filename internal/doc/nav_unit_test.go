@@ -18,8 +18,8 @@ import (
 )
 
 // The expected values in this file were captured by running the MuPDF oracle over probe documents with exactly
-// these structures (offset box origins, each rotation, each destination kind, crop intersections); see the M3
-// decision log in plan.md. They pin behavior the committed corpus does not cover.
+// these structures (offset box origins, each rotation, each destination kind, crop intersections). They pin
+// behavior the committed corpus does not cover.
 
 const (
 	pagesOneKid = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"

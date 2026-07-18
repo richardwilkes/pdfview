@@ -8,7 +8,7 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Command oracle dumps the observable behavior of github.com/richardwilkes/pdf (MuPDF via cgo) for a corpus PDF
-// into a golden directory that the pure-Go pdfview engine is tested against (see plan.md). It is a development
+// into a golden directory that the pure-Go pdfview engine is tested against. It is a development
 // tool: it requires cgo and a checkout of the binding at ../../pdf, is never imported by the library, and never
 // runs in CI — the goldens it produces are committed. Run regen.sh to regenerate every golden from the corpus.
 //

@@ -15,7 +15,7 @@ import (
 )
 
 // Annotation-appearance selection and placement, matching MuPDF's display path (fz_run_page), pinned entirely by
-// oracle probes (2026-07-11, M8 /AP decision-log entry):
+// oracle probes:
 //
 //   - Only the normal appearance (/AP /N) ever renders — /D and /R never do. A stream-valued /N is used directly
 //     (a stray /AS is ignored); a dictionary-valued /N requires /AS to name one of its stream entries, else the

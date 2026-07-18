@@ -8,10 +8,10 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package device defines the seam between the content-stream interpreter (internal/content) and its consumers:
-// the raster device (internal/render) and, from M7, the structured-text device (internal/stext). One
-// interpreter pass drives N devices through Tee, so a render call walks each content stream exactly once.
+// the raster device (internal/render) and the structured-text device (internal/stext). One interpreter pass
+// drives N devices through Tee, so a render call walks each content stream exactly once.
 //
-// Contract (see plan.md "Device seam"): the interpreter owns all PDF semantics — colorspace and function
+// Contract: the interpreter owns all PDF semantics — colorspace and function
 // resolution, graphics-state tracking, recursion and resource limits — and guarantees balanced push/pop
 // pairing: every ClipPath/ClipStrokePath/ClipImageMask/EndTextClip is matched by a later PopClip, every
 // BeginGroup by an EndGroup, and every BeginMask by an EndMask and then a PopMask, even when the content

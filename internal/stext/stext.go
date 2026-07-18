@@ -9,12 +9,12 @@
 
 // Package stext implements the structured-text device: it records every character the content-stream
 // interpreter emits — through any text verb, in emission order, unclipped — and provides
-// fz_search_stext_page-compatible search over the recorded characters (see plan.md "Search compatibility").
+// fz_search_stext_page-compatible search over the recorded characters.
 //
 // The device deliberately ignores clip pushes: MuPDF's structured-text extraction is unclipped, so text
 // scissored away by a clip path is still searchable, and invisible text (render mode 3, arriving through
-// IgnoreText) is recorded too. Character quads are computed exactly as the M6 quad-parity spike pinned them
-// against the oracle: Trm × [0..advance, descender..ascender], in the coordinate space of the interpreter
+// IgnoreText) is recorded too. Character quads are computed exactly as pinned against the oracle:
+// Trm × [0..advance, descender..ascender], in the coordinate space of the interpreter
 // pass's CTM. Search hits therefore come back in that same space; the engine seam runs the pass at scale 1 so
 // they are page-space values matching the goldens' searchRaw quads bit-for-bit.
 package stext
@@ -38,7 +38,7 @@ type Char struct {
 	Origin gfx.Point
 	End    gfx.Point
 	// Rune is the extraction/search value (0 when the font provides no Unicode mapping; such characters never
-	// match a needle, exactly as the spike pinned).
+	// match a needle, exactly as pinned against the oracle).
 	Rune rune
 	// Size is the em size in device units (the vertical scale of the Trm).
 	Size float32
@@ -106,8 +106,8 @@ func (d *Device) record(run *device.TextRun) {
 // Search finds needle in the recorded characters and returns the hit quads in emission order, at most maxQuads
 // of them (a match that would overflow the budget is truncated and the search stops, so the count is exact —
 // matching the original implementation, whose fixed quad buffer fz_search_stext_page filled and no further).
-// The matching rules replicate fz_search_stext_page black-box, as pinned by the M6 quad-parity spike and the
-// probe corpus (see the M6/M7 decision-log entries): Unicode simple case folding for non-space runes; a needle
+// The matching rules replicate fz_search_stext_page black-box, as pinned by the quad-parity tests and the
+// probe corpus: Unicode simple case folding for non-space runes; a needle
 // whitespace rune matches a run of extracted whitespace characters, a horizontal gap of at least gapSpaceEm
 // (a synthesized inter-word space), or a line break; a word never silently spans a line break; matches do not
 // overlap; each match yields one quad per line touched, split further by segmentQuads' vertical-extent rule. A
@@ -117,7 +117,7 @@ func (d *Device) Search(needle string, maxQuads int) []gfx.Quad {
 }
 
 // Matcher thresholds, in em fractions of the preceding character's size, pinned behaviorally against the
-// oracle at M6: a horizontal gap of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a
+// oracle: a horizontal gap of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a
 // space there — text-std14's "Kerned Text" needle carries a 0.5 em TJ gap); baseline origins offset by more
 // than lineBreakEm perpendicular to the advance direction are different lines (measured perpendicular so
 // rotated text advancing through device y stays one line).
@@ -238,7 +238,7 @@ func gapBetween(prev, cur Char) float32 {
 }
 
 // segmentQuads assembles one line's matched characters into hit quads, reproducing the oracle's grouping
-// (pinned by irs-fw9 and hit-quad-split.pdf; see the M6 decision log): characters extend the current quad
+// (pinned by irs-fw9 and hit-quad-split.pdf): characters extend the current quad
 // horizontally while their vertical extent stays within extentSplitFraction of the quad's height — measured
 // against the extent the quad's FIRST character established, which is never stretched by later merged
 // characters — and a character diverging further (such as a much larger inter-word space) closes the quad and

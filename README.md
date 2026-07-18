@@ -155,9 +155,3 @@ On the committed benchmark protocol (`BenchmarkRenderGlaive150`, warm renders of
 150 dpi, darwin/arm64): 8.6/7.6 ms per page versus the cgo MuPDF binding's 6.5/4.9 ms — about 1.3–1.6× cgo, from a
 pure-Go engine. Warm renders are served by a glyph-coverage cache, direct compositing under rectangular clips, and
 per-document surface reuse.
-
-## History
-
-The pure-Go engine was built milestone by milestone against the plan in [plan.md](plan.md), which is kept as the
-historical record of the port: milestone status, the dated decision log (every behavioral pin against the oracle),
-and the measured pixel-parity numbers per corpus file.

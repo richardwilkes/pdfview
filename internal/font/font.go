@@ -11,15 +11,15 @@
 // embedded font programs, encodings, width resolution, and the deterministic substitution of non-embedded
 // fonts from the bundled data (internal/font/data). It supplies the content interpreter with everything a
 // show-text operator needs — per-code advances in text space, ascent/descent for text quads, and Unicode for
-// extraction/search — and (as milestone M6 progresses) glyph outlines for rendering.
+// extraction/search — and glyph outlines for rendering.
 //
-// Metrics contract (pinned behaviorally against the oracle goldens — see the 2026-07-11 M6 decision-log
-// entries in plan.md): the widths that position glyphs come from the PDF /Widths (or /W) entries whenever
-// present, never from the font program, so layout and search parity hold even when glyph shapes are
-// substituted. The ascender/descender that size text quads follow FreeType's rules, because that is what the
-// oracle's MuPDF build exposes: hhea values for sfnt fonts (falling back to OS/2 typo, then win metrics, when
-// hhea has none), and the FontBBox for bare CFF and Type 1 programs. Substituted fonts use the pinned metrics
-// of MuPDF's bundled replacements, not the metrics of our Liberation stand-ins, for the same reason.
+// Metrics contract (pinned behaviorally against the oracle goldens): the widths that position glyphs come from
+// the PDF /Widths (or /W) entries whenever present, never from the font program, so layout and search parity
+// hold even when glyph shapes are substituted. The ascender/descender that size text quads follow FreeType's
+// rules, because that is what the oracle's MuPDF build exposes: hhea values for sfnt fonts (falling back to
+// OS/2 typo, then win metrics, when hhea has none), and the FontBBox for bare CFF and Type 1 programs.
+// Substituted fonts use the pinned metrics of MuPDF's bundled replacements, not the metrics of our Liberation
+// stand-ins, for the same reason.
 package font
 
 import (
@@ -33,8 +33,8 @@ import (
 // Errors reported by Load. They flow no further than the interpreter, which degrades a failed font load by
 // keeping the previous font (matching the oracle's operator-level error recovery).
 var (
-	// ErrUnsupportedFont marks font subtypes that do not have engine support yet (Type0 and Type3 until their
-	// M6 boxes land); the interpreter skips text shown with them, never erroring the page.
+	// ErrUnsupportedFont marks font configurations without engine support (Type0 fonts encoded with a
+	// predefined non-Identity CMap); the interpreter skips text shown with them, never erroring the page.
 	ErrUnsupportedFont = errors.New("unsupported font type")
 	// ErrBadFont marks a font dictionary too malformed to use.
 	ErrBadFont = errors.New("unusable font dictionary")
@@ -290,9 +290,9 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 }
 
 // Width returns the advance for a code in text space (em units at size 1). A present /Widths array is
-// authoritative: its value when the code resolves, /MissingWidth otherwise (plan.md width rules). Without
-// one, substituted fonts use the standard-14 AFM width for the code's glyph name and embedded sfnt programs
-// their own hmtx advance, then /MissingWidth. Composite fonts use /W with /DW as the default instead.
+// authoritative: its value when the code resolves, /MissingWidth otherwise. Without one, substituted fonts
+// use the standard-14 AFM width for the code's glyph name and embedded sfnt programs their own hmtx advance,
+// then /MissingWidth. Composite fonts use /W with /DW as the default instead.
 func (f *Font) Width(code uint32) float32 {
 	if f.type0 != nil {
 		return f.type0.cidWidth(f.type0.cmap.cid(code))
@@ -317,8 +317,8 @@ func (f *Font) Width(code uint32) float32 {
 }
 
 // Unicode returns the Unicode rune for a code, or 0 when none is known. A /ToUnicode CMap takes precedence
-// over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune until
-// the M7 extraction seam carries strings.
+// over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the
+// one rune per code the search/extraction seam carries.
 func (f *Font) Unicode(code uint32) rune {
 	if f.toUni != nil {
 		if s := f.toUni.bfString(code); s != "" {
@@ -425,8 +425,8 @@ func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
 }
 
 // buildUnicode fills the code→rune table: glyph name through the Adobe Glyph List (including its uniXXXX and
-// uXXXXXX conventions), else the code itself for ASCII, else unknown. ToUnicode CMaps (which take precedence)
-// land later in M6; search/extraction parity is pinned at M7.
+// uXXXXXX conventions), else the code itself for ASCII, else unknown. A /ToUnicode CMap, when present, takes
+// precedence over this table at lookup time (see Unicode).
 func buildUnicode(f *Font) {
 	for code := range 256 {
 		if name := f.enc[code]; name != "" {

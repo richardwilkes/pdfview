@@ -5,9 +5,9 @@
 # version 2.0. If a copy of the MPL was not distributed with this file, You
 # can obtain one at http://mozilla.org/MPL/2.0/.
 #
-# Fetches the veraPDF test corpus for the local M8 soak (see plan.md and soak_test.go). The download is
-# tag-pinned and checksum-verified; the extracted files land in testfiles/external/veraPDF-corpus, which is
-# GITIGNORED — the corpus is never committed to this repository (decision log 2026-07-11).
+# Fetches the veraPDF test corpus for the local soak (see soak_test.go). The download is tag-pinned and
+# checksum-verified; the extracted files land in testfiles/external/veraPDF-corpus, which is GITIGNORED — the
+# corpus is never committed to this repository.
 #
 # Attribution: the veraPDF corpus is (c) the veraPDF Consortium, licensed under the Creative Commons
 # Attribution 4.0 International license (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/).

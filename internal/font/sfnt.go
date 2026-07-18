@@ -121,8 +121,8 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 	return info
 }
 
-// gid runs the pinned code→GID chain for an embedded sfnt program (plan.md font-pipeline table, verified
-// against the glaive golden pixels):
+// gid runs the pinned code→GID chain for an embedded sfnt program (verified against the glaive golden
+// pixels):
 //
 //   - non-symbolic fonts: the encoding's glyph name, first through the AGL to Unicode into the Unicode cmap,
 //     then through the reverse Mac Roman encoding into the (1,0) cmap (standard viewer practice — glaive's

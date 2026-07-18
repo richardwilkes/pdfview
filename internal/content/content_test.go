@@ -463,7 +463,7 @@ func TestColorSpaceResources(t *testing.T) {
 
 func TestPatternSpaceSkipsPaint(t *testing.T) {
 	rec := run(t, nil, nil, "/Pattern cs /P0 scn 0 0 10 10 re f 1 0 0 rg 0 0 1 1 re f")
-	wantOps(t, rec, opFill) // Only the rg fill paints until patterns land at M8.
+	wantOps(t, rec, opFill) // Only the rg fill paints: /P0 resolves to no pattern, so the pattern fill is skipped.
 	if rec.calls[0].paint.Color != (color.NRGBA{R: 255, A: 255}) {
 		t.Errorf("post-pattern color: %v", rec.calls[0].paint.Color)
 	}
