@@ -63,6 +63,7 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 || os.Args[1] != "dump" {
+		//nolint:gosec // We want the executable's name in the usage message.
 		log.Fatalf("usage: %s dump -in file.pdf -out dir [-dpi 72,100,150] [-password pw]... [-search needle]... | %s soak dir out.json",
 			filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	}

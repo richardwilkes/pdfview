@@ -111,7 +111,7 @@ func render(op string, pats [][]float64) ([]patch, *image.NRGBA) {
 	defer doc.Release()
 	page, err := doc.RenderPage(0, 72, 0, "")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err) //nolint:gocritic // exitAfterDefer: the tool is exiting; skipping the deferred Release is fine.
 	}
 	return out, page.Image
 }
@@ -137,7 +137,7 @@ func probeGray() []byte {
 // verifyRGB asserts the DeviceRGB model internal/color hard-codes: each channel is trunc(float32(v)×255),
 // independent of the others.
 func verifyRGB() {
-	rng := rand.New(rand.NewSource(7))
+	rng := rand.New(rand.NewSource(7)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 3*1021+500)
 	for ch := range 3 {
 		for i := 0; i <= 1020; i++ {
@@ -184,7 +184,7 @@ func probeCMYK() []byte {
 // validateCMYK renders off-grid colors and checks multilinear interpolation of the freshly captured grid
 // against them, mirroring internal/color's evaluation.
 func validateCMYK(table []byte) {
-	rng := rand.New(rand.NewSource(42))
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 2000)
 	for range 2000 {
 		pats = append(pats, []float64{rng.Float64(), rng.Float64(), rng.Float64(), rng.Float64()})

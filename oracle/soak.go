@@ -35,6 +35,7 @@ type SoakRecord struct {
 func soak(dir, out string) error {
 	records := make(map[string]*SoakRecord)
 	var paths []string
+	//nolint:gosec // Local dev tool; dir comes from the developer's command line.
 	if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -72,12 +73,12 @@ func soak(dir, out string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(out, append(blob, '\n'), 0o644)
+	return os.WriteFile(out, append(blob, '\n'), 0o644) //nolint:gosec // Local dev tool; out is a command-line arg.
 }
 
 func soakMain(args []string) {
 	if len(args) != 2 {
-		log.Fatalf("usage: %s soak dir out.json", filepath.Base(os.Args[0]))
+		log.Fatalf("usage: %s soak dir out.json", filepath.Base(os.Args[0])) //nolint:gosec // We want the executable's name.
 	}
 	if err := soak(args[0], args[1]); err != nil {
 		log.Fatal(err)

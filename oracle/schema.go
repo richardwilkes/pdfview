@@ -11,6 +11,9 @@ package main
 
 // This file defines the truth.json schema. internal/testsupport in the root module mirrors these types read-side
 // (the two modules deliberately share no code, so the library never depends on this module); keep the two in sync.
+// Struct field order here is the key order truth.json is emitted with (encoding/json marshals fields in declaration
+// order), so fieldalignment is suppressed rather than allowed to scramble the committed goldens; the testsupport
+// mirror carries the alignment-optimized ordering.
 //
 // Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left
 // origin, y-down, in PDF points, after the page's /Rotate and MediaBox/CropBox handling have been folded in by
@@ -19,7 +22,7 @@ package main
 // non-finite (a destination with no explicit coordinate, such as /Fit) are encoded as JSON null.
 
 // Truth is the top-level truth.json document, one per corpus file.
-type Truth struct {
+type Truth struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	// File is the corpus file's base name (the corpus lives in testfiles/corpus, goldens in
 	// testfiles/goldens/<name> where <name> is File without its extension).
 	File   string `json:"file"`
@@ -58,7 +61,7 @@ type AuthAttempt struct {
 }
 
 // TOCRawEntry is one raw outline node.
-type TOCRawEntry struct {
+type TOCRawEntry struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	Title    string         `json:"title"`
 	URI      string         `json:"uri,omitempty"`
 	Page     int            `json:"page"`
@@ -68,7 +71,7 @@ type TOCRawEntry struct {
 }
 
 // TOCEntry is one public-API TOCEntry (sanitized title, scaled ints).
-type TOCEntry struct {
+type TOCEntry struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	Title    string      `json:"title"`
 	Page     int         `json:"page"`
 	X        int         `json:"x"`
@@ -77,7 +80,7 @@ type TOCEntry struct {
 }
 
 // Page holds everything dumped for one 0-based page.
-type Page struct {
+type Page struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	Page int `json:"page"`
 	// Bounds is the raw page bounding box (x0, y0, x1, y1) in page space.
 	Bounds [4]float32 `json:"bounds"`
@@ -92,7 +95,7 @@ type Page struct {
 }
 
 // RawLink is one link as MuPDF reports it, before the public API's filtering and scaling.
-type RawLink struct {
+type RawLink struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	// URI is the raw link URI (for internal links this is MuPDF's synthesized destination URI, which the public
 	// API discards).
 	URI      string     `json:"uri,omitempty"`
@@ -105,7 +108,7 @@ type RawLink struct {
 }
 
 // Render is one public-API RenderPage result at one DPI.
-type Render struct {
+type Render struct { //nolint:govet // Field order is truth.json's emitted key order; see the file comment.
 	// PNG is the file name (within the golden directory) of the losslessly encoded image.NRGBA output.
 	PNG    string `json:"png"`
 	Width  int    `json:"width"`
