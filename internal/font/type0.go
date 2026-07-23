@@ -111,7 +111,13 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		// Unicode (which needs ToUnicode; without one, nothing renders — accepted until a corpus file demands better).
 		std14 := standard14Name(f.BaseFont, desc.flags)
 		f.ascender, f.descender = substituteMetrics(&desc, std14)
-		f.sub = loadSubstitute(std14)
+		// Shapes, like loadSimple: the substitute owns the glyphs only when no embedded program does. A CFF whose Top
+		// DICT carries no usable /FontBBox lands here with outlines but without metrics — substituting its shapes too
+		// would have Font.GID resolve codes through the substitute's cmap while Font.GlyphPath pulled those indices out
+		// of the embedded charstrings, drawing arbitrary glyphs. Only the metrics fall back in that case.
+		if info.sfnt == nil && f.cff == nil {
+			f.sub = loadSubstitute(std14)
+		}
 	}
 
 	if v, ok := cos.AsReal(d.Resolve(descendant["DW"])); ok && v > 0 {

@@ -11,6 +11,7 @@ package font
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -272,29 +273,55 @@ func abs32(v float32) float32 {
 	return v
 }
 
-// buildCFF assembles a minimal CFF: header, Name INDEX (one name), Top DICT INDEX with the given dict bytes.
+// buildIndex encodes a CFF INDEX: count, offSize, count+1 one-byte offsets, then the data. The synthetic fonts here all
+// stay well under the 255 bytes a one-byte offset can address.
+func buildIndex(entries ...[]byte) []byte {
+	var buf bytes.Buffer
+	buf.WriteByte(byte(len(entries) >> 8))
+	buf.WriteByte(byte(len(entries)))
+	if len(entries) == 0 {
+		return buf.Bytes()
+	}
+	buf.WriteByte(1) // offSize
+	off := 1
+	buf.WriteByte(byte(off))
+	for _, e := range entries {
+		off += len(e)
+		buf.WriteByte(byte(off))
+	}
+	for _, e := range entries {
+		buf.Write(e)
+	}
+	return buf.Bytes()
+}
+
+// buildCFF assembles a minimal CFF: header, Name INDEX (one name), Top DICT INDEX with the given dict bytes. It is
+// enough for the Top DICT parser, but not for a glyph-loading parse — see buildGlyphCFF for that.
 func buildCFF(dict []byte) []byte {
 	var buf bytes.Buffer
 	buf.Write([]byte{1, 0, 4, 1}) // major, minor, hdrSize, offSize
-	index := func(entries ...[]byte) {
-		buf.WriteByte(byte(len(entries) >> 8))
-		buf.WriteByte(byte(len(entries)))
-		if len(entries) == 0 {
-			return
-		}
-		buf.WriteByte(1) // offSize
-		off := 1
-		buf.WriteByte(byte(off))
-		for _, e := range entries {
-			off += len(e)
-			buf.WriteByte(byte(off))
-		}
-		for _, e := range entries {
-			buf.Write(e)
-		}
-	}
-	index([]byte("Test"))
-	index(dict)
+	buf.Write(buildIndex([]byte("Test")))
+	buf.Write(buildIndex(dict))
+	return buf.Bytes()
+}
+
+// buildGlyphCFF assembles a CFF complete enough for go-text's cff.Parse to yield loadable glyphs: the Top DICT holds
+// the caller's entries plus a CharStrings offset, and the CharStrings INDEX follows the empty String and Global Subr
+// INDEXes. The charset defaults to the predefined ISOAdobe one and the Private DICT is absent, both of which cff.Parse
+// accepts.
+func buildGlyphCFF(dict []byte, charstrings ...[]byte) []byte {
+	dict = append(append([]byte{}, dict...), 29, 0, 0, 0, 0, 17) // 32-bit CharStrings offset (patched below), then op 17
+	head := []byte{1, 0, 4, 1}
+	name := buildIndex([]byte("Test"))
+	empty := buildIndex() // The String INDEX and the Global Subr INDEX.
+	binary.BigEndian.PutUint32(dict[len(dict)-5:], uint32(len(head)+len(name)+len(buildIndex(dict))+2*len(empty)))
+	var buf bytes.Buffer
+	buf.Write(head)
+	buf.Write(name)
+	buf.Write(buildIndex(dict))
+	buf.Write(empty)
+	buf.Write(empty)
+	buf.Write(buildIndex(charstrings...))
 	return buf.Bytes()
 }
 
@@ -378,6 +405,37 @@ func TestType0DispatchByFontFile(t *testing.T) {
 	}
 	if f.ascender < 0.951 || f.ascender > 0.953 {
 		t.Errorf("ascender = %v, want ≈0.952 from the embedded CFF FontBBox", f.ascender)
+	}
+}
+
+// TestType0CFFWithoutFontBBoxKeepsItsGlyphs guards the CIDFontType0 substitute gate. A subset CFF whose Top DICT has no
+// usable /FontBBox yields no metrics, but its charstrings are still the font's glyph source. Loading the Liberation
+// substitute alongside them would leave Font.GID mapping codes through the substitute's cmap while Font.GlyphPath
+// pulled those indices out of the embedded program — arbitrary glyph shapes, silently. Only the metrics fall back.
+func TestType0CFFWithoutFontBBoxKeepsItsGlyphs(t *testing.T) {
+	endchar := []byte{139, 14} // "0 endchar": a valid, empty charstring.
+	cff := buildGlyphCFF(nil, endchar, endchar, endchar)
+	f, err := loadFromDict(
+		t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /TestCID /FontDescriptor 3 0 R >>",
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 /FontFile3 4 0 R >>",
+		fmt.Sprintf("<< /Length %d /Subtype /CIDFontType0C >>\nstream\n%s\nendstream", len(cff), cff),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.cff == nil {
+		t.Fatal("the embedded CFF supplied no glyph program")
+	}
+	if f.sub != nil {
+		t.Fatal("a substitute was loaded alongside the embedded CFF, so GID and GlyphPath disagree")
+	}
+	if got := f.GID(2); got != 2 {
+		t.Errorf("GID(2) = %d, want 2 through the embedded program (identity CID→GID)", got)
+	}
+	if f.ascender <= 0 || f.descender >= 0 {
+		t.Errorf("metrics = %v/%v, want the substitute metrics fallback", f.ascender, f.descender)
 	}
 }
 
