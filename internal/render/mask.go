@@ -120,6 +120,12 @@ func (d *Device) BeginMask(_ gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA,
 		ms.guard = d.c.SaveLayerAlpha(nil, 0)
 	} else {
 		d.c = ms.surf.Canvas()
+		// The mask surface is a fresh canvas at identity, but the masked content draws under whatever matrix the canvas
+		// being masked carries — a Wrapped device's caller may have translated, scaled, or rotated theirs. Adopt that
+		// matrix as the mask canvas's base so the mask content rasterizes into the same device pixels the coverage plane
+		// is later applied at (a no-op for a device that owns its surface, whose canvas is always at identity here).
+		base := ms.saved.TotalMatrix()
+		d.c.SetMatrix(&base)
 		if luminosity {
 			// The mask group composites over the /BC backdrop before luminance extraction; prefilling the whole surface
 			// also gives areas outside the group's BBox the backdrop's luminosity.
@@ -162,7 +168,12 @@ func (d *Device) PopMask() {
 		paint.AntiAlias = false
 		full := geom.RectWH(float32(d.width), float32(d.height))
 		sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
+		// The plane is in device pixels (see BeginMask), so gate the layer with the canvas at identity rather than under
+		// whatever matrix a Wrapped device's caller left in place.
+		count := d.c.Save()
+		d.c.ResetMatrix()
 		d.c.DrawImageRect(ms.mask, full, full, sampling, paint, canvas.ConstraintFast)
+		d.c.RestoreToCount(count)
 	}
 	d.c.RestoreToCount(ms.layer)
 }

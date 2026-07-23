@@ -99,7 +99,8 @@ func New(width, height int) (*Device, error) {
 // glyph-coverage blit fast path is disabled (it composites straight into an owned surface's pixmap), so text renders
 // through the pinned merged-outline path, which transforms correctly under any state the caller's canvas carries.
 // Soft-mask spans still render to their own offscreen surfaces, sized from the canvas's base device so mask coverage
-// spans the whole canvas.
+// spans the whole canvas and carrying the canvas's matrix so mask and masked content register (mask.go); the sh
+// operator's surface-wide coverage rectangle compensates for that matrix the same way (FillShading).
 func Wrap(c *canvas.Canvas) (*Device, error) {
 	if c == nil {
 		return nil, ErrSurface
@@ -771,6 +772,17 @@ func (d *Device) FillShading(sh *shading.Shading, ctm gfx.Matrix, paint device.P
 	full.LineTo(float32(d.width), float32(d.height))
 	full.LineTo(0, float32(d.height))
 	full.Close()
+	// The rectangle is the device surface in pixels, but the draw runs under the canvas's own matrix, which a Wrapped
+	// device's caller may have set to anything; pull it back into that local space so the painted area still covers
+	// exactly the surface. Only the covered area moves — the shader is anchored by its own local matrix (preparePaint
+	// was handed a nil ctm, so it maps pattern space into the space the draw runs in).
+	if m := d.c.TotalMatrix(); !m.IsIdentity() {
+		inv, invertible := m.Invert()
+		if !invertible {
+			return
+		}
+		full.Transform(&inv)
+	}
 	d.withShadingBBox(p, func() {
 		d.c.DrawPath(full, cpaint)
 	})

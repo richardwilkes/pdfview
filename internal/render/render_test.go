@@ -11,6 +11,7 @@ package render
 
 import (
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -656,6 +657,170 @@ func TestBeginMaskDepthCapDegrades(t *testing.T) {
 	}
 	if len(d.maskStack) != 0 {
 		t.Fatalf("mask stack not unwound: %d left", len(d.maskStack))
+	}
+}
+
+// wrappedOnto returns a device drawing onto host's canvas after applying shift to it, as DrawPage's Wrap does for a
+// caller who has already transformed their canvas. Pixels come back through host.
+func wrappedOnto(t *testing.T, host *Device, dx, dy float32) *Device {
+	t.Helper()
+	host.c.Translate(dx, dy)
+	d, err := Wrap(host.c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// comparePixels fails on the first byte where two renders of the same content diverge.
+func comparePixels(t *testing.T, got, want []byte, stride int, label string) {
+	t.Helper()
+	for i := range want {
+		if got[i] != want[i] {
+			p := i / 4
+			t.Fatalf("%s: pixel (%d,%d) byte %d = %d, want %d", label, p%(stride/4), p/(stride/4), i%4, got[i], want[i])
+		}
+	}
+}
+
+// A device wrapping a caller's canvas draws under whatever matrix that canvas already carries, so a soft mask must
+// rasterize its content and apply its coverage plane in the same device pixels the masked content lands in. Masking
+// through a translated canvas must therefore match masking through an owned device with the translation folded into
+// the content matrices — the mask surface is at identity and PopMask's DstIn rectangle is in surface pixels, so both
+// have to compensate for the caller's matrix.
+func TestWrappedCanvasSoftMaskRegistersWithContent(t *testing.T) {
+	draw := func(d *Device, ctm gfx.Matrix) {
+		var maskArea gfx.Path
+		maskArea.Rect(-16, -12, 20, 20) // device (0,0)-(20,20)
+		var content gfx.Path
+		content.Rect(-16, -12, 40, 40) // the whole surface
+		d.BeginMask(gfx.Rect{}, false, color.NRGBA{}, nil)
+		d.FillPath(&maskArea, false, ctm, redPaint())
+		d.EndMask()
+		d.FillPath(&content, false, ctm, redPaint())
+		d.PopMask()
+	}
+	ref := newDevice(t, 40, 40)
+	draw(ref, gfx.Translate(16, 12))
+	want, stride, err := ref.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The reference itself must show the mask gating the content, or the comparison below proves nothing.
+	for _, tc := range []struct {
+		x, y   int
+		opaque bool
+	}{{5, 5, true}, {19, 19, true}, {30, 5, false}, {5, 30, false}, {30, 30, false}} {
+		if got := pixelAt(t, want, stride, tc.x, tc.y); (got[3] == 255) != tc.opaque {
+			t.Fatalf("reference pixel (%d,%d) = %v, want opaque=%v", tc.x, tc.y, got, tc.opaque)
+		}
+	}
+	host := newDevice(t, 40, 40)
+	draw(wrappedOnto(t, host, 16, 12), gfx.Identity())
+	got, _, err := host.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparePixels(t, got, want, stride, "masked fill through a translated canvas")
+}
+
+// The sh operator paints across the whole clip by covering the device surface, a rectangle in surface pixels. On a
+// wrapped canvas carrying the caller's matrix that rectangle has to be pulled back into the canvas's local space, or
+// the shading under- and over-covers by exactly the caller's transform.
+func TestWrappedCanvasFillShadingCoversSurface(t *testing.T) {
+	sh := &shading.Shading{
+		Kind:   shading.KindAxial,
+		Coords: [6]float32{0, 0, 20, 0},
+		Extend: [2]bool{true, true},
+		Stops: []shading.Stop{
+			{Offset: 0, Color: color.NRGBA{R: 255, A: 255}},
+			{Offset: 1, Color: color.NRGBA{B: 255, A: 255}},
+		},
+	}
+	paint := device.Paint{Alpha: 1}
+	ref := newDevice(t, 40, 40)
+	ref.FillShading(sh, gfx.Translate(16, 12), paint)
+	want, stride, err := ref.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, xy := range [][2]int{{0, 0}, {39, 39}, {20, 20}} { // the reference must cover the whole surface
+		if got := pixelAt(t, want, stride, xy[0], xy[1]); got[3] != 255 {
+			t.Fatalf("reference pixel (%d,%d) = %v, want opaque", xy[0], xy[1], got)
+		}
+	}
+	host := newDevice(t, 40, 40)
+	wrappedOnto(t, host, 16, 12).FillShading(sh, gfx.Identity(), paint)
+	got, _, err := host.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparePixels(t, got, want, stride, "sh through a translated canvas")
+}
+
+// clampDim must apply its bounds in float space: Go's float→int conversion is implementation-defined for operands that
+// do not fit and the platforms disagree (amd64 saturates to math.MinInt64, which an int-space clamp rounds back UP to
+// 1 — the exact opposite of the clamp — while arm64 saturates high), so an over-range extent must be bounded before it
+// is converted. The cases below are the ones whose conversion is undefined; each must land on a bound on every
+// platform.
+func TestClampDimClampsBeforeConverting(t *testing.T) {
+	for _, tc := range []struct {
+		v    float32
+		maxV int
+		want int
+	}{
+		{v: float32(math.NaN()), maxV: 512, want: 1},
+		{v: float32(math.Inf(-1)), maxV: 512, want: 1},
+		{v: -1e30, maxV: 512, want: 1},
+		{v: 0, maxV: 512, want: 1},
+		{v: 0.9, maxV: 512, want: 1},
+		{v: 1, maxV: 512, want: 1},
+		{v: 7.9, maxV: 512, want: 7},
+		{v: 512, maxV: 512, want: 512},
+		{v: 1e30, maxV: 512, want: 512},
+		{v: float32(math.Inf(1)), maxV: 2048, want: 2048},
+		{v: 1e30, maxV: 2048, want: 2048},
+	} {
+		if got := clampDim(tc.v, tc.maxV); got != tc.want {
+			t.Errorf("clampDim(%v, %d) = %d, want %d", tc.v, tc.maxV, got, tc.want)
+		}
+	}
+}
+
+// The two clampDim call sites must survive an over-range extent with their grids clamped to the maximum, not collapsed
+// to 1×1. Both dimensions are observable indirectly: the function grid is sampled once per cell, and the tiling cell's
+// replay matrix carries the tile width per pattern-space unit.
+func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
+	d := newDevice(t, 32, 32)
+	calls := 0
+	sh := &shading.Shading{
+		Kind:   shading.KindFunction,
+		Domain: [4]float32{0, 1, 0, 1},
+		Matrix: gfx.Matrix{A: 1e30, D: 1e30}, // a device extent no int can hold
+		ColorAt: func(x, _ float32) color.NRGBA {
+			calls++
+			return color.NRGBA{R: uint8(x * 255), A: 255}
+		},
+	}
+	if s := d.functionShader(sh, gfx.Identity()); s == nil {
+		t.Fatal("function shading with an over-range device extent produced no shader")
+	}
+	if want := maxFunctionDim * maxFunctionDim; calls != want {
+		t.Errorf("function shading sampled a %d-cell grid, want the clamped %d", calls, want)
+	}
+	var replayCTM gfx.Matrix
+	tiling := &device.Tiling{
+		Replay: func(_ device.Device, ctm gfx.Matrix) { replayCTM = ctm },
+		BBox:   gfx.Rect{X0: 0, Y0: 0, X1: 1, Y1: 4},
+		XStep:  1,
+		YStep:  4,
+	}
+	// patCTM scales x by 1e30 (the overflowing dimension) and y by 2 (keeping the cell surface small).
+	if s := d.tileShader(tiling, gfx.Identity(), gfx.Matrix{A: 1e30, D: 2}); s == nil {
+		t.Fatal("tiling pattern with an over-range cell size produced no shader")
+	}
+	if replayCTM.A != maxTileDim { // XStep is 1, so the window's x scale is the tile width in pixels
+		t.Errorf("tiling cell rasterized %v pixels wide, want the clamped %d", replayCTM.A, maxTileDim)
 	}
 }
 

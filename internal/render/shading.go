@@ -320,8 +320,8 @@ func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.S
 			minY, maxY = min(minY, py), max(maxY, py)
 		}
 	}
-	w := clampDim(int(maxX-minX+1), maxFunctionDim)
-	h := clampDim(int(maxY-minY+1), maxFunctionDim)
+	w := clampDim(maxX-minX+1, maxFunctionDim)
+	h := clampDim(maxY-minY+1, maxFunctionDim)
 	for w*h > maxFunctionArea {
 		w = max(w/2, 1)
 		h = max(h/2, 1)
@@ -356,14 +356,20 @@ func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.S
 	return shaders.NewImage(img, shaders.TileDecal, shaders.TileDecal, sampling, &lm)
 }
 
-func clampDim(v, maxV int) int {
-	if v < 1 {
+// clampDim converts a pixel extent to a grid dimension in [1, maxV]. The bounds are applied in float space on purpose:
+// Go leaves a float→int conversion implementation-defined when the value does not fit, and the platforms disagree —
+// amd64 saturates to math.MinInt64, which an int-space clamp reads as "too small" and rounds UP to 1 (a shading
+// rendered as one flat color, a tiling pattern as a 1×1 tile), while arm64 saturates to math.MaxInt64. A shading
+// /Matrix that blows the domain up to a 1e30 device extent, or an XStep×scale product that overflows to +Inf, must
+// therefore never reach the conversion unclamped.
+func clampDim(v float32, maxV int) int {
+	if !(v >= 1) { // Catches NaN along with everything under a pixel.
 		return 1
 	}
-	if v > maxV {
+	if v >= float32(maxV) { // Also catches +Inf.
 		return maxV
 	}
-	return v
+	return int(v)
 }
 
 // tileShader renders one tiling-pattern cell into an offscreen surface at the pattern's device scale and wraps it in a
@@ -378,8 +384,8 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 	if !isFinite32(sx) || !isFinite32(sy) || sx <= 0 || sy <= 0 {
 		return nil
 	}
-	w := clampDim(int(t.XStep*sx+0.5), maxTileDim)
-	h := clampDim(int(t.YStep*sy+0.5), maxTileDim)
+	w := clampDim(t.XStep*sx+0.5, maxTileDim)
+	h := clampDim(t.YStep*sy+0.5, maxTileDim)
 	for w*h > maxTileArea {
 		w = max(w/2, 1)
 		h = max(h/2, 1)
