@@ -339,3 +339,47 @@ func TestLRUCache(t *testing.T) {
 		t.Fatalf("negative entry not retained: v=%v ok=%v", v, ok)
 	}
 }
+
+// TestSpacedShowKeepsOperandBacking verifies the " operator reads its string operand positionally instead of reslicing
+// the shared operand list. Reslicing advanced the list's base pointer permanently — exec's `operands[:0]` reset keeps
+// the shifted base — so every " shed two slots of capacity, eventually forcing the operand buffer to reallocate and
+// leaving the maxOperands sliding window working against an ever-shrinking buffer.
+func TestSpacedShowKeepsOperandBacking(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF("<< >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newInterp(d, nil, gfx.Identity(), &recorder{t: t}, nil)
+	in.operands = make([]cos.Object, 0, maxOperands)
+	want := cap(in.operands)
+	const spacedShows = maxOperands // Enough to consume the whole backing array two slots at a time.
+	in.exec([]byte("BT " + strings.Repeat(`1 2 (a) " `, spacedShows) + "ET"))
+	if got := cap(in.operands); got != want {
+		t.Fatalf("operand capacity = %d after %d %q operators, want %d: the backing array was shifted",
+			got, spacedShows, `"`, want)
+	}
+}
+
+// TestSpacedShowOperands verifies the " operator still takes aw and ac from the first two operands and the shown string
+// from the third, moving to the next line before showing.
+func TestSpacedShowOperands(t *testing.T) {
+	d := type3PDF(t)
+	// 14 TL sets the leading, so " drops the baseline to y = -14 before showing. Each "A" is 600 glyph units wide
+	// (600 × 0.001 × 10pt = 6 text units) and ac adds 3 more, so the second glyph starts 9 to the right.
+	rec := run(t, d, resourcesOf(t, d), `BT /T3 10 Tf 14 TL 5 3 (AA) " ET`)
+	fills := rec.byOp(opFill)
+	if len(fills) != 2 {
+		t.Fatalf("fills = %d, want 2 (the third operand is the string to show)", len(fills))
+	}
+	p0 := fills[0].ctm.Apply(fills[0].path.Points[0])
+	p1 := fills[1].ctm.Apply(fills[1].path.Points[0])
+	if p0.X != 0 || p0.Y != -14 {
+		t.Errorf("first glyph at (%v, %v), want (0, -14): the leading move must precede the show", p0.X, p0.Y)
+	}
+	if dx := p1.X - p0.X; dx != 9 {
+		t.Errorf("second glyph advanced %v, want 9 (6 width + 3 char spacing from the second operand)", dx)
+	}
+	if p1.Y != p0.Y {
+		t.Errorf("second glyph baseline %v, want %v", p1.Y, p0.Y)
+	}
+}

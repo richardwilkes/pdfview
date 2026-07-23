@@ -140,8 +140,11 @@ func (in *interp) opTm() {
 }
 
 // opShowString implements Tj: show the single string operand as one run.
-func (in *interp) opShowString() {
-	s, ok := in.string1()
+func (in *interp) opShowString() { in.showString(0) }
+
+// showString shows the string operand at index i as one run.
+func (in *interp) showString(i int) {
+	s, ok := in.stringAt(i)
 	if !ok {
 		return
 	}
@@ -186,9 +189,12 @@ func (in *interp) opTJ() {
 }
 
 // opNextLineShow implements ' (move to next line, then show).
-func (in *interp) opNextLineShow() {
+func (in *interp) opNextLineShow() { in.nextLineShow(0) }
+
+// nextLineShow moves to the next line, then shows the string operand at index i.
+func (in *interp) nextLineShow(i int) {
 	in.textMove(0, -in.gs.text.leading)
-	in.opShowString()
+	in.showString(i)
 }
 
 // opSpacedShow implements " (set word and character spacing, move to next line, then show). The operands are aw ac
@@ -204,8 +210,7 @@ func (in *interp) opSpacedShow() {
 	}
 	in.gs.text.wordSpacing = float32(aw)
 	in.gs.text.charSpacing = float32(ac)
-	in.operands = in.operands[2:] // The string becomes the leading operand for the ' behavior.
-	in.opNextLineShow()
+	in.nextLineShow(2) // The string is the third operand; the ' behavior handles the rest.
 }
 
 // newRun starts a text run for the current font, or nil when no usable font or matrix is in effect (the show operator
@@ -363,11 +368,11 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 	in.opRestore()
 }
 
-// string1 returns the single leading string operand.
-func (in *interp) string1() (cos.String, bool) {
-	if len(in.operands) < 1 {
+// stringAt returns the string operand at index i.
+func (in *interp) stringAt(i int) (cos.String, bool) {
+	if i < 0 || i >= len(in.operands) {
 		return nil, false
 	}
-	s, ok := in.operands[0].(cos.String)
+	s, ok := in.operands[i].(cos.String)
 	return s, ok
 }
