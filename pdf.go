@@ -50,6 +50,7 @@ var (
 	ErrImageTooLarge            = errors.New("rendered image would be too large")
 	ErrInvalidPageSize          = errors.New("invalid page size")
 	ErrDocumentReleased         = errors.New("document has been released")
+	ErrInvalidMatrix            = errors.New("invalid matrix")
 )
 
 // Each of these variables is global and are not safe to modify when other calls to this code are being made. Generally,

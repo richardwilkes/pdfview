@@ -12,6 +12,7 @@ package pdfview_test
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,4 +183,78 @@ func TestDrawPageErrors(t *testing.T) {
 	if err = d.DrawPage(c, 0, geom.IdentityMatrix()); !errors.Is(err, pdfview.ErrDocumentReleased) {
 		t.Fatalf("expected ErrDocumentReleased, got %v", err)
 	}
+}
+
+// TestDrawPageInvalidMatrix pins the caller-matrix validation: a matrix that is itself non-finite, or one whose
+// composition with the page CTM overflows, is rejected with ErrInvalidMatrix without drawing anything or disturbing the
+// canvas. Without the guard the non-finite CTM reaches the raster device, which concats it onto the caller's canvas.
+func TestDrawPageInvalidMatrix(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", "vectors.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := pdfview.New(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Release()
+	nan := float32(math.NaN())
+	inf := float32(math.Inf(1))
+	for _, tc := range []struct {
+		name string
+		ctm  geom.Matrix
+	}{
+		{name: "nan-scale", ctm: geom.ScaleMatrix(nan, 1)},
+		{name: "nan-translate", ctm: geom.TranslateMatrix(0, nan)},
+		{name: "inf-scale", ctm: geom.ScaleMatrix(1, inf)},
+		{name: "nan-skew", ctm: geom.MatrixFrom9([9]float32{1, nan, 0, 0, 1, 0, 0, 0, 1})},
+		// Finite entries whose product with the page CTM's translation overflows to ±Inf.
+		{name: "overflow", ctm: geom.ScaleMatrix(math.MaxFloat32, math.MaxFloat32)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			surf := surface.NewRasterN32Premul(8, 8, nil)
+			if surf == nil {
+				t.Fatal("unable to create surface")
+			}
+			c := surf.Canvas()
+			saves := c.SaveCount()
+			if err = d.DrawPage(c, 0, tc.ctm); !errors.Is(err, pdfview.ErrInvalidMatrix) {
+				t.Fatalf("expected ErrInvalidMatrix, got %v", err)
+			}
+			if got := c.SaveCount(); got != saves {
+				t.Fatalf("DrawPage changed the canvas save count: %d != %d", got, saves)
+			}
+			for i, v := range readSurfaceNRGBA(t, surf, 8, 8) {
+				if v != 0 {
+					t.Fatalf("DrawPage drew onto the canvas: byte %d is %d", i, v)
+				}
+			}
+		})
+	}
+	// A finite matrix at the same page must still paint, so the guard is not simply rejecting everything.
+	t.Run("finite", func(t *testing.T) {
+		rendered, rerr := d.RenderPage(0, 72, 0, "")
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		w := rendered.Image.Rect.Dx()
+		h := rendered.Image.Rect.Dy()
+		surf := surface.NewRasterN32Premul(int32(w), int32(h), nil)
+		if surf == nil {
+			t.Fatal("unable to create surface")
+		}
+		if err = d.DrawPage(surf.Canvas(), 0, geom.IdentityMatrix()); err != nil {
+			t.Fatal(err)
+		}
+		painted := false
+		for _, v := range readSurfaceNRGBA(t, surf, w, h) {
+			if v != 0 {
+				painted = true
+				break
+			}
+		}
+		if !painted {
+			t.Fatal("expected a finite matrix to paint something")
+		}
+	})
 }

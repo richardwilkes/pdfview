@@ -27,6 +27,9 @@ import (
 // geom.ScaleMatrix(dpi/72, dpi/72) reproduces RenderPage's layout at that dpi. Only the affine components of ctm are
 // used (PDF content is affine; any perspective entries are ignored).
 //
+// ctm must be finite, and its composition with the page CTM must not overflow; a matrix that fails either test is
+// rejected with ErrInvalidMatrix before anything is drawn.
+//
 // The caller's surface lifecycle is untouched: DrawPage only issues draw calls, never reads pixels, snapshots, or
 // flushes, and the canvas's save/clip/matrix state is restored before returning — even when hostile content panics the
 // interpreter, which surfaces as ErrInternal per the package's robustness contract. Content drawn before such a panic
@@ -62,6 +65,13 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 	if cerr != nil {
 		return ErrUnableToLoadPage
 	}
+	// Every other entry point derives its CTM from validated geometry, and the interpreter relies on that: cm and a
+	// form's /Matrix only check the product they compute, assuming the incoming CTM is already finite. The caller's
+	// matrix is the one unvalidated source, so reject it here rather than letting a NaN/Inf reach the device.
+	full := base.Mul(gfxFromGeom(ctm))
+	if !full.IsFinite() {
+		return ErrInvalidMatrix
+	}
 	save := c.Save()
 	defer func() {
 		if recover() != nil {
@@ -70,7 +80,7 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 		c.RestoreToCount(save)
 	}()
 	dev.SetStore(e.store)
-	e.runPage(pg, base.Mul(gfxFromGeom(ctm)), dev)
+	e.runPage(pg, full, dev)
 	return nil
 }
 
