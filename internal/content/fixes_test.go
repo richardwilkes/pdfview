@@ -15,6 +15,9 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 // TestCMNonFiniteRejected verifies the cm operator rejects a CTM concat that overflows to a non-finite matrix (finite
@@ -121,6 +124,28 @@ func TestImageCacheRetainsAfterCapReached(t *testing.T) {
 	}
 	if first.img != second.img {
 		t.Fatal("repeated draw of a cap-overflowing image re-decoded instead of reusing the cached image")
+	}
+}
+
+// TestLoadFontCachedFailureReportsMiss verifies that a font whose load fails, when cached as a negative entry in the
+// budgeted store, still reports a miss on subsequent lookups (like the no-store LRU path). Before the fix, the store
+// path returned the typed-nil *font.Font boxed in the cache as a success, so a repeated Tf would clear the current font
+// instead of aborting the operator and preserving the previous font.
+func TestLoadFontCachedFailureReportsMiss(t *testing.T) {
+	// Object 1 is a plain integer, so it is not a font dictionary and font.Load never runs — loadFont fails.
+	d, err := cos.Open([]byte(minimalPDF("42")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{cos.Name("Font"): cos.Dict{cos.Name("F1"): cos.Ref{Num: 1}}}
+	in := newInterp(d, res, gfx.Identity(), device.Device(nil), store.New(1<<20))
+
+	if f, ok := in.loadFont(cos.Name("F1")); ok || f != nil {
+		t.Fatalf("first load of an unloadable font: got (%v, %v), want (nil, false)", f, ok)
+	}
+	// The second lookup hits the cached negative entry; it must also report a miss.
+	if f, ok := in.loadFont(cos.Name("F1")); ok || f != nil {
+		t.Fatalf("cached-failure load of an unloadable font: got (%v, %v), want (nil, false)", f, ok)
 	}
 }
 
