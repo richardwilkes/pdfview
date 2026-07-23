@@ -552,12 +552,31 @@ func (e *engineDocument) outline() *outlineNode {
 	return convertOutline(e.doc.Outline())
 }
 
+// maxOutlineConvertDepth bounds convertOutline's recursion. The engine already caps outline depth well below this and
+// returns an acyclic tree, so this only guards against a future invariant slip: it sits above the engine's own cap so
+// legitimate trees are never truncated here.
+const maxOutlineConvertDepth = 128
+
 func convertOutline(item *doc.OutlineItem) *outlineNode {
+	return convertOutlineGuarded(item, 0, make(map[*doc.OutlineItem]bool))
+}
+
+// convertOutlineGuarded re-labels the engine's outline tree into the seam type, walking siblings iteratively. A shared
+// visited set cuts any next/down reference cycle and a depth cap bounds recursion, so the conversion terminates even if
+// the engine's acyclic/depth-capped invariant is ever violated rather than relying on it.
+func convertOutlineGuarded(item *doc.OutlineItem, depth int, visited map[*doc.OutlineItem]bool) *outlineNode {
+	if depth > maxOutlineConvertDepth {
+		return nil
+	}
 	var head *outlineNode
 	tail := &head
 	for ; item != nil; item = item.Next {
+		if visited[item] {
+			break
+		}
+		visited[item] = true
 		node := &outlineNode{
-			down:  convertOutline(item.Down),
+			down:  convertOutlineGuarded(item.Down, depth+1, visited),
 			title: item.Title,
 			page:  item.Page,
 			x:     item.X,

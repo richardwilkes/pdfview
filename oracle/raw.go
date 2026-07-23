@@ -285,9 +285,26 @@ func (r *rawDoc) outlineTree() []*TOCRawEntry {
 	return convertOutline(outline)
 }
 
+// maxOutlineDepth bounds convertOutline's recursion so a mis-formed (cyclic or pathologically deep) fz_outline tree
+// cannot overflow the stack. MuPDF is trusted to return acyclic, shallow trees, so this is only a defensive backstop.
+const maxOutlineDepth = 128
+
 func convertOutline(outline *C.fz_outline) []*TOCRawEntry {
+	return convertOutlineGuarded(outline, 0, make(map[*C.fz_outline]bool))
+}
+
+// convertOutlineGuarded walks the fz_outline sibling chain with a shared visited set (cutting next/down cycles) and a
+// depth cap (bounding recursion), so a cyclic or over-deep tree terminates instead of looping or exhausting memory.
+func convertOutlineGuarded(outline *C.fz_outline, depth int, visited map[*C.fz_outline]bool) []*TOCRawEntry {
+	if depth > maxOutlineDepth {
+		return nil
+	}
 	var entries []*TOCRawEntry
 	for ; outline != nil; outline = outline.next {
+		if visited[outline] {
+			break
+		}
+		visited[outline] = true
 		entry := &TOCRawEntry{
 			Title: goStringOrEmpty(outline.title),
 			URI:   goStringOrEmpty(outline.uri),
@@ -296,7 +313,7 @@ func convertOutline(outline *C.fz_outline) []*TOCRawEntry {
 			Y:     finiteOrNull(float32(outline.y)),
 		}
 		if outline.down != nil {
-			entry.Children = convertOutline(outline.down)
+			entry.Children = convertOutlineGuarded(outline.down, depth+1, visited)
 		}
 		entries = append(entries, entry)
 	}

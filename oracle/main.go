@@ -84,6 +84,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err = validateNeedles(needles); err != nil {
+		log.Fatal(err)
+	}
 	if err = dump(*in, *out, dpis, passwords, needles); err != nil {
 		log.Fatalf("%s: %v", *in, err)
 	}
@@ -96,12 +99,28 @@ func parseDPIs(csv string) ([]int, error) {
 		if err != nil || dpi < 1 {
 			return nil, fmt.Errorf("invalid dpi %q", part)
 		}
+		// Duplicate DPIs would collapse under a shared strconv.Itoa(dpi) map key (truth.TOC, page Renders), silently
+		// discarding one dump, so reject them instead of letting the second write win.
+		if slices.Contains(dpis, dpi) {
+			return nil, fmt.Errorf("duplicate dpi %d", dpi)
+		}
 		dpis = append(dpis, dpi)
 	}
 	if len(dpis) == 0 {
 		return nil, fmt.Errorf("no dpis given")
 	}
 	return dpis, nil
+}
+
+// validateNeedles rejects duplicate search needles. Each needle is a key in the per-render Search map, so a repeated
+// needle would overwrite the earlier entry and silently discard one dump rather than being caught.
+func validateNeedles(needles []string) error {
+	for i, needle := range needles {
+		if slices.Contains(needles[:i], needle) {
+			return fmt.Errorf("duplicate search needle %q", needle)
+		}
+	}
+	return nil
 }
 
 func dump(in, out string, dpis []int, passwords, needles []string) error {
