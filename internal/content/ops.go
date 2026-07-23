@@ -388,6 +388,25 @@ func (in *interp) opDash() {
 	in.gs.sp.DashPhase = float32(phase)
 }
 
+// resolvedDashLengths prepares an ExtGState /D dash-length array for opDash. Content-stream operands are always direct,
+// so opDash reads the entries without resolving them, but a /D array lives in the object graph where `[[3 0 R 2] 0]` is
+// legal; the entries are resolved into a copy, since the original belongs to the document's object cache. The
+// maxDashEntries truncation mirrors opDash's own, so the trailing entries it would ignore are never loaded.
+func (in *interp) resolvedDashLengths(obj cos.Object) cos.Object {
+	arr, ok := cos.AsArray(in.doc.Resolve(obj))
+	if !ok {
+		return cos.Null{} // Not an array: opDash's own type check skips the operator, leaving the previous dash.
+	}
+	out := make(cos.Array, 0, min(len(arr), maxDashEntries))
+	for _, entry := range arr {
+		if len(out) >= maxDashEntries {
+			break
+		}
+		out = append(out, in.doc.Resolve(entry))
+	}
+	return out
+}
+
 // opExtGState implements gs: apply the supported subset of an ExtGState dictionary (line parameters, dash, constant
 // alpha, blend mode, soft mask). The remaining entries (font, transfer functions, ...) are ignored.
 func (in *interp) opExtGState() {
@@ -421,7 +440,7 @@ func (in *interp) opExtGState() {
 	}
 	if arr, has := in.doc.GetArray(dict, "D"); has && len(arr) == 2 {
 		saved := in.operands
-		in.operands = []cos.Object{in.doc.Resolve(arr[0]), in.doc.Resolve(arr[1])}
+		in.operands = []cos.Object{in.resolvedDashLengths(arr[0]), in.doc.Resolve(arr[1])}
 		in.opDash()
 		in.operands = saved
 	}

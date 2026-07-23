@@ -164,6 +164,68 @@ func TestDashPhaseGuarded(t *testing.T) {
 	}
 }
 
+// TestExtGStateDashEntriesResolved verifies the individual ExtGState /D dash lengths are resolved before opDash reads
+// them. Content-stream operands are always direct, so the d operator needs no resolution, but a /D array lives in the
+// object graph where `[[3 0 R 2] 0]` is legal; an unresolved entry fails cos.AsReal and would leave the previous dash
+// pattern in effect instead of the one the ExtGState asked for.
+func TestExtGStateDashEntriesResolved(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		gs    string
+		extra []string
+		dash  []float32
+		phase float32
+	}{
+		{
+			name:  "indirect entries",
+			gs:    `<< /Type /ExtGState /D [[2 0 R 3 0 R] 4 0 R] >>`,
+			extra: []string{"6", "3", "1.5"},
+			dash:  []float32{6, 3},
+			phase: 1.5,
+		},
+		{
+			name:  "indirect array",
+			gs:    `<< /Type /ExtGState /D [2 0 R 0] >>`,
+			extra: []string{"[4 2]"},
+			dash:  []float32{4, 2},
+		},
+		{ // Resolution does not make an invalid entry valid: a negative length still skips the operator.
+			name:  caseNegative,
+			gs:    `<< /Type /ExtGState /D [[6 2 0 R] 0] >>`,
+			extra: []string{"-3"},
+			dash:  []float32{1, 5},
+		},
+		{ // An absent object resolves to Null, which is not a number, so the previous dash survives.
+			name: "missing entry",
+			gs:   `<< /Type /ExtGState /D [[6 9 0 R] 0] >>`,
+			dash: []float32{1, 5},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := cos.Open([]byte(minimalPDF(append([]string{tc.gs}, tc.extra...)...)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catExtGState: cos.Dict{resGSName: cos.Ref{Num: 1}}}
+			// The content stream installs a dash of its own first, so a skipped /D is visible as that leftover pattern.
+			rec := run(t, d, res, "[1 5] 0 d /GS0 gs 0 0 m 1 1 l S")
+			wantOps(t, rec, opStroke)
+			sp := rec.calls[0].sp
+			if len(sp.Dash) != len(tc.dash) {
+				t.Fatalf("dash = %v, want %v", sp.Dash, tc.dash)
+			}
+			for i, want := range tc.dash {
+				if sp.Dash[i] != want {
+					t.Fatalf("dash = %v, want %v", sp.Dash, tc.dash)
+				}
+			}
+			if sp.DashPhase != tc.phase {
+				t.Fatalf("dash phase = %v, want %v", sp.DashPhase, tc.phase)
+			}
+		})
+	}
+}
+
 // TestFormMatrixNonFiniteRejected verifies the form XObject /Matrix concatenation is dropped when it overflows to a
 // non-finite CTM (like cm), so transformAABB/ClipPath and the form body's paints never see NaN/Inf.
 func TestFormMatrixNonFiniteRejected(t *testing.T) {
