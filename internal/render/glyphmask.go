@@ -236,13 +236,9 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	paint.AntiAlias = true
 	c.DrawPath(fill, paint)
 	// White premultiplied by coverage stores the coverage in every channel; take the alpha byte (R|G<<8|B<<16|A<<24).
-	pm := surf.Pixmap()
-	plane := make([]byte, w*h)
-	for row := range h {
-		base := row * int(pm.RowPixels)
-		for col := range w {
-			plane[row*w+col] = uint8(pm.Pix[base+col] >> 24)
-		}
+	plane := coveragePlane(surf.Pixmap(), w, h)
+	if plane == nil {
+		return &glyphMask{}, 96
 	}
 	info := imagecore.ImageInfo{
 		Width:     int32(w),
@@ -256,6 +252,23 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	}
 	return &glyphMask{img: img, plane: plane, w: int32(w), h: int32(h), ox: int32(mx0), oy: int32(my0)},
 		glyphMaskSize(w, h) * 2
+}
+
+// coveragePlane extracts the w×h alpha coverage from a white-on-transparent scratch pixmap into a tightly packed
+// Alpha8 plane. It returns nil when pm is nil, so the caller degrades to the outline fill rather than panicking — the
+// same nil guard compositeMask and Pixels apply before touching a surface's backing store.
+func coveragePlane(pm *raster.Pixmap, w, h int) []byte {
+	if pm == nil {
+		return nil
+	}
+	plane := make([]byte, w*h)
+	for row := range h {
+		base := row * int(pm.RowPixels)
+		for col := range w {
+			plane[row*w+col] = uint8(pm.Pix[base+col] >> 24)
+		}
+	}
+	return plane
 }
 
 // compositeMask source-over-composites a coverage plane, tinted by the opaque color r,g,b, straight into the surface

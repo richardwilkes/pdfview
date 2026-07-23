@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/richardwilkes/canvas/raster"
+
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
@@ -591,6 +593,29 @@ func TestRenderGlyphMaskRejectsHugeFiniteBounds(t *testing.T) {
 	}
 	if mask.plane != nil {
 		t.Fatalf("huge finite bounds produced a %dx%d coverage plane instead of the outline fallback", mask.w, mask.h)
+	}
+}
+
+// coveragePlane must degrade to nil on a nil pixmap — the same guard compositeMask and Pixels apply — so a scratch
+// surface with no backing store makes renderGlyphMask fall back to the outline fill instead of dereferencing nil.
+func TestCoveragePlaneNilPixmap(t *testing.T) {
+	if plane := coveragePlane(nil, 4, 3); plane != nil {
+		t.Fatalf("nil pixmap yielded a %d-byte plane; want nil so the caller degrades", len(plane))
+	}
+	pm := raster.NewPixmap(2, 2)
+	pm.Pix[0] = 0xAB << 24
+	pm.Pix[1] = 0xCD << 24
+	pm.Pix[2] = 0x11 << 24
+	pm.Pix[3] = 0x22 << 24
+	plane := coveragePlane(pm, 2, 2)
+	if want := []byte{0xAB, 0xCD, 0x11, 0x22}; len(plane) != len(want) {
+		t.Fatalf("got %d-byte plane, want %d", len(plane), len(want))
+	} else {
+		for i, w := range want {
+			if plane[i] != w {
+				t.Fatalf("plane[%d] = %#x, want %#x", i, plane[i], w)
+			}
+		}
 	}
 }
 
