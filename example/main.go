@@ -38,15 +38,15 @@ func main() {
 	}
 }
 
-func extract(path, search string) error {
-	data, err := os.ReadFile(path) //nolint:gosec // For the example, we don't care
-	if err != nil {
+func extract(path, search string) (err error) {
+	var data []byte
+	if data, err = os.ReadFile(path); err != nil { //nolint:gosec // For the example, we don't care
 		return err
 	}
 
 	// Pass 0 for maxCacheSize for no limit.
-	doc, err := pdfview.New(data, 0)
-	if err != nil {
+	var doc *pdfview.Document
+	if doc, err = pdfview.New(data, 0); err != nil {
 		return err
 	}
 	defer doc.Release()
@@ -66,8 +66,8 @@ func extract(path, search string) error {
 	fmt.Println(divider)
 
 	// Render the first page at 150 DPI, highlighting up to 10 search matches.
-	page, err := doc.RenderPage(0, 150, 10, search)
-	if err != nil {
+	var page *pdfview.RenderedPage
+	if page, err = doc.RenderPage(0, 150, 10, search); err != nil {
 		return err
 	}
 
@@ -93,11 +93,15 @@ func extract(path, search string) error {
 		fmt.Println(divider)
 	}
 
-	out, err := os.Create("page0.png")
-	if err != nil {
+	var out *os.File
+	if out, err = os.Create("page0.png"); err != nil { //nolint:gosec // For the example, we don't care
 		return err
 	}
-	defer out.Close() //nolint:errcheck // We're exiting anyway
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if err = png.Encode(out, page.Image); err != nil {
 		return err
 	}
