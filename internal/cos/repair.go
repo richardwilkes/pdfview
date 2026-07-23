@@ -28,6 +28,13 @@ func (d *Document) repair() error {
 	var trailers []Dict // Candidate trailers, in file order (later entries are newer).
 	var objStmNums []int
 	catalogNum := -1
+	// The offset just past the file's last "endstream" bounds the recovery scan for every swept stream header. Without
+	// it, each header lacking a matching endstream scans to end of input, so a file full of bare stream keywords costs
+	// O(n²); with it, headers beyond the last real endstream fail in constant time.
+	endstreamLimit := 0
+	if i := bytes.LastIndex(d.data, []byte("endstream")); i >= 0 {
+		endstreamLimit = i + len("endstream")
+	}
 	pos := 0
 	for pos < len(d.data) {
 		rel := bytes.Index(d.data[pos:], []byte("obj"))
@@ -40,7 +47,7 @@ func (d *Document) repair() error {
 			pos = idx + 3
 			continue
 		}
-		obj, _, end, err := parseIndirectAt(d.data, int64(numStart), -1)
+		obj, _, end, err := parseIndirectAtBounded(d.data, int64(numStart), -1, endstreamLimit)
 		if err != nil || end <= int64(idx) {
 			pos = idx + 3
 			continue

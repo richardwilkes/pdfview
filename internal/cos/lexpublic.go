@@ -76,10 +76,13 @@ func (l *Lexer) Pos() int {
 	return l.lex.pos
 }
 
-// SetPos moves the read offset (used to skip non-lexical spans such as inline-image payloads). Offsets outside the data
-// are clamped to its end.
+// SetPos moves the read offset (used to skip non-lexical spans such as inline-image payloads). A negative offset is
+// clamped to the buffer start; an offset past the end is clamped to the end.
 func (l *Lexer) SetPos(pos int) {
-	if pos < 0 || pos > len(l.lex.data) {
+	switch {
+	case pos < 0:
+		pos = 0
+	case pos > len(l.lex.data):
 		pos = len(l.lex.data)
 	}
 	l.lex.pos = pos

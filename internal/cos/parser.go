@@ -212,6 +212,14 @@ func (p *parser) expectInt() (int64, error) {
 // key), and the offset just past it (past endstream for streams), which the repair scanner uses to skip stream
 // payloads.
 func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, end int64, err error) {
+	return parseIndirectAtBounded(data, off, wantNum, len(data))
+}
+
+// parseIndirectAtBounded is parseIndirectAt with an upper bound (exclusive) on where the fallback "endstream" scan may
+// look. The repair sweep passes the offset just past the file's last "endstream" so that a swept stream header with no
+// matching endstream fails its recovery scan immediately instead of scanning to end of input on every such header
+// (O(n²) on hostile input full of bare stream keywords). All other callers pass len(data), preserving prior behavior.
+func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
 		return nil, 0, 0, errStreamOutOfRange
 	}
@@ -252,7 +260,7 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 	if !ok {
 		return nil, 0, 0, fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
 	}
-	raw, rawEnd, err := captureRawStream(data, p.lex.pos, dict)
+	raw, rawEnd, err := captureRawStream(data, p.lex.pos, endstreamLimit, dict)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -264,7 +272,7 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 // otherwise (indirect, missing, or wrong /Length) the data is scanned for the next "endstream" keyword and any final
 // end-of-line marker before it is trimmed, mirroring the recovery behavior of deployed readers. The returned end offset
 // is just past the endstream keyword.
-func captureRawStream(data []byte, pos int, dict Dict) (raw []byte, end int64, err error) {
+func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict) (raw []byte, end int64, err error) {
 	// Per ISO 32000-2 7.3.8.1 the stream keyword is followed by CRLF or LF; a lone CR and a missing break are
 	// tolerated.
 	if pos < len(data) && data[pos] == '\r' {
@@ -279,7 +287,13 @@ func captureRawStream(data []byte, pos int, dict Dict) (raw []byte, end int64, e
 			return data[pos:dataEnd], at, nil
 		}
 	}
-	idx := bytes.Index(data[pos:], []byte("endstream"))
+	// The fallback scan searches only up to endstreamLimit (never past the buffer). A stream header at or beyond that
+	// bound cannot be followed by an "endstream" keyword, so report the miss without scanning.
+	searchEnd := min(endstreamLimit, len(data))
+	if pos >= searchEnd {
+		return nil, 0, errNoEndstream
+	}
+	idx := bytes.Index(data[pos:searchEnd], []byte("endstream"))
 	if idx < 0 {
 		return nil, 0, errNoEndstream
 	}

@@ -25,6 +25,7 @@ type objStm struct {
 var (
 	errObjStmEntry = errors.New("object not found in object stream")
 	errObjStmSelf  = errors.New("object stream is not stored directly in the file")
+	errObjStmCycle = errors.New("object stream refers to itself")
 )
 
 // loadObjStm parses and caches the object stream with the given object number. The stream object itself must be stored
@@ -33,6 +34,13 @@ var (
 func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if stm, ok := d.objStms[num]; ok {
 		return stm, nil
+	}
+	// Guard against a stream whose header keys resolve (via indirect references and back-pointing xref entries) into
+	// this same stream: parseObjStm below resolves /N, /First, /Filter, and /DecodeParms, any of which can re-enter
+	// loadObjStm for num before it is cached. Without this the recursion is unbounded (maxResolveDepth resets on each
+	// fresh Resolve), exhausting the goroutine stack.
+	if d.objStmLoading[num] {
+		return nil, errObjStmCycle
 	}
 	entry, ok := d.xref[num]
 	if !ok || entry.kind != xrefInFile {
@@ -50,7 +58,9 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	// here (before the /Filter chain) means the objects parsed out of it need no further decryption, matching ISO
 	// 32000-2 7.6.2.
 	d.decryptDirect(num, gen, stream)
+	d.objStmLoading[num] = true
 	stm, err := d.parseObjStm(stream)
+	delete(d.objStmLoading, num)
 	if err != nil {
 		return nil, err
 	}

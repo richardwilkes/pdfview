@@ -37,12 +37,16 @@ var (
 // Document is one open PDF file at the COS level. It is not safe for concurrent use; the public API package serializes
 // access with its document mutex.
 type Document struct {
-	xref      map[int]xrefEntry
-	objCache  map[int]Object
-	objStms   map[int]*objStm
-	trailer   Dict
-	decryptor Decryptor
-	data      []byte
+	xref     map[int]xrefEntry
+	objCache map[int]Object
+	objStms  map[int]*objStm
+	// objStmLoading tracks object streams currently being parsed, breaking the mutual recursion that a malicious file
+	// can induce when an object stream's own dictionary keys (/N, /First, /Filter, /DecodeParms) are indirect
+	// references whose xref entries point back into the same not-yet-cached stream.
+	objStmLoading map[int]bool
+	trailer       Dict
+	decryptor     Decryptor
+	data          []byte
 	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted; it is
 	// meaningful only once decryptor is non-nil.
 	encryptNum int
@@ -54,10 +58,11 @@ type Document struct {
 // is broken, inconsistent, or missing. It fails only when even repair cannot produce a root.
 func Open(data []byte) (*Document, error) {
 	d := &Document{
-		data:     data,
-		xref:     make(map[int]xrefEntry),
-		objCache: make(map[int]Object),
-		objStms:  make(map[int]*objStm),
+		data:          data,
+		xref:          make(map[int]xrefEntry),
+		objCache:      make(map[int]Object),
+		objStms:       make(map[int]*objStm),
+		objStmLoading: make(map[int]bool),
 	}
 	if err := d.loadXref(); err != nil {
 		if rerr := d.repair(); rerr != nil {
@@ -350,4 +355,5 @@ func (d *Document) filterParams(parmDict Dict) filter.Params {
 func (d *Document) clearCaches() {
 	d.objCache = make(map[int]Object)
 	d.objStms = make(map[int]*objStm)
+	d.objStmLoading = make(map[int]bool)
 }

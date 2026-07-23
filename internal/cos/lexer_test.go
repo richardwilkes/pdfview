@@ -11,6 +11,7 @@ package cos
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -48,6 +49,11 @@ func TestLexNumbers(t *testing.T) {
 		{"-.002", token{kind: tkReal, f: -0.002}},
 		{".5", token{kind: tkReal, f: 0.5}},
 		{"--5", token{kind: tkInt, i: 5}}, // Lenient: doubled signs cancel.
+		// Integers above the old (1<<62)/10 guard but within int64 must stay exact tkInt, not be perturbed as tkReal.
+		{"922337203685477580", token{kind: tkInt, i: 922337203685477580}},
+		{"5000000000000000000", token{kind: tkInt, i: 5000000000000000000}},
+		{"9223372036854775807", token{kind: tkInt, i: 9223372036854775807}}, // math.MaxInt64
+		{"-9223372036854775807", token{kind: tkInt, i: -9223372036854775807}},
 	} {
 		tokens := lexAll(t, tc.src)
 		if len(tokens) != 1 {
@@ -284,5 +290,96 @@ func TestDecodeTextString(t *testing.T) {
 		if got := DecodeTextString(String(tc.in)); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestLexLargeIntegerOverflow(t *testing.T) {
+	// A magnitude beyond int64 overflows and is returned as a real rather than a truncated integer.
+	tokens := lexAll(t, "99999999999999999999999")
+	if len(tokens) != 1 || tokens[0].kind != tkReal {
+		t.Fatalf("overflowing integer lexed to %#v", tokens)
+	}
+	if tokens[0].f < 9.9e22 || tokens[0].f > 1.1e23 {
+		t.Errorf("overflow real = %g, want ~1e23", tokens[0].f)
+	}
+}
+
+func TestSetPosClamps(t *testing.T) {
+	data := []byte("0123456789")
+	l := NewLexer(data, 0)
+	l.SetPos(-5)
+	if l.Pos() != 0 {
+		t.Errorf("negative offset clamped to %d, want 0", l.Pos())
+	}
+	l.SetPos(4)
+	if l.Pos() != 4 {
+		t.Errorf("in-range offset became %d, want 4", l.Pos())
+	}
+	l.SetPos(len(data) + 100)
+	if l.Pos() != len(data) {
+		t.Errorf("past-end offset clamped to %d, want %d", l.Pos(), len(data))
+	}
+}
+
+func TestLoadObjStmSelfReference(t *testing.T) {
+	// Object stream 1's /N is an indirect reference to object 2, whose cross-reference entry points back into stream 1.
+	// Resolving /N therefore re-enters loadObjStm(1); without the recursion guard this exhausts the goroutine stack.
+	// Reaching an ordinary error return proves the guard broke the cycle.
+	data := []byte("1 0 obj\n<< /Type /ObjStm /N 2 0 R /First 4 >>\nstream\n2 0\nendstream\nendobj\n")
+	d := &Document{
+		data: data,
+		xref: map[int]xrefEntry{
+			1: {kind: xrefInFile, offset: 0},
+			2: {kind: xrefInStream, stmNum: 1, stmIdx: 0},
+		},
+		objCache:      map[int]Object{},
+		objStms:       map[int]*objStm{},
+		objStmLoading: map[int]bool{},
+		repaired:      true, // Suppress the load-failure repair retry so the test exercises only the recursion guard.
+	}
+	if _, err := d.loadObjStm(1); err == nil {
+		t.Fatal("expected an error from the self-referential object stream")
+	}
+	if len(d.objStmLoading) != 0 {
+		t.Errorf("objStmLoading not cleaned up: %v", d.objStmLoading)
+	}
+}
+
+func TestCaptureRawStreamEndstreamLimit(t *testing.T) {
+	dict := Dict{}
+	data := []byte("stream\nabcde\nendstream rest")
+	pos := len("stream\n")
+	// With the limit at end of buffer, the fallback scan finds endstream.
+	raw, _, err := captureRawStream(data, pos, len(data), dict)
+	if err != nil || !bytes.Equal(raw, []byte("abcde")) {
+		t.Fatalf("full-limit capture: raw=%q err=%v", raw, err)
+	}
+	// A limit before the endstream keyword hides it, so the scan reports the miss without running past the bound.
+	if _, _, err = captureRawStream(data, pos, pos+3, dict); err == nil {
+		t.Error("expected errNoEndstream when the keyword is beyond the limit")
+	}
+	// A start offset at or beyond the limit fails immediately.
+	if _, _, err = captureRawStream(data, len(data), 0, dict); err == nil {
+		t.Error("expected errNoEndstream when pos is beyond the limit")
+	}
+}
+
+func TestRepairManyBareStreams(t *testing.T) {
+	// Many "N 0 obj << >> stream" headers with no endstream anywhere used to cost O(n²): each header scanned to EOF.
+	// The repair endstream bound makes each miss constant-time. This checks the pathological input still repairs into a
+	// usable document (with a real trailer/catalog appended) rather than hanging.
+	var b bytes.Buffer
+	for i := 2; i < 4000; i++ {
+		fmt.Fprintf(&b, "%d 0 obj\n<< /Length 10 >>\nstream\n", i)
+	}
+	b.WriteString("1 0 obj << /Type /Catalog /Pages 5 0 R >> endobj\n")
+	b.WriteString("5 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n")
+	b.WriteString("trailer << /Root 1 0 R >>\n")
+	d, err := Open(b.Bytes())
+	if err != nil {
+		t.Fatalf("Open of bare-stream file failed: %v", err)
+	}
+	if _, ok := d.GetDict(d.Trailer(), "Root"); !ok {
+		t.Error("repaired document has no usable root")
 	}
 }

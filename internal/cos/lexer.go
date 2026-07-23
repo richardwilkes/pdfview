@@ -11,6 +11,7 @@ package cos
 
 import (
 	"errors"
+	"math"
 	"strconv"
 )
 
@@ -181,10 +182,11 @@ func (l *lexer) lexNumber() token {
 	overflow := false
 	for i < len(span) && span[i] >= '0' && span[i] <= '9' {
 		digits = true
-		if whole > (1<<62)/10 {
+		d := int64(span[i] - '0')
+		if whole > (math.MaxInt64-d)/10 {
 			overflow = true
 		} else {
-			whole = whole*10 + int64(span[i]-'0')
+			whole = whole*10 + d
 		}
 		i++
 	}
