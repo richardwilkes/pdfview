@@ -49,7 +49,9 @@ func (dec *decoder) applyStencilMask(img *Image, ms *cos.Stream) {
 	sub := &decoder{d: dec.d, dict: ms.Dict, data: data, codec: codec, parms: parms}
 	mw, wOK := sub.intEntry("Width", "W")
 	mh, hOK := sub.intEntry("Height", "H")
-	if !wOK || !hOK || mw <= 0 || mh <= 0 || mw*mh > maxPixelsFor(len(data)) {
+	// Cap each dimension against maxImagePixels first, the way run() does: without it a Width/Height near 2^40 wraps
+	// mw*mh mod 2^64 to a small value that passes the budget check, then panics or attempts an exabyte allocation.
+	if !wOK || !hOK || mw <= 0 || mh <= 0 || mw > maxImagePixels || mh > maxImagePixels || mw*mh > maxPixelsFor(len(data)) {
 		return
 	}
 	plane, err := sub.stencilPlane(int(mw), int(mh))
@@ -70,7 +72,9 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	sub := &decoder{d: d, dict: sm.Dict, data: data, codec: codec, parms: parms}
 	w64, wOK := sub.intEntry("Width", "W")
 	h64, hOK := sub.intEntry("Height", "H")
-	if !wOK || !hOK || w64 <= 0 || h64 <= 0 || w64*h64 > maxPixelsFor(len(data)) {
+	// Cap each dimension against maxImagePixels first, the way run() does: without it a Width/Height near 2^40 wraps
+	// w64*h64 mod 2^64 to a small value that passes the budget check, then panics or attempts an exabyte allocation.
+	if !wOK || !hOK || w64 <= 0 || h64 <= 0 || w64 > maxImagePixels || h64 > maxImagePixels || w64*h64 > maxPixelsFor(len(data)) {
 		return nil, 0, 0, ErrBadImage
 	}
 	w, h = int(w64), int(h64)

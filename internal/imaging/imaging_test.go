@@ -26,6 +26,9 @@ import (
 const (
 	keyBPC        cos.Name = "BPC"
 	keyColorSpace cos.Name = "ColorSpace"
+	keyWidth      cos.Name = "Width"
+	keyHeight     cos.Name = "Height"
+	keyMask       cos.Name = "Mask"
 )
 
 // testDoc returns a minimal document for Resolve calls; the image dictionaries and mask streams in these tests are
@@ -273,7 +276,7 @@ func TestSMaskComposite(t *testing.T) {
 	d := testDoc(t)
 	smask := &cos.Stream{
 		Dict: cos.Dict{
-			"Width": cos.Integer(2), "Height": cos.Integer(1), "BitsPerComponent": cos.Integer(8),
+			keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), "BitsPerComponent": cos.Integer(8),
 			keyColorSpace: cos.Name("DeviceGray"),
 		},
 		Raw: []byte{0x00, 0x80},
@@ -303,7 +306,7 @@ func TestSMaskComposite(t *testing.T) {
 		}
 	}
 	// An /SMask overrides any /Mask entry, including a color-key array (ISO 32000-2 8.9.6.6).
-	dict["Mask"] = cos.Array{cos.Integer(0), cos.Integer(255), cos.Integer(0), cos.Integer(255), cos.Integer(0), cos.Integer(255)}
+	dict[keyMask] = cos.Array{cos.Integer(0), cos.Integer(255), cos.Integer(0), cos.Integer(255), cos.Integer(0), cos.Integer(255)}
 	img, err = DecodeInline(d, dict, payload, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -316,12 +319,12 @@ func TestSMaskComposite(t *testing.T) {
 func TestStencilMaskEntry(t *testing.T) {
 	d := testDoc(t)
 	mask := &cos.Stream{
-		Dict: cos.Dict{"Width": cos.Integer(2), "Height": cos.Integer(1), "ImageMask": cos.Boolean(true)},
+		Dict: cos.Dict{keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), "ImageMask": cos.Boolean(true)},
 		Raw:  []byte{0b01000000},
 	}
 	dict := cos.Dict{
 		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G"),
-		"Mask": mask,
+		keyMask: mask,
 	}
 	img, err := DecodeInline(d, dict, []byte{10, 20}, nil)
 	if err != nil {
@@ -337,7 +340,7 @@ func TestColorKeyMask(t *testing.T) {
 	d := testDoc(t)
 	dict := cos.Dict{
 		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
-		"Mask": cos.Array{cos.Integer(90), cos.Integer(110), cos.Integer(0), cos.Integer(50), cos.Integer(200), cos.Integer(255)},
+		keyMask: cos.Array{cos.Integer(90), cos.Integer(110), cos.Integer(0), cos.Integer(50), cos.Integer(200), cos.Integer(255)},
 	}
 	img, err := DecodeInline(d, dict, []byte{100, 25, 220, 100, 60, 220}, nil)
 	if err != nil {
@@ -370,6 +373,78 @@ func TestPixelBudgets(t *testing.T) {
 	}
 	if img.Width != 4096 || img.Height != 2048 {
 		t.Fatalf("dims: %dx%d", img.Width, img.Height)
+	}
+}
+
+func TestCCITTColumnsBounded(t *testing.T) {
+	d := testDoc(t)
+	// A /Columns value large enough that cols×h would overflow int64 must be rejected before any allocation, the way
+	// run() bounds Width/Height. Without the per-dimension cap the product wraps and slips under the pixel budget.
+	dict := cos.Dict{
+		"W": cos.Integer(4), "H": cos.Integer(4), keyBPC: cos.Integer(1), "CS": cos.Name("G"),
+		"F":  cos.Name("CCF"),
+		"DP": cos.Dict{"K": cos.Integer(-1), "Columns": cos.Integer(1 << 38)},
+	}
+	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
+		t.Fatal("huge CCITT /Columns accepted")
+	}
+}
+
+func TestCCITTMultiComponentRejected(t *testing.T) {
+	d := testDoc(t)
+	// CCITT is a bilevel, single-component codec; pairing it with a multi-component color space is malformed and would
+	// otherwise read ncomp samples per pixel against a single-component row, producing garbage.
+	dict := cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(2), keyBPC: cos.Integer(1), "CS": cos.Name("RGB"),
+		"F":  cos.Name("CCF"),
+		"DP": cos.Dict{"K": cos.Integer(-1), "Columns": cos.Integer(2)},
+	}
+	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
+		t.Fatal("CCITT with a multi-component color space accepted")
+	}
+	// The same stream with a single-component space still decodes.
+	dict["CS"] = cos.Name("G")
+	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err != nil {
+		t.Fatalf("CCITT with DeviceGray must decode: %v", err)
+	}
+}
+
+func TestMaskDimensionsBounded(t *testing.T) {
+	d := testDoc(t)
+	// An /SMask whose Width×Height overflows int64 must be rejected without panicking; the base image stays opaque.
+	smask := &cos.Stream{
+		Dict: cos.Dict{
+			keyWidth: cos.Integer(1 << 40), keyHeight: cos.Integer(1 << 40),
+			"BitsPerComponent": cos.Integer(8), keyColorSpace: cos.Name("DeviceGray"),
+		},
+		Raw: []byte{0x00},
+	}
+	dict := cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
+		"SMask": smask,
+	}
+	img, err := DecodeInline(d, dict, []byte{200, 100, 50, 200, 100, 50}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.HasAlpha {
+		t.Fatal("oversized /SMask should be ignored, leaving the image opaque")
+	}
+	// The same overflow guard covers a stencil /Mask stream.
+	mask := &cos.Stream{
+		Dict: cos.Dict{keyWidth: cos.Integer(1 << 40), keyHeight: cos.Integer(1 << 40), "ImageMask": cos.Boolean(true)},
+		Raw:  []byte{0x00},
+	}
+	dict = cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G"),
+		keyMask: mask,
+	}
+	img, err = DecodeInline(d, dict, []byte{10, 20}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.HasAlpha {
+		t.Fatal("oversized stencil /Mask should be ignored, leaving the image opaque")
 	}
 }
 

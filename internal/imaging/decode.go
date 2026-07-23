@@ -45,6 +45,12 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	if ncomp <= 0 || ncomp > 32 {
 		return nil, ErrBadImage
 	}
+	if isCCITT(dec.codec) && ncomp != 1 {
+		// CCITT is a bilevel, single-component codec: its rows are cols one-bit samples, one per pixel, and rowStride
+		// above is sized for that. A multi-component color space would make the per-pixel loop read ncomp samples per
+		// pixel against a single-component row, producing garbage. Decline the malformed pairing (rendered blank).
+		return nil, ErrBadImage
+	}
 	if rowStride == 0 {
 		rowStride = (w*ncomp*bpc + 7) / 8
 	}

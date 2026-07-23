@@ -41,7 +41,10 @@ func (dec *decoder) decodeCCITT(h int) (data []byte, cols int, err error) {
 		align = dictBool(dec.d, dec.parms, "EncodedByteAlign")
 		black1 = dictBool(dec.d, dec.parms, "BlackIs1")
 	}
-	if int64(cols)*int64(h) > maxPixelsFor(len(dec.data)) {
+	// Bound each dimension the way run() bounds Width/Height before multiplying: cols comes straight from the /Columns
+	// decode param (guarded only as v > 0) and h from the caller, so an unbounded product could overflow int64 and slip
+	// under the budget check, leading to an enormous rowBytes*h allocation.
+	if cols > maxImagePixels || h > maxImagePixels || int64(cols)*int64(h) > maxPixelsFor(len(dec.data)) {
 		return nil, 0, ErrTooLarge
 	}
 	sf := ccitt.Group3
