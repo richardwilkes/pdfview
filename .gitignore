@@ -1,5 +1,4 @@
 /tools/
-# The oracle module's compiled binary (from a stray `go build` in oracle/; regen.sh uses `go run .` and never
-# needs it). Only source, scripts, the corpus, and the goldens are committed.
 /oracle/oracle
 /oracle/oracle.exe
+/issues.md
