@@ -59,7 +59,7 @@ func (f *Font) Advance(name string) (adv float32, ok bool) {
 	if err != nil {
 		return 0, false
 	}
-	return float32(h.advance), true
+	return float32(h.advance), h.widthSet
 }
 
 // run executes one glyph's charstring through a fresh machine and handler.
@@ -107,6 +107,9 @@ type handler struct {
 	// ops counts executed operators across the glyph (including seac components) against maxHandlerOps.
 	ops        int
 	hasPending bool
+	// widthSet records that hsbw/sbw ran and set advance, so Advance can distinguish a real width of 0 from a
+	// charstring where no width operator executed (malformed, or interrupted before it ran).
+	widthSet bool
 	// justClosed records an explicit closepath, so the next moveto suppresses the reader's automatic close.
 	justClosed bool
 	// needClose records drawing since the last close; finish() closes only then.
@@ -335,6 +338,7 @@ func (h *handler) applyEscaped(state *psi.Machine, op byte) error {
 func (h *handler) setSidebearing(state *psi.Machine, sbx, sby, wx float64) error {
 	if !h.inSeac {
 		h.advance = wx
+		h.widthSet = true
 	}
 	h.pendingX, h.pendingY = h.transX+sbx, h.transY+sby
 	h.hasPending = true

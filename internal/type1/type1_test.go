@@ -442,6 +442,17 @@ func TestAdvanceOnly(t *testing.T) {
 	if _, ok := f.Advance("nosuchglyph"); ok {
 		t.Errorf("Advance(nosuchglyph) succeeded")
 	}
+	// A charstring that never runs hsbw/sbw must report ok=false, not a spurious width of 0 — the caller relies on
+	// this to fall back to another width source rather than record a bogus zero advance.
+	f.CharStrings["nowidth"] = cs(0, 0, oRmoveto, 100, oHlineto, oEndchar)
+	if adv, ok := f.Advance("nowidth"); ok {
+		t.Errorf("Advance(nowidth) = %v, %v; want ok=false", adv, ok)
+	}
+	// A charstring whose hsbw genuinely sets width 0 must still report ok=true, distinguishing it from the above.
+	f.CharStrings["zerowidth"] = cs(0, 0, oHsbw, oEndchar)
+	if adv, ok := f.Advance("zerowidth"); !ok || adv != 0 {
+		t.Errorf("Advance(zerowidth) = %v, %v; want 0, true", adv, ok)
+	}
 }
 
 func TestGlyphErrors(t *testing.T) {
