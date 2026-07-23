@@ -376,20 +376,24 @@ func quadToRect(q quad, scale float64) image.Rectangle {
 // box never clips its content: the min corner is floored and the max corner is ceiled.
 func scaleRect(x0, y0, x1, y1, scale float64) image.Rectangle {
 	return image.Rect(
-		int(math.Floor(x0*scale)),
-		int(math.Floor(y0*scale)),
-		int(math.Ceil(x1*scale)),
-		int(math.Ceil(y1*scale)),
+		clampFloatToInt(math.Floor(x0*scale)),
+		clampFloatToInt(math.Floor(y0*scale)),
+		clampFloatToInt(math.Ceil(x1*scale)),
+		clampFloatToInt(math.Ceil(y1*scale)),
 	)
 }
 
 // scaledFloor multiplies v by scale, floors the result, and converts it to an int. A destination that carries no
 // explicit coordinate (e.g. a /Fit destination, in both link targets and TOC entries) is represented as a non-finite
-// value; Go's conversion of a non-finite (or out-of-range) float to int is architecture-defined — 0 on arm64 but
-// math.MinInt64 on amd64 — so those values are mapped to 0 here to keep the returned coordinates deterministic across
-// architectures.
+// value; see clampFloatToInt for why those are mapped to 0.
 func scaledFloor(v, scale float64) int {
-	r := math.Floor(v * scale)
+	return clampFloatToInt(math.Floor(v * scale))
+}
+
+// clampFloatToInt converts an already-rounded float to an int, mapping non-finite or out-of-range values to 0. Go's
+// conversion of a non-finite (or out-of-range) float to int is architecture-defined — 0 on arm64 but math.MinInt64 on
+// amd64 — so clamping here keeps the returned coordinates deterministic across architectures.
+func clampFloatToInt(r float64) int {
 	if math.IsNaN(r) || r < math.MinInt || r > math.MaxInt {
 		return 0
 	}
