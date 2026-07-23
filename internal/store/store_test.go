@@ -105,6 +105,28 @@ func TestReplace(t *testing.T) {
 	}
 }
 
+func TestOversizedReplaceKeepsOthers(t *testing.T) {
+	s := New(100)
+	s.Put(keyA{1}, "a", 30)
+	s.Put(keyA{2}, "b", 30)
+	s.Put(keyA{3}, "c", 30) // Three useful entries, well within budget.
+	// Re-put key 3 with a value larger than the whole budget. It must drop only key 3, not needlessly evict the
+	// other (useful) entries en route to evicting the oversized one.
+	s.Put(keyA{3}, "huge", 200)
+	if _, ok := s.Get(keyA{3}); ok {
+		t.Errorf("oversized replacement survived")
+	}
+	if v, ok := s.Get(keyA{1}); !ok || v != "a" {
+		t.Errorf("entry 1 wrongly evicted: %v, %v", v, ok)
+	}
+	if v, ok := s.Get(keyA{2}); !ok || v != "b" {
+		t.Errorf("entry 2 wrongly evicted: %v, %v", v, ok)
+	}
+	if got := s.Used(); got != 60 {
+		t.Errorf("used = %d, want 60", got)
+	}
+}
+
 func TestNilStoreSafe(t *testing.T) {
 	var s *Store
 	s.Put(keyA{1}, "x", 1)

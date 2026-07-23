@@ -79,6 +79,19 @@ func (s *Store) Put(key, val any, size uint64) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.max != 0 && size > s.max {
+		// A value larger than the whole budget is never retained. If the key already holds an entry, drop it here
+		// rather than fall through to the re-put branch, which would replace-then-evict every other (useful) entry
+		// before finally evicting this oversized one.
+		if el, ok := s.entries[key]; ok {
+			s.lru.Remove(el)
+			if e, isEntry := el.Value.(*entry); isEntry {
+				s.used -= e.size
+			}
+			delete(s.entries, key)
+		}
+		return
+	}
 	if el, ok := s.entries[key]; ok {
 		if e, isEntry := el.Value.(*entry); isEntry {
 			s.used -= e.size
@@ -88,9 +101,6 @@ func (s *Store) Put(key, val any, size uint64) {
 			s.evict()
 			return
 		}
-	}
-	if s.max != 0 && size > s.max {
-		return
 	}
 	el := s.lru.PushFront(&entry{key: key, val: val, size: size})
 	s.entries[key] = el
