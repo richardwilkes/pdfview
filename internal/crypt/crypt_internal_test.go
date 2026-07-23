@@ -13,7 +13,43 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/cos"
 )
+
+// TestConfigureCapsKeyLen checks that a hostile /Length beyond 128 bits is clamped to a 16-byte key for R<=4. The
+// RC4/AESV2 file key derives from a 16-byte MD5 digest, so an uncapped keyLen (up to 32 for /Length 256) would slice
+// that digest out of range and panic during the empty-password probe at document open.
+func TestConfigureCapsKeyLen(t *testing.T) {
+	for _, length := range []int64{256, 192, 136} {
+		h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
+		encDict := cos.Dict{"Length": cos.Integer(length)}
+		if err := h.configure(&cos.Document{}, encDict, 2); err != nil {
+			t.Fatalf("configure(/Length %d): %v", length, err)
+		}
+		if h.keyLen != 16 {
+			t.Errorf("/Length %d yields keyLen %d, want 16 (capped)", length, h.keyLen)
+		}
+		// Before the cap these derivations sliced the 16-byte digest with an out-of-range index and panicked.
+		h.deriveRC4([]byte(""))
+	}
+
+	// A normal /Length 128 still maps to a 16-byte key, and the R2 default of 40 bits to 5 bytes.
+	h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
+	if err := h.configure(&cos.Document{}, cos.Dict{"Length": cos.Integer(128)}, 2); err != nil {
+		t.Fatalf("configure(/Length 128): %v", err)
+	}
+	if h.keyLen != 16 {
+		t.Errorf("/Length 128 yields keyLen %d, want 16", h.keyLen)
+	}
+	h2 := &Handler{r: 2, o: make([]byte, 32), u: make([]byte, 32)}
+	if err := h2.configure(&cos.Document{}, cos.Dict{}, 1); err != nil {
+		t.Fatalf("configure(default): %v", err)
+	}
+	if h2.keyLen != 5 {
+		t.Errorf("default /Length yields keyLen %d, want 5", h2.keyLen)
+	}
+}
 
 // TestPadPassword checks the password padding of Algorithm 2: an empty password is exactly the padding string, and a
 // full-length password is truncated to 32 bytes with no padding appended.

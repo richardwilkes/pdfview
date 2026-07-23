@@ -115,7 +115,9 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 		if l, ok := c.GetInt(encDict, "Length"); ok && l >= 40 && l <= 256 && l%8 == 0 {
 			length = int(l)
 		}
-		h.keyLen = length / 8
+		// The RC4/AESV2 file key derives from a 16-byte MD5 digest, so a hostile /Length up to 256 (keyLen 32) would
+		// slice that digest out of range and panic. Cap at 16 (ISO 32000-2 keys never exceed 128 bits for R<=4).
+		h.keyLen = min(length/8, 16)
 		if len(h.o) < 32 || len(h.u) < 32 {
 			return errBadKeyEntry
 		}
