@@ -20,6 +20,13 @@ import (
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
+// Shared sub-test case names for the graphics-state guard tables.
+const (
+	caseValid    = "valid"
+	caseNegative = "negative"
+	caseOverflow = "overflow"
+)
+
 // TestCMNonFiniteRejected verifies the cm operator rejects a CTM concat that overflows to a non-finite matrix (finite
 // operands can still multiply to Inf), leaving the prior CTM in effect so the device never sees NaN/Inf coordinates.
 func TestCMNonFiniteRejected(t *testing.T) {
@@ -47,10 +54,10 @@ func TestMiterLimitGuarded(t *testing.T) {
 		content string
 		want    float32
 	}{
-		{"valid", "3.5 M 0 0 m 1 1 l S", 3.5},
+		{caseValid, "3.5 M 0 0 m 1 1 l S", 3.5},
 		{"zero", "0 M 0 0 m 1 1 l S", 10},
-		{"negative", "-4 M 0 0 m 1 1 l S", 10},
-		{"overflow", huge + " M 0 0 m 1 1 l S", 10},
+		{caseNegative, "-4 M 0 0 m 1 1 l S", 10},
+		{caseOverflow, huge + " M 0 0 m 1 1 l S", 10},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := run(t, nil, nil, tc.content)
@@ -69,9 +76,9 @@ func TestExtGStateMiterLimitGuarded(t *testing.T) {
 		ml   string
 		want float32
 	}{
-		{"valid", "2.5", 2.5},
-		{"negative", "-1", 10},
-		{"overflow", "1" + strings.Repeat("0", 39), 10}, // 1e39 -> +Inf in float32
+		{caseValid, "2.5", 2.5},
+		{caseNegative, "-1", 10},
+		{caseOverflow, "1" + strings.Repeat("0", 39), 10}, // 1e39 -> +Inf in float32
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pdf := minimalPDF(fmt.Sprintf("<< /Type /ExtGState /ML %s >>", tc.ml))
@@ -86,6 +93,100 @@ func TestExtGStateMiterLimitGuarded(t *testing.T) {
 				t.Fatalf("MiterLimit = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestLineWidthGuarded verifies the w operator rejects a non-finite line width (a real that narrows to +Inf in float32),
+// keeping the default width of 1 so no infinite stroke width flows to StrokePath.
+func TestLineWidthGuarded(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39) // 1e39, which overflows float32 to +Inf
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    float32
+	}{
+		{caseValid, "4 w 0 0 m 1 1 l S", 4},
+		{caseNegative, "-4 w 0 0 m 1 1 l S", 1},
+		{caseOverflow, huge + " w 0 0 m 1 1 l S", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := run(t, nil, nil, tc.content)
+			wantOps(t, rec, opStroke)
+			if got := rec.calls[0].sp.Width; got != tc.want {
+				t.Fatalf("Width = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExtGStateLineWidthGuarded verifies the ExtGState /LW entry applies the same finiteness guard as the w operator.
+func TestExtGStateLineWidthGuarded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lw   string
+		want float32
+	}{
+		{caseValid, "5", 5},
+		{caseNegative, "-1", 1},
+		{caseOverflow, "1" + strings.Repeat("0", 39), 1}, // 1e39 -> +Inf in float32
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pdf := minimalPDF(fmt.Sprintf("<< /Type /ExtGState /LW %s >>", tc.lw))
+			d, err := cos.Open([]byte(pdf))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catExtGState: cos.Dict{resGSName: cos.Ref{Num: 1}}}
+			rec := run(t, d, res, "/GS0 gs 0 0 m 1 1 l S")
+			wantOps(t, rec, opStroke)
+			if got := rec.calls[0].sp.Width; got != tc.want {
+				t.Fatalf("Width = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDashPhaseGuarded verifies the d operator rejects a non-finite dash phase, leaving the previous dash (empty by
+// default) in effect so no NaN/Inf offset reaches the stroker.
+func TestDashPhaseGuarded(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39) // 1e39, which overflows float32 to +Inf
+	// Valid: finite phase installs both the array and the phase.
+	rec := run(t, nil, nil, "[6 3] 1.5 d 0 0 m 1 1 l S")
+	wantOps(t, rec, opStroke)
+	if sp := rec.calls[0].sp; len(sp.Dash) != 2 || sp.DashPhase != 1.5 {
+		t.Fatalf("valid dash rejected: %v phase %v", sp.Dash, sp.DashPhase)
+	}
+	// Non-finite phase: the whole operator is skipped, so the default (empty) dash and zero phase remain.
+	rec = run(t, nil, nil, "[6 3] "+huge+" d 0 0 m 1 1 l S")
+	wantOps(t, rec, opStroke)
+	if sp := rec.calls[0].sp; len(sp.Dash) != 0 || sp.DashPhase != 0 {
+		t.Fatalf("non-finite dash phase accepted: %v phase %v", sp.Dash, sp.DashPhase)
+	}
+}
+
+// TestFormMatrixNonFiniteRejected verifies the form XObject /Matrix concatenation is dropped when it overflows to a
+// non-finite CTM (like cm), so transformAABB/ClipPath and the form body's paints never see NaN/Inf.
+func TestFormMatrixNonFiniteRejected(t *testing.T) {
+	big := "1" + strings.Repeat("0", 20) // 1e20; the square (~1e40) overflows float32 to +Inf
+	form := fmt.Sprintf(`<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Matrix [%[1]s 0 0 %[1]s 0 0] /Length 24 >>
+stream
+1 0 0 rg 0 0 5 5 re f
+endstream`, big)
+	d, err := cos.Open([]byte(minimalPDF(form)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catXObject: cos.Dict{resFormName: cos.Ref{Num: 1}}}
+	// The outer cm scales by 1e20 (finite); multiplying by the form's 1e20 Matrix overflows and must be dropped, so the
+	// form body paints under the still-finite outer CTM.
+	rec := run(t, d, res, fmt.Sprintf("%[1]s 0 0 %[1]s 0 0 cm /Fm0 Do", big))
+	wantOps(t, rec, opClip, opFill, opPopClip)
+	fill := rec.calls[1]
+	if !fill.ctm.IsFinite() {
+		t.Fatalf("non-finite CTM reached the device: %+v", fill.ctm)
+	}
+	if fill.ctm.A != 1e20 {
+		t.Fatalf("form Matrix was not rejected: ctm.A = %v, want 1e20", fill.ctm.A)
 	}
 }
 

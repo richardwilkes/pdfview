@@ -46,7 +46,7 @@ func (in *interp) op(word string) {
 			}
 		}
 	case "w":
-		if v, ok := in.float1(); ok && v >= 0 {
+		if v, ok := in.float1(); ok && v >= 0 && isFinitePt(v, 0) {
 			in.gs.sp.Width = v
 		}
 	case "J":
@@ -381,6 +381,9 @@ func (in *interp) opDash() {
 		}
 		dash = append(dash, float32(v))
 	}
+	if !isFinitePt(float32(phase), 0) {
+		return // A non-finite dash phase would flow to the stroker's dash offset; skip the operator.
+	}
 	in.gs.sp.Dash = dash
 	in.gs.sp.DashPhase = float32(phase)
 }
@@ -401,7 +404,9 @@ func (in *interp) opExtGState() {
 		return
 	}
 	if v, has := d64(in.doc, dict, "LW"); has && v >= 0 {
-		in.gs.sp.Width = float32(v)
+		if f := float32(v); isFinitePt(f, 0) {
+			in.gs.sp.Width = f
+		}
 	}
 	if v, has := in.doc.GetInt(dict, "LC"); has && v >= 0 && v <= 2 {
 		in.gs.sp.Cap = gfx.LineCap(v)
@@ -539,7 +544,11 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	}
 	in.opSave()
 	if v, has := numbers6(in.doc, stream.Dict, "Matrix"); has {
-		in.gs.ctm = gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}.Mul(in.gs.ctm)
+		// Guard the concatenated CTM's finiteness (like cm/replayMask): finite operands can still multiply to a
+		// NaN/Inf CTM, which transformAABB/ClipPath and the form body's paints pass on without re-checking.
+		if m := (gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}).Mul(in.gs.ctm); m.IsFinite() {
+			in.gs.ctm = m
+		}
 	}
 	// A /Group /S /Transparency form composites as a transparency group (ISO 32000-2 11.6.6): the current soft mask,
 	// constant alpha, and blend apply once to the group's composite (the mask via the replay, the alpha/blend via
