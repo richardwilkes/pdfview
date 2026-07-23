@@ -54,6 +54,16 @@ func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int) (Func, 
 	if s.bounds, ok = numbers(d, dict, "Bounds", len(arr)-1); (!ok || len(s.bounds) != len(arr)-1) && len(arr) > 1 {
 		return nil, errBadStitching
 	}
+	// ISO 32000-2 7.10.5 requires Bounds to be in nondecreasing order within Domain:
+	// Domain[0] <= Bounds[0] <= ... <= Bounds[k-2] <= Domain[1]. Rejecting malformed bounds keeps Eval's subdomain
+	// scan from selecting the wrong subfunction and interpolating over an inverted [lo, hi].
+	prev := c.domain[0]
+	for _, b := range s.bounds {
+		if b < prev || b > c.domain[1] {
+			return nil, errBadStitching
+		}
+		prev = b
+	}
 	if s.encode, ok = numbers(d, dict, "Encode", 2*len(arr)); !ok || len(s.encode) != 2*len(arr) {
 		return nil, errBadStitching
 	}

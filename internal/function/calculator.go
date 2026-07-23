@@ -227,6 +227,17 @@ func (s *psStack) popBool() bool {
 	return s.pop() != 0
 }
 
+// popVal pops a value together with its type flag (true when the value is a boolean rather than a number), so callers
+// that must honor the standard's typed semantics can distinguish boolean true from the number 1.0.
+func (s *psStack) popVal() (float64, bool) {
+	if s.n == 0 {
+		s.failed = true
+		return 0, false
+	}
+	s.n--
+	return s.vals[s.n], s.bools[s.n]
+}
+
 func (c *calculator) Eval(in []float32) []float32 {
 	x := c.clampIn(in)
 	var stack psStack
@@ -334,12 +345,21 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 			case shift >= 0:
 				s.push(float64(a << shift))
 			default:
-				s.push(float64(a >> -shift))
+				// ISO 32000-2 Table 42: zeros are shifted in on a right shift. Shift the unsigned bit pattern so
+				// the sign bit does not propagate (logical, not arithmetic, shift). -shift is 1..31 here, so the
+				// result always fits the non-negative int32 range.
+				s.push(float64(uint32(a) >> uint32(-shift)))
 			}
 		case opEq:
-			s.pushBool(s.pop() == s.pop())
+			bv, bb := s.popVal()
+			av, ab := s.popVal()
+			// ISO 32000-2 treats operands of different types as unequal, so the boolean type flags must match too:
+			// boolean true (stored as 1.0) is not equal to the number 1.0.
+			s.pushBool(ab == bb && av == bv)
 		case opNe:
-			s.pushBool(s.pop() != s.pop())
+			bv, bb := s.popVal()
+			av, ab := s.popVal()
+			s.pushBool(ab != bb || av != bv)
 		case opFalse:
 			s.pushBool(false)
 		case opTrue:

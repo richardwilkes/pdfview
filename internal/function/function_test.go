@@ -96,6 +96,28 @@ func TestStitching(t *testing.T) {
 	near(t, evalOne(t, fn, 1), 0)
 }
 
+func TestStitchingBadBounds(t *testing.T) {
+	subs := ` /Functions [ << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>
+              << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>
+              << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> ]
+ /Encode [0 1 0 1 0 1] >>`
+	for _, bounds := range []string{
+		"[0.7 0.3]",  // not nondecreasing (inverted)
+		"[0.3 1.5]",  // above Domain max
+		"[-0.2 0.6]", // below Domain min
+	} {
+		d := docWith(t, `<< /FunctionType 3 /Domain [0 1] /Bounds `+bounds+subs)
+		if _, err := Parse(d, cos.Ref{Num: 1}); err == nil {
+			t.Errorf("bounds %s parsed", bounds)
+		}
+	}
+	// Valid nondecreasing bounds within Domain still parse.
+	d := docWith(t, `<< /FunctionType 3 /Domain [0 1] /Bounds [0.3 0.6]`+subs)
+	if _, err := Parse(d, cos.Ref{Num: 1}); err != nil {
+		t.Errorf("valid bounds rejected: %v", err)
+	}
+}
+
 func TestSampled(t *testing.T) {
 	// 3-sample 8-bit ramp 0, 128, 255 over domain [0,1]: linear interpolation between samples.
 	payload := string([]byte{0, 128, 255})
@@ -152,6 +174,39 @@ func TestCalculatorArithmetic(t *testing.T) {
 		"{ dup dup mul exch 3 add sub }") // x -> x² - (x+3)
 	fn := parseObj1(t, d)
 	near(t, evalOne(t, fn, 4), 16-7)
+}
+
+func TestCalculatorBitshift(t *testing.T) {
+	// Right shift (negative operand) must shift in zeros: -8 (0xFFFFFFF8) >> 1 = 0x7FFFFFFC, not the arithmetic -4.
+	d := docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [-2147483648 2147483647]", "{ pop -8 -1 bitshift }")
+	fn := parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 0x7FFFFFFC)
+	// Left shift is unchanged: 1 << 4 = 16.
+	d = docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 256]", "{ pop 1 4 bitshift }")
+	fn = parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 16)
+	// Shifts of magnitude >= 32 yield 0.
+	d = docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [-1 1]", "{ pop -8 -40 bitshift }")
+	fn = parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 0)
+}
+
+func TestCalculatorEqTypeAware(t *testing.T) {
+	// Boolean true is stored as 1.0 but must not compare equal to the number 1.0 (ISO 32000-2 typed equality).
+	d := docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ pop true 1 eq { 1 } { 0 } ifelse }")
+	fn := parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 0) // true != 1
+	// ne is the negation: true ne 1 is true.
+	d = docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ pop true 1 ne { 1 } { 0 } ifelse }")
+	fn = parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 1)
+	// Same-typed operands still compare by value: 1 eq 1 is true, true eq true is true.
+	d = docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ pop 1 1 eq { 1 } { 0 } ifelse }")
+	fn = parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 1)
+	d = docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ pop true true eq { 1 } { 0 } ifelse }")
+	fn = parseObj1(t, d)
+	near(t, evalOne(t, fn, 0), 1)
 }
 
 func TestCalculatorDivZeroClamps(t *testing.T) {
