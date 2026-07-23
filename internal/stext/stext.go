@@ -271,8 +271,13 @@ func segmentQuads(seg []Char) []gfx.Quad {
 		cTop, cBottom := c.Quad.UL.Y, c.Quad.LL.Y
 		cMinX, cMaxX := min(c.Quad.UL.X, c.Quad.UR.X), max(c.Quad.UL.X, c.Quad.UR.X)
 		if open {
-			limit := (bottom - top) * extentSplitFraction
-			if math.Abs(float64(cTop-top)) <= float64(limit) && math.Abs(float64(cBottom-bottom)) <= float64(limit) {
+			// Absolute value: vertically-mirrored axis-aligned text (Trm.D > 0) puts bottom above top, and a negative
+			// limit would reject every merge, fragmenting the line into one quad per character.
+			limit := float64(bottom-top) * extentSplitFraction
+			if limit < 0 {
+				limit = -limit
+			}
+			if math.Abs(float64(cTop-top)) <= limit && math.Abs(float64(cBottom-bottom)) <= limit {
 				minX, maxX = min(minX, cMinX), max(maxX, cMaxX)
 				continue
 			}

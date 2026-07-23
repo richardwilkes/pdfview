@@ -34,6 +34,25 @@ func mkChar(r rune, x, y, adv, size float32) Char {
 	}
 }
 
+// mkMirroredChar builds one vertically-mirrored axis-aligned character (Trm.B == 0 && Trm.C == 0 with Trm.D > 0, so the
+// ascender maps below the descender in y-down device space and the quad's UL.Y exceeds its LL.Y).
+func mkMirroredChar(r rune, x, y, adv, size float32) Char {
+	c := mkChar(r, x, y, adv, size)
+	top, bottom := y+0.8*size, y-0.2*size
+	c.Quad.UL.Y, c.Quad.UR.Y = top, top
+	c.Quad.LL.Y, c.Quad.LR.Y = bottom, bottom
+	return c
+}
+
+// mkMirroredWord is mkWord for vertically-mirrored characters.
+func mkMirroredWord(s string, x, y, adv, size float32) (chars []Char, endX float32) {
+	for _, r := range s {
+		chars = append(chars, mkMirroredChar(r, x, y, adv, size))
+		x += adv
+	}
+	return chars, x
+}
+
 // mkWord lays out s as consecutive characters starting at (x, y), advancing adv per character, and returns the
 // characters plus the x just past the word.
 func mkWord(s string, x, y, adv, size float32) (chars []Char, endX float32) {
@@ -109,6 +128,33 @@ func TestSearchExtentSplit(t *testing.T) {
 	chars = append(append(append([]Char(nil), alpha...), mkChar(' ', endX, 200, 10, 20)), beta...)
 	if got = searchChars(chars, "alpha beta", 100); len(got) != 1 {
 		t.Fatalf("expected 1 quad for uniform extents, got %d", len(got))
+	}
+}
+
+func TestSearchMirroredExtent(t *testing.T) {
+	// Vertically-mirrored text has a negative bottom-top extent; the merge threshold must use its magnitude or every
+	// character flushes into its own quad.
+	chars, endX := mkMirroredWord("alpha", 100, 200, 10, 20)
+	got := searchChars(chars, "alpha", 100)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 quad for a uniform mirrored run, got %d: %+v", len(got), got)
+	}
+	top, bottom := float32(200+0.8*20), float32(200-0.2*20)
+	want := gfx.Quad{
+		UL: gfx.Point{X: 100, Y: top},
+		UR: gfx.Point{X: endX, Y: top},
+		LL: gfx.Point{X: 100, Y: bottom},
+		LR: gfx.Point{X: endX, Y: bottom},
+	}
+	if got[0] != want {
+		t.Fatalf("quad = %+v, want %+v", got[0], want)
+	}
+	// The extent-split rule still applies in the mirrored orientation: an oversized space yields three quads.
+	space := mkMirroredChar(' ', endX, 200, 20, 40)
+	beta, _ := mkMirroredWord("beta", endX+20, 200, 10, 20)
+	chars = append(append(append([]Char(nil), chars...), space), beta...)
+	if got = searchChars(chars, "alpha beta", 100); len(got) != 3 {
+		t.Fatalf("expected 3 quads, got %d: %+v", len(got), got)
 	}
 }
 
