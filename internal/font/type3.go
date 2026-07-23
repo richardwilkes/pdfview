@@ -76,7 +76,9 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.type3 = info
 	desc := loadDescriptor(d, dict)
 	f.Flags = desc.flags
-	f.missingWidth = desc.missingWidth
+	// /MissingWidth is in glyph space like /Widths: transform through the FontMatrix's x column the same way
+	// (loadDescriptor divided by 1000; undo, then apply the matrix). For the default matrix this is a no-op.
+	f.missingWidth = desc.missingWidth * 1000 * info.matrix[0]
 
 	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults. (No search
 	// needles pin Type 3 quads; the corpus probe pins pixels.)

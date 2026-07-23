@@ -380,3 +380,29 @@ func TestType0DispatchByFontFile(t *testing.T) {
 		t.Errorf("ascender = %v, want ≈0.952 from the embedded CFF FontBBox", f.ascender)
 	}
 }
+
+func TestType3NonStandardFontMatrixWidths(t *testing.T) {
+	// A Type 3 font with a non-standard FontMatrix (0.01 => 10x the default 0.001) exercises the glyph-space→text-space
+	// transform for both /Widths and /MissingWidth. /alpha (code 65) has an explicit width; code 66 falls through to
+	// /MissingWidth. Both must scale by matrix[0], not by the default 1/1000.
+	f, err := loadFromDict(t,
+		`<< /Type /Font /Subtype /Type3 /FontBBox [0 0 750 750] /FontMatrix [0.01 0 0 0.01 0 0]
+		    /CharProcs << /alpha 3 0 R >> /Encoding << /Differences [65 /alpha] >>
+		    /FirstChar 65 /LastChar 65 /Widths [500] /FontDescriptor 2 0 R >>`,
+		`<< /Type /FontDescriptor /FontName /T3 /Flags 4 /MissingWidth 321 >>`,
+		"<< /Length 2 >>\nstream\nd0\nendstream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.IsType3() {
+		t.Fatal("font did not load as Type 3")
+	}
+	// A raw glyph-space width of 500 scaled by matrix[0]=0.01 yields a text-space advance of 5.
+	if got := f.Width(65); got != 5 {
+		t.Errorf("Width(65) = %v, want 5 (/Widths through the FontMatrix)", got)
+	}
+	// A raw /MissingWidth of 321 scaled by matrix[0]=0.01 yields 3.21; before the fix this returned the raw 0.321.
+	if got := f.Width(66); got < 3.209 || got > 3.211 {
+		t.Errorf("Width(66) = %v, want ≈3.21 (/MissingWidth through the FontMatrix)", got)
+	}
+}
