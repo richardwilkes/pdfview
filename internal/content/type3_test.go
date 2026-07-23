@@ -122,6 +122,35 @@ func TestType3RecursionTerminates(t *testing.T) {
 	}
 }
 
+// TestType3NonFiniteCTMDropsGlyph pins the finiteness guard on the composed FontMatrix · Trm CTM: both operands are
+// finite on their own (loadType3 rejects non-finite /FontMatrix entries, appendGlyphs records only finite Trms) yet
+// their product overflows float32, and the charproc must not paint under the resulting non-finite CTM.
+func TestType3NonFiniteCTMDropsGlyph(t *testing.T) {
+	const huge = "100000000000000000000" // 1e20 — finite in float32, but its square is not.
+	proc := "600 0 0 0 500 700 d1\n0 0 500 700 re f"
+	d, err := cos.Open([]byte(minimalPDF(
+		"<< /Font << /T3 2 0 R >> >>",
+		`<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 800] /FontMatrix [`+huge+` 0 0 `+huge+` 0 0]
+  /CharProcs << /boxy 3 0 R >>
+  /Encoding << /Type /Encoding /Differences [65 /boxy] >>
+  /FirstChar 65 /LastChar 65 /Widths [600] >>`,
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(proc), proc),
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Tm supplies a huge (but finite) Trm; FontMatrix · Trm then overflows.
+	rec := run(t, d, resourcesOf(t, d), "BT /T3 1 Tf "+huge+" 0 0 "+huge+" 0 0 Tm (A) Tj ET")
+	if n := len(rec.byOp(opFill)); n != 0 {
+		t.Errorf("fills = %d, want 0 (the glyph must be dropped, not painted under a non-finite CTM)", n)
+	}
+	for i := range rec.calls {
+		if !rec.calls[i].ctm.IsFinite() {
+			t.Errorf("call %d (%s) reached the device with a non-finite CTM: %+v", i, rec.calls[i].op, rec.calls[i].ctm)
+		}
+	}
+}
+
 func TestType3ClipModeDegrades(t *testing.T) {
 	d := type3PDF(t)
 	// Tr 7 (clip-only) with a Type 3 font: no ClipText accumulation, no EndTextClip, and later content still draws (the

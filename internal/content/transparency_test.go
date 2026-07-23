@@ -93,6 +93,56 @@ func TestSoftMaskAnchor(t *testing.T) {
 	}
 }
 
+// TestSoftMaskBBoxFiniteness pins the bbox handed to BeginMask: the mapped mask /BBox when the composition is usable,
+// and the empty rect when it is not — neither the mask form's /Matrix times the gs-time CTM overflowing to non-finite
+// nor a finite CTM overflowing the mapped corners may hand the device NaN/Inf geometry.
+func TestSoftMaskBBoxFiniteness(t *testing.T) {
+	const huge = "100000000000000000000" // 1e20 — finite in float32, but its square is not.
+	maskForm := func(bbox, matrix string) string {
+		return `<< /Type /XObject /Subtype /Form /BBox ` + bbox + ` /Matrix ` + matrix + `
+   /Group << /S /Transparency /CS /DeviceGray >> /Length 20 >>
+stream
+1 g 0 0 25 50 re f
+endstream`
+	}
+	pdf := minimalPDF(
+		maskFormBody,
+		`<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R >> >>`,
+		maskForm("[0 0 50 50]", "["+huge+" 0 0 "+huge+" 0 0]"),
+		`<< /Type /ExtGState /SMask << /S /Luminosity /G 3 0 R >> >>`,
+		maskForm("[0 0 "+huge+" "+huge+"]", "[1 0 0 1 0 0]"),
+		`<< /Type /ExtGState /SMask << /S /Luminosity /G 5 0 R >> >>`,
+	)
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catExtGState: cos.Dict{
+		"GOK": cos.Ref{Num: 2}, "GCTM": cos.Ref{Num: 4}, "GBOX": cos.Ref{Num: 6},
+	}}
+
+	// Usable composition: the mask /BBox mapped through the anchoring CTM.
+	rec := run(t, d, res, "/GOK gs 0 0 10 10 re f")
+	wantOps(t, rec, "beginmask", opClip, opFill, opPopClip, "endmask", opFill, "popmask")
+	if got := rec.calls[0].rect; got != (gfx.Rect{X1: 50, Y1: 50}) {
+		t.Errorf("mask bbox = %+v, want the mapped /BBox (0 0 50 50)", got)
+	}
+
+	// /Matrix · anchor overflows: the CTM is unusable, so the content replay is skipped AND the bbox degrades.
+	rec = run(t, d, res, "q "+huge+" 0 0 "+huge+" 0 0 cm /GCTM gs 0 0 10 10 re f Q")
+	wantOps(t, rec, "beginmask", "endmask", opFill, "popmask")
+	if got := rec.calls[0].rect; got != (gfx.Rect{}) {
+		t.Errorf("mask bbox = %+v, want the empty rect for a non-finite CTM", got)
+	}
+
+	// Finite CTM, but the mapped corners overflow: the content still replays, only the bbox degrades.
+	rec = run(t, d, res, "q "+huge+" 0 0 "+huge+" 0 0 cm /GBOX gs 0 0 10 10 re f Q")
+	wantOps(t, rec, "beginmask", opClip, opFill, opPopClip, "endmask", opFill, "popmask")
+	if got := rec.calls[0].rect; got != (gfx.Rect{}) {
+		t.Errorf("mask bbox = %+v, want the empty rect for non-finite mapped corners", got)
+	}
+}
+
 // TestTransparencyGroupEmission pins the Do protocol for /Group /S /Transparency forms: BeginGroup carries the
 // isolation/knockout attributes plus the caller's blend and FILL alpha, and the interior runs with alpha/blend/mask
 // reset (ISO 32000-2 11.6.6).

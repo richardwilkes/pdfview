@@ -84,6 +84,18 @@ func TestMatrixIsFinite(t *testing.T) {
 	}
 }
 
+func TestRectIsFinite(t *testing.T) {
+	if !(Rect{X1: 10, Y1: 20}).IsFinite() {
+		t.Error("ordinary rect reported non-finite")
+	}
+	if (Rect{X1: float32(math.NaN())}).IsFinite() {
+		t.Error("NaN rect reported finite")
+	}
+	if (Rect{X0: float32(math.Inf(-1)), X1: float32(math.Inf(1))}).IsFinite() {
+		t.Error("Inf rect reported finite")
+	}
+}
+
 func TestPathBuilding(t *testing.T) {
 	var p Path
 	p.MoveTo(1, 2)

@@ -347,8 +347,15 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 	if err != nil {
 		return
 	}
+	// Guard the composed CTM's finiteness, like cm/Tm/execForm/replayMask: a finite /FontMatrix against a finite Trm can
+	// still multiply to NaN/Inf. Unlike a form's optional /Matrix there is no sane fallback — glyph space is defined only
+	// by that product — so the glyph is dropped rather than painted under the raw text-space CTM.
+	ctm := f.Type3Matrix().Mul(g.Trm)
+	if !ctm.IsFinite() {
+		return
+	}
 	in.opSave()
-	in.gs.ctm = f.Type3Matrix().Mul(g.Trm)
+	in.gs.ctm = ctm
 	resources := in.res[len(in.res)-1]
 	if t3res := f.Type3Resources(); t3res != nil {
 		resources = t3res

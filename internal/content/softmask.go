@@ -178,8 +178,18 @@ func (in *interp) masked(alpha float64, body func()) {
 // anchor is the CTM captured when the gs operator installed the mask. When the content cannot replay (recursion
 // limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
 func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
+	// Finite operands can still multiply to a NaN/Inf CTM (and a finite CTM against a large /BBox can overflow the
+	// mapped corners), so the bbox is validated before it crosses the device seam: an unusable one degrades to the empty
+	// rect rather than handing the device geometry it must re-check. The content replay below is skipped for the same
+	// reason.
 	ctm := sm.matrix.Mul(anchor)
-	in.dev.BeginMask(transformAABB(sm.bbox, ctm), sm.luminosity, sm.backdrop, sm.transfer)
+	bbox := gfx.Rect{}
+	if ctm.IsFinite() {
+		if mapped := transformAABB(sm.bbox, ctm); mapped.IsFinite() {
+			bbox = mapped
+		}
+	}
+	in.dev.BeginMask(bbox, sm.luminosity, sm.backdrop, sm.transfer)
 	defer in.dev.EndMask()
 	if in.formDepth >= maxFormDepth || len(in.gsStack) >= maxQDepth || !ctm.IsFinite() {
 		return

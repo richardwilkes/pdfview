@@ -37,6 +37,17 @@ func (r Rect) Normalize() Rect {
 	return r
 }
 
+// IsFinite reports whether every coordinate is a finite number.
+func (r Rect) IsFinite() bool {
+	for _, v := range [4]float32{r.X0, r.Y0, r.X1, r.Y1} {
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return false
+		}
+	}
+	return true
+}
+
 // IsEmpty reports whether the normalized rectangle has no area.
 func (r Rect) IsEmpty() bool {
 	r = r.Normalize()
