@@ -118,6 +118,32 @@ func TestStitchingBadBounds(t *testing.T) {
 	}
 }
 
+func TestStitchingRangeMustMatchSubfunctions(t *testing.T) {
+	subs := ` /Functions [ << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>
+              << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> ]
+ /Bounds [0.5] /Encode [0 1 0 1] >>`
+	for _, rng := range []string{
+		"/Range [0 1 0 1 0 1] ", // wider than the 1-output subfunctions
+		"/Range [0 1 0 1] ",     // still wider
+	} {
+		d := docWith(t, `<< /FunctionType 3 /Domain [0 1] `+rng+subs)
+		if _, err := Parse(d, cos.Ref{Num: 1}); err == nil {
+			t.Errorf("%s parsed", rng)
+		}
+	}
+	// A /Range that agrees with the subfunctions parses, and NOutputs() matches Eval's result length.
+	d := docWith(t, `<< /FunctionType 3 /Domain [0 1] /Range [0 0.5] `+subs)
+	fn := parseObj1(t, d)
+	if fn.NOutputs() != 1 {
+		t.Fatalf("NOutputs %d, want 1", fn.NOutputs())
+	}
+	got := evalOne(t, fn, 0.25)
+	if len(got) != fn.NOutputs() {
+		t.Fatalf("Eval returned %d values, NOutputs reports %d", len(got), fn.NOutputs())
+	}
+	near(t, got, 0.5) // 0.25 encodes to 0.5 in the first subfunction, within the declared range
+}
+
 func TestSampled(t *testing.T) {
 	// 3-sample 8-bit ramp 0, 128, 255 over domain [0,1]: linear interpolation between samples.
 	payload := string([]byte{0, 128, 255})

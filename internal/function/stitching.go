@@ -51,6 +51,12 @@ func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int) (Func, 
 		}
 		s.funcs = append(s.funcs, sub)
 	}
+	// A declared /Range must agree with the subfunctions on output count. NOutputs() prefers /Range while Eval returns
+	// whatever the selected subfunction produced, so a wider /Range would make the two disagree and let callers that
+	// validate with NOutputs() (such as color.parseSeparation) accept a function that under-fills their components.
+	if len(c.rng) != 0 && len(c.rng)/2 != nOut {
+		return nil, errBadStitching
+	}
 	if s.bounds, ok = numbers(d, dict, "Bounds", len(arr)-1); (!ok || len(s.bounds) != len(arr)-1) && len(arr) > 1 {
 		return nil, errBadStitching
 	}
