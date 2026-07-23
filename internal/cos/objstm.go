@@ -26,7 +26,16 @@ var (
 	errObjStmEntry = errors.New("object not found in object stream")
 	errObjStmSelf  = errors.New("object stream is not stored directly in the file")
 	errObjStmCycle = errors.New("object stream refers to itself")
+	errObjStmDepth = errors.New("object stream nesting too deep")
 )
+
+// maxObjStmDepth caps how many object streams may be under load at once. The objStmLoading guard stops a single stream
+// from re-entering itself, but a straight chain of distinct object streams — each one's header keys (/N, /First,
+// /Filter, /DecodeParms) resolving into the next via back-pointing xref entries — recurses through loadObjStm with no
+// per-stream repeat, so nothing but this depth bound keeps a crafted file of many tiny chained streams from driving the
+// goroutine stack to a fatal overflow. Legitimate files never nest object streams (ISO 32000-2 7.5.7 forbids storing an
+// object stream inside another), so this cap is only ever hit by hostile input.
+const maxObjStmDepth = 64
 
 // loadObjStm parses and caches the object stream with the given object number. The stream object itself must be stored
 // directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2 7.5.7), which also
@@ -41,6 +50,12 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	// fresh Resolve), exhausting the goroutine stack.
 	if d.objStmLoading[num] {
 		return nil, errObjStmCycle
+	}
+	// len(objStmLoading) is the number of loadObjStm calls currently in progress (each sets its entry before recursing
+	// and deletes it afterward), i.e. the current nesting depth. Capping it stops a chain of distinct object streams —
+	// which the per-number cycle guard above cannot catch — from recursing without bound.
+	if len(d.objStmLoading) >= maxObjStmDepth {
+		return nil, errObjStmDepth
 	}
 	entry, ok := d.xref[num]
 	if !ok || entry.kind != xrefInFile {

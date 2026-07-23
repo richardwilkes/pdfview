@@ -11,6 +11,7 @@ package cos
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -339,6 +340,60 @@ func TestLoadObjStmSelfReference(t *testing.T) {
 	}
 	if _, err := d.loadObjStm(1); err == nil {
 		t.Fatal("expected an error from the self-referential object stream")
+	}
+	if len(d.objStmLoading) != 0 {
+		t.Errorf("objStmLoading not cleaned up: %v", d.objStmLoading)
+	}
+}
+
+func TestLoadObjStmDepthCap(t *testing.T) {
+	// The per-number cycle guard only stops a single stream from re-entering itself; a straight chain of distinct
+	// object streams recurses without repeating any number, so only the nesting-depth cap keeps it from exhausting the
+	// goroutine stack. Simulate maxObjStmDepth streams already under load and confirm the next entry is refused.
+	d := &Document{
+		xref:          map[int]xrefEntry{},
+		objCache:      map[int]Object{},
+		objStms:       map[int]*objStm{},
+		objStmLoading: map[int]bool{},
+	}
+	for i := range maxObjStmDepth {
+		d.objStmLoading[-(i + 1)] = true
+	}
+	if _, err := d.loadObjStm(999); !errors.Is(err, errObjStmDepth) {
+		t.Fatalf("at max nesting depth: got %v, want errObjStmDepth", err)
+	}
+	// One level shallower the guard must not fire, so loadObjStm proceeds and fails later for another reason (here the
+	// missing xref entry for object 999), never returning errObjStmDepth.
+	delete(d.objStmLoading, -1)
+	if _, err := d.loadObjStm(999); errors.Is(err, errObjStmDepth) {
+		t.Fatal("depth guard fired below the cap")
+	}
+}
+
+func TestLoadObjStmChainTerminates(t *testing.T) {
+	// Build a straight chain of distinct object streams: stream s's /N is an indirect reference to object 100+s, whose
+	// cross-reference entry stores it inside stream s+1. Resolving each /N therefore recurses into the next stream via
+	// loadObjStm with a fresh number every time, defeating the cycle guard. The chain is longer than maxObjStmDepth, so
+	// the depth cap must break the recursion; the load returns an ordinary error and leaves objStmLoading clean.
+	const chain = maxObjStmDepth + 10
+	var buf bytes.Buffer
+	xref := map[int]xrefEntry{}
+	for s := 1; s <= chain; s++ {
+		xref[s] = xrefEntry{kind: xrefInFile, offset: int64(buf.Len())}
+		xref[100+s] = xrefEntry{kind: xrefInStream, stmNum: s + 1, stmIdx: 0}
+		fmt.Fprintf(&buf, "%d 0 obj\n<< /Type /ObjStm /N %d 0 R /First 4 >>\nstream\n0 0\nendstream\nendobj\n",
+			s, 100+s)
+	}
+	d := &Document{
+		data:          buf.Bytes(),
+		xref:          xref,
+		objCache:      map[int]Object{},
+		objStms:       map[int]*objStm{},
+		objStmLoading: map[int]bool{},
+		repaired:      true, // Suppress the load-failure repair retry so the test exercises only the recursion path.
+	}
+	if _, err := d.loadObjStm(1); err == nil {
+		t.Fatal("expected an error from the deep object-stream chain")
 	}
 	if len(d.objStmLoading) != 0 {
 		t.Errorf("objStmLoading not cleaned up: %v", d.objStmLoading)
