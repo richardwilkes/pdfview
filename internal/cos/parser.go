@@ -281,7 +281,10 @@ func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict) (raw []by
 	if pos < len(data) && data[pos] == '\n' {
 		pos++
 	}
-	if length, ok := AsInt(dict["Length"]); ok && length >= 0 && int64(pos)+length <= int64(len(data)) {
+	// The bound is written as length <= len(data)-pos rather than pos+length <= len(data): pos is within [0, len(data)]
+	// so len(data)-pos is a non-negative int that cannot overflow, whereas pos+length would wrap negative for a large
+	// but valid Integer /Length (near math.MaxInt64) and slip a bogus, negative dataEnd past the guard.
+	if length, ok := AsInt(dict["Length"]); ok && length >= 0 && length <= int64(len(data)-pos) {
 		dataEnd := pos + int(length)
 		if at, found := endstreamAt(data, dataEnd); found {
 			return data[pos:dataEnd], at, nil

@@ -74,14 +74,20 @@ func (Ref) isObject()     {}
 func (*Stream) isObject() {}
 
 // AsInt returns obj as an integer. Reals are truncated toward zero, matching the tolerance PDF consumers extend to keys
-// that formally require integers; non-finite reals and every other type report false.
+// that formally require integers; non-finite reals, reals whose magnitude exceeds the int64 range, and every other type
+// report false.
 func AsInt(obj Object) (int64, bool) {
 	switch v := obj.(type) {
 	case Integer:
 		return int64(v), true
 	case Real:
 		f := float64(v)
-		if math.IsNaN(f) || math.IsInf(f, 0) {
+		// Reject non-finite reals and any finite real whose (toward-zero) truncation cannot be represented as an
+		// int64: Go leaves an out-of-range float→int conversion implementation-defined, which would yield
+		// platform-dependent results. math.MaxInt64 rounds up to 2^63 as float64, so f >= math.MaxInt64 correctly
+		// rejects everything from 2^63 upward; math.MinInt64 (-2^63) is exact, so f < math.MinInt64 is the matching
+		// lower guard. Both comparisons also absorb ±Inf.
+		if math.IsNaN(f) || f >= math.MaxInt64 || f < math.MinInt64 {
 			return 0, false
 		}
 		return int64(f), true

@@ -364,6 +364,52 @@ func TestCaptureRawStreamEndstreamLimit(t *testing.T) {
 	}
 }
 
+func TestAsIntRealRange(t *testing.T) {
+	// Finite reals within the int64 range truncate toward zero.
+	for _, tc := range []struct {
+		in   Real
+		want int64
+	}{
+		{Real(3.9), 3},
+		{Real(-3.9), -3},
+		{Real(0), 0},
+		// 2^63-1024 is the largest float64 strictly below 2^63; its truncation still fits in int64.
+		{Real(9223372036854774784), 9223372036854774784},
+		{Real(math.MinInt64), math.MinInt64},
+	} {
+		if got, ok := AsInt(tc.in); !ok || got != tc.want {
+			t.Errorf("AsInt(%v) = (%d, %v), want (%d, true)", float64(tc.in), got, ok, tc.want)
+		}
+	}
+	// Non-finite reals and reals whose magnitude exceeds the int64 range report false rather than performing the
+	// implementation-defined out-of-range float→int conversion that would break cross-architecture determinism.
+	for _, in := range []Real{
+		Real(math.NaN()),
+		Real(math.Inf(1)),
+		Real(math.Inf(-1)),
+		Real(9223372036854775808), // 2^63, just past math.MaxInt64
+		Real(1e300),
+		Real(-1e300),
+	} {
+		if got, ok := AsInt(in); ok {
+			t.Errorf("AsInt(%v) = (%d, true), want ok=false", float64(in), got)
+		}
+	}
+}
+
+func TestCaptureRawStreamHugeLength(t *testing.T) {
+	// A large-but-valid Integer /Length near math.MaxInt64 used to overflow the pos+length bound to a negative value,
+	// pass the guard, and then index the buffer with a negative offset. The overflow-safe bound must reject it and fall
+	// back to the endstream scan instead of panicking.
+	dict := Dict{"Length": Integer(9223372036854775800)}
+	data := []byte("stream\nabcde\nendstream rest")
+	pos := len("stream\n")
+	raw, _, err := captureRawStream(data, pos, len(data), dict)
+	if err != nil || !bytes.Equal(raw, []byte("abcde")) {
+		t.Fatalf("huge-length capture: raw=%q err=%v", raw, err)
+	}
+}
+
 func TestRepairManyBareStreams(t *testing.T) {
 	// Many "N 0 obj << >> stream" headers with no endstream anywhere used to cost O(n²): each header scanned to EOF.
 	// The repair endstream bound makes each miss constant-time. This checks the pathological input still repairs into a
