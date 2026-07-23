@@ -223,14 +223,20 @@ func imageFilterName(name Name) bool {
 	}
 }
 
-// ImageFilterSplit applies dict's leading non-image filters to raw — an image XObject's raw stream payload or an inline
-// image's data between ID and EI — and stops at the first image-codec filter (DCTDecode, CCITTFaxDecode, JBIG2Decode,
-// JPXDecode, or an abbreviated form), returning the processed data, the codec's name, and its resolved decode-parms
-// dictionary (possibly nil). The inline-image abbreviations /F and /DP are honored alongside /Filter and /DecodeParms
-// (only here — on ordinary streams /F means an external file). When the chain contains no image codec, the returned
-// codec is empty and data holds fully decoded sample bytes. Filters listed after an image codec are impossible to apply
-// (the codec ends the byte-stream pipeline) and are ignored, matching deployed viewers.
+// ImageFilterSplit applies an image XObject's leading non-image filters to raw — the stream's payload — and stops at
+// the first image-codec filter (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode, or an abbreviated form), returning
+// the processed data, the codec's name, and its resolved decode-parms dictionary (possibly nil). When the chain
+// contains no image codec, the returned codec is empty and data holds fully decoded sample bytes. Filters listed after
+// an image codec are impossible to apply (the codec ends the byte-stream pipeline) and are ignored, matching deployed
+// viewers. Only /Filter and /DecodeParms are consulted: on an ordinary stream /F is a file specification for external
+// data, not a filter abbreviation. Use InlineImageFilterSplit for inline images, where the abbreviations apply.
 func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
+	return d.imageFilterSplit(Dict{"Filter": dict["Filter"], "DecodeParms": dict["DecodeParms"]}, raw)
+}
+
+// InlineImageFilterSplit is ImageFilterSplit for an inline image's data between ID and EI, where the abbreviations /F
+// and /DP stand in for /Filter and /DecodeParms (ISO 32000-2 table 92). The unabbreviated keys win when both appear.
+func (d *Document) InlineImageFilterSplit(dict Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
 	lookup := Dict{"Filter": dict["Filter"], "DecodeParms": dict["DecodeParms"]}
 	if lookup["Filter"] == nil {
 		lookup["Filter"] = dict["F"]
@@ -238,6 +244,12 @@ func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec N
 	if lookup["DecodeParms"] == nil {
 		lookup["DecodeParms"] = dict["DP"]
 	}
+	return d.imageFilterSplit(lookup, raw)
+}
+
+// imageFilterSplit is the shared body of ImageFilterSplit and InlineImageFilterSplit; lookup holds the already-resolved
+// /Filter and /DecodeParms entries to use.
+func (d *Document) imageFilterSplit(lookup Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
 	names, parmsArr, err := d.filterNamesAndParms(lookup)
 	if err != nil {
 		return nil, "", nil, err

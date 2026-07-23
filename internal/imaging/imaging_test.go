@@ -465,6 +465,48 @@ func TestStubCodecs(t *testing.T) {
 	}
 }
 
+// TestFilterAbbreviationScope pins /F and /DP to inline images: on an image XObject /F is a file specification, so it
+// must not be read as a filter chain (which turned an external-data stream into a "malformed image").
+func TestFilterAbbreviationScope(t *testing.T) {
+	d := testDoc(t)
+	// Inline: /F names the filter and /DP its parameters.
+	dict := cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G"),
+		"F": cos.Name("AHx"),
+	}
+	img, err := DecodeInline(d, dict, []byte("00ff>"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Pix[0] != 0x00 || img.Pix[4] != 0xff {
+		t.Fatalf("inline /F filter: %v", img.Pix)
+	}
+	// XObject: /F is a file specification and is ignored, along with /DP; the raw payload is the sample data.
+	stream := &cos.Stream{
+		Dict: cos.Dict{
+			keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), keyBPC: cos.Integer(8),
+			keyColorSpace: cos.Name("DeviceGray"),
+			"F":           cos.String("ext.dat"),
+			"DP":          cos.Dict{"K": cos.Integer(-1)},
+		},
+		Raw: []byte{0x00, 0xff},
+	}
+	if img, err = DecodeXObject(d, stream, nil); err != nil {
+		t.Fatal(err)
+	}
+	if img.Pix[0] != 0x00 || img.Pix[4] != 0xff {
+		t.Fatalf("XObject file specification treated as a filter: %v", img.Pix)
+	}
+	// An XObject's /F is likewise not a codec: a stream naming DCTDecode there decodes as raw samples, not JPEG.
+	stream.Dict["F"] = cos.Name("DCTDecode")
+	if img, err = DecodeXObject(d, stream, nil); err != nil {
+		t.Fatal(err)
+	}
+	if img.Pix[0] != 0x00 || img.Pix[4] != 0xff {
+		t.Fatalf("XObject /F treated as a codec: %v", img.Pix)
+	}
+}
+
 func TestInlineNamedColorSpace(t *testing.T) {
 	d := testDoc(t)
 	res := cos.Dict{keyColorSpace: cos.Dict{

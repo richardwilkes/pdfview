@@ -95,7 +95,7 @@ func DecodeXObject(d *cos.Document, stream *cos.Stream, resources cos.Dict) (*Im
 // DecodeInline decodes an inline image (BI … ID … EI) whose dictionary and payload the content interpreter has
 // isolated. resources is the resource dictionary in scope, used to resolve named /CS entries.
 func DecodeInline(d *cos.Document, dict cos.Dict, payload []byte, resources cos.Dict) (*Image, error) {
-	data, codec, parms, err := d.ImageFilterSplit(dict, payload)
+	data, codec, parms, err := d.InlineImageFilterSplit(dict, payload)
 	if err != nil {
 		return nil, ErrBadImage
 	}

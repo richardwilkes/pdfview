@@ -381,30 +381,31 @@ func TestOpenCorpus(t *testing.T) {
 func TestImageFilterSplit(t *testing.T) {
 	const hello = "Hello"
 	const filterKey cos.Name = "Filter"
+	const dctName cos.Name = "DCTDecode"
 	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
 	d := mustOpen(t, []byte(pdf))
 	hexPayload := []byte("48656c6c6f>")
 	// A non-image prefix filter is applied; the split stops at the codec and hands back its parms.
 	dict := cos.Dict{
-		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), cos.Name("DCTDecode")},
+		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), dctName},
 		"DecodeParms": cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
 	}
 	data, codec, parms, err := d.ImageFilterSplit(dict, hexPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != hello || codec != "DCTDecode" {
+	if string(data) != hello || codec != dctName {
 		t.Fatalf("data %q codec %q", data, codec)
 	}
 	if v, _ := d.GetInt(parms, "ColorTransform"); v != 0 || parms == nil {
 		t.Fatalf("parms: %v", parms)
 	}
-	// The inline abbreviations /F and /DP are honored.
+	// The inline abbreviations /F and /DP are honored for an inline image.
 	dict = cos.Dict{
 		"F":  cos.Array{cos.Name("AHx"), cos.Name("CCF")},
 		"DP": cos.Array{cos.Null{}, cos.Dict{"K": cos.Integer(-1)}},
 	}
-	if data, codec, parms, err = d.ImageFilterSplit(dict, hexPayload); err != nil {
+	if data, codec, parms, err = d.InlineImageFilterSplit(dict, hexPayload); err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != hello || codec != "CCF" {
@@ -412,6 +413,34 @@ func TestImageFilterSplit(t *testing.T) {
 	}
 	if v, _ := d.GetInt(parms, "K"); v != -1 {
 		t.Fatalf("abbreviated parms: %v", parms)
+	}
+	// The unabbreviated keys win when an inline image supplies both spellings.
+	dict = cos.Dict{
+		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), dctName},
+		"DecodeParms": cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
+		"F":           cos.Array{cos.Name("AHx"), cos.Name("CCF")},
+		"DP":          cos.Array{cos.Null{}, cos.Dict{"K": cos.Integer(-1)}},
+	}
+	if data, codec, parms, err = d.InlineImageFilterSplit(dict, hexPayload); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasK := d.GetInt(parms, "K"); string(data) != hello || codec != dctName || hasK {
+		t.Fatalf("both spellings: data %q codec %q parms %v", data, codec, parms)
+	}
+	// An image XObject's /F is a file specification, not a filter abbreviation: it is ignored, and /DP with it.
+	for _, fileSpec := range []cos.Object{cos.String("ext.dat"), cos.Dict{"F": cos.String("ext.dat")}} {
+		dict = cos.Dict{"F": fileSpec, "DP": cos.Dict{"K": cos.Integer(-1)}}
+		if data, codec, parms, err = d.ImageFilterSplit(dict, hexPayload); err != nil {
+			t.Fatalf("file spec %v: %v", fileSpec, err)
+		}
+		if !bytes.Equal(data, hexPayload) || codec != "" || parms != nil {
+			t.Fatalf("file spec %v: data %q codec %q parms %v", fileSpec, data, codec, parms)
+		}
+	}
+	// A stream that does carry an image codec still splits on /Filter while /F names an external file.
+	dict = cos.Dict{filterKey: dctName, "F": cos.String("ext.dat")}
+	if data, codec, _, err = d.ImageFilterSplit(dict, hexPayload); err != nil || codec != dctName {
+		t.Fatalf("external file with codec: data %q codec %q %v", data, codec, err)
 	}
 	// No image codec: the chain fully decodes and the codec is empty.
 	dict = cos.Dict{filterKey: cos.Name("ASCIIHexDecode")}
