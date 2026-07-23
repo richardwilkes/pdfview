@@ -39,7 +39,11 @@ func (in *interp) op(word string) {
 		in.opRestore()
 	case "cm":
 		if v, ok := in.floats(6); ok {
-			in.gs.ctm = gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}.Mul(in.gs.ctm)
+			// Guard the resulting CTM's finiteness (like opTm): finite operands can still multiply to a NaN/Inf CTM,
+			// which the path/stroke/shading paints pass straight to the device without re-checking.
+			if m := (gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}).Mul(in.gs.ctm); m.IsFinite() {
+				in.gs.ctm = m
+			}
 		}
 	case "w":
 		if v, ok := in.float1(); ok && v >= 0 {
@@ -54,7 +58,7 @@ func (in *interp) op(word string) {
 			in.gs.sp.Join = gfx.LineJoin(v)
 		}
 	case "M":
-		if v, ok := in.float1(); ok {
+		if v, ok := in.float1(); ok && isFinitePt(v, 0) && v > 0 {
 			in.gs.sp.MiterLimit = v
 		}
 	case "d":
@@ -406,7 +410,9 @@ func (in *interp) opExtGState() {
 		in.gs.sp.Join = gfx.LineJoin(v)
 	}
 	if v, has := d64(in.doc, dict, "ML"); has {
-		in.gs.sp.MiterLimit = float32(v)
+		if f := float32(v); isFinitePt(f, 0) && f > 0 {
+			in.gs.sp.MiterLimit = f
+		}
 	}
 	if arr, has := in.doc.GetArray(dict, "D"); has && len(arr) == 2 {
 		saved := in.operands

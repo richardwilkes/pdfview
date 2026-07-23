@@ -14,9 +14,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/imaging"
 )
 
-// maxCachedImages caps the per-Run decoded-image cache used when no budgeted store is wired. A page drawing more
-// distinct images than this still renders them all; the extras just decode again on reuse. With a store, its byte
-// budget replaces this cap.
+// maxCachedImages caps the per-Run decoded-image LRU used when no budgeted store is wired. A page drawing more distinct
+// images than this still renders them all; the least-recently-used ones decode again if reused after eviction. With a
+// store, its byte budget replaces this cap.
 const maxCachedImages = 32
 
 // drawImageXObject implements Do for /Subtype /Image: decode (cached by the resource's reference — in the document's
@@ -47,14 +47,12 @@ func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dic
 		in.st.Put(imageKey{ref: ref}, img, imageSize(img))
 		return img
 	}
-	cached, seen := in.images[ref]
-	if !seen {
-		cached, _ = imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
-		if len(in.images) < maxCachedImages {
-			in.images[ref] = cached
-		}
+	if cached, seen := in.images.get(ref); seen {
+		return cached
 	}
-	return cached
+	img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
+	in.images.put(ref, img)
+	return img
 }
 
 // imageSize estimates a decoded image's cache footprint.

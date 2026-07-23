@@ -52,7 +52,7 @@ const (
 	maxOperands    = 64
 	maxDashEntries = 32
 	maxTotalOps    = 1 << 22
-	// maxCachedFonts caps the per-Run font cache used when no budgeted store is wired (matching maxCachedImages' role
+	// maxCachedFonts caps the per-Run font LRU used when no budgeted store is wired (matching maxCachedImages' role
 	// for images); with a store, its byte budget replaces this cap.
 	maxCachedFonts = 64
 )
@@ -141,10 +141,12 @@ type interp struct {
 	operands []cos.Object
 	path     *gfx.Path
 	active   map[cos.Ref]bool
-	// images caches decoded image XObjects (nil for failed decodes) for this Run, capped at maxCachedImages.
-	images map[cos.Ref]*imaging.Image
-	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference.
-	fonts map[cos.Ref]*font.Font
+	// images caches decoded image XObjects (nil for failed decodes) for this Run, an LRU capped at maxCachedImages
+	// entries so a re-used image stays cached rather than being dropped once the cap is reached.
+	images *lruCache[cos.Ref, *imaging.Image]
+	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference; an LRU
+	// capped at maxCachedFonts entries.
+	fonts *lruCache[cos.Ref, *font.Font]
 	gs    gstate
 	cur   gfx.Point
 	start gfx.Point
@@ -237,8 +239,8 @@ func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.D
 		},
 		path:   &gfx.Path{},
 		active: make(map[cos.Ref]bool),
-		images: make(map[cos.Ref]*imaging.Image),
-		fonts:  make(map[cos.Ref]*font.Font),
+		images: newLRUCache[cos.Ref, *imaging.Image](maxCachedImages),
+		fonts:  newLRUCache[cos.Ref, *font.Font](maxCachedFonts),
 		budget: maxTotalOps,
 	}
 	in.gs.text.scale = 1

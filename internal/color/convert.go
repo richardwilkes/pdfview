@@ -83,10 +83,7 @@ func rgbByte(v float32) uint8 {
 // quarter-byte observation points.
 func grayToNRGBA(v float32) color.NRGBA {
 	t := float64(clamp01(v)) * (graySamples - 1)
-	lo := int(t)
-	if lo > graySamples-2 {
-		lo = graySamples - 2
-	}
+	lo := min(int(t), graySamples-2)
 	fr := t - float64(lo)
 	var out [3]uint8
 	for ch := range 3 {

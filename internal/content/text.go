@@ -85,7 +85,7 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 				}
 				return nil, false // Cached failure (negative entry).
 			}
-		} else if f, cached := in.fonts[ref]; cached {
+		} else if f, cached := in.fonts.get(ref); cached {
 			return f, f != nil
 		}
 	}
@@ -99,8 +99,8 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 		switch {
 		case in.st != nil:
 			in.st.Put(fontKey{ref: ref}, f, fontSize(f))
-		case len(in.fonts) < maxCachedFonts:
-			in.fonts[ref] = f
+		default:
+			in.fonts.put(ref, f)
 		}
 	}
 	return f, f != nil
