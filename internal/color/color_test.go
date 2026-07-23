@@ -68,6 +68,27 @@ func TestDeviceGrayCurve(t *testing.T) {
 	}
 }
 
+// TestGrayTableGuard covers the wrong-sized-asset fallback: a corrupt or short gray table must not index out of range,
+// mirroring the length guard on the CMYK path. The real embed is validated separately by TestDeviceGrayCurve.
+func TestGrayTableGuard(t *testing.T) {
+	// The embedded table must be exactly the expected size, so grayValid hands it through unchanged.
+	if grayValid() == nil {
+		t.Fatal("embedded gray table failed its length guard")
+	}
+	// A wrong-sized (here, too-short) table falls back to a neutral ramp rather than panicking. Under the old code,
+	// v=1 would index grayTable[3057:3063] and panic on this 3-byte slice.
+	for _, v := range []float32{0, 0.25, 0.5, 1} {
+		want := rgbByte(v)
+		if got := grayFromTable([]byte{0, 0, 0}, v); got != (color.NRGBA{R: want, G: want, B: want, A: 255}) {
+			t.Errorf("fallback gray %v = %v, want neutral %d", v, got, want)
+		}
+	}
+	// A nil table is treated the same way.
+	if got := grayFromTable(nil, 1); got != (color.NRGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Errorf("nil-table white = %v", got)
+	}
+}
+
 func TestDeviceCMYKTable(t *testing.T) {
 	// Oracle anchors from the probe grid and the vectors golden.
 	if got := DeviceCMYK.ToNRGBA([]float32{0, 0, 0.8, 0}); got != (color.NRGBA{R: 255, G: 243, B: 79, A: 255}) {

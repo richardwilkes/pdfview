@@ -79,16 +79,38 @@ func rgbByte(v float32) uint8 {
 	return uint8(clamp01(v) * 255)
 }
 
+// grayValid returns the embedded gray table only when it is the expected size (graySamples nodes × 3 bytes); a
+// wrong-sized asset yields nil so grayToNRGBA falls back rather than indexing out of range. This mirrors the length
+// guard cmykOnce applies to the CMYK table.
+var grayValid = sync.OnceValue(func() []byte {
+	if len(grayTable) != graySamples*3 {
+		return nil
+	}
+	return grayTable
+})
+
 // grayToNRGBA converts a DeviceGray value through the observed gray curve, interpolating linearly between the
 // quarter-byte observation points.
 func grayToNRGBA(v float32) color.NRGBA {
+	return grayFromTable(grayValid(), v)
+}
+
+// grayFromTable interpolates v through the gray table, or falls back to a neutral ramp when table is not the expected
+// size (a corrupt or wrong-sized embed). Split out from grayToNRGBA so the fallback path is directly testable.
+func grayFromTable(table []byte, v float32) color.NRGBA {
+	if len(table) != graySamples*3 {
+		// The embedded table is validated at build time by the package tests; this fallback (a neutral gray ramp
+		// using the DeviceRGB truncation on all three channels) only runs if the binary's data is somehow corrupt.
+		b := rgbByte(v)
+		return color.NRGBA{R: b, G: b, B: b, A: 255}
+	}
 	t := float64(clamp01(v)) * (graySamples - 1)
 	lo := min(int(t), graySamples-2)
 	fr := t - float64(lo)
 	var out [3]uint8
 	for ch := range 3 {
-		a := float64(grayTable[lo*3+ch])
-		b := float64(grayTable[(lo+1)*3+ch])
+		a := float64(table[lo*3+ch])
+		b := float64(table[(lo+1)*3+ch])
 		out[ch] = uint8(math.Floor(a + (b-a)*fr + 0.5))
 	}
 	return color.NRGBA{R: out[0], G: out[1], B: out[2], A: 255}
