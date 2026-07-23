@@ -364,6 +364,28 @@ func TestPNGPredictorSixteenBit(t *testing.T) {
 	}
 }
 
+func TestPNGPredictorSubByteMultiComponent(t *testing.T) {
+	// 5 components at 2 bits each is 10 bits per pixel, so bytes-per-pixel must round up to 2. A floor-division bpp
+	// would use 1 here and mis-invert the Sub/Average/Paeth filters.
+	const columns = 4
+	const colors = 5
+	const bits = 2
+	rowLen := (colors*bits*columns + 7) / 8 // 40 bits -> 5 bytes
+	bpp := (colors*bits + 7) / 8            // 10 bits -> 2 bytes
+	raw := sampleData()[:rowLen*6]
+	for _, filters := range [][]byte{{1}, {3}, {4}, {0, 1, 2, 3, 4}} {
+		filtered := pngFilterForward(raw, rowLen, bpp, filters)
+		s := spec(flateName)
+		s.Params.Predictor = 12
+		s.Params.Colors = colors
+		s.Params.BitsPerComponent = bits
+		s.Params.Columns = columns
+		if got := decode(t, s, zlibCompress(t, filtered)); !bytes.Equal(got, raw) {
+			t.Errorf("sub-byte multi-component PNG predictor with filters %v: round trip mismatch", filters)
+		}
+	}
+}
+
 func TestPNGPredictorBadFilterType(t *testing.T) {
 	s := spec(flateName)
 	s.Params.Predictor = 10

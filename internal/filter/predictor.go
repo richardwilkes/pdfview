@@ -55,8 +55,9 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	}
 	rowLen := (p.Colors*p.BitsPerComponent*p.Columns + 7) / 8
 	// The number of bytes per complete pixel, rounded up to at least one, per the PNG specification's filtering model.
-	// Sub-byte components always use 1.
-	bpp := max(1, p.Colors*p.BitsPerComponent/8)
+	// A single sub-byte pixel rounds up to 1, but a multi-component sub-byte config (e.g. 5 colors * 2 bits) spans
+	// more than one byte, so round the whole pixel width up rather than flooring per component.
+	bpp := max(1, (p.Colors*p.BitsPerComponent+7)/8)
 	// A row cannot be longer than the data itself; clamping keeps hostile Columns values from forcing large allocations
 	// for a file that does not actually contain such rows.
 	rowLen = min(rowLen, len(data))
