@@ -201,6 +201,14 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	if !isFinite32(minX) || !isFinite32(minY) || !isFinite32(maxX) || !isFinite32(maxY) {
 		return &glyphMask{}, 96
 	}
+	// Reject degenerate text matrices whose device bounds, though finite, dwarf any real glyph: the floor/ceil below
+	// would otherwise overflow int (architecture-defined, saturating to MinInt64 on amd64) and the w/h subtraction
+	// could wrap back into a small positive value that slips past the maxGlyphMaskDim gate as an all-zero plane,
+	// silently dropping the glyph instead of taking the outline fallback. Mirrors rectInterior's 1<<24 clamp.
+	const maxReasonable = 1 << 24
+	if minX < -maxReasonable || minY < -maxReasonable || maxX > maxReasonable || maxY > maxReasonable {
+		return &glyphMask{}, 96
+	}
 	mx0 := int(math.Floor(float64(minX))) - 1
 	my0 := int(math.Floor(float64(minY))) - 1
 	w := int(math.Ceil(float64(maxX))) + 1 - mx0

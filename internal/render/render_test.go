@@ -19,6 +19,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/shading"
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
@@ -568,4 +569,91 @@ func delta(a, b uint8) int {
 		return int(a - b)
 	}
 	return int(b - a)
+}
+
+// A degenerate text matrix whose device bounds are finite but enormous must fall back to the outline fill (plane nil),
+// not overflow the floor/ceil and slip an all-zero coverage plane past the size gate that silently drops the glyph.
+func TestRenderGlyphMaskRejectsHugeFiniteBounds(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	gid := f.GID('H')
+	if gid == 0 {
+		t.Fatal("'H' unmapped")
+	}
+	gp := d.glyphPath(f, gid)
+	if gp == nil {
+		t.Fatal("no glyph path")
+	}
+	g := &device.Glyph{Trm: gfx.Matrix{A: 1e30, D: -1e30}, GID: gid}
+	mask, _ := d.renderGlyphMask(g, gp, 0, 0)
+	if mask == nil {
+		t.Fatal("nil mask")
+	}
+	if mask.plane != nil {
+		t.Fatalf("huge finite bounds produced a %dx%d coverage plane instead of the outline fallback", mask.w, mask.h)
+	}
+}
+
+// A malformed /TR LUT shorter than 256 entries must be ignored (treated as identity), not indexed by an arbitrary
+// 0–255 mask value, which would panic.
+func TestBeginMaskShortTransferLUTNoPanic(t *testing.T) {
+	d := newDevice(t, 8, 8)
+	d.BeginMask(gfx.Rect{}, false, color.NRGBA{}, []byte{0, 1, 2})
+	var p gfx.Path
+	p.Rect(0, 0, 8, 8)
+	d.FillPath(&p, false, gfx.Identity(), redPaint())
+	d.EndMask()
+	d.PopMask()
+	if _, _, err := d.Pixels(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Soft-mask nesting beyond maxMaskDepth must degrade to the no-surface path rather than allocating another full-page
+// offscreen surface, and the Begin/End/Pop pairing must still unwind cleanly.
+func TestBeginMaskDepthCapDegrades(t *testing.T) {
+	d := newDevice(t, 8, 8)
+	const depth = maxMaskDepth + 3
+	for range depth {
+		d.BeginMask(gfx.Rect{}, false, color.NRGBA{}, nil)
+	}
+	for i, ms := range d.maskStack {
+		switch {
+		case i < maxMaskDepth && ms.surf == nil:
+			t.Errorf("mask %d within the cap has no surface", i)
+		case i >= maxMaskDepth && ms.surf != nil:
+			t.Errorf("mask %d beyond the cap allocated a surface", i)
+		}
+	}
+	for range depth {
+		d.EndMask()
+		d.PopMask()
+	}
+	if len(d.maskStack) != 0 {
+		t.Fatalf("mask stack not unwound: %d left", len(d.maskStack))
+	}
+}
+
+// gradientRamp must not index an empty stop slice, even when boundary extensions are requested.
+func TestGradientRampEmptyStops(t *testing.T) {
+	for _, e := range [][2]float32{{0, 0}, {0.5, 0.5}} {
+		colors, pos := gradientRamp(nil, e[0], e[1])
+		if colors != nil || pos != nil {
+			t.Fatalf("e=%v: expected nil ramp, got %v / %v", e, colors, pos)
+		}
+	}
+}
+
+// Axial and radial shaders with no color stops must degrade to a nil shader (no shading painted) rather than panic on
+// stops[0].
+func TestShaderEmptyStopsNoPanic(t *testing.T) {
+	d := newDevice(t, 8, 8)
+	axial := &shading.Shading{Kind: shading.KindAxial, Coords: [6]float32{0, 0, 8, 8}, Extend: [2]bool{true, true}}
+	if s := d.axialShader(axial, gfx.Identity()); s != nil {
+		t.Error("axialShader with no stops returned a shader")
+	}
+	radial := &shading.Shading{Kind: shading.KindRadial, Coords: [6]float32{0, 0, 1, 8, 8, 4}, Extend: [2]bool{true, true}}
+	if s := d.radialShader(radial, gfx.Identity()); s != nil {
+		t.Error("radialShader with no stops returned a shader")
+	}
 }

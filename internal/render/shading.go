@@ -120,6 +120,9 @@ func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Sh
 // gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by e0 before
 // offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
 func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Color, pos []float32) {
+	if len(stops) == 0 {
+		return nil, nil
+	}
 	span := 1 + e0 + e1
 	n := len(stops)
 	if e0 > 0 {
@@ -173,6 +176,9 @@ func isFinite32(v float32) bool {
 
 // axialShader builds the linear-gradient shader for a type 2 shading.
 func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
+	if len(sh.Stops) == 0 {
+		return nil
+	}
 	p0 := geom.Point{X: sh.Coords[0], Y: sh.Coords[1]}
 	p1 := geom.Point{X: sh.Coords[2], Y: sh.Coords[3]}
 	lm := matrix(local)
@@ -214,6 +220,9 @@ func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shad
 
 // radialShader builds the two-point conical shader for a type 3 shading.
 func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
+	if len(sh.Stops) == 0 {
+		return nil
+	}
 	c0 := gfx.Point{X: sh.Coords[0], Y: sh.Coords[1]}
 	r0 := sh.Coords[2]
 	c1 := gfx.Point{X: sh.Coords[3], Y: sh.Coords[4]}

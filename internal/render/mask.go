@@ -100,11 +100,20 @@ func (d *Device) applyKnockout(paint *canvas.Paint) {
 	}
 }
 
+// maxMaskDepth caps how many soft-mask spans may be open at once. Each open span holds a full width×height×4 offscreen
+// surface plus its readback buffer, so unbounded nesting is a memory-pressure vector. Upstream form-XObject recursion
+// already bounds mask nesting well below this; the local cap keeps the surface commitment bounded even if that upstream
+// invariant is ever broken, degrading deeper masks to the no-surface path (mask content is swallowed, the masked op
+// still draws) rather than allocating without limit.
+const maxMaskDepth = 16
+
 // BeginMask implements device.Device.
 func (d *Device) BeginMask(_ gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA, transfer []byte) {
 	ms := &maskState{luminosity: luminosity, transfer: transfer, saved: d.c, savedClip: d.textClip}
 	d.textClip = nil
-	ms.surf = surface.NewRasterN32Premul(int32(d.width), int32(d.height), nil)
+	if len(d.maskStack) < maxMaskDepth {
+		ms.surf = surface.NewRasterN32Premul(int32(d.width), int32(d.height), nil)
+	}
 	if ms.surf == nil {
 		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page; the masked op
 		// then draws unmasked (degrade, never erase).
@@ -187,7 +196,9 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 			plane[j] = pix[i]
 		}
 	}
-	if ms.transfer != nil {
+	// Only a full 256-entry LUT can be indexed by an arbitrary 0–255 mask value; anything shorter is unusable, so treat
+	// it as identity rather than trusting the caller's slice length (parseTransfer returns nil or exactly 256).
+	if len(ms.transfer) == 256 {
 		for j, v := range plane {
 			plane[j] = ms.transfer[v]
 		}
