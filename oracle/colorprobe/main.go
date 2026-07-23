@@ -16,11 +16,11 @@
 //
 //	go run ./colorprobe [-out ../internal/color/data]
 //
-// It writes gray1021.bin (DeviceGray sampled at i/1020 → RGB bytes) and cmyk17.bin.gz (DeviceCMYK on the 17^4 grid →
-// RGB bytes, gzipped), then validates that internal/color's evaluation strategies reproduce fresh off-grid
-// observations: DeviceRGB as trunc(v×255) per channel exactly, and the CMYK grid under multilinear interpolation within
-// a small tolerance. Validation failure means MuPDF's conversion behavior changed shape, not just values —
-// internal/color then needs rework, not just new tables.
+// It samples DeviceGray at i/1020 and DeviceCMYK on the 17^4 grid, validates that internal/color's evaluation
+// strategies reproduce fresh off-grid observations — DeviceRGB as trunc(v×255) per channel exactly, and the CMYK grid
+// under multilinear interpolation within a small tolerance — and only then writes gray1021.bin and cmyk17.bin.gz, so a
+// failed run leaves the committed tables untouched. Validation failure means MuPDF's conversion behavior changed shape,
+// not just values — internal/color then needs rework, not just new tables.
 package main
 
 import (
@@ -47,35 +47,62 @@ type patch struct {
 	x, y  int
 }
 
+// steps holds the probe and validation stages. Tests substitute them for the MuPDF-backed originals.
+type steps struct {
+	probeGray    func() []byte
+	verifyRGB    func() error
+	probeCMYK    func() []byte
+	validateCMYK func(table []byte) error
+}
+
 func main() {
 	log.SetFlags(0)
 	out := flag.String("out", filepath.Join("..", "internal", "color", "data"), "output directory for the table files")
 	flag.Parse()
 
-	grayTable := probeGray()
-	if err := os.WriteFile(filepath.Join(*out, "gray1021.bin"), grayTable, 0o644); err != nil {
+	if err := generate(*out, steps{
+		probeGray:    probeGray,
+		verifyRGB:    verifyRGB,
+		probeCMYK:    probeCMYK,
+		validateCMYK: validateCMYK,
+	}); err != nil {
 		log.Fatal(err)
 	}
-	verifyRGB()
-	cmykTable := probeCMYK()
+}
+
+// generate runs every probe and validation, then writes the table files. Nothing touches disk until all validation has
+// passed, so a failure leaves the committed tables exactly as they were rather than replacing them with tables that
+// internal/color can't evaluate.
+func generate(out string, s steps) error {
+	grayTable := s.probeGray()
+	if err := s.verifyRGB(); err != nil {
+		return err
+	}
+	cmykTable := s.probeCMYK()
+	if err := s.validateCMYK(cmykTable); err != nil {
+		return err
+	}
 	var gz bytes.Buffer
 	w, err := gzip.NewWriterLevel(&gz, gzip.BestCompression)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if _, err = w.Write(cmykTable); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err = w.Close(); err != nil {
-		log.Fatal(err)
+		return err
 	}
-	if err = os.WriteFile(filepath.Join(*out, "cmyk17.bin.gz"), gz.Bytes(), 0o644); err != nil {
-		log.Fatal(err)
+	grayPath := filepath.Join(out, "gray1021.bin")
+	if err = os.WriteFile(grayPath, grayTable, 0o644); err != nil {
+		return err
 	}
-	validateCMYK(cmykTable)
-	log.Printf("wrote %s (%d bytes) and %s (%d bytes gzipped)",
-		filepath.Join(*out, "gray1021.bin"), len(grayTable),
-		filepath.Join(*out, "cmyk17.bin.gz"), gz.Len())
+	cmykPath := filepath.Join(out, "cmyk17.bin.gz")
+	if err = os.WriteFile(cmykPath, gz.Bytes(), 0o644); err != nil {
+		return err
+	}
+	log.Printf("wrote %s (%d bytes) and %s (%d bytes gzipped)", grayPath, len(grayTable), cmykPath, gz.Len())
+	return nil
 }
 
 // render builds a single-page PDF filling one patch per comps entry with the given operator, renders it at 72 dpi, and
@@ -135,7 +162,7 @@ func probeGray() []byte {
 
 // verifyRGB asserts the DeviceRGB model internal/color hard-codes: each channel is trunc(float32(v)×255), independent
 // of the others.
-func verifyRGB() {
+func verifyRGB() error {
 	rng := rand.New(rand.NewSource(7)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 3*1021+500)
 	for ch := range 3 {
@@ -153,12 +180,13 @@ func verifyRGB() {
 		r, g, b := at(img, p.x, p.y)
 		for ch, got := range []uint8{r, g, b} {
 			if want := uint8(float32(p.comps[ch]) * 255); got != want {
-				log.Fatalf("DeviceRGB model broke: rgb%v channel %d rendered %d, trunc model says %d",
+				return fmt.Errorf("DeviceRGB model broke: rgb%v channel %d rendered %d, trunc model says %d",
 					p.comps, ch, got, want)
 			}
 		}
 	}
 	log.Printf("DeviceRGB trunc model verified over %d patches", len(patches))
+	return nil
 }
 
 func probeCMYK() []byte {
@@ -182,7 +210,7 @@ func probeCMYK() []byte {
 
 // validateCMYK renders off-grid colors and checks multilinear interpolation of the freshly captured grid against them,
 // mirroring internal/color's evaluation.
-func validateCMYK(table []byte) {
+func validateCMYK(table []byte) error {
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // Deterministic probe points; not security-sensitive.
 	pats := make([][]float64, 0, 2000)
 	for range 2000 {
@@ -204,9 +232,10 @@ func validateCMYK(table []byte) {
 	mean := sumErr / float64(3*len(patches))
 	log.Printf("CMYK interpolation vs %d off-grid observations: mean %.3f, max %.1f", len(patches), mean, maxErr)
 	if maxErr > 4 || mean > 0.75 {
-		log.Fatalf("CMYK grid interpolation error grew beyond expectations (mean %.3f, max %.1f); "+
+		return fmt.Errorf("CMYK grid interpolation error grew beyond expectations (mean %.3f, max %.1f); "+
 			"the conversion's shape changed — rework internal/color, don't just commit the tables", mean, maxErr)
 	}
+	return nil
 }
 
 func interp(table []byte, comps []float64) [3]float64 {
