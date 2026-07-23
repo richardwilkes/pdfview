@@ -75,6 +75,13 @@ func TestClampFloatToInt(t *testing.T) {
 		{name: "nan", in: math.NaN(), want: 0},
 		{name: "overflow", in: math.MaxFloat64, want: 0},
 		{name: "underflow", in: -math.MaxFloat64, want: 0},
+		// 2^63 is the first value above the int range. It is exactly representable as a float64 (unlike math.MaxInt,
+		// which rounds up to it), so a `> math.MaxInt` guard would let it slip through to int(r) and overflow.
+		{name: "exactly 2^63", in: -float64(math.MinInt), want: 0},
+		// The largest float64 strictly below 2^63 (2^63−1024) is in range and must round-trip, not clamp.
+		{name: "largest in-range positive", in: math.Nextafter(-float64(math.MinInt), 0), want: math.MaxInt - 1023},
+		// math.MinInt (−2^63) is exactly representable and in range.
+		{name: "exactly math.MinInt", in: float64(math.MinInt), want: math.MinInt},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := clampFloatToInt(tc.in); got != tc.want {

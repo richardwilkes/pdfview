@@ -394,7 +394,12 @@ func scaledFloor(v, scale float64) int {
 // conversion of a non-finite (or out-of-range) float to int is architecture-defined — 0 on arm64 but math.MinInt64 on
 // amd64 — so clamping here keeps the returned coordinates deterministic across architectures.
 func clampFloatToInt(r float64) int {
-	if math.IsNaN(r) || r < math.MinInt || r > math.MaxInt {
+	// The safe conversion range is [math.MinInt, math.MaxInt]. float64 represents math.MinInt (−2^63) exactly, so the
+	// lower guard is precise. It cannot represent math.MaxInt (2^63−1), which rounds up to 2^63 — comparing against it
+	// with `>` would let an r of exactly 2^63 slip through to int(r) and overflow. −math.MinInt is 2^63 (representable
+	// exactly for every int width, since math.MinInt is a power of two), so `r >= -float64(math.MinInt)` rejects the
+	// first out-of-range value precisely.
+	if math.IsNaN(r) || r < math.MinInt || r >= -float64(math.MinInt) {
 		return 0
 	}
 	return int(r)
