@@ -119,17 +119,21 @@ func TestBundledData(t *testing.T) {
 
 func TestGlyphNameToUnicode(t *testing.T) {
 	for name, want := range map[string]string{
-		"A":           "A",
-		"alpha":       "α",
-		"uni0041":     "A",
-		"uni00410042": "AB",
-		"u0041":       "A",
-		"u1D400":      "\U0001D400",
-		"f_f_i":       "ffi", // Components resolve individually.
-		"A.sc":        "A",   // Suffix stripped.
-		"uniD800":     "",    // Surrogates rejected.
-		"bogusname":   "",
-		"":            "",
+		"A":             "A",
+		"alpha":         "α",
+		"uni0041":       "A",
+		"uni00410042":   "AB",
+		"u0041":         "A",
+		"u1D400":        "\U0001D400",
+		"f_f_i":         "ffi", // Components resolve individually.
+		"A.sc":          "A",   // Suffix stripped.
+		"uniD800":       "",    // Surrogates rejected.
+		"bogusname":     "",
+		"":              "",
+		"A_uniD800":     "A",  // A bad component discards itself, not the components already resolved.
+		"uniD800_A":     "A",  // Leading bad component skipped; later valid one kept.
+		"A_bogus_B":     "AB", // Unrecognized middle component contributes nothing.
+		"u0041_uABCDEF": "A",  // Out-of-range (> 0x10FFFF) component skipped, valid one kept.
 	} {
 		if got := GlyphNameToUnicode(name); got != want {
 			t.Errorf("GlyphNameToUnicode(%q) = %q, want %q", name, got, want)
@@ -344,5 +348,35 @@ func TestCFFTopDict(t *testing.T) {
 		if _, err = parseCFFTopDict(bad); err == nil {
 			t.Errorf("parseCFFTopDict(%v) should fail", bad)
 		}
+	}
+}
+
+// TestType0DispatchByFontFile guards against trusting /Subtype over the actually-present FontFile: a descendant
+// mislabeled "CIDFontType2" whose program really lives in FontFile3 (a CFF) must be parsed from FontFile3 and embedded,
+// not routed into the SFNT arm with a nil stream and then substituted away.
+func TestType0DispatchByFontFile(t *testing.T) {
+	// A CFF carrying FontBBox [-166 -214 1076 952] so top.metrics() resolves and the font counts as embedded.
+	cff := buildCFF([]byte{
+		28, 0xFF, 0x5A, // -166
+		28, 0xFF, 0x2A, // -214
+		28, 0x04, 0x34, // 1076
+		28, 0x03, 0xB8, // 952
+		5, // FontBBox
+	})
+	f, err := loadFromDict(
+		t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCID /FontDescriptor 3 0 R >>", // mislabeled subtype
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 /FontFile3 4 0 R >>",
+		fmt.Sprintf("<< /Length %d /Subtype /Type1C >>\nstream\n%s\nendstream", len(cff), cff),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.sub != nil {
+		t.Fatal("FontFile3 CFF was discarded and the font substituted")
+	}
+	if f.ascender < 0.951 || f.ascender > 0.953 {
+		t.Errorf("ascender = %v, want ≈0.952 from the embedded CFF FontBBox", f.ascender)
 	}
 }

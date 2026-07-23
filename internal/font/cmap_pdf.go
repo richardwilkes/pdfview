@@ -297,8 +297,9 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 }
 
 // nextCode decodes the next character code from b (ISO 32000-2 9.7.6.3): the codespace ranges determine how many bytes
-// one code spans. Codes outside every codespace consume bytes per the partial-match rule (the shortest codespace length
-// whose first byte brackets the input's first byte), defaulting to one byte.
+// one code spans. Codes outside every codespace consume bytes per the partial-match rule — the length of the codespace
+// whose leading bytes match the longest prefix of the input (each byte within that byte position's range), ties broken
+// by the shortest codespace, defaulting to one byte.
 func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
 	for length := 1; length <= 4 && length <= len(b); length++ {
 		var v uint32
@@ -309,20 +310,30 @@ func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
 			return v, length
 		}
 	}
-	// Invalid code: consume per the shortest partially matching codespace, mapping to CID 0.
+	// Invalid code: consume per the codespace matching the longest input prefix, mapping to CID 0. Prefix length is how
+	// many leading bytes lie within the codespace's per-position byte ranges; the winner's full length is consumed.
 	n = 1
-	b0 := uint32(b[0])
-	best := 8
+	bestPrefix := 0
+	bestLen := 8
 	for c := cm; c != nil; c = c.base {
 		for _, cs := range c.codespaces {
-			shift := (int(cs.nBytes) - 1) * 8
-			if b0 >= (cs.lo>>shift)&0xFF && b0 <= (cs.hi>>shift)&0xFF && int(cs.nBytes) < best {
-				best = int(cs.nBytes)
+			nb := int(cs.nBytes)
+			prefix := 0
+			for i := 0; i < nb && i < len(b); i++ {
+				shift := (nb - 1 - i) * 8
+				if uint32(b[i]) < (cs.lo>>shift)&0xFF || uint32(b[i]) > (cs.hi>>shift)&0xFF {
+					break
+				}
+				prefix++
+			}
+			if prefix > 0 && (prefix > bestPrefix || (prefix == bestPrefix && nb < bestLen)) {
+				bestPrefix = prefix
+				bestLen = nb
 			}
 		}
 	}
-	if best <= 4 {
-		n = min(best, len(b))
+	if bestPrefix > 0 && bestLen <= 4 {
+		n = min(bestLen, len(b))
 	}
 	return 0, n
 }

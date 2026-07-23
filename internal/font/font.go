@@ -443,7 +443,9 @@ func buildUnicode(f *Font) {
 
 // GlyphNameToUnicode implements the AGL algorithm for one glyph name: strip any suffix after the first period, split
 // ligature components on underscores, then resolve each component via the AGL, the uniXXXX (one or more 4-hex-digit
-// UTF-16 values) form, or the uXXXX[XX] form. Returns "" when nothing resolves.
+// UTF-16 values) form, or the uXXXX[XX] form. Each component resolves independently; an unresolvable one (unknown name,
+// surrogate, out-of-range) contributes nothing but does not discard the components already resolved. Returns "" only
+// when nothing resolves.
 func GlyphNameToUnicode(name string) string {
 	if name == "" {
 		return ""
@@ -458,19 +460,23 @@ func GlyphNameToUnicode(name string) string {
 		case agl[part] != "":
 			sb.WriteString(agl[part])
 		case strings.HasPrefix(part, "uni") && len(part) >= 7 && (len(part)-3)%4 == 0:
+			var comp strings.Builder
+			ok := true
 			for i := 3; i+4 <= len(part); i += 4 {
-				v, ok := parseHex(part[i : i+4])
-				if !ok || (v >= 0xD800 && v <= 0xDFFF) {
-					return ""
+				v, valid := parseHex(part[i : i+4])
+				if !valid || (v >= 0xD800 && v <= 0xDFFF) {
+					ok = false
+					break
 				}
-				sb.WriteRune(rune(v))
+				comp.WriteRune(rune(v))
+			}
+			if ok {
+				sb.WriteString(comp.String())
 			}
 		case strings.HasPrefix(part, "u") && len(part) >= 5 && len(part) <= 7:
-			v, ok := parseHex(part[1:])
-			if !ok || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF) {
-				return ""
+			if v, valid := parseHex(part[1:]); valid && v <= 0x10FFFF && (v < 0xD800 || v > 0xDFFF) {
+				sb.WriteRune(rune(v))
 			}
-			sb.WriteRune(rune(v))
 		}
 	}
 	return sb.String()

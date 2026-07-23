@@ -78,6 +78,36 @@ func TestParseCMapCore(t *testing.T) {
 	}
 }
 
+func TestNextCodePartialMatch(t *testing.T) {
+	// Two overlapping codespaces whose first-byte ranges both bracket 0x41, but the 3-byte one matches a longer prefix
+	// of the input. ISO 32000-2 9.7.6.3 consumes the longest-matching codespace's length, not the shortest bracketing.
+	content := `begincmap
+2 begincodespacerange
+<4180> <41ff>
+<414141> <7e7e7e>
+endcodespacerange
+endcmap`
+	cm := parseCMap([]byte(content), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	for _, tc := range []struct {
+		in   []byte
+		n    int
+		code uint32
+	}{
+		{[]byte{0x41, 0x41, 0x00}, 3, 0}, // invalid: 3-byte codespace matches 2 leading bytes → consume its 3
+		{[]byte{0x41, 0x30}, 2, 0},       // tie on 1-byte prefix → shortest (2-byte) codespace consumed
+		{[]byte{0x41, 0x90}, 2, 0x4190},  // full 2-byte match
+		{[]byte{0xff}, 1, 0},             // no codespace brackets the first byte → one byte
+	} {
+		code, n := cm.nextCode(tc.in)
+		if code != tc.code || n != tc.n {
+			t.Errorf("nextCode(% x) = %x, %d; want %x, %d", tc.in, code, n, tc.code, tc.n)
+		}
+	}
+}
+
 func TestPredefinedIdentity(t *testing.T) {
 	h := predefinedCMap("Identity-H")
 	v := predefinedCMap("Identity-V")
@@ -198,6 +228,24 @@ func TestParseWArrays(t *testing.T) {
 	}
 	if w1, vx, vy := info.cidVMetrics(99, 0.5); w1 != -1 || vx != 0.25 || vy != 0.88 { // Defaults.
 		t.Errorf("cidVMetrics(99) = %v %v %v", w1, vx, vy)
+	}
+
+	// A /W whose starting CID exceeds the 16-bit CID space (here 2^33) must be rejected, not narrowed via uint32 to a
+	// small wrapped CID that keys the widths to the wrong range.
+	overflow := cos.Array{
+		cos.Integer(1 << 33),
+		cos.Array{cos.Real(500)},
+		cos.Integer(3),
+		cos.Array{cos.Real(750)}, // A valid entry after the bad one still parses.
+	}
+	over := &type0Info{dw: 1, w: parseWArray(d, overflow)}
+	for cid, want := range map[uint32]float32{
+		0: 1,    // uint32(1<<33) == 0: the wrapped low bits must NOT have picked up the width.
+		3: 0.75, // The valid entry following the rejected one still applies.
+	} {
+		if got := over.cidWidth(cid); got != want {
+			t.Errorf("overflow cidWidth(%d) = %v, want %v", cid, got, want)
+		}
 	}
 }
 

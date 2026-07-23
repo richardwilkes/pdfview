@@ -56,6 +56,10 @@ type w2Range struct {
 // entry.
 const maxCIDToGIDBytes = 2 * 65536
 
+// maxCID is the largest addressable CID: CIDs are 16-bit per ISO 32000-2 9.7.4, so a /W or /W2 entry naming a larger
+// starting CID is malformed. Rejecting it also keeps the later uint32(c1) narrowing from wrapping on a hostile value.
+const maxCID = 0xFFFF
+
 // loadType0 loads a Type0 font dictionary.
 func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f := &Font{}
@@ -71,15 +75,17 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 	if descendant == nil {
 		return nil, ErrBadFont
 	}
-	subtype, _ := d.GetName(descendant, "Subtype")
 	desc := loadDescriptor(d, descendant)
 	f.Flags = desc.flags
 	info := &type0Info{cmap: cm, dw: 1, dw2: [2]float32{0.88, -1}, vertical: cm.wModeResolved() == 1}
 	f.type0 = info
 
+	// Dispatch on which FontFile is actually present rather than trusting /Subtype: a font mislabeled "CIDFontType2"
+	// whose program really sits in FontFile3 (bare/Type1C CFF) must still be parsed from FontFile3, not routed into the
+	// SFNT arm with a nil stream and then substituted away (ISO 32000-2 9.7.4.2).
 	embedded := false
 	switch {
-	case subtype == "CIDFontType2" || desc.fontFile2 != nil:
+	case desc.fontFile2 != nil:
 		if sfnt := parseSFNTStream(d, desc.fontFile2); sfnt != nil {
 			info.sfnt = sfnt
 			f.ascender, f.descender = sfnt.ascender, sfnt.descender
@@ -222,7 +228,7 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 	var out []wRange
 	for i := 0; i+1 < len(arr) && len(out) < maxCMapRanges; {
 		c1, ok := cos.AsInt(d.Resolve(arr[i]))
-		if !ok || c1 < 0 {
+		if !ok || c1 < 0 || c1 > maxCID {
 			i++
 			continue
 		}
@@ -275,7 +281,7 @@ func parseW2Array(d *cos.Document, arr cos.Array) []w2Range {
 	}
 	for i := 0; i+1 < len(arr) && len(out) < maxCMapRanges; {
 		c1, ok := cos.AsInt(d.Resolve(arr[i]))
-		if !ok || c1 < 0 {
+		if !ok || c1 < 0 || c1 > maxCID {
 			i++
 			continue
 		}
