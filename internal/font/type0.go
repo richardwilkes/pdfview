@@ -310,7 +310,7 @@ func parseW2Array(d *cos.Document, arr cos.Array) []w2Range {
 		if i+4 < len(arr) {
 			c2, ok2 := cos.AsInt(d.Resolve(next))
 			t, okT := real3([]cos.Object{arr[i+2], arr[i+3], arr[i+4]})
-			if ok2 && okT && c2 >= c1 {
+			if ok2 && okT && c2 >= c1 && c2 <= maxCID {
 				out = append(out, w2Range{lo: uint32(c1), hi: uint32(c2), entries: [][3]float32{t}})
 			}
 			i += 5

@@ -52,7 +52,9 @@ const (
 	FlagForceBold   = 1 << 18
 )
 
-// Font is one loaded PDF font resource. It is immutable after Load and safe for concurrent reads.
+// Font is one loaded PDF font resource. Its fields are immutable after Load, but reads are only safe under the
+// document's serialization: GID and GlyphPath call through the per-Font otfont.Face, which caches lookups without
+// locking, so two goroutines must not use the same *Font concurrently.
 type Font struct {
 	// enc maps codes to glyph names for simple fonts ("" when the code has none).
 	enc *[256]string

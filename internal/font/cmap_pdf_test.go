@@ -247,6 +247,24 @@ func TestParseWArrays(t *testing.T) {
 			t.Errorf("overflow cidWidth(%d) = %v, want %v", cid, got, want)
 		}
 	}
+
+	// The same bound applies to a /W2 range end: 2^32+100 must be rejected rather than narrowed via uint32 to 100,
+	// which would otherwise put a bogus [0, 100] range ahead of the real entry that cidVMetrics scans for.
+	w2Overflow := cos.Array{
+		cos.Integer(0), cos.Integer(1<<32 + 100), cos.Integer(-1100), cos.Integer(300), cos.Integer(900),
+		cos.Integer(50),
+		cos.Array{cos.Integer(-900), cos.Integer(400), cos.Integer(880)},
+	}
+	w2Over := &type0Info{dw2: [2]float32{0.88, -1}, w2: parseW2Array(d, w2Overflow)}
+	if len(w2Over.w2) != 1 || w2Over.w2[0].lo != 50 || w2Over.w2[0].hi != 50 {
+		t.Fatalf("overflow /W2 ranges = %+v, want only the CID 50 entry", w2Over.w2)
+	}
+	if w1, vx, vy := w2Over.cidVMetrics(50, 0.5); w1 != -0.9 || vx != 0.4 || vy != 0.88 {
+		t.Errorf("overflow cidVMetrics(50) = %v %v %v, want -0.9 0.4 0.88", w1, vx, vy)
+	}
+	if w1, vx, vy := w2Over.cidVMetrics(10, 0.5); w1 != -1 || vx != 0.25 || vy != 0.88 { // Defaults, not the bad range.
+		t.Errorf("overflow cidVMetrics(10) = %v %v %v, want defaults", w1, vx, vy)
+	}
 }
 
 func TestCFFCIDCharset(t *testing.T) {
