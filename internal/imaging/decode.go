@@ -22,20 +22,25 @@ import (
 func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	data := dec.data
 	rowStride := 0
-	bpc, err := dec.bitsPerComponent()
-	if err != nil {
-		return nil, err
-	}
+	bpc := 1
 	if isCCITT(dec.codec) {
 		// CCITT output is always one bit per sample; rows are byte-aligned at the decoder's column count, which may
-		// differ from /Width (extra columns are dropped, missing ones read as zero samples).
+		// differ from /Width (extra columns are dropped, missing ones read as zero samples). The codec fixes bpc at 1
+		// regardless of /BitsPerComponent, so we do not consult (or require) that key here — deployed viewers render
+		// CCITT images that omit it, and so do we.
 		var cols int
+		var err error
 		data, cols, err = dec.decodeCCITT(h)
 		if err != nil {
 			return nil, err
 		}
-		bpc = 1
 		rowStride = (cols + 7) / 8
+	} else {
+		var err error
+		bpc, err = dec.bitsPerComponent()
+		if err != nil {
+			return nil, err
+		}
 	}
 	space, err := dec.colorSpace()
 	if err != nil {

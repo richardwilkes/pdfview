@@ -29,6 +29,7 @@ const (
 	keyWidth      cos.Name = "Width"
 	keyHeight     cos.Name = "Height"
 	keyMask       cos.Name = "Mask"
+	keyColumns             = "Columns"
 )
 
 // testDoc returns a minimal document for Resolve calls; the image dictionaries and mask streams in these tests are
@@ -383,7 +384,7 @@ func TestCCITTColumnsBounded(t *testing.T) {
 	dict := cos.Dict{
 		"W": cos.Integer(4), "H": cos.Integer(4), keyBPC: cos.Integer(1), "CS": cos.Name("G"),
 		"F":  cos.Name("CCF"),
-		"DP": cos.Dict{"K": cos.Integer(-1), "Columns": cos.Integer(1 << 38)},
+		"DP": cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(1 << 38)},
 	}
 	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
 		t.Fatal("huge CCITT /Columns accepted")
@@ -397,7 +398,7 @@ func TestCCITTMultiComponentRejected(t *testing.T) {
 	dict := cos.Dict{
 		"W": cos.Integer(2), "H": cos.Integer(2), keyBPC: cos.Integer(1), "CS": cos.Name("RGB"),
 		"F":  cos.Name("CCF"),
-		"DP": cos.Dict{"K": cos.Integer(-1), "Columns": cos.Integer(2)},
+		"DP": cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(2)},
 	}
 	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
 		t.Fatal("CCITT with a multi-component color space accepted")
@@ -406,6 +407,24 @@ func TestCCITTMultiComponentRejected(t *testing.T) {
 	dict["CS"] = cos.Name("G")
 	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err != nil {
 		t.Fatalf("CCITT with DeviceGray must decode: %v", err)
+	}
+}
+
+func TestCCITTMissingBitsPerComponent(t *testing.T) {
+	d := testDoc(t)
+	// CCITT output is fixed at one bit per sample regardless of /BitsPerComponent, so a stream that omits the key must
+	// still decode — deployed viewers render these, and the codec supplies the value. The dict below has no keyBPC.
+	dict := cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(2), "CS": cos.Name("G"),
+		"F":  cos.Name("CCF"),
+		"DP": cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(2)},
+	}
+	img, err := DecodeInline(d, dict, []byte{0x00}, nil)
+	if err != nil {
+		t.Fatalf("CCITT without /BitsPerComponent must decode: %v", err)
+	}
+	if img.Width != 2 || img.Height != 2 {
+		t.Fatalf("unexpected dimensions %dx%d", img.Width, img.Height)
 	}
 }
 
