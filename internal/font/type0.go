@@ -120,7 +120,9 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	}
 
-	if v, ok := cos.AsReal(d.Resolve(descendant["DW"])); ok && v > 0 {
+	// Per ISO 32000-2 9.7.4.3 the 1000-unit (1.0) default applies only when /DW is absent. An explicit /DW 0 is
+	// legitimate (e.g. an all-combining-marks CIDFont) and must override the default, so accept any non-negative value.
+	if v, ok := cos.AsReal(d.Resolve(descendant["DW"])); ok && v >= 0 {
 		info.dw = float32(v) / 1000
 	}
 	if arr, ok := d.GetArray(descendant, "W"); ok {

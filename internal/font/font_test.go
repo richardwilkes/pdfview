@@ -439,6 +439,36 @@ func TestType0CFFWithoutFontBBoxKeepsItsGlyphs(t *testing.T) {
 	}
 }
 
+// TestType0ExplicitZeroDefaultWidth guards ISO 32000-2 9.7.4.3: the 1000-unit (1.0) default width applies only when
+// /DW is absent. A CIDFont declaring /DW 0 — legitimate for an all-combining-marks font — must advance zero, not fall
+// back to 1.0. A CIDFont omitting /DW must still default to 1.0.
+func TestType0ExplicitZeroDefaultWidth(t *testing.T) {
+	zero, err := loadFromDict(t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCID /DW 0 /FontDescriptor 3 0 R >>",
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 >>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zero.type0 == nil {
+		t.Fatal("Type0 info not populated")
+	}
+	if got := zero.type0.cidWidth(42); got != 0 {
+		t.Errorf("cidWidth with /DW 0 = %v, want 0 (explicit zero must override the 1.0 default)", got)
+	}
+
+	absent, err := loadFromDict(t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCID /FontDescriptor 3 0 R >>",
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 >>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := absent.type0.cidWidth(42); got != 1 {
+		t.Errorf("cidWidth with /DW absent = %v, want 1.0 default", got)
+	}
+}
+
 func TestType3NonStandardFontMatrixWidths(t *testing.T) {
 	// A Type 3 font with a non-standard FontMatrix (0.01 => 10x the default 0.001) exercises the glyph-space→text-space
 	// transform for both /Widths and /MissingWidth. /alpha (code 65) has an explicit width; code 66 falls through to
