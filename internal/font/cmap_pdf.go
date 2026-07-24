@@ -42,11 +42,13 @@ type cidRangeEntry struct {
 }
 
 // bfEntry maps the code range [lo, hi] to target strings: dst for a contiguous mapping (the last UTF-16 code unit
-// increments across the range), dstArray for an explicit per-code list.
+// increments across the range), dstArray for an explicit per-code list. trimmed carries the increment the codes clipped
+// off a contiguous entry's front by sortRanges already consumed, so dst stays the string the CMap wrote for lo.
 type bfEntry struct {
 	dst      []byte
 	dstArray [][]byte
 	lo, hi   uint32
+	trimmed  uint16
 	nBytes   uint8
 }
 
@@ -138,7 +140,35 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 		}
 		operands = operands[:0]
 	}
+	cm.sortRanges()
 	return cm
+}
+
+// sortRanges leaves the code→CID and bf lists sorted by starting code and non-overlapping, so cid and bfString can
+// binary search them instead of walking from the start. Both run once per glyph shown — Font.Width and Font.GID consult
+// cid, Font.Unicode consults bfString — and parsing accepts up to maxCMapRanges entries in each list, so a linear scan
+// costs O(glyphs × ranges) on a text-heavy page using a large embedded CMap or /ToUnicode. The /W and /W2 lists already
+// get exactly this treatment for the same reason (see disjointCIDRanges).
+//
+// Overlap is malformed: ISO 32000-2 9.7.5.3 maps a code through one entry. It resolves as it does for /W — the
+// contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie — which
+// matches what the former linear scan returned for every case except a later entry that also starts lower.
+func (cm *cmapPDF) sortRanges() {
+	cm.cids = disjointCIDRanges(cm.cids, func(r *cidRangeEntry) (uint32, uint32) { return r.lo, r.hi },
+		func(r *cidRangeEntry, lo uint32) {
+			r.cid += lo - r.lo
+			r.lo = lo
+		})
+	cm.bf = disjointCIDRanges(cm.bf, func(e *bfEntry) (uint32, uint32) { return e.lo, e.hi },
+		func(e *bfEntry, lo uint32) {
+			off := lo - e.lo
+			if e.dstArray != nil {
+				e.dstArray = e.dstArray[off:] // hi is bounded by the array's length, so the clipped codes are its front.
+			} else {
+				e.trimmed += uint16(off)
+			}
+			e.lo = lo
+		})
 }
 
 // codeToken converts a hex-string token to (value, byte length); code strings longer than 4 bytes are invalid.
@@ -250,6 +280,15 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 		e := bfEntry{lo: lo, hi: hi, nBytes: nLo}
 		switch {
 		case arrayDst != nil:
+			// The array supplies one target per code, so its length — not hi — bounds what the entry can map. Clamping
+			// here keeps the codes past the array's end available to a later overlapping entry, which is what the former
+			// linear scan gave them by falling through, and lets bfString index the array without a bounds check.
+			if len(arrayDst) == 0 {
+				return
+			}
+			if uint32(len(arrayDst))-1 < hi-lo {
+				e.hi = lo + uint32(len(arrayDst)) - 1
+			}
 			e.dstArray = arrayDst
 		case len(pending) == need && pending[need-1].Kind == cos.TokenString:
 			e.dst = append([]byte(nil), pending[need-1].Bytes...)
@@ -356,9 +395,8 @@ func (cm *cmapPDF) cid(code uint32) uint32 {
 		if c.identity {
 			return code & 0xFFFF
 		}
-		for i := range c.cids {
-			r := &c.cids[i]
-			if code >= r.lo && code <= r.hi {
+		if i := findCIDRange(c.cids, func(r *cidRangeEntry) uint32 { return r.lo }, code); i >= 0 {
+			if r := &c.cids[i]; code <= r.hi {
 				return r.cid + (code - r.lo)
 			}
 		}
@@ -369,20 +407,19 @@ func (cm *cmapPDF) cid(code uint32) uint32 {
 // bfString maps a code to its bf target string (ToUnicode), decoding UTF-16BE; "" when unmapped.
 func (cm *cmapPDF) bfString(code uint32) string {
 	for c := cm; c != nil; c = c.base {
-		for i := range c.bf {
-			e := &c.bf[i]
-			if code < e.lo || code > e.hi {
-				continue
-			}
-			idx := code - e.lo
-			if e.dstArray != nil {
-				if idx < uint32(len(e.dstArray)) {
-					return utf16BEToString(e.dstArray[idx], 0)
-				}
-				continue
-			}
-			return utf16BEToString(e.dst, uint16(idx))
+		i := findCIDRange(c.bf, func(e *bfEntry) uint32 { return e.lo }, code)
+		if i < 0 {
+			continue
 		}
+		e := &c.bf[i]
+		if code > e.hi {
+			continue
+		}
+		idx := code - e.lo
+		if e.dstArray != nil {
+			return utf16BEToString(e.dstArray[idx], 0)
+		}
+		return utf16BEToString(e.dst, uint16(idx)+e.trimmed)
 	}
 	return ""
 }

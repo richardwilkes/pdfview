@@ -283,10 +283,11 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 		})
 }
 
-// disjointCIDRanges sorts /W or /W2 entries by starting CID and trims away any overlap, leaving a strictly increasing,
-// non-overlapping list that cidWidth and cidVMetrics can binary search rather than walking from the start for every
-// glyph shown — a CJK CIDFont routinely carries thousands of entries, and parsing accepts up to maxCMapRanges. span
-// reports an entry's inclusive CID bounds and clipTo advances its start (dropping the shadowed leading widths).
+// disjointCIDRanges sorts /W, /W2 or CMap entries by starting CID (or character code) and trims away any overlap,
+// leaving a strictly increasing, non-overlapping list that cidWidth, cidVMetrics, cid and bfString can binary search
+// rather than walking from the start for every glyph shown — a CJK CIDFont routinely carries thousands of entries, and
+// parsing accepts up to maxCMapRanges. span reports an entry's inclusive bounds and clipTo advances its start (dropping
+// the shadowed leading values).
 //
 // Overlap is malformed: ISO 32000-2 9.7.4.3 assigns each CID a single width. The contested span goes to the entry with
 // the lower starting CID, and the earlier array entry breaks a tie, which matches what the former linear scan returned

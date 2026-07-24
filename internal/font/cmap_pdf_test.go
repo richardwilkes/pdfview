@@ -10,6 +10,8 @@
 package font
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -384,6 +386,109 @@ func TestWArrayIsSearchable(t *testing.T) {
 	} {
 		if w1, vx, vy := v.cidVMetrics(tc.cid, 0.5); w1 != tc.w1 || vx != tc.vx || vy != tc.vy {
 			t.Errorf("cidVMetrics(%d) = %v %v %v, want %v %v %v", tc.cid, w1, vx, vy, tc.w1, tc.vx, tc.vy)
+		}
+	}
+}
+
+// TestCMapRangesAreSearchable covers the sorted, non-overlapping form parseCMap leaves its code→CID and bf lists in so
+// that cid and bfString can binary search: entries arriving out of code order must still resolve, and overlapping
+// entries must be trimmed — with the surviving tail re-based onto the right CID, bfrange increment or array element —
+// rather than left to shadow one another.
+func TestCMapRangesAreSearchable(t *testing.T) {
+	// Deliberately out of code order, with three kinds of overlap: [0010, 0013] partially covers the later-listed
+	// [0012, 0015], [0005, 0008] partially covers the later-listed [0007, 0009], and [0100, 0180] wholly covers
+	// [0150, 0151], which must drop out entirely.
+	cm := parseCMap([]byte(`1 begincodespacerange <0000> <ffff> endcodespacerange
+7 begincidrange
+<0200> <020a> 2000
+<0010> <0013> 100
+<0012> <0015> 500
+<0005> <0008> 800
+<0007> <0009> 700
+<0100> <0180> 9000
+<0150> <0151> 4000
+endcidrange`), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	for i := 1; i < len(cm.cids); i++ {
+		if prev, cur := cm.cids[i-1], cm.cids[i]; cur.lo <= prev.hi {
+			t.Fatalf("cid ranges not sorted and disjoint: %+v then %+v", prev, cur)
+		}
+	}
+	for code, want := range map[uint32]uint32{
+		0x0004: 0, 0x000a: 0, 0x0016: 0, 0x00ff: 0, 0x0181: 0, 0x020b: 0, // Unmapped, around the kept ranges.
+		0x0005: 800, 0x0008: 803, // [0005, 0008] starts lower than [0007, 0009], so it keeps the contested 7 and 8.
+		0x0009: 702,              // The tail of [0007, 0009] survives, re-based onto CID 700 + 2.
+		0x0010: 100, 0x0013: 103, // [0010, 0013] starts lower than [0012, 0015], so it keeps 12 and 13.
+		0x0014: 502, 0x0015: 503, // The re-based tail of [0012, 0015].
+		0x0100: 9000, 0x0150: 9080, 0x0151: 9081, 0x0180: 9128, // [0100, 0180] wins everything [0150, 0151] claimed.
+		0x0200: 2000, 0x020a: 2010, // The entry listed first, now searched last.
+	} {
+		if got := cm.cid(code); got != want {
+			t.Errorf("cid(%#04x) = %d, want %d", code, got, want)
+		}
+	}
+
+	// bf entries get the same treatment. [0020, 0031] partially covers the later-listed contiguous [0030, 0033], whose
+	// surviving tail must keep incrementing from its own start; [0040, 004f] carries a two-element array, so it maps only
+	// [0040, 0041] and the codes past the array's end stay available to the later [0042, 0043]; and [0050, 0055] partially
+	// covers the later-listed array entry [0053, 0056], whose surviving element must be the array's fourth, not its first.
+	cm = parseCMap([]byte(`1 begincodespacerange <0000> <ffff> endcodespacerange
+5 beginbfrange
+<0030> <0033> <0041>
+<0020> <0031> <0061>
+<0053> <0056> [<0041> <0042> <0043> <0044>]
+<0040> <004f> [<0058> <0059>]
+<0042> <0043> <0030>
+<0050> <0055> <0061>
+endbfrange`), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	for i := 1; i < len(cm.bf); i++ {
+		if prev, cur := cm.bf[i-1], cm.bf[i]; cur.lo <= prev.hi {
+			t.Fatalf("bf ranges not sorted and disjoint: %+v then %+v", prev, cur)
+		}
+	}
+	for code, want := range map[uint32]string{
+		0x001f: "", 0x0034: "", 0x0044: "", 0x0057: "", // Unmapped, around the kept ranges.
+		0x0020: "a", 0x0030: "q", 0x0031: "r", // [0020, 0031] starts lower, so it keeps the contested 30 and 31.
+		0x0032: "C", 0x0033: "D", // The tail of [0030, 0033] survives, still incrementing from its own <0041>.
+		0x0040: "X", 0x0041: "Y", // The array bounds the entry: 0042 and beyond fall to the next entry.
+		0x0042: "0", 0x0043: "1",
+		0x0050: "a", 0x0055: "f", // [0050, 0055] starts lower than the array entry [0053, 0056].
+		0x0056: "D", // The tail of [0053, 0056] survives, re-based onto the array's fourth element.
+	} {
+		if got := cm.bfString(code); got != want {
+			t.Errorf("bfString(%#04x) = %q, want %q", code, got, want)
+		}
+	}
+
+	// Many entries, listed high code first, to exercise the search rather than a scan that happens to hit early.
+	const n = 500
+	var sb strings.Builder
+	sb.WriteString("1 begincodespacerange <0000> <ffff> endcodespacerange\n500 begincidrange\n")
+	for i := n - 1; i >= 0; i-- {
+		fmt.Fprintf(&sb, "<%04x> <%04x> %d\n", 4*i, 4*i+1, 1000+i) // Ranges [4i, 4i+1], gaps between.
+	}
+	sb.WriteString("endcidrange")
+	if cm = parseCMap([]byte(sb.String()), 0, nil); cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if len(cm.cids) != n {
+		t.Fatalf("kept %d of %d cid ranges", len(cm.cids), n)
+	}
+	for i := range uint32(n) {
+		want := 1000 + i
+		if got := cm.cid(4 * i); got != want {
+			t.Errorf("cid(%d) = %d, want %d", 4*i, got, want)
+		}
+		if got := cm.cid(4*i + 1); got != want+1 { // The range's second code takes the next CID.
+			t.Errorf("cid(%d) = %d, want %d", 4*i+1, got, want+1)
+		}
+		if got := cm.cid(4*i + 2); got != 0 { // In the gap, so unmapped.
+			t.Errorf("gap cid(%d) = %d, want 0", 4*i+2, got)
 		}
 	}
 }
