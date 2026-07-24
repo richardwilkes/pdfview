@@ -92,12 +92,12 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		}
 		return gray, gw, gh, nil
 	}
-	bpc, err := sub.bitsPerComponent()
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	rowStride := (w*bpc + 7) / 8
+	var bpc, rowStride int
+	validCols := w
 	if isCCITT(codec) {
+		// CCITT fixes bpc at 1 and supplies the column count itself, so — like decodeSamples — do not consult (or
+		// require) /BitsPerComponent here; a soft mask that omits the key must still decode. Rows are byte-aligned at
+		// the decoder's column count, so columns past it (when /Width > /Columns) read as zero samples.
 		var cols int
 		data, cols, err = sub.decodeCCITT(h)
 		if err != nil {
@@ -105,6 +105,15 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		}
 		bpc = 1
 		rowStride = (cols + 7) / 8
+		if cols < validCols {
+			validCols = cols
+		}
+	} else {
+		bpc, err = sub.bitsPerComponent()
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		rowStride = (w*bpc + 7) / 8
 	}
 	plane = make([]byte, w*h)
 	reader := sampleReader{data: data, bpc: bpc}
@@ -123,7 +132,13 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	for y := range h {
 		reader.seek(y * rowStride)
 		for x := range w {
-			plane[y*w+x] = lut[reader.next()]
+			// Columns past the decoder's count read as zero samples (see decodeSamples); the 16-bit path above never
+			// applies to CCITT, so only this LUT loop needs the guard.
+			sample := uint32(0)
+			if x < validCols {
+				sample = reader.next()
+			}
+			plane[y*w+x] = lut[sample]
 		}
 	}
 	return plane, w, h, nil

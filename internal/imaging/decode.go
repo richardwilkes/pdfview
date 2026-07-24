@@ -23,6 +23,7 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	data := dec.data
 	rowStride := 0
 	bpc := 1
+	validCols := w
 	if isCCITT(dec.codec) {
 		// CCITT output is always one bit per sample; rows are byte-aligned at the decoder's column count, which may
 		// differ from /Width (extra columns are dropped, missing ones read as zero samples). The codec fixes bpc at 1
@@ -35,6 +36,9 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 			return nil, err
 		}
 		rowStride = (cols + 7) / 8
+		if cols < validCols {
+			validCols = cols
+		}
 	} else {
 		var err error
 		bpc, err = dec.bitsPerComponent()
@@ -71,7 +75,14 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		reader.seek(y * rowStride)
 		for x := range w {
 			for c := range ncomp {
-				samples[c] = reader.next()
+				// Columns past the decoder's own count (CCITT with /Width > /Columns) are not present in the row's
+				// byte-aligned data; reading them would consume padding and then the next row's bits, so they read as
+				// zero samples per the contract above.
+				if x < validCols {
+					samples[c] = reader.next()
+				} else {
+					samples[c] = 0
+				}
 			}
 			var out color.NRGBA
 			if lut != nil {
@@ -213,6 +224,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	}
 	data := dec.data
 	rowStride := (w + 7) / 8
+	validCols := w
 	switch {
 	case isCCITT(dec.codec):
 		var cols int
@@ -222,6 +234,9 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 			return nil, err
 		}
 		rowStride = (cols + 7) / 8
+		if cols < validCols {
+			validCols = cols
+		}
 	case isDCT(dec.codec):
 		gray, gw, gh, err := dec.dctGrayPlane()
 		if err != nil || gw != w || gh != h {
@@ -240,7 +255,13 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	for y := range h {
 		reader.seek(y * rowStride)
 		for x := range w {
-			if (reader.next() == 0) != invert {
+			// Columns past the decoder's count read as zero samples (see decodeSamples); crossing the byte-aligned
+			// row boundary into padding or the next row would otherwise corrupt the stencil.
+			sample := uint32(0)
+			if x < validCols {
+				sample = reader.next()
+			}
+			if (sample == 0) != invert {
 				alpha[y*w+x] = 255
 			}
 		}

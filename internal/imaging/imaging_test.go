@@ -30,6 +30,12 @@ const (
 	keyHeight     cos.Name = "Height"
 	keyMask       cos.Name = "Mask"
 	keyColumns             = "Columns"
+
+	keyBitsPerComponent cos.Name = "BitsPerComponent"
+	keySMask            cos.Name = "SMask"
+	keyImageMask        cos.Name = "ImageMask"
+	keyFilter           cos.Name = "Filter"
+	keyDecodeParms      cos.Name = "DecodeParms"
 )
 
 // testDoc returns a minimal document for Resolve calls; the image dictionaries and mask streams in these tests are
@@ -277,14 +283,14 @@ func TestSMaskComposite(t *testing.T) {
 	d := testDoc(t)
 	smask := &cos.Stream{
 		Dict: cos.Dict{
-			keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), "BitsPerComponent": cos.Integer(8),
+			keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), keyBitsPerComponent: cos.Integer(8),
 			keyColorSpace: cos.Name("DeviceGray"),
 		},
 		Raw: []byte{0x00, 0x80},
 	}
 	dict := cos.Dict{
 		"W": cos.Integer(4), "H": cos.Integer(2), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
-		"SMask": smask,
+		keySMask: smask,
 	}
 	payload := bytes.Repeat([]byte{200, 100, 50}, 8)
 	img, err := DecodeInline(d, dict, payload, nil)
@@ -320,7 +326,7 @@ func TestSMaskComposite(t *testing.T) {
 func TestStencilMaskEntry(t *testing.T) {
 	d := testDoc(t)
 	mask := &cos.Stream{
-		Dict: cos.Dict{keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), "ImageMask": cos.Boolean(true)},
+		Dict: cos.Dict{keyWidth: cos.Integer(2), keyHeight: cos.Integer(1), keyImageMask: cos.Boolean(true)},
 		Raw:  []byte{0b01000000},
 	}
 	dict := cos.Dict{
@@ -428,19 +434,149 @@ func TestCCITTMissingBitsPerComponent(t *testing.T) {
 	}
 }
 
+func TestCCITTWidthExceedsColumns(t *testing.T) {
+	d := testDoc(t)
+	// When /Width exceeds the CCITT /Columns count, the extra columns are not present in each byte-aligned decoded row;
+	// they must read as zero samples (blank), not spill over from the row's padding bits or bleed in from the following
+	// row. An empty payload decodes (via the truncation-fill path) to an all-white bitmap, so every present column is
+	// white (255) and every missing column must come back black (0) under the default DeviceGray mapping.
+	const w, h, cols = 12, 2, 8
+	dict := cos.Dict{
+		"W": cos.Integer(w), "H": cos.Integer(h), keyBPC: cos.Integer(1), "CS": cos.Name("G"),
+		"F":  cos.Name("CCF"),
+		"DP": cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(cols)},
+	}
+	img, err := DecodeInline(d, dict, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := range h {
+		for x := range w {
+			want := byte(255) // Present columns: the all-white fill.
+			if x >= cols {
+				want = 0 // Missing columns read as zero samples → black.
+			}
+			if got := img.Pix[(y*w+x)*4]; got != want {
+				t.Fatalf("pixel (%d,%d): got %d want %d", x, y, got, want)
+			}
+		}
+	}
+}
+
+func TestCCITTStencilMaskWidthExceedsColumns(t *testing.T) {
+	d := testDoc(t)
+	// The same missing-column contract for a CCITT stencil /Mask. A zero stencil sample paints the base (visible); the
+	// all-white fill masks out every present column, so only the missing columns past /Columns — read as zero samples —
+	// stay visible.
+	const w, h, cols = 12, 2, 8
+	mask := &cos.Stream{
+		Dict: cos.Dict{
+			keyWidth: cos.Integer(w), keyHeight: cos.Integer(h), keyImageMask: cos.Boolean(true),
+			keyFilter:      cos.Name("CCITTFaxDecode"),
+			keyDecodeParms: cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(cols)},
+		},
+	}
+	dict := cos.Dict{
+		"W": cos.Integer(w), "H": cos.Integer(h), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
+		keyMask: mask,
+	}
+	img, err := DecodeInline(d, dict, bytes.Repeat([]byte{200, 100, 50}, w*h), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := range h {
+		for x := range w {
+			want := byte(0) // Present columns: the white stencil sample masks the base out.
+			if x >= cols {
+				want = 255 // Missing columns read as zero samples → painted (visible).
+			}
+			if got := img.Pix[(y*w+x)*4+3]; got != want {
+				t.Fatalf("alpha (%d,%d): got %d want %d", x, y, got, want)
+			}
+		}
+	}
+}
+
+func TestCCITTSMaskWidthExceedsColumns(t *testing.T) {
+	d := testDoc(t)
+	// The same missing-column contract for a CCITT /SMask: columns past /Columns read as zero samples → alpha 0
+	// (transparent), while the present columns come back from the all-white fill as alpha 255 (opaque).
+	const w, h, cols = 12, 2, 8
+	smask := &cos.Stream{
+		Dict: cos.Dict{
+			keyWidth: cos.Integer(w), keyHeight: cos.Integer(h),
+			keyBitsPerComponent: cos.Integer(1), keyColorSpace: cos.Name("DeviceGray"),
+			keyFilter:      cos.Name("CCITTFaxDecode"),
+			keyDecodeParms: cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(cols)},
+		},
+	}
+	dict := cos.Dict{
+		"W": cos.Integer(w), "H": cos.Integer(h), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
+		keySMask: smask,
+	}
+	img, err := DecodeInline(d, dict, bytes.Repeat([]byte{200, 100, 50}, w*h), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := range h {
+		for x := range w {
+			want := byte(255)
+			if x >= cols {
+				want = 0
+			}
+			if got := img.Pix[(y*w+x)*4+3]; got != want {
+				t.Fatalf("alpha (%d,%d): got %d want %d", x, y, got, want)
+			}
+		}
+	}
+}
+
+func TestCCITTSMaskMissingBitsPerComponent(t *testing.T) {
+	d := testDoc(t)
+	// A CCITT /SMask that omits /BitsPerComponent must still decode and apply — the codec fixes bpc at 1 — rather than
+	// being rejected and silently dropped (the /Mask and raw-sample paths already tolerate the omission). /Decode [1 0]
+	// flips the all-white fill to alpha 0, so an applied mask leaves the base fully transparent while a dropped mask
+	// would leave it opaque.
+	const w, h = 2, 2
+	smask := &cos.Stream{
+		Dict: cos.Dict{
+			keyWidth: cos.Integer(w), keyHeight: cos.Integer(h), keyColorSpace: cos.Name("DeviceGray"),
+			"Decode":       cos.Array{cos.Integer(1), cos.Integer(0)},
+			keyFilter:      cos.Name("CCITTFaxDecode"),
+			keyDecodeParms: cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(w)},
+		},
+	}
+	dict := cos.Dict{
+		"W": cos.Integer(w), "H": cos.Integer(h), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
+		keySMask: smask,
+	}
+	img, err := DecodeInline(d, dict, bytes.Repeat([]byte{200, 100, 50}, w*h), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !img.HasAlpha {
+		t.Fatal("CCITT SMask without /BitsPerComponent was dropped (image stayed opaque)")
+	}
+	for i := range w * h {
+		if got := img.Pix[i*4+3]; got != 0 {
+			t.Fatalf("pixel %d alpha: got %d want 0 (mask should be fully transparent)", i, got)
+		}
+	}
+}
+
 func TestMaskDimensionsBounded(t *testing.T) {
 	d := testDoc(t)
 	// An /SMask whose Width×Height overflows int64 must be rejected without panicking; the base image stays opaque.
 	smask := &cos.Stream{
 		Dict: cos.Dict{
 			keyWidth: cos.Integer(1 << 40), keyHeight: cos.Integer(1 << 40),
-			"BitsPerComponent": cos.Integer(8), keyColorSpace: cos.Name("DeviceGray"),
+			keyBitsPerComponent: cos.Integer(8), keyColorSpace: cos.Name("DeviceGray"),
 		},
 		Raw: []byte{0x00},
 	}
 	dict := cos.Dict{
 		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"),
-		"SMask": smask,
+		keySMask: smask,
 	}
 	img, err := DecodeInline(d, dict, []byte{200, 100, 50, 200, 100, 50}, nil)
 	if err != nil {
@@ -451,7 +587,7 @@ func TestMaskDimensionsBounded(t *testing.T) {
 	}
 	// The same overflow guard covers a stencil /Mask stream.
 	mask := &cos.Stream{
-		Dict: cos.Dict{keyWidth: cos.Integer(1 << 40), keyHeight: cos.Integer(1 << 40), "ImageMask": cos.Boolean(true)},
+		Dict: cos.Dict{keyWidth: cos.Integer(1 << 40), keyHeight: cos.Integer(1 << 40), keyImageMask: cos.Boolean(true)},
 		Raw:  []byte{0x00},
 	}
 	dict = cos.Dict{
