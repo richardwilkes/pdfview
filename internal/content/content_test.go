@@ -58,14 +58,26 @@ type call struct {
 	knockout bool
 }
 
+// textCall is one recorded text device call, kept apart from calls so adding text assertions to a test does not shift
+// the path/image call indices every other test indexes into.
+type textCall struct {
+	op     string
+	glyphs int
+}
+
 // recorder records device calls and enforces the push/pop balance contract.
 type recorder struct {
 	t     *testing.T
 	calls []call
+	texts []textCall
 	depth int
 }
 
 func (r *recorder) add(c *call) { r.calls = append(r.calls, *c) }
+
+func (r *recorder) addText(op string, run *device.TextRun) {
+	r.texts = append(r.texts, textCall{op: op, glyphs: len(run.Glyphs)})
+}
 
 func (r *recorder) FillPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix, paint device.Paint) {
 	r.add(&call{op: opFill, path: p.Clone(), evenOdd: evenOdd, ctm: ctm, paint: paint})
@@ -93,16 +105,20 @@ func (r *recorder) PopClip() {
 	r.add(&call{op: opPopClip})
 }
 
-func (r *recorder) FillText(*device.TextRun, device.Paint)                      {}
-func (r *recorder) StrokeText(*device.TextRun, *gfx.StrokeParams, device.Paint) {}
-func (r *recorder) ClipText(*device.TextRun)                                    {}
+func (r *recorder) FillText(run *device.TextRun, _ device.Paint) { r.addText("filltext", run) }
+
+func (r *recorder) StrokeText(run *device.TextRun, _ *gfx.StrokeParams, _ device.Paint) {
+	r.addText("stroketext", run)
+}
+
+func (r *recorder) ClipText(run *device.TextRun) { r.addText("cliptext", run) }
 
 func (r *recorder) EndTextClip() {
 	r.depth++
 	r.add(&call{op: "endtextclip"})
 }
 
-func (r *recorder) IgnoreText(*device.TextRun) {}
+func (r *recorder) IgnoreText(run *device.TextRun) { r.addText("ignoretext", run) }
 
 func (r *recorder) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 	r.add(&call{op: opFillImage, img: img, ctm: ctm, alpha: alpha})

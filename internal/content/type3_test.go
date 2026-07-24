@@ -165,3 +165,40 @@ func TestType3ClipModeDegrades(t *testing.T) {
 		t.Errorf("fills = %d, want 1", n)
 	}
 }
+
+// TestType3NonPaintingModesStayExtractable pins that the two Type 3 render modes that paint nothing — 3 (invisible) and
+// 7 (clip-only) — still report their run to the device as IgnoreText, so structured text keeps them searchable. The
+// painting modes are checked alongside to show mode 7 is the only one that used to fall through to no device call at
+// all.
+func TestType3NonPaintingModesStayExtractable(t *testing.T) {
+	d := type3PDF(t)
+	res := resourcesOf(t, d)
+	for _, tc := range []struct {
+		want     string
+		mode     int
+		procRuns bool
+	}{
+		{mode: 0, want: "filltext", procRuns: true},
+		{mode: 3, want: "ignoretext"},
+		{mode: 4, want: "filltext", procRuns: true},
+		{mode: 7, want: "ignoretext"},
+	} {
+		t.Run(fmt.Sprintf("Tr%d", tc.mode), func(t *testing.T) {
+			rec := run(t, d, res, fmt.Sprintf("BT %d Tr /T3 10 Tf (A) Tj ET", tc.mode))
+			if len(rec.texts) != 1 {
+				t.Fatalf("text calls = %+v, want exactly one %s", rec.texts, tc.want)
+			}
+			if got := rec.texts[0]; got.op != tc.want || got.glyphs != 1 {
+				t.Errorf("text call = %+v, want {op: %s, glyphs: 1}", got, tc.want)
+			}
+			// A non-painting mode must not run the charprocs either: nothing is drawn for modes 3 and 7.
+			want := 0
+			if tc.procRuns {
+				want = 1
+			}
+			if n := len(rec.byOp(opFill)); n != want {
+				t.Errorf("charproc fills = %d, want %d", n, want)
+			}
+		})
+	}
+}

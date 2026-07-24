@@ -309,9 +309,11 @@ func (in *interp) emitRun(run *device.TextRun) {
 // blocks the proc's own color operators. The run itself still reaches the device (FillText draws nothing for a font
 // without outlines) so the structured-text device sees Type 3 text like any other. Type 3 text clipping (modes 4-7) is
 // not supported: the run clips nothing rather than everything, the least-wrong degrade until a corpus file demands
-// proc-rendered clip masks.
+// proc-rendered clip masks. Mode 7 (clip-only) paints nothing either, so it is reported as IgnoreText — no proc runs and
+// no clip accumulates, but the run still reaches the device and stays searchable, matching what ClipText gives the
+// non-Type-3 path.
 func (in *interp) emitType3Run(run *device.TextRun, paint bool, mode int) {
-	if mode == 3 {
+	if mode == 3 || mode == 7 {
 		in.dev.IgnoreText(run)
 		return
 	}
