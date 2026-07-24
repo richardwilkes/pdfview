@@ -360,6 +360,38 @@ func TestSpacedShowKeepsOperandBacking(t *testing.T) {
 	}
 }
 
+// TestInlineDictValuelessKeyBeforeID verifies parseInlineDict terminates the dictionary when a name key has no value and
+// runs straight into the ID marker. Before the fix, the ID keyword was handed to parseOperand, which failed and silently
+// consumed it; the loop then scanned into the binary payload, hit EOF, drew nothing, and left the lexer at end-of-stream
+// so all trailing page content was discarded. The image must still decode and the trailing fill must still paint.
+func TestInlineDictValuelessKeyBeforeID(t *testing.T) {
+	// /Junk carries no value and is immediately followed by ID; the four gray samples decode as a 2x2 image.
+	rec := run(t, nil, nil, "BI /W 2 /H 2 /BPC 8 /CS /G /Junk ID \x00\x01\x02\x03 EI 0 0 1 1 re f")
+	wantOps(t, rec, opFillImage, opFill)
+	if img := rec.calls[0].img; img.Width != 2 || img.Height != 2 || len(img.Pix) != 16 {
+		t.Fatalf("inline image decoded wrong: %+v", img)
+	}
+	if rec.calls[1].path.Points[2] != (gfx.Point{X: 1, Y: 1}) {
+		t.Error("trailing content after a valueless-key inline image was discarded")
+	}
+}
+
+// TestInlineLengthOverflowGuarded verifies isolatePayload does not trust a /L whose value, added to pos, would overflow
+// int on a 32-bit build and slip past the pos+length <= len(data) bound into an out-of-range slice. A length beyond the
+// available data is rejected and the payload is delimited by scanning for EI instead. (On 64-bit the sum cannot
+// overflow, but the guard's fall-back-to-scan behavior is identical and testable on any platform.)
+func TestInlineLengthOverflowGuarded(t *testing.T) {
+	data := []byte("\x00\x01\x02 EI trailing")
+	dict := cos.Dict{"L": cos.Integer(1<<31 - 1)} // A length far past len(data); the guard must reject it.
+	payload, end := isolatePayload(dict, data, 0)
+	if string(payload) != "\x00\x01\x02" {
+		t.Fatalf("payload = %q, want the EI-delimited bytes", payload)
+	}
+	if want := len("\x00\x01\x02 EI"); end != want {
+		t.Fatalf("end = %d, want %d (just past EI)", end, want)
+	}
+}
+
 // TestSpacedShowOperands verifies the " operator still takes aw and ac from the first two operands and the shown string
 // from the third, moving to the next line before showing.
 func TestSpacedShowOperands(t *testing.T) {

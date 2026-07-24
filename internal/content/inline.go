@@ -59,6 +59,12 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 			if valTok.Kind == cos.TokenEOF {
 				return nil, false
 			}
+			// A key with no value that runs straight into ID (e.g. "BI /W 4 /IM ID<binary>") must terminate the
+			// dictionary here; parseOperand cannot make an operand from the ID keyword and would silently swallow it,
+			// missing the payload marker and desynchronizing the tokenizer into the binary payload.
+			if valTok.Kind == cos.TokenKeyword && string(valTok.Bytes) == "ID" {
+				return dict, true
+			}
 			if obj, objOK := parseOperand(lex, valTok, 0); objOK {
 				dict[key] = obj
 			}
@@ -70,7 +76,10 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 // /Length) delimits the payload without inspection when the claimed extent lands at an EI; otherwise the payload ends
 // at the first plausible EI keyword, with the single separating whitespace byte before it excluded.
 func isolatePayload(dict cos.Dict, data []byte, pos int) (payload []byte, end int) {
-	if length := inlineLength(dict); length >= 0 && pos+length <= len(data) {
+	// length can be up to 1<<31-1, so pos+length is computed as length <= len(data)-pos to avoid an int overflow on
+	// 32-bit builds (GOARCH=386/arm) that would wrap negative, slip past the bound, and index data[pos:pos+length] out
+	// of range. pos <= len(data) always holds (it is a lexer offset), so len(data)-pos is non-negative.
+	if length := inlineLength(dict); length >= 0 && pos <= len(data) && length <= len(data)-pos {
 		if eiEnd, ok := eiAt(data, pos+length); ok {
 			return data[pos : pos+length], eiEnd
 		}
