@@ -14,7 +14,6 @@ import (
 
 	"github.com/richardwilkes/canvas/canvas"
 	"github.com/richardwilkes/canvas/colorcore"
-	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/imagecore"
 	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/raster"
@@ -168,7 +167,10 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 // (see the store package comment, pinned by TestCacheBudget). Feeding hit rate or retention back into the choice would
 // break exactly that, since a blit and the merged-outline fill it replaces agree only within ±1 of compositing
 // rounding, so a cache-driven fallback would make a page's pixels a function of its budget. The cost of a miss is
-// therefore kept as low as it can be (a lazily wrapped image; a reused scratch surface) rather than avoided.
+// therefore kept as low as it can be rather than avoided: everything a miss touches beyond the coverage plane it must
+// produce — the scratch surface, its clear, the transformed outline path, the fill paint, the canvas image wrapper —
+// is reused, deferred or done in place, leaving the analytic-AA fill (which the merged outline would pay anyway) as
+// nearly the whole of it.
 func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy float32) *glyphMask {
 	key := glyphMaskKey{font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy}
 	if d.store != nil {
@@ -241,26 +243,40 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	if surf == nil {
 		return &glyphMask{}, 96
 	}
-	c := surf.Canvas()
-	// Clear only the region this mask uses (the scratch surface is sized for the largest glyph seen).
-	count := c.Save()
-	c.ClipRect(geom.RectWH(float32(w), float32(h)), raster.ClipIntersect, false)
-	c.Clear(colorcore.Transparent)
-	c.RestoreToCount(count)
+	pm := surf.Pixmap()
+	if pm == nil || int(pm.Width) < w || int(pm.Height) < h {
+		// No backing store, or one smaller than maskScratchSurface was asked for: degrade to the outline fill rather
+		// than zeroing or reading back out of bounds.
+		return &glyphMask{}, 96
+	}
+	// Zero just the w×h corner this mask uses (the scratch surface is sized for the largest glyph seen) straight in the
+	// backing store. Clearing through the canvas — save, clip to the region, Clear, restore — allocated a paint and a
+	// blend blitter per miss and ran the general draw pipeline to write constant zeroes; a direct pixmap write is the
+	// same store compositeMask already performs, and nothing ever snapshots this surface, so there is no copy-on-write
+	// state the canvas would need to see invalidated.
+	for row := range h {
+		clear(pm.Pix[row*int(pm.RowPixels):][:w])
+	}
 	local.E -= float32(mx0)
 	local.F -= float32(my0)
 	m := matrix(local)
-	fill := path.New()
-	fill.AddPathMatrix(gp, &m, path.AddPathAppend)
-	paint := canvas.NewPaint()
-	paint.Color = colorcore.White
-	paint.AntiAlias = true
-	c.DrawPath(fill, paint)
-	// White premultiplied by coverage stores the coverage in every channel; take the alpha byte (R|G<<8|B<<16|A<<24).
-	plane := coveragePlane(surf.Pixmap(), w, h)
-	if plane == nil {
-		return &glyphMask{}, 96
+	// One scratch path and one paint, reused by every miss: both were allocated fresh per glyph, and with the outline
+	// storage retained across rewinds the transformed copy costs only the points it holds. The scratch cannot be shared
+	// out from under itself — the fill below calls into canvas, never back into the device — and gp is always a cached
+	// glyph-space outline, never this path.
+	if d.maskPath == nil {
+		d.maskPath = path.New()
+		d.maskPath.SetVolatile(true) // Rebuilt for every glyph; nothing downstream should cache it.
+		d.maskPaint = canvas.NewPaint()
+		d.maskPaint.Color = colorcore.White
+		d.maskPaint.AntiAlias = true
 	}
+	fill := d.maskPath
+	fill.Rewind() // Restores the winding fill and empty storage a fresh path would have had.
+	fill.AddPathMatrix(gp, &m, path.AddPathAppend)
+	surf.Canvas().DrawPath(fill, d.maskPaint)
+	// White premultiplied by coverage stores the coverage in every channel; take the alpha byte (R|G<<8|B<<16|A<<24).
+	plane := coveragePlane(pm, w, h)
 	// The canvas image stays unbuilt: the direct pixmap composite reads plane straight and is the route nearly every
 	// glyph takes, so wrapping the plane here would allocate a wrapper per miss that nothing reads (image() builds one
 	// the first time a glyph actually goes through DrawImage, and the blit skips the glyph if that ever fails). The
@@ -269,8 +285,9 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 }
 
 // coveragePlane extracts the w×h alpha coverage from a white-on-transparent scratch pixmap into a tightly packed
-// Alpha8 plane. It returns nil when pm is nil, so the caller degrades to the outline fill rather than panicking — the
-// same nil guard compositeMask and Pixels apply before touching a surface's backing store.
+// Alpha8 plane. It returns nil rather than panicking when pm is nil — the same nil guard compositeMask and Pixels
+// apply before touching a surface's backing store, and the one renderGlyphMask makes before it zeroes the region it is
+// about to read back.
 func coveragePlane(pm *raster.Pixmap, w, h int) []byte {
 	if pm == nil {
 		return nil

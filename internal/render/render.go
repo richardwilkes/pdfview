@@ -56,8 +56,11 @@ type Device struct {
 	glyphPaths map[glyphKey]*path.Path
 	// glyphMasks caches rendered glyph coverage planes for this render when no store is wired (glyphmask.go).
 	glyphMasks map[glyphMaskKey]*glyphMask
-	// maskScratch is the reusable surface glyph coverage planes render into (glyphmask.go).
+	// maskScratch is the reusable surface glyph coverage planes render into, maskPath the reusable path each glyph
+	// outline is transformed into and maskPaint the fixed white antialiased paint that fills it (glyphmask.go).
 	maskScratch *surface.Surface
+	maskPath    *path.Path
+	maskPaint   *canvas.Paint
 	// meshScratch is the reusable path each mesh-shading triangle is built in (shading.go).
 	meshScratch *path.Path
 	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.

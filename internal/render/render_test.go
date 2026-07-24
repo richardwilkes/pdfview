@@ -224,7 +224,7 @@ func TestHairline(t *testing.T) {
 
 // helveticaFont loads a substituted standard-14 Helvetica through the real font pipeline (rendering via the bundled
 // Liberation Sans), giving the text tests genuine outlines without fixture files.
-func helveticaFont(t *testing.T) *font.Font {
+func helveticaFont(t testing.TB) *font.Font {
 	t.Helper()
 	var b strings.Builder
 	b.WriteString("%PDF-1.7\n1 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
@@ -246,7 +246,7 @@ func helveticaFont(t *testing.T) *font.Font {
 }
 
 // glyphRun builds a one-glyph run for code, with the glyph-space em box mapped to device space by trm.
-func glyphRun(t *testing.T, f *font.Font, code uint32, trm, ctm gfx.Matrix) *device.TextRun {
+func glyphRun(t testing.TB, f *font.Font, code uint32, trm, ctm gfx.Matrix) *device.TextRun {
 	t.Helper()
 	gid := f.GID(code)
 	if gid == 0 {
@@ -576,6 +576,102 @@ func delta(a, b uint8) int {
 	return int(b - a)
 }
 
+// TestGlyphMaskScratchReuseIsClean pins that the per-miss scratch the mask renderer reuses across glyphs — the coverage
+// surface, the transformed outline path and the fill paint — carries nothing from the glyph before it. A glyph rendered
+// after a much larger, ink-heavy one must come out byte-identical to the same glyph on a device that has drawn nothing
+// else: a clear that misses part of the region it is about to read back, or an outline path left un-rewound, would show
+// up as stray coverage in the second render. Reset drops the mask cache but keeps the scratch, so the second glyph is
+// still a miss and still lands on the storage the first one dirtied.
+func TestGlyphMaskScratchReuseIsClean(t *testing.T) {
+	f := helveticaFont(t)
+	small := gfx.Matrix{A: 9.31, D: -9.31}.Mul(gfx.Translate(4.27, 26.53)) // fractional phase: always a miss
+	pixels := func(d *Device) []byte {
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	alone := newDevice(t, 32, 32)
+	alone.FillText(glyphRun(t, f, 'o', small, gfx.Identity()), redPaint())
+	want := pixels(alone)
+	after := newDevice(t, 32, 32)
+	// 'W' at 30 px is both wider and taller than the 9 px 'o', so it grows the scratch surface well past what the 'o'
+	// needs and leaves ink across it.
+	big := gfx.Matrix{A: 30.17, D: -30.17}.Mul(gfx.Translate(0.41, 30.29))
+	after.FillText(glyphRun(t, f, 'W', big, gfx.Identity()), redPaint())
+	after.Reset()
+	after.FillText(glyphRun(t, f, 'o', small, gfx.Identity()), redPaint())
+	got := pixels(after)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("glyph rendered after a larger one differs at byte %d: %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+// TestGlyphMaskMissAllocationsBounded pins the cost of a coverage-cache miss. A budget too small to retain the planes
+// makes every glyph of every render a miss, so the miss has to stay cheap: what it may allocate is the plane itself,
+// the mask that owns it and the cache's own bookkeeping. The scratch surface, the region clear, the transformed outline
+// path and the fill paint are reused or done in place and must not show up here — each of those was one or two
+// allocations per glyph before, and a regression that restores any of them lifts the count past maskMissAllocCeiling.
+func TestGlyphMaskMissAllocationsBounded(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 256, 64)
+	codes := []uint32{'H', 'e', 'l', 'o', 'W', 'r', 'd', 'A'}
+	glyphs := make([]device.Glyph, len(codes))
+	run := &device.TextRun{Font: f, Glyphs: glyphs, CTM: gfx.Identity()}
+	n := 0
+	draw := func() {
+		for i, code := range codes {
+			gid := f.GID(code)
+			if gid == 0 {
+				t.Fatalf("code %d unmapped", code)
+			}
+			// A phase no earlier pass used keys a fresh cache entry, so every glyph here misses.
+			trm := gfx.Matrix{A: 11, D: -11, E: float32(i)*14 + float32(n%31)/31, F: 40 + float32(n%17)/17}
+			glyphs[i] = device.Glyph{Trm: trm, GID: gid, Code: code}
+		}
+		d.FillText(run, redPaint())
+		d.glyphMasks = nil // Stand in for a budget that retains nothing, without steering the path taken.
+		n++
+	}
+	draw() // Warm the glyph-outline cache, which is not what is being measured here.
+	if got := testing.AllocsPerRun(50, draw) / float64(len(codes)); got > maskMissAllocCeiling {
+		t.Fatalf("a glyph mask miss allocated %.1f times, want at most %d", got, maskMissAllocCeiling)
+	}
+}
+
+// BenchmarkGlyphMaskMiss measures a coverage-cache miss end to end — outline fill into the scratch surface, coverage
+// copy, composite — which is what every glyph costs under a budget too small to retain the planes.
+func BenchmarkGlyphMaskMiss(b *testing.B) {
+	f := helveticaFont(b)
+	d, err := New(256, 64)
+	if err != nil {
+		b.Fatal(err)
+	}
+	codes := []uint32{'H', 'e', 'l', 'o', 'W', 'r', 'd', 'A'}
+	gids := make([]uint32, len(codes))
+	for i, code := range codes {
+		if gids[i] = f.GID(code); gids[i] == 0 {
+			b.Fatalf("code %d unmapped", code)
+		}
+	}
+	glyphs := make([]device.Glyph, len(codes))
+	run := &device.TextRun{Font: f, Glyphs: glyphs, CTM: gfx.Identity()}
+	b.ReportAllocs()
+	n := 0
+	for b.Loop() {
+		for i := range codes {
+			trm := gfx.Matrix{A: 11, D: -11, E: float32(i)*14 + float32(n%31)/31, F: 40 + float32(n%17)/17}
+			glyphs[i] = device.Glyph{Trm: trm, GID: gids[i], Code: codes[i]}
+		}
+		d.FillText(run, redPaint())
+		d.glyphMasks = nil
+		n++
+	}
+}
+
 // A degenerate text matrix whose device bounds are finite but enormous must fall back to the outline fill (plane nil),
 // not overflow the floor/ceil and slip an all-zero coverage plane past the size gate that silently drops the glyph.
 func TestRenderGlyphMaskRejectsHugeFiniteBounds(t *testing.T) {
@@ -649,8 +745,9 @@ func TestBlitGlyphHugeOriginBlankNoPanic(t *testing.T) {
 	}
 }
 
-// coveragePlane must degrade to nil on a nil pixmap — the same guard compositeMask and Pixels apply — so a scratch
-// surface with no backing store makes renderGlyphMask fall back to the outline fill instead of dereferencing nil.
+// coveragePlane must degrade to nil on a nil pixmap — the same guard compositeMask and Pixels apply — rather than
+// dereferencing it. renderGlyphMask makes that check itself before it zeroes the region it is about to read back, so
+// this pins the helper's own contract.
 func TestCoveragePlaneNilPixmap(t *testing.T) {
 	if plane := coveragePlane(nil, 4, 3); plane != nil {
 		t.Fatalf("nil pixmap yielded a %d-byte plane; want nil so the caller degrades", len(plane))
