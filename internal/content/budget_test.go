@@ -18,6 +18,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/imaging"
 )
 
 // padding is the whitespace each repeatedly executed body in these tests carries: enough that re-running it is real
@@ -191,5 +192,79 @@ func TestChargeSaturates(t *testing.T) {
 	in.charge(maxTotalOps)
 	if in.budget != -1 {
 		t.Fatalf("budget = %d after charging an exhausted budget, want -1", in.budget)
+	}
+}
+
+// imageCounter is a Device that counts the images it is handed without retaining them: the image-decode budget test
+// decodes dozens of multi-megapixel images, which the recorder would hold alive all at once.
+type imageCounter struct {
+	device.Null
+	images int
+}
+
+func (c *imageCounter) FillImage(*imaging.Image, gfx.Matrix, float64)          { c.images++ }
+func (c *imageCounter) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) { c.images++ }
+
+// TestInlineImageDecodeChargedPerSample verifies a stream of inline images drains the work budget in proportion to the
+// samples the decodes produce. The dictionary alone dictates that count: maxPixelsFor's 2^22-pixel floor is independent
+// of how small the payload is, so before the charge a BI cost one budget unit out of maxTotalOps while triggering four
+// million samples of work — a kilobyte of content stream bought minutes of decoding with the budget still untouched.
+func TestInlineImageDecodeChargedPerSample(t *testing.T) {
+	const images = 400
+	// One payload byte claiming 2048x2048. /IM keeps the decoded plane one byte per sample rather than four, which
+	// bounds the test's transient allocation; the charge counts samples either way.
+	const one = "BI /IM true /W 2048 /H 2048 /L 1 ID \x00 EI "
+	d, err := cos.Open([]byte(minimalPDF("<< >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dev imageCounter
+	Run(d, nil, []byte(strings.Repeat(one, images)), gfx.Identity(), &dev, nil)
+	// One more than the budget divides by: the decode that exhausts the budget still completes before exec stops.
+	limit := 1 + maxTotalOps/imageDecodeCost(&imaging.Image{Width: 2048, Height: 2048}, 1)
+	switch {
+	case dev.images == 0:
+		t.Fatal("no inline image decoded at all: the decode charge is too aggressive")
+	case dev.images >= images:
+		t.Fatalf("all %d inline images decoded: a 4-megapixel decode is not charged to the work budget", images)
+	case dev.images > limit:
+		t.Fatalf("%d inline images decoded, want at most %d (one decode charge each)", dev.images, limit)
+	}
+}
+
+// TestImageXObjectDecodeChargedOncePerDecode verifies an image XObject's decode charges the budget for the samples it
+// produces — so a page naming many distinct images pays for each — while the cache hit that follows charges nothing,
+// which is what keeps one image drawn repeatedly cheap.
+func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF(streamObj(
+		"/Type /XObject /Subtype /Image /Width 64 /Height 64 /BitsPerComponent 8 /ColorSpace /DeviceGray",
+		"\x00\x01\x02\x03"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	in := newInterp(d, nil, gfx.Identity(), device.Null{}, nil)
+	before := in.budget
+	img := in.cachedImage(ref, stream, nil)
+	if img == nil {
+		t.Fatal("the image did not decode")
+	}
+	afterFirst := in.budget
+	want := imageDecodeCost(img, len(stream.Raw))
+	if got := before - afterFirst; got != want {
+		t.Fatalf("the decode charged %d, want %d", got, want)
+	}
+	if want <= bodyCost(len(stream.Raw)) {
+		t.Fatalf("the charge of %d ignores the %d samples the decode produced", want, img.Width*img.Height)
+	}
+	if again := in.cachedImage(ref, stream, nil); again != img {
+		t.Fatal("the repeat re-decoded the image instead of hitting the per-Run cache")
+	}
+	if in.budget != afterFirst {
+		t.Fatalf("the cache hit charged %d, want 0", afterFirst-in.budget)
 	}
 }

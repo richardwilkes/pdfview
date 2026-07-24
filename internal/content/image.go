@@ -29,12 +29,23 @@ func (in *interp) drawImageXObject(raw cos.Object, stream *cos.Stream) {
 	if ref, isRef := raw.(cos.Ref); isRef {
 		img = in.cachedImage(ref, stream, resources)
 	} else {
-		img, _ = imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
+		img = in.decodeXObject(stream, resources)
 	}
 	in.drawImage(img)
 }
 
-// cachedImage decodes an image XObject through the active cache layer.
+// decodeXObject decodes one image XObject, charging the work budget for the decode it performs: a page naming many
+// distinct images must not turn a few bytes of content apiece into unbounded sample production (see budget.go).
+// Failures draw nothing.
+func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging.Image {
+	img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
+	in.charge(imageDecodeCost(img, len(stream.Raw)))
+	return img
+}
+
+// cachedImage decodes an image XObject through the active cache layer. Only the decodes it actually performs are
+// charged: a cache hit did no work beyond the Do operator's own unit, which is what makes a repeatedly drawn image
+// cheap.
 func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dict) *imaging.Image {
 	if in.st != nil {
 		if v, hit := in.st.Get(imageKey{ref: ref}); hit {
@@ -43,14 +54,14 @@ func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dic
 			}
 			return nil // Cached failure (negative entry).
 		}
-		img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
+		img := in.decodeXObject(stream, resources)
 		in.st.Put(imageKey{ref: ref}, img, imageSize(img))
 		return img
 	}
 	if cached, seen := in.images.get(ref); seen {
 		return cached
 	}
-	img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
+	img := in.decodeXObject(stream, resources)
 	in.images.put(ref, img)
 	return img
 }
@@ -63,9 +74,13 @@ func imageSize(img *imaging.Image) uint64 {
 	return uint64(len(img.Pix)) + 64
 }
 
-// decodeInline decodes one inline image against the resource frame in scope (named /CS entries resolve through it).
+// decodeInline decodes one inline image against the resource frame in scope (named /CS entries resolve through it),
+// charging the work budget for it. Inline images have no cache — the payload is the content stream itself — so every BI
+// pays, which is what bounds a stream of tiny BI operators each claiming huge dimensions.
 func (in *interp) decodeInline(dict cos.Dict, payload []byte) (*imaging.Image, error) {
-	return imaging.DecodeInline(in.doc, dict, payload, in.res[len(in.res)-1])
+	img, err := imaging.DecodeInline(in.doc, dict, payload, in.res[len(in.res)-1])
+	in.charge(imageDecodeCost(img, len(payload)))
+	return img, err
 }
 
 // drawImage emits one decoded image to the device under the current CTM: stencils tint with the fill paint (skipped

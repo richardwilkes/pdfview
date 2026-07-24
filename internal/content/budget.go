@@ -12,6 +12,7 @@ package content
 import (
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
@@ -20,9 +21,11 @@ import (
 // costs one unit per invocation while each invocation re-decodes and re-scans the form's whole body, so a few tens of
 // kilobytes of input buy hours of work. Every site that runs another stream's body — form XObjects, soft-mask groups,
 // Type 3 charprocs, tiling-pattern cells — therefore charges bodyCost for that body on every invocation, and every
-// resource parse an operator can force charges a flat cost. The reference-keyed per-Run caches (runCaches) make the
-// repeat cheap on top of being bounded: the same form invoked twice decodes once, and a parsed color space, shading or
-// pattern survives the fresh resource frame each form invocation pushes.
+// resource parse an operator can force charges a flat cost. Image decodes — inline images and image XObjects — likewise
+// charge imageDecodeCost for the samples they produce, which the dictionary's dimensions dictate rather than the
+// payload's size. The reference-keyed per-Run caches (runCaches) make the repeat cheap on top of being bounded: the same
+// form invoked twice decodes once, and a parsed color space, shading or pattern survives the fresh resource frame each
+// form invocation pushes.
 
 const (
 	// bodyCostShift scales a stream body's length into budget units. exec scans the whole body on every invocation (and
@@ -37,6 +40,13 @@ const (
 	// function 256 times, and a type 4 function's evaluations are bounded but far from free, so they cost several
 	// resource parses.
 	shadingParseCost = 1 << 12
+	// imagePixelCostShift scales a decoded image's pixel count into budget units. A decode touches every sample it
+	// produces — unpacking, color conversion, mask compositing — and the sample count is bounded only by
+	// imaging.maxPixelsFor(payload), whose floor (2^22 pixels) is independent of how small the payload is: charging by
+	// payload length alone would leave a stream of one-byte inline images claiming 2048x2048 dimensions essentially free.
+	// At >>6, the whole budget buys roughly 64 decodes at that floor, while a page's worth of legitimate photographs
+	// costs a small fraction of it.
+	imagePixelCostShift = 6
 	// maxCachedBodies and maxCachedBodyBytes bound the per-Run decoded-body cache: at most this many bodies, none larger
 	// than the byte cap. An oversized body decodes again on reuse rather than pinning tens of megabytes for the whole
 	// Run — the budget charge, not the cache, is what bounds re-decoding it.
@@ -84,6 +94,18 @@ func (in *interp) charge(n int) {
 // bodyCost is the budget charge for decoding or running a stream body of n bytes.
 func bodyCost(n int) int {
 	return 1 + n>>bodyCostShift
+}
+
+// imageDecodeCost is the budget charge for one image decode: the encoded payload it scanned plus the samples it
+// produced. img is nil for a failed decode, which still scanned its payload. The product is computed in int64 because
+// int is 32 bits on GOARCH=386/arm; the decoder caps it at imaging's maxImagePixels (2^26), so the shifted result is
+// always small enough for the budget counter.
+func imageDecodeCost(img *imaging.Image, payload int) int {
+	cost := bodyCost(payload)
+	if img != nil {
+		cost += int(int64(img.Width) * int64(img.Height) >> imagePixelCostShift)
+	}
+	return cost
 }
 
 // streamBody decodes one executable stream body — a form XObject's, a soft mask's, a tiling cell's, a Type 3

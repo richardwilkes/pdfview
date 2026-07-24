@@ -11,6 +11,7 @@ package content
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -413,5 +414,40 @@ func TestSpacedShowOperands(t *testing.T) {
 	}
 	if p1.Y != p0.Y {
 		t.Errorf("second glyph baseline %v, want %v", p1.Y, p0.Y)
+	}
+}
+
+// TestShortColorOperandsIgnored verifies sc/scn/SC/SCN leave the current color alone when the operand list carries
+// fewer numbers than the selected space needs. Before the fix the short (possibly empty) list was installed verbatim
+// and ToNRGBA padded it with zeroes, so a bare scn under DeviceCMYK silently repainted in white — while the sibling
+// operators g/rg/k, which demand the exact operand count, skipped the same malformed input.
+func TestShortColorOperandsIgnored(t *testing.T) {
+	// (0, 0, 0.8, 0) is the CMYK anchor TestColorOperators pins: 255, 243, 79. All-zero CMYK would be white.
+	yellow := color.NRGBA{R: 255, G: 243, B: 79, A: 255}
+	// (0, 1, 1, 0) is the CMYK red the same conversion produces.
+	red := color.NRGBA{R: 237, G: 28, B: 36, A: 255}
+	rec := run(t, nil, nil, `0 0 0.8 0 k 0 0 1 1 re f
+scn 0 0 1 1 re f
+0.5 0.25 scn 0 0 1 1 re f
+0 1 1 0 sc 0 0 1 1 re f`)
+	wantOps(t, rec, opFill, opFill, opFill, opFill)
+	for i, what := range []string{"k", "a bare scn", "a two-operand scn"} {
+		if got := rec.calls[i].paint.Color; got != yellow {
+			t.Errorf("fill %d after %s = %v, want %v", i, what, got, yellow)
+		}
+	}
+	if got := rec.calls[3].paint.Color; got != red {
+		t.Errorf("a complete four-operand sc = %v, want %v: the guard must not block valid operands", got, red)
+	}
+	// The stroke operators take the same path.
+	rec = run(t, nil, nil, `0 0 0.8 0 K 0 0 m 1 1 l S
+SCN 0 0 m 1 1 l S
+0 1 1 0 SC 0 0 m 1 1 l S`)
+	wantOps(t, rec, opStroke, opStroke, opStroke)
+	if got := rec.calls[1].paint.Color; got != yellow {
+		t.Errorf("stroke after a bare SCN = %v, want %v", got, yellow)
+	}
+	if got := rec.calls[2].paint.Color; got != red {
+		t.Errorf("stroke after a complete SC = %v, want %v", got, red)
 	}
 }

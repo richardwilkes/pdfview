@@ -180,10 +180,14 @@ func (in *interp) op(word string) {
 			}
 		}
 	case "sc", "scn":
-		in.gs.fillComps = in.componentsFor(in.gs.fillSpace)
+		if comps, ok := in.componentsFor(in.gs.fillSpace); ok {
+			in.gs.fillComps = comps
+		}
 		in.gs.fillPattern, in.gs.fillPatCTM = in.patternFor(in.gs.fillSpace)
 	case "SC", "SCN":
-		in.gs.strokeComps = in.componentsFor(in.gs.strokeSpace)
+		if comps, ok := in.componentsFor(in.gs.strokeSpace); ok {
+			in.gs.strokeComps = comps
+		}
 		in.gs.strokePattern, in.gs.strokePatCTM = in.patternFor(in.gs.strokeSpace)
 
 	// ---- XObjects and shadings ----
@@ -345,14 +349,23 @@ func (in *interp) strokePaint() device.Paint {
 	return p
 }
 
-// componentsFor implements sc/scn/SC/SCN: the leading numeric operands, at most the space's component count
-// (uncolored-pattern operands are followed by the pattern name, which patternFor consumes).
-func (in *interp) componentsFor(space pdfcolor.Space) []float32 {
-	maxN := space.NComponents()
-	if maxN == 0 {
-		return nil
+// componentsFor implements the color-component half of sc/scn/SC/SCN: the leading numeric operands, which must number
+// exactly the space's component count (uncolored-pattern operands are followed by the pattern name, which patternFor
+// consumes). A short or absent operand list reports false so the caller leaves the current color alone, matching
+// g/rg/k — which require the exact count via floats(n) — and this file's contract that operators with missing operands
+// are skipped. Without that, a bare scn in, say, DeviceCMYK would repaint in white: the missing components pad with
+// zeroes on the way to ToNRGBA.
+func (in *interp) componentsFor(space pdfcolor.Space) ([]float32, bool) {
+	n := space.NComponents()
+	if n == 0 {
+		// A colored pattern space carries no components at all, so its (empty) list is complete as it stands.
+		return nil, true
 	}
-	return in.leadingFloats(maxN)
+	comps := in.leadingFloats(n)
+	if len(comps) != n {
+		return nil, false
+	}
+	return comps, true
 }
 
 // opDash implements d: a dash array plus phase. The array is truncated to maxDashEntries and non-finite or negative
