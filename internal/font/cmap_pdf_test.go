@@ -267,6 +267,127 @@ func TestParseWArrays(t *testing.T) {
 	}
 }
 
+// TestWArrayIsSearchable covers the sorted, non-overlapping form parseWArray / parseW2Array leave behind so that
+// cidWidth and cidVMetrics can binary search: entries arriving out of order must still resolve, and overlapping entries
+// must be trimmed rather than left to shadow one another.
+func TestWArrayIsSearchable(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF("<< >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Deliberately out of CID order, with three kinds of overlap: [10, 13] partially covers the later-listed [12, 15],
+	// [5, 8] partially covers the later-listed per-CID [7, 9] (whose surviving width must be re-based, not shifted), and
+	// [0, 100] wholly covers [50, 51], which must drop out entirely.
+	info := &type0Info{dw: 1, w: parseWArray(d, cos.Array{
+		cos.Integer(200), cos.Integer(210), cos.Integer(2000),
+		cos.Integer(10),
+		cos.Array{cos.Integer(100), cos.Integer(200), cos.Integer(300), cos.Integer(400)},
+		cos.Integer(12), cos.Integer(15), cos.Integer(1500),
+		cos.Integer(5), cos.Integer(8), cos.Integer(800),
+		cos.Integer(7),
+		cos.Array{cos.Integer(700), cos.Integer(710), cos.Integer(720)},
+		cos.Integer(0), cos.Integer(100), cos.Integer(1000),
+		cos.Integer(50),
+		cos.Array{cos.Integer(5000), cos.Integer(5100)},
+	})}
+	for i := 1; i < len(info.w); i++ {
+		if prev, cur := info.w[i-1], info.w[i]; cur.lo <= prev.hi {
+			t.Fatalf("/W ranges not sorted and disjoint: %+v then %+v", prev, cur)
+		}
+	}
+	for cid, want := range map[uint32]float32{
+		0: 1, 4: 1, 9: 1, 50: 1, 51: 1, 100: 1, // [0, 100] wins everything the later entries claimed inside it.
+		101: 1, 199: 1, // /DW: past the last kept range but before the next one.
+		200: 2, 205: 2, 210: 2,
+		211: 1, 65535: 1, // /DW: past every range.
+	} {
+		if got := info.cidWidth(cid); got != want {
+			t.Errorf("cidWidth(%d) = %v, want %v", cid, got, want)
+		}
+	}
+
+	// The same overlaps without the [0, 100] blanket, so the trimming of the two partial overlaps is observable.
+	info = &type0Info{dw: 1, w: parseWArray(d, cos.Array{
+		cos.Integer(12), cos.Integer(15), cos.Integer(1500),
+		cos.Integer(10),
+		cos.Array{cos.Integer(100), cos.Integer(200), cos.Integer(300), cos.Integer(400)},
+		cos.Integer(7),
+		cos.Array{cos.Integer(700), cos.Integer(710), cos.Integer(720)},
+		cos.Integer(5), cos.Integer(8), cos.Integer(800),
+	})}
+	for cid, want := range map[uint32]float32{
+		4:  1,                              // /DW.
+		5:  0.8,                            // [5, 8] starts lower than [7, 9], so it keeps the contested 7 and 8.
+		8:  0.8,                            //
+		9:  0.72,                           // The tail of [7, 9] survives, re-based onto its third width.
+		10: 0.1, 11: 0.2, 12: 0.3, 13: 0.4, // [10, 13] starts lower than [12, 15], so it keeps 12 and 13.
+		14: 1.5, 15: 1.5, // The tail of [12, 15] survives.
+		16: 1, // /DW.
+	} {
+		if got := info.cidWidth(cid); got != want {
+			t.Errorf("trimmed cidWidth(%d) = %v, want %v", cid, got, want)
+		}
+	}
+
+	// Many entries, listed high CID first, to exercise the search rather than a scan that happens to hit early.
+	const n = 500
+	var arr cos.Array
+	for i := n - 1; i >= 0; i-- {
+		arr = append(arr, cos.Integer(4*i), cos.Integer(4*i+1), cos.Integer(i)) // Ranges [4i, 4i+1], gaps between.
+	}
+	info = &type0Info{dw: 7, w: parseWArray(d, arr)}
+	if len(info.w) != n {
+		t.Fatalf("kept %d of %d /W ranges", len(info.w), n)
+	}
+	for i := range uint32(n) {
+		want := float32(i) / 1000
+		if got := info.cidWidth(4 * i); got != want {
+			t.Errorf("cidWidth(%d) = %v, want %v", 4*i, got, want)
+		}
+		if got := info.cidWidth(4*i + 1); got != want {
+			t.Errorf("cidWidth(%d) = %v, want %v", 4*i+1, got, want)
+		}
+		if got := info.cidWidth(4*i + 2); got != 7 { // In the gap, so /DW.
+			t.Errorf("gap cidWidth(%d) = %v, want 7", 4*i+2, got)
+		}
+	}
+
+	// /W2 gets the same treatment: out of order, with [20, 29] partially shadowing the later-listed per-CID [25, 27].
+	v := &type0Info{dw2: [2]float32{0.88, -1}, w2: parseW2Array(d, cos.Array{
+		cos.Integer(40),
+		cos.Array{cos.Integer(-400), cos.Integer(410), cos.Integer(420)},
+		cos.Integer(25),
+		cos.Array{
+			cos.Integer(-250), cos.Integer(251), cos.Integer(252),
+			cos.Integer(-260), cos.Integer(261), cos.Integer(262),
+			cos.Integer(-270), cos.Integer(271), cos.Integer(272),
+		},
+		cos.Integer(20), cos.Integer(26), cos.Integer(-200), cos.Integer(201), cos.Integer(202),
+	})}
+	for i := 1; i < len(v.w2); i++ {
+		if prev, cur := v.w2[i-1], v.w2[i]; cur.lo <= prev.hi {
+			t.Fatalf("/W2 ranges not sorted and disjoint: %+v then %+v", prev, cur)
+		}
+	}
+	for _, tc := range []struct {
+		cid        uint32
+		w1, vx, vy float32
+	}{
+		{cid: 19, w1: -1, vx: 0.25, vy: 0.88}, // Defaults.
+		{cid: 20, w1: -0.2, vx: 0.201, vy: 0.202},
+		{cid: 26, w1: -0.2, vx: 0.201, vy: 0.202},  // [20, 26] starts lower, so it keeps 25 and 26.
+		{cid: 27, w1: -0.27, vx: 0.271, vy: 0.272}, // The re-based tail of [25, 27].
+		{cid: 28, w1: -1, vx: 0.25, vy: 0.88},      // Defaults.
+		{cid: 40, w1: -0.4, vx: 0.41, vy: 0.42},
+		{cid: 41, w1: -1, vx: 0.25, vy: 0.88}, // Defaults.
+	} {
+		if w1, vx, vy := v.cidVMetrics(tc.cid, 0.5); w1 != tc.w1 || vx != tc.vx || vy != tc.vy {
+			t.Errorf("cidVMetrics(%d) = %v %v %v, want %v %v %v", tc.cid, w1, vx, vy, tc.w1, tc.vx, tc.vy)
+		}
+	}
+}
+
 func TestCFFCIDCharset(t *testing.T) {
 	// A synthetic charset: format 1, GIDs 1.. mapping to CID ranges {100..102, 500}. CharStrings INDEX with 5 entries
 	// (nGlyphs = 5), each 1 byte.

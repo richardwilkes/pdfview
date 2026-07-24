@@ -10,6 +10,9 @@
 package font
 
 import (
+	"cmp"
+	"slices"
+
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
@@ -40,13 +43,14 @@ type type0Info struct {
 }
 
 // wRange is one /W entry: CIDs [lo, hi] with per-CID widths (ws indexed from lo) or one uniform width (len(ws) == 1),
-// in text space.
+// in text space. type0Info.w holds these sorted by lo and non-overlapping, so cidWidth can binary search.
 type wRange struct {
 	ws     []float32
 	lo, hi uint32
 }
 
-// w2Range is one /W2 entry: per-CID (w1y, vx, vy) triples, or one uniform triple, in text space.
+// w2Range is one /W2 entry: per-CID (w1y, vx, vy) triples, or one uniform triple, in text space. type0Info.w2 holds
+// these sorted by lo and non-overlapping, so cidVMetrics can binary search.
 type w2Range struct {
 	entries [][3]float32
 	lo, hi  uint32
@@ -270,6 +274,46 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 		}
 		i++
 	}
+	return disjointCIDRanges(out, func(r *wRange) (uint32, uint32) { return r.lo, r.hi },
+		func(r *wRange, lo uint32) {
+			if len(r.ws) > 1 {
+				r.ws = r.ws[lo-r.lo:]
+			}
+			r.lo = lo
+		})
+}
+
+// disjointCIDRanges sorts /W or /W2 entries by starting CID and trims away any overlap, leaving a strictly increasing,
+// non-overlapping list that cidWidth and cidVMetrics can binary search rather than walking from the start for every
+// glyph shown — a CJK CIDFont routinely carries thousands of entries, and parsing accepts up to maxCMapRanges. span
+// reports an entry's inclusive CID bounds and clipTo advances its start (dropping the shadowed leading widths).
+//
+// Overlap is malformed: ISO 32000-2 9.7.4.3 assigns each CID a single width. The contested span goes to the entry with
+// the lower starting CID, and the earlier array entry breaks a tie, which matches what the former linear scan returned
+// for every case except a later array entry that also starts lower.
+func disjointCIDRanges[T any](in []T, span func(*T) (uint32, uint32), clipTo func(*T, uint32)) []T {
+	slices.SortStableFunc(in, func(a, b T) int {
+		aLo, _ := span(&a)
+		bLo, _ := span(&b)
+		return cmp.Compare(aLo, bLo)
+	})
+	out := in[:0]
+	var covered uint32
+	started := false
+	for i := range in {
+		lo, hi := span(&in[i])
+		if started && lo <= covered {
+			if hi <= covered {
+				continue // Wholly shadowed by the entries already kept.
+			}
+			clipTo(&in[i], covered+1)
+		}
+		if !started || hi > covered {
+			covered = hi
+		}
+		started = true
+		out = append(out, in[i])
+	}
 	return out
 }
 
@@ -320,14 +364,28 @@ func parseW2Array(d *cos.Document, arr cos.Array) []w2Range {
 		}
 		i++
 	}
-	return out
+	return disjointCIDRanges(out, func(r *w2Range) (uint32, uint32) { return r.lo, r.hi },
+		func(r *w2Range, lo uint32) {
+			if len(r.entries) > 1 {
+				r.entries = r.entries[lo-r.lo:]
+			}
+			r.lo = lo
+		})
+}
+
+// findCIDRange returns the index of the only entry of a sorted, non-overlapping range list that can contain cid, or -1.
+func findCIDRange[T any](ranges []T, lo func(*T) uint32, cid uint32) int {
+	i, exact := slices.BinarySearchFunc(ranges, cid, func(r T, c uint32) int { return cmp.Compare(lo(&r), c) })
+	if !exact {
+		i-- // The insertion point is one past the last entry starting at or below cid.
+	}
+	return i
 }
 
 // cidWidth returns the horizontal width for a CID in text space: /W, else /DW.
 func (t *type0Info) cidWidth(cid uint32) float32 {
-	for i := range t.w {
-		r := &t.w[i]
-		if cid >= r.lo && cid <= r.hi {
+	if i := findCIDRange(t.w, func(r *wRange) uint32 { return r.lo }, cid); i >= 0 {
+		if r := &t.w[i]; cid <= r.hi {
 			if len(r.ws) == 1 {
 				return r.ws[0]
 			}
@@ -340,9 +398,8 @@ func (t *type0Info) cidWidth(cid uint32) float32 {
 // cidVMetrics returns the vertical displacement w1y and origin vector (vx, vy) for a CID in text space: /W2, else vx =
 // w0/2 with /DW2's (vy, w1y).
 func (t *type0Info) cidVMetrics(cid uint32, w0 float32) (w1y, vx, vy float32) {
-	for i := range t.w2 {
-		r := &t.w2[i]
-		if cid >= r.lo && cid <= r.hi {
+	if i := findCIDRange(t.w2, func(r *w2Range) uint32 { return r.lo }, cid); i >= 0 {
+		if r := &t.w2[i]; cid <= r.hi {
 			e := r.entries[0]
 			if len(r.entries) > 1 {
 				e = r.entries[cid-r.lo]
