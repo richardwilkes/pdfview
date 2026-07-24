@@ -15,6 +15,7 @@ import (
 	"compress/zlib"
 	"encoding/ascii85"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/filter"
@@ -475,6 +476,21 @@ func TestUnsupportedFilter(t *testing.T) {
 		if _, err := filter.Decode(spec(name), []byte("x"), 1024); !errors.Is(err, filter.ErrUnsupportedFilter) {
 			t.Errorf("expected ErrUnsupportedFilter for %s, got %v", name, err)
 		}
+	}
+}
+
+// TestDecodeMaxSizeCeiling guards against the limit-arithmetic overflow that made readCapped return an empty stream:
+// int64(math.MaxInt)+1 wraps to math.MinInt64, which io.LimitReader treats as immediate EOF. With the largest possible
+// maxSize a valid stream must still decode fully rather than silently emptying.
+func TestDecodeMaxSizeCeiling(t *testing.T) {
+	want := []byte(hello)
+	compressed := zlibCompress(t, want)
+	got, err := filter.Decode(spec(flateName), compressed, math.MaxInt)
+	if err != nil {
+		t.Fatalf("Decode(%s, MaxInt): %v", flateName, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("Decode(%s, MaxInt) = %q, want %q", flateName, got, want)
 	}
 }
 

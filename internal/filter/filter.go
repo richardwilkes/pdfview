@@ -166,7 +166,14 @@ func Decode(spec Spec, data []byte, maxSize int) ([]byte, error) {
 // cap. A read error after at least one byte of output is swallowed and the partial output returned, matching the fault
 // tolerance described in the package comment; an error before any output is reported.
 func readCapped(r io.Reader, maxSize int) ([]byte, error) {
-	out, err := io.ReadAll(io.LimitReader(r, int64(maxSize)+1))
+	// Widen before adding the overshoot byte, and skip the addition entirely at the top of the range: a maxSize of
+	// math.MaxInt would otherwise wrap the limit negative, and io.LimitReader treats a negative N as immediate EOF —
+	// silently returning an empty stream instead of decoding or reporting ErrTooLarge.
+	limit := int64(maxSize)
+	if limit < math.MaxInt64 {
+		limit++
+	}
+	out, err := io.ReadAll(io.LimitReader(r, limit))
 	if len(out) > maxSize {
 		return nil, ErrTooLarge
 	}
