@@ -8,8 +8,9 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package device defines the seam between the content-stream interpreter (internal/content) and its consumers: the
-// raster device (internal/render) and the structured-text device (internal/stext). One interpreter pass drives N
-// devices through Tee, so a render call walks each content stream exactly once.
+// raster device (internal/render) and the structured-text device (internal/stext). Each consumer gets its own
+// interpreter pass: the passes differ in the scale they run at, so fanning one pass out to several devices is not a
+// substitute for them (see the search path in pdf.go).
 //
 // Contract: the interpreter owns all PDF semantics — colorspace and function resolution, graphics-state tracking,
 // recursion and resource limits — and guarantees balanced push/pop pairing: every

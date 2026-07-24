@@ -292,6 +292,16 @@ func crossCheckStandard(std *[256]string, fonts []afmFont) {
 }
 
 func writeEncodings(path string, encodings map[string][256]string) {
+	if err := os.WriteFile(path, buildEncodings(encodings), 0o644); err != nil {
+		fatal("%v", err)
+	}
+	fmt.Printf("  %s written\n", path)
+}
+
+// buildEncodings renders encodings_gen.go. The result is gofmt/gofumpt-clean: the blank line each table appends after
+// its closing brace is trimmed, but the file still ends with exactly one newline, so regenerating reproduces the
+// committed file byte for byte instead of producing a spurious diff and a lint failure.
+func buildEncodings(encodings map[string][256]string) []byte {
 	var buf bytes.Buffer
 	buf.WriteString(`// Copyright (c) 2026 by Richard A. Wilkes. All rights reserved.
 //
@@ -327,8 +337,5 @@ package font
 		}
 		buf.WriteString("}\n\n")
 	}
-	if err := os.WriteFile(path, bytes.TrimRight(buf.Bytes(), "\n"), 0o644); err != nil {
-		fatal("%v", err)
-	}
-	fmt.Printf("  %s written\n", path)
+	return append(bytes.TrimRight(buf.Bytes(), "\n"), '\n')
 }

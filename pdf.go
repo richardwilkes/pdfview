@@ -737,9 +737,9 @@ func (p *page) bounds() (width, height float32) {
 // (the exact-value tests index hits positionally). The page's content runs through the interpreter once more against
 // the structured-text device at scale 1, so the quads come back in top-left/y-down page space — the same space MuPDF's
 // fz_search_stext_page reported them in through the C float funnel — and quadToRect applies the render scale in float64
-// exactly as the original implementation did. Running the pass at the render scale instead (sharing the rasterize pass
-// via device.Tee) would compose every quad corner in scaled float32 and break that funnel. A panic provoked by hostile
-// content surfaces as no hits rather than escaping the public API.
+// exactly as the original implementation did. Running the pass at the render scale instead (fanning the rasterize pass
+// out to both devices) would compose every quad corner in scaled float32 and break that funnel. A panic provoked by
+// hostile content surfaces as no hits rather than escaping the public API.
 func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []quad) {
 	defer func() {
 		if recover() != nil {

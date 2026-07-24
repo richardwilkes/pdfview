@@ -175,29 +175,37 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.Flags = desc.flags
 	f.missingWidth = desc.missingWidth
 
-	// The embedded program supplies the quad metrics; substituted fonts use the standard-14 pins.
+	// The embedded program supplies the quad metrics; substituted fonts use the standard-14 pins. Each descriptor entry
+	// is tried in turn and a program that yields nothing falls through to the next one, so a dictionary carrying both a
+	// corrupt FontFile2 and a usable FontFile3 (or a program sitting in an entry its /Subtype does not predict) still
+	// renders its real glyphs instead of being substituted away — the same allowance loadType0 makes for composite fonts.
 	embedded := false
-	switch {
-	case desc.fontFile2 != nil:
+	if desc.fontFile2 != nil {
 		if info := parseSFNTStream(d, desc.fontFile2); info != nil {
 			f.sfnt, embedded = info, true
 			f.ascender, f.descender = info.ascender, info.descender
 		}
-	case desc.fontFile3 != nil && desc.fontFile3Sub == "OpenType":
-		if info := parseSFNTStream(d, desc.fontFile3); info != nil {
-			f.sfnt, embedded = info, true
-			f.ascender, f.descender = info.ascender, info.descender
-		}
-	case desc.fontFile3 != nil:
-		// Bare CFF (Type1C): FreeType — and so the oracle — takes ascender/descender from the FontBBox.
-		if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {
-			if asc, dsc, ok := top.metrics(); ok {
-				f.ascender, f.descender = asc, dsc
-				embedded = true
+	}
+	if f.sfnt == nil && desc.fontFile3 != nil {
+		if desc.fontFile3Sub == "OpenType" {
+			if info := parseSFNTStream(d, desc.fontFile3); info != nil {
+				f.sfnt, embedded = info, true
+				f.ascender, f.descender = info.ascender, info.descender
 			}
-			f.cff = parseCFFGlyphs(d, desc.fontFile3, top)
 		}
-	case desc.fontFile != nil:
+		if f.sfnt == nil {
+			// Bare CFF (Type1C): FreeType — and so the oracle — takes ascender/descender from the FontBBox. A stream
+			// whose /Subtype claimed OpenType but did not parse as one is read as bare CFF here.
+			if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {
+				if asc, dsc, ok := top.metrics(); ok {
+					f.ascender, f.descender = asc, dsc
+					embedded = true
+				}
+				f.cff = parseCFFGlyphs(d, desc.fontFile3, top)
+			}
+		}
+	}
+	if f.sfnt == nil && f.cff == nil && desc.fontFile != nil {
 		// Type 1 programs: quad metrics come from the FontBBox over the FontMatrix-implied upem, like bare CFF
 		// (FreeType's rule; see the package comment). seac needs StandardEncoding regardless of the font's own
 		// encoding, so the generated table is injected here.
