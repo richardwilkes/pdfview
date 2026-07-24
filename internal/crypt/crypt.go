@@ -67,7 +67,9 @@ func New(c *cos.Document, encDict cos.Dict) (*Handler, error) {
 	}
 	v, _ := c.GetInt(encDict, "V")
 	r, ok := c.GetInt(encDict, "R")
-	if !ok || r < 2 || r > 6 || r == 1 {
+	// The standard security handler defines revisions 2 through 6 (ISO 32000-2 7.6.4); there is no revision 1 and
+	// nothing above 6, so both ends are rejected, as is a missing or non-integer /R.
+	if !ok || r < 2 || r > 6 {
 		return nil, errBadRevision
 	}
 	h := &Handler{r: int(r), metaEnc: true}

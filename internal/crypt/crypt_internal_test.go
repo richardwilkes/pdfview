@@ -12,6 +12,7 @@ package crypt
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -48,6 +49,53 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 	}
 	if h2.keyLen != 5 {
 		t.Errorf("default /Length yields keyLen %d, want 5", h2.keyLen)
+	}
+}
+
+// TestNewRevisionRange pins the accepted /R range to 2-6, the revisions the standard security handler defines (ISO
+// 32000-2 7.6.4). Everything outside that range — including a missing, non-integer, or out-of-range revision — has to
+// be reported as errBadRevision rather than reaching configure with a revision no derivation implements.
+func TestNewRevisionRange(t *testing.T) {
+	for _, tc := range []struct {
+		entry cos.Object
+		name  string
+		want  bool
+	}{
+		{name: "absent", entry: nil, want: false},
+		{name: "not an integer", entry: cos.Name("4"), want: false},
+		{name: "negative", entry: cos.Integer(-1), want: false},
+		{name: "zero", entry: cos.Integer(0), want: false},
+		{name: "one", entry: cos.Integer(1), want: false},
+		{name: "two", entry: cos.Integer(2), want: true},
+		{name: "three", entry: cos.Integer(3), want: true},
+		{name: "four", entry: cos.Integer(4), want: true},
+		{name: "five", entry: cos.Integer(5), want: true},
+		{name: "six", entry: cos.Integer(6), want: true},
+		{name: "seven", entry: cos.Integer(7), want: false},
+		{name: "huge", entry: cos.Integer(1 << 40), want: false},
+	} {
+		// Sized for both branches of configure: R<=4 needs 32-byte /O and /U, R5/R6 need 48-byte /O and /U plus
+		// 32-byte /OE and /UE, so the revision is the only thing under test.
+		encDict := cos.Dict{
+			"Filter": cos.Name("Standard"),
+			"V":      cos.Integer(2),
+			"O":      cos.String(make([]byte, 48)),
+			"U":      cos.String(make([]byte, 48)),
+			"OE":     cos.String(make([]byte, 32)),
+			"UE":     cos.String(make([]byte, 32)),
+		}
+		if tc.entry != nil {
+			encDict["R"] = tc.entry
+		}
+		h, err := New(&cos.Document{}, encDict)
+		switch {
+		case tc.want && err != nil:
+			t.Errorf("/R %s: New: %v, want a handler", tc.name, err)
+		case !tc.want && err == nil:
+			t.Errorf("/R %s: New succeeded with revision %d, want errBadRevision", tc.name, h.r)
+		case !tc.want && !errors.Is(err, errBadRevision):
+			t.Errorf("/R %s: New: %v, want errBadRevision", tc.name, err)
+		}
 	}
 }
 
