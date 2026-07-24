@@ -16,6 +16,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func lexAll(t *testing.T, src string) []token {
@@ -283,13 +284,24 @@ func TestDecodeTextString(t *testing.T) {
 		{"utf16be", "Hi€", []byte{0xfe, 0xff, 0x00, 'H', 0x00, 'i', 0x20, 0xac}},
 		{"utf16be surrogate", "\U0001f600", []byte{0xfe, 0xff, 0xd8, 0x3d, 0xde, 0x00}},
 		{"utf8 bom", "ok", []byte{0xef, 0xbb, 0xbf, 'o', 'k'}},
+		{"utf8 bom multibyte", "é€", []byte{0xef, 0xbb, 0xbf, 0xc3, 0xa9, 0xe2, 0x82, 0xac}},
+		// A UTF-8 byte-order mark does not make the rest valid UTF-8: undecodable bytes must map to U+FFFD rather than
+		// surviving raw in the returned string.
+		{"utf8 bom invalid byte", "o�k", []byte{0xef, 0xbb, 0xbf, 'o', 0xff, 'k'}},
+		{"utf8 bom truncated sequence", "e�", []byte{0xef, 0xbb, 0xbf, 'e', 0xe2, 0x82}},
+		{"utf8 bom bare continuation", "�a", []byte{0xef, 0xbb, 0xbf, 0xa9, 'a'}},
+		{"utf8 bom only", "", []byte{0xef, 0xbb, 0xbf}},
 		{"pdfdoc ascii", "plain", []byte("plain")},
 		{"pdfdoc specials", "ﬁ€–", []byte{0x93, 0xa0, 0x85}},
 		{"pdfdoc latin1", "é", []byte{0xe9}},
 		{"pdfdoc undefined", "�", []byte{0x9f}},
 	} {
-		if got := DecodeTextString(String(tc.in)); got != tc.want {
+		got := DecodeTextString(String(tc.in))
+		if got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("%s: result is not valid UTF-8: % x", tc.name, got)
 		}
 	}
 }

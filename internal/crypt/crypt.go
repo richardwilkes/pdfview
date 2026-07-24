@@ -220,6 +220,12 @@ func (h *Handler) DecryptStream(num, gen int, data []byte) []byte {
 	return h.apply(h.stmM, num, gen, data)
 }
 
+// EncryptsMetadata reports whether metadata streams are encrypted along with everything else, i.e. whether the
+// encryption dictionary's /EncryptMetadata entry (default true) is set.
+func (h *Handler) EncryptsMetadata() bool {
+	return h.metaEnc
+}
+
 // apply performs the actual decryption for one string or stream. It is total: any shortfall (no key, bad key length,
 // malformed ciphertext) yields the input unchanged rather than an error or panic, because these hooks run deep inside
 // object loading where there is no error channel and hostile input must not crash.

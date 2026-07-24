@@ -11,6 +11,7 @@ package cos
 
 import (
 	"bytes"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -25,10 +26,21 @@ func DecodeTextString(s String) string {
 	case len(b) >= 2 && b[0] == 0xfe && b[1] == 0xff:
 		return decodeUTF16BE(b[2:])
 	case bytes.HasPrefix(b, []byte{0xef, 0xbb, 0xbf}):
-		return string(b[3:])
+		return decodeUTF8(b[3:])
 	default:
 		return decodePDFDoc(b)
 	}
+}
+
+// decodeUTF8 returns b as a Go string, replacing each run of bytes that is not a valid UTF-8 sequence with U+FFFD. A
+// PDF 2.0 writer is required to emit valid UTF-8 after the byte-order mark, but a malformed file must still satisfy
+// DecodeTextString's contract that undecodable content maps to U+FFFD rather than surviving as raw bytes.
+func decodeUTF8(b []byte) string {
+	s := string(b)
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, string(utf8.RuneError))
 }
 
 func decodeUTF16BE(b []byte) string {

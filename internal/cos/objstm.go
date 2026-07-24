@@ -97,9 +97,9 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Each header pair needs at least three bytes ("N 0"), so /N values beyond that are lies; clamping keeps the slice
-	// allocations proportional to real data.
-	n = min(n, int64(len(data))/2)
+	// Each header pair needs at least three bytes (a digit, a separator, and a digit), so /N values beyond that are
+	// lies; clamping keeps the slice allocations proportional to real data.
+	n = min(n, int64(len(data))/3)
 	stm := &objStm{
 		data:  data,
 		nums:  make([]int, 0, n),

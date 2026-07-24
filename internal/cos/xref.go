@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 )
 
 // xrefKind classifies a cross-reference entry.
@@ -108,12 +109,18 @@ func (d *Document) loadXref() error {
 }
 
 // mergeTrailers combines the trailer dictionaries of a cross-reference chain, newest first: the newest trailer wins,
-// with the document-level keys filled in from older trailers when the newer ones lack them.
+// with the document-level keys filled in from older trailers when the newer ones lack them. The result is always a
+// fresh dictionary: the inputs are parsed objects — for a cross-reference stream, trailers[0] is the stream's own
+// dictionary — and neither this merge nor the caller's later edits (installRepairedTrailer supplies a fallback /Root)
+// may alter what another consumer of that object sees.
 func mergeTrailers(trailers []Dict) Dict {
 	if len(trailers) == 0 {
 		return Dict{}
 	}
-	merged := trailers[0]
+	merged := maps.Clone(trailers[0])
+	if merged == nil {
+		merged = Dict{}
+	}
 	for _, older := range trailers[1:] {
 		for _, key := range []Name{"Root", "Info", "Encrypt", "ID"} {
 			if _, ok := merged[key]; !ok {

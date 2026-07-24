@@ -22,7 +22,15 @@ type Decryptor interface {
 	// DecryptStream returns the decrypted raw payload of a stream belonging to object (num, gen), applied before the
 	// stream's /Filter chain. The same no-panic and pass-through contract as DecryptString applies.
 	DecryptStream(num, gen int, data []byte) []byte
+	// EncryptsMetadata reports whether metadata streams are encrypted along with the rest of the document. It is false
+	// only when the encryption dictionary carries /EncryptMetadata false, in which case ISO 32000-2 7.6.2 stores every
+	// /Type /Metadata stream in the clear and it must not be run through DecryptStream.
+	EncryptsMetadata() bool
 }
+
+// typeMetadata is the /Type value of a metadata stream. Such streams are stored unencrypted when the encryption
+// dictionary sets /EncryptMetadata false (ISO 32000-2 7.6.2), so the decryptor skips them in that case.
+const typeMetadata Name = "Metadata"
 
 // SetDecryptor installs dec and drops every cached object, so objects parsed before the security handler existed — the
 // catalog probed while validating the root, and the /Encrypt dictionary itself — are reparsed and decrypted on next
@@ -75,9 +83,11 @@ func (d *Document) decryptValue(num, gen int, obj Object) Object {
 		for k, e := range v.Dict {
 			v.Dict[k] = d.decryptValue(num, gen, e)
 		}
-		// Cross-reference streams are never encrypted (ISO 32000-2 7.5.8.2); everything else — including object streams
-		// — is.
-		if typ, _ := AsName(v.Dict["Type"]); typ != typeXRef {
+		// Cross-reference streams are never encrypted (ISO 32000-2 7.5.8.2), and metadata streams are not either when
+		// the encryption dictionary sets /EncryptMetadata false (7.6.2); everything else — including object streams —
+		// is.
+		if typ, _ := AsName(v.Dict["Type"]); typ != typeXRef &&
+			(typ != typeMetadata || d.decryptor.EncryptsMetadata()) {
 			v.Raw = d.decryptor.DecryptStream(num, gen, v.Raw)
 		}
 		return v

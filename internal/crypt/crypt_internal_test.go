@@ -51,6 +51,39 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 	}
 }
 
+// TestEncryptsMetadata checks that /EncryptMetadata reaches the COS layer, which consults it to leave a /Type
+// /Metadata stream undecrypted (ISO 32000-2 7.6.2). The entry defaults to true when absent or malformed.
+func TestEncryptsMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		entry cos.Object
+		name  string
+		want  bool
+	}{
+		{name: "absent", entry: nil, want: true},
+		{name: "true", entry: cos.Boolean(true), want: true},
+		{name: "false", entry: cos.Boolean(false), want: false},
+		{name: "not a boolean", entry: cos.Integer(0), want: true},
+	} {
+		encDict := cos.Dict{
+			"Filter": cos.Name("Standard"),
+			"V":      cos.Integer(2),
+			"R":      cos.Integer(4),
+			"O":      cos.String(make([]byte, 32)),
+			"U":      cos.String(make([]byte, 32)),
+		}
+		if tc.entry != nil {
+			encDict["EncryptMetadata"] = tc.entry
+		}
+		h, err := New(&cos.Document{}, encDict)
+		if err != nil {
+			t.Fatalf("%s: New: %v", tc.name, err)
+		}
+		if got := h.EncryptsMetadata(); got != tc.want {
+			t.Errorf("%s: EncryptsMetadata() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestPadPassword checks the password padding of Algorithm 2: an empty password is exactly the padding string, and a
 // full-length password is truncated to 32 bytes with no padding appended.
 func TestPadPassword(t *testing.T) {
