@@ -33,6 +33,12 @@ type glyfInfo struct {
 // glyfCompositeDepth caps composite-glyph recursion (matching go-text's own cap).
 const glyfCompositeDepth = 8
 
+// glyfWorkBudget caps the total work one path() call may spend: one unit per component visited plus one per contour
+// emitted. The depth cap alone bounds recursion depth but not branching, so a chain where glyph i is N components of
+// glyph i+1 costs N^depth appendGlyph calls (and a path that grows just as fast) without this ceiling. Sized like
+// maxSegments in the Type 1 interpreter; real glyphs stay in the low hundreds.
+const glyfWorkBudget = 1 << 14
+
 // newGlyfInfo builds the walker from an sfnt loader; nil when the program has no usable glyf/loca pair.
 func newGlyfInfo(ld *opentype.Loader, upem float32, numGlyphs int) *glyfInfo {
 	if upem <= 0 || numGlyphs <= 0 {
@@ -81,15 +87,20 @@ func (g *glyfInfo) path(gid uint32) *gfx.Path {
 	}
 	p := &gfx.Path{}
 	scale := 1 / g.upem
-	g.appendGlyph(p, gid, gfx.Scale(scale, scale), 0)
+	budget := glyfWorkBudget
+	g.appendGlyph(p, gid, gfx.Scale(scale, scale), 0, &budget, map[uint32]bool{})
 	return p
 }
 
-// appendGlyph appends one glyph's contours under m, recursing into composite components.
-func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int) {
-	if depth > glyfCompositeDepth {
+// appendGlyph appends one glyph's contours under m, recursing into composite components. budget is decremented once per
+// visited glyph and once per emitted contour and stops the walk when exhausted; onPath holds the composite GIDs on the
+// current recursion path, so a component that references any ancestor (a self-reference or a longer A->B->A cycle) is
+// skipped rather than followed.
+func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int, budget *int, onPath map[uint32]bool) {
+	if depth > glyfCompositeDepth || *budget <= 0 {
 		return
 	}
+	*budget--
 	data := g.glyphData(gid)
 	if data == nil {
 		return
@@ -100,15 +111,21 @@ func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int)
 	}
 	switch d := glyph.Data.(type) {
 	case tables.SimpleGlyph:
-		appendSimpleContours(p, d, m)
+		appendSimpleContours(p, d, m, budget)
 	case tables.CompositeGlyph:
+		onPath[gid] = true
 		for i := range d.Glyphs {
 			part := &d.Glyphs[i]
-			if uint32(part.GlyphIndex) == gid {
-				continue // Self-reference: hostile.
+			child := uint32(part.GlyphIndex)
+			if onPath[child] {
+				continue // References an ancestor on the recursion path (self or longer cycle): hostile.
 			}
-			g.appendGlyph(p, uint32(part.GlyphIndex), componentMatrix(part).Mul(m), depth+1)
+			g.appendGlyph(p, child, componentMatrix(part).Mul(m), depth+1, budget, onPath)
+			if *budget <= 0 {
+				break
+			}
 		}
+		delete(onPath, gid)
 	}
 }
 
@@ -132,10 +149,14 @@ func componentMatrix(part *tables.CompositeGlyphPart) gfx.Matrix {
 
 // appendSimpleContours converts a simple glyph's quadratic contours: runs of off-curve points imply on-curve midpoints
 // between them; a contour with no on-curve point starts at the midpoint of its first two points.
-func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix) {
+func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix, budget *int) {
 	pts := sg.Points
 	start := 0
 	for _, endIdx := range sg.EndPtsOfContours {
+		if *budget <= 0 {
+			return
+		}
+		*budget--
 		end := int(endIdx)
 		if end < start || end >= len(pts) {
 			return // Malformed contour indices: stop appending, keep what is valid so far.
