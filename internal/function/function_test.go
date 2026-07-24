@@ -217,6 +217,93 @@ func TestCalculatorBitshift(t *testing.T) {
 	near(t, evalOne(t, fn, 0), 0)
 }
 
+// TestCalculatorIntConversionClamps pins the float→int conversions the calculator's integer operators depend on. Go
+// leaves an out-of-range float→int conversion implementation-defined and the architectures disagree (arm64 saturates,
+// amd64 wraps to the sentinel), so the bounds must be applied in float space to keep results identical everywhere.
+func TestCalculatorIntConversionClamps(t *testing.T) {
+	for _, tc := range []struct {
+		in   float64
+		want int32
+	}{
+		{in: 0, want: 0},
+		{in: 2.75, want: 2},
+		{in: -2.75, want: -2},
+		{in: math.NaN(), want: 0},
+		{in: math.Inf(1), want: math.MaxInt32},
+		{in: math.Inf(-1), want: math.MinInt32},
+		{in: 1e20, want: math.MaxInt32},
+		{in: -1e20, want: math.MinInt32},
+		{in: math.MaxInt32, want: math.MaxInt32},
+		{in: math.MinInt32, want: math.MinInt32},
+		{in: math.MaxInt32 + 1, want: math.MaxInt32},
+		{in: math.MinInt32 - 1, want: math.MinInt32},
+	} {
+		if got := psToInt32(tc.in); got != tc.want {
+			t.Errorf("psToInt32(%v) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		in   float64
+		want int
+	}{
+		{in: 0, want: 0},
+		{in: 3.9, want: 3},
+		{in: psStackLimit, want: psStackLimit},
+		{in: -0.5, want: -1},
+		{in: -1, want: -1},
+		{in: math.NaN(), want: -1},
+		{in: math.Inf(1), want: -1},
+		{in: math.Inf(-1), want: -1},
+		{in: 1e20, want: -1},
+		{in: psStackLimit + 1, want: -1},
+	} {
+		if got := psToStackCount(tc.in); got != tc.want {
+			t.Errorf("psToStackCount(%v) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestCalculatorOutOfRangeOperands checks the clamping end to end: a program that feeds a non-finite or far
+// out-of-int32 value to an operator that needs an integer must produce the same output on every architecture.
+func TestCalculatorOutOfRangeOperands(t *testing.T) {
+	const (
+		big      = "10000000000 10000000000 mul" // 1e20, far outside int32
+		nan      = "0 0 div"
+		small    = "[0 100]"
+		signed   = "[-100 100]"
+		int32Rng = "[-2147483648 2147483647]"
+	)
+	for _, tc := range []struct {
+		program string
+		rng     string
+		want    float32
+	}{
+		// A count operand that is not a usable stack count must abort the program everywhere, rather than reading as 0
+		// (a silent no-op that runs the rest of the program) on one architecture and as a huge negative (an abort) on
+		// another. Each of these aborts before the trailing 99 is pushed, so the output stays 1.
+		{program: "{ pop 1 " + nan + " copy 99 }", rng: small, want: 1},
+		{program: "{ pop 1 " + nan + " index 99 }", rng: small, want: 1},
+		{program: "{ pop 1 " + nan + " 1 roll 99 }", rng: small, want: 1},
+		{program: "{ pop 1 " + big + " copy 99 }", rng: small, want: 1},
+		{program: "{ pop 1 " + big + " neg index 99 }", rng: small, want: 1},
+		// Integer operands saturate to the int32 bounds and NaN reads as 0.
+		{program: "{ pop " + big + " 1 idiv }", rng: int32Rng, want: math.MaxInt32},
+		{program: "{ pop " + big + " neg 1 idiv }", rng: int32Rng, want: math.MinInt32},
+		{program: "{ pop " + big + " 10 mod }", rng: signed, want: math.MaxInt32 % 10},
+		{program: "{ pop " + big + " 255 and }", rng: "[-1 4096]", want: 255},
+		{program: "{ pop " + nan + " 255 or }", rng: "[-1 4096]", want: 255},
+		{program: "{ pop " + nan + " not }", rng: signed, want: -1},
+		{program: "{ pop 1 " + big + " bitshift }", rng: signed, want: 0},
+		{program: "{ pop 1 " + big + " neg bitshift }", rng: signed, want: 0},
+	} {
+		d := docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range "+tc.rng, tc.program)
+		fn := parseObj1(t, d)
+		if got := evalOne(t, fn, 0); got[0] != tc.want {
+			t.Errorf("program %q produced %v, want %v", tc.program, got[0], tc.want)
+		}
+	}
+}
+
 func TestCalculatorEqTypeAware(t *testing.T) {
 	// Boolean true is stored as 1.0 but must not compare equal to the number 1.0 (ISO 32000-2 typed equality).
 	d := docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ pop true 1 eq { 1 } { 0 } ifelse }")

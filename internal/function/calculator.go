@@ -238,6 +238,35 @@ func (s *psStack) popVal() (float64, bool) {
 	return s.vals[s.n], s.bools[s.n]
 }
 
+// psToInt32 converts a stack value to the 32-bit integer that the calculator's integer operators (idiv, mod, bitshift,
+// and, or, xor, not) work on. The bounds are applied in float space on purpose: Go leaves a float→int conversion
+// implementation-defined when the value does not fit, and the platforms disagree — arm64 saturates to the nearest
+// int32 bound (and maps NaN to 0) while amd64 wraps every out-of-range operand to math.MinInt32 — so an unclamped
+// conversion would let a tint transform that produces a huge or non-finite value yield different colors on different
+// CPUs. Saturating (and mapping NaN to 0) here keeps the result identical everywhere.
+func psToInt32(v float64) int32 {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= math.MaxInt32: // Also catches +Inf. math.MaxInt32 is exactly representable as a float64.
+		return math.MaxInt32
+	case v <= math.MinInt32: // Also catches -Inf.
+		return math.MinInt32
+	default:
+		return int32(v)
+	}
+}
+
+// psToStackCount converts a stack value to the operand count or index used by copy, index and roll. Anything that is
+// not a finite, non-negative value within the stack limit maps to -1 so the caller's existing range check rejects it,
+// making the rejection deterministic across architectures rather than depending on how the CPU converts the operand.
+func psToStackCount(v float64) int {
+	if math.IsNaN(v) || v < 0 || v > psStackLimit {
+		return -1
+	}
+	return int(v)
+}
+
 func (c *calculator) Eval(in []float32) []float32 {
 	x := c.clampIn(in)
 	var stack psStack
@@ -304,7 +333,7 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 		case opFloor:
 			s.push(math.Floor(s.pop()))
 		case opIdiv:
-			b, a := int32(s.pop()), int32(s.pop())
+			b, a := psToInt32(s.pop()), psToInt32(s.pop())
 			if b == 0 {
 				s.failed = true
 				return
@@ -315,7 +344,7 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 		case opLog:
 			s.push(math.Log10(s.pop()))
 		case opMod:
-			b, a := int32(s.pop()), int32(s.pop())
+			b, a := psToInt32(s.pop()), psToInt32(s.pop())
 			if b == 0 {
 				s.failed = true
 				return
@@ -338,7 +367,7 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 		case opAnd, opOr, opXor:
 			execPSBits(instr.op, s)
 		case opBitshift:
-			shift, a := int32(s.pop()), int32(s.pop())
+			shift, a := psToInt32(s.pop()), psToInt32(s.pop())
 			switch {
 			case shift >= 32 || shift <= -32:
 				s.push(0)
@@ -380,10 +409,10 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 			if s.n > 0 && s.bools[s.n-1] {
 				s.pushBool(!s.popBool())
 			} else {
-				s.push(float64(^int32(s.pop())))
+				s.push(float64(^psToInt32(s.pop())))
 			}
 		case opCopy:
-			n := int(s.pop())
+			n := psToStackCount(s.pop())
 			if n < 0 || n > s.n || s.n+n > psStackLimit {
 				s.failed = true
 				return
@@ -410,7 +439,7 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 			s.vals[s.n-1], s.vals[s.n-2] = s.vals[s.n-2], s.vals[s.n-1]
 			s.bools[s.n-1], s.bools[s.n-2] = s.bools[s.n-2], s.bools[s.n-1]
 		case opIndex:
-			n := int(s.pop())
+			n := psToStackCount(s.pop())
 			if n < 0 || n >= s.n {
 				s.failed = true
 				return
@@ -424,7 +453,9 @@ func execPS(program []psInstr, s *psStack, steps *int) {
 		case opPop:
 			s.pop()
 		case opRoll:
-			j, n := int(s.pop()), int(s.pop())
+			// The rotation amount is reduced modulo n by rollSlice, so saturating it is harmless; the operand count
+			// must be a real stack count, so anything else is rejected below.
+			j, n := int(psToInt32(s.pop())), psToStackCount(s.pop())
 			if n < 0 || n > s.n {
 				s.failed = true
 				return
@@ -453,7 +484,7 @@ func execPSBits(op psOp, s *psStack) {
 		}
 		return
 	}
-	ai, bi := int32(a), int32(b)
+	ai, bi := psToInt32(a), psToInt32(b)
 	switch op {
 	case opAnd:
 		s.push(float64(ai & bi))
