@@ -535,8 +535,15 @@ func (e *engineDocument) needsPassword() bool {
 
 // authenticate attempts to authenticate with the given user or owner password, returning MuPDF-compatible status bits.
 // doc.Authenticate produces them in the same layout as AuthenticationStatus (bit 0 = no authentication required, bit 1
-// = user, bit 2 = owner), so the value maps straight across the seam.
-func (e *engineDocument) authenticate(password string) AuthenticationStatus {
+// = user, bit 2 = owner), so the value maps straight across the seam. doc.Authenticate decrypts and re-parses the page
+// tree on untrusted input; a panic provoked by a malformed encrypted document surfaces as a zero status rather than
+// escaping the public API, matching the guards on the other engine calls.
+func (e *engineDocument) authenticate(password string) (status AuthenticationStatus) {
+	defer func() {
+		if recover() != nil {
+			status = 0
+		}
+	}()
 	return AuthenticationStatus(e.doc.Authenticate(password))
 }
 
@@ -557,8 +564,14 @@ func (e *engineDocument) loadPage(pageNumber int) (*page, error) {
 // outline returns the root of the document outline, or nil when there is none. The engine hands back its own linked
 // tree in the same shape; this conversion only re-labels it into the seam type. Sibling chains are walked iteratively
 // (their length is engine-capped but can be long); recursion depth equals the outline's nesting depth, which the engine
-// caps far below stack limits.
-func (e *engineDocument) outline() *outlineNode {
+// caps far below stack limits. doc.Outline walks the untrusted /Outlines tree resolving destinations; a panic provoked
+// by a malformed tree surfaces as a nil outline rather than escaping the public API.
+func (e *engineDocument) outline() (root *outlineNode) {
+	defer func() {
+		if recover() != nil {
+			root = nil
+		}
+	}()
 	return convertOutline(e.doc.Outline())
 }
 
@@ -599,8 +612,15 @@ func convertOutlineGuarded(item *doc.OutlineItem, depth int, visited map[*doc.Ou
 }
 
 // links returns the link annotations present on the page, in /Annots order, with all geometry already in
-// top-left/y-down page space (the engine's navigation layer maps it).
-func (e *engineDocument) links(pg *page) []pageLinkInfo {
+// top-left/y-down page space (the engine's navigation layer maps it). doc.Links resolves the untrusted /Annots array;
+// a panic provoked by malformed link annotations surfaces as no links rather than escaping the public API, matching the
+// guards on rasterize and search that render() also relies on.
+func (e *engineDocument) links(pg *page) (infos []pageLinkInfo) {
+	defer func() {
+		if recover() != nil {
+			infos = nil
+		}
+	}()
 	engineLinks := e.doc.Links(pg.number)
 	if len(engineLinks) == 0 {
 		return nil
