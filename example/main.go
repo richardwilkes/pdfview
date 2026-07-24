@@ -65,6 +65,13 @@ func extract(path, search string) (err error) {
 	}
 	fmt.Println(divider)
 
+	// A document whose catalog has no usable page tree opens successfully with zero pages, so there is nothing to
+	// render. Report that rather than letting RenderPage fail with "invalid page number".
+	if doc.PageCount() == 0 {
+		fmt.Println("document has no renderable pages")
+		return nil
+	}
+
 	// Render the first page at 150 DPI, highlighting up to 10 search matches.
 	var page *pdfview.RenderedPage
 	if page, err = doc.RenderPage(0, 150, 10, search); err != nil {
