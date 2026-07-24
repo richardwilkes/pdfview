@@ -92,7 +92,8 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		}
 		return gray, gw, gh, nil
 	}
-	var bpc, rowStride int
+	var bpc int
+	var rowStride int64
 	validCols := w
 	if isCCITT(codec) {
 		// CCITT fixes bpc at 1 and supplies the column count itself, so — like decodeSamples — do not consult (or
@@ -104,7 +105,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 			return nil, 0, 0, err
 		}
 		bpc = 1
-		rowStride = (cols + 7) / 8
+		rowStride = rowStrideFor(cols, 1, 1)
 		if cols < validCols {
 			validCols = cols
 		}
@@ -113,7 +114,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		rowStride = (w*bpc + 7) / 8
+		rowStride = rowStrideFor(w, 1, bpc)
 	}
 	plane = make([]byte, w*h)
 	reader := sampleReader{data: data, bpc: bpc}
@@ -121,7 +122,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		// 16-bit masks map per sample (no LUT): the high byte carries all the precision alpha keeps.
 		mapping := sub.grayMapping(16)
 		for y := range h {
-			reader.seek(y * rowStride)
+			reader.seek(int64(y) * rowStride)
 			for x := range w {
 				plane[y*w+x] = alphaByte(mapping.apply(reader.next(), 0))
 			}
@@ -130,7 +131,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	}
 	lut := sub.alphaLUT(bpc)
 	for y := range h {
-		reader.seek(y * rowStride)
+		reader.seek(int64(y) * rowStride)
 		for x := range w {
 			// Columns past the decoder's count read as zero samples (see decodeSamples); the 16-bit path above never
 			// applies to CCITT, so only this LUT loop needs the guard.

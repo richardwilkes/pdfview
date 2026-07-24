@@ -21,7 +21,7 @@ import (
 // BitsPerComponent, map through /Decode, convert through the color space, then apply /SMask or /Mask alpha.
 func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	data := dec.data
-	rowStride := 0
+	rowStride := int64(0)
 	bpc := 1
 	validCols := w
 	if isCCITT(dec.codec) {
@@ -35,7 +35,7 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		if err != nil {
 			return nil, err
 		}
-		rowStride = (cols + 7) / 8
+		rowStride = rowStrideFor(cols, 1, 1)
 		if cols < validCols {
 			validCols = cols
 		}
@@ -61,7 +61,7 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		return nil, ErrBadImage
 	}
 	if rowStride == 0 {
-		rowStride = (w*ncomp*bpc + 7) / 8
+		rowStride = rowStrideFor(w, ncomp, bpc)
 	}
 	mapping := dec.decodeMapping(space, bpc)
 	lut := mapping.lut(space, bpc)
@@ -72,7 +72,7 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	reader := sampleReader{data: data, bpc: bpc}
 	hasAlpha := false
 	for y := range h {
-		reader.seek(y * rowStride)
+		reader.seek(int64(y) * rowStride)
 		for x := range w {
 			for c := range ncomp {
 				// Columns past the decoder's own count (CCITT with /Width > /Columns) are not present in the row's
@@ -223,7 +223,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 		}
 	}
 	data := dec.data
-	rowStride := (w + 7) / 8
+	rowStride := rowStrideFor(w, 1, 1)
 	validCols := w
 	switch {
 	case isCCITT(dec.codec):
@@ -233,7 +233,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		rowStride = (cols + 7) / 8
+		rowStride = rowStrideFor(cols, 1, 1)
 		if cols < validCols {
 			validCols = cols
 		}
@@ -253,7 +253,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	alpha := make([]byte, w*h)
 	reader := sampleReader{data: data, bpc: 1}
 	for y := range h {
-		reader.seek(y * rowStride)
+		reader.seek(int64(y) * rowStride)
 		for x := range w {
 			// Columns past the decoder's count read as zero samples (see decodeSamples); crossing the byte-aligned
 			// row boundary into padding or the next row would otherwise corrupt the stencil.
@@ -269,26 +269,35 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	return alpha, nil
 }
 
+// rowStrideFor returns the byte length of one row of w pixels at ncomp components of bpc bits each. The product reaches
+// 2^35 bits (2^26 columns * 32 components * 16 bits, the caps run enforces), which wraps a 32-bit int (GOARCH=386/arm)
+// into a negative stride that would seek the sample reader backwards, so it is computed and carried as an int64.
+func rowStrideFor(w, ncomp, bpc int) int64 {
+	return (int64(w)*int64(ncomp)*int64(bpc) + 7) / 8
+}
+
 // sampleReader unpacks big-endian packed samples of 1, 2, 4, 8, or 16 bits. Reads past the end of data return zero
 // samples, the lenient completion for truncated payloads.
 type sampleReader struct {
 	data []byte
-	pos  int // bit position
+	pos  int64 // bit position
 	bpc  int
 }
 
-// seek positions the reader at a byte offset (rows are byte-aligned).
-func (r *sampleReader) seek(byteOff int) {
+// seek positions the reader at a byte offset (rows are byte-aligned). The offset is an int64 because a row stride can
+// exceed a 32-bit int on its own, and the row-major product with the row index (and the 8× to bits) compounds it.
+func (r *sampleReader) seek(byteOff int64) {
 	r.pos = byteOff * 8
 }
 
 // next returns the next sample.
 func (r *sampleReader) next() uint32 {
+	n := int64(len(r.data))
 	switch r.bpc {
 	case 8:
 		i := r.pos >> 3
 		r.pos += 8
-		if i < len(r.data) {
+		if i < n {
 			return uint32(r.data[i])
 		}
 		return 0
@@ -296,18 +305,18 @@ func (r *sampleReader) next() uint32 {
 		i := r.pos >> 3
 		r.pos += 16
 		var hi, lo uint32
-		if i < len(r.data) {
+		if i < n {
 			hi = uint32(r.data[i])
 		}
-		if i+1 < len(r.data) {
+		if i+1 < n {
 			lo = uint32(r.data[i+1])
 		}
 		return hi<<8 | lo
 	default: // 1, 2, 4
 		i := r.pos >> 3
-		shift := 8 - r.bpc - (r.pos & 7)
-		r.pos += r.bpc
-		if i < len(r.data) {
+		shift := 8 - r.bpc - int(r.pos&7)
+		r.pos += int64(r.bpc)
+		if i < n {
 			return uint32(r.data[i]>>shift) & (1<<r.bpc - 1)
 		}
 		return 0

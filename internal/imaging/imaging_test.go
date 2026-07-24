@@ -89,6 +89,64 @@ func TestSampleReader(t *testing.T) {
 	}
 }
 
+// TestSampleStrideMaximumLayout pins the row-stride and bit-position arithmetic at the largest layouts run accepts.
+// Every value asserted here exceeds math.MaxInt32, so an int computation would wrap on a 32-bit build (GOARCH=386/arm)
+// and hand the sample reader a zero or negative stride; a negative bit position then makes next()'s pos>>3 index the
+// data slice out of range and panic.
+func TestSampleStrideMaximumLayout(t *testing.T) {
+	// 2^26 columns * 32 components * 16 bits = 2^32 bytes per row, four times an int32's range (it wraps to exactly 0).
+	if got, want := rowStrideFor(maxImagePixels, 32, 16), int64(1)<<32; got != want {
+		t.Errorf("maximum-layout row stride: got %d, want %d", got, want)
+	}
+	// A width just under the cap wraps negative rather than to zero, the case that panics instead of reading zeros.
+	if got, want := rowStrideFor(6<<21, 32, 16), int64(3)<<28; got != want {
+		t.Errorf("near-maximum row stride: got %d, want %d", got, want)
+	}
+	// The last row of a 2^20 x 64 image (2^26 pixels, exactly the pixel cap) sits past 2^32 bytes and 2^35 bits in.
+	stride := rowStrideFor(1<<20, 32, 16)
+	var r sampleReader
+	r.bpc = 16
+	r.seek(stride * 63)
+	if want := int64(63) << 29; r.pos != want {
+		t.Errorf("last-row bit position: got %d, want %d", r.pos, want)
+	}
+	// Reading there is past the end of any real payload, which is the zero-sample truncation case, not a panic.
+	r.data = []byte{0xff, 0xff}
+	if got := r.next(); got != 0 {
+		t.Errorf("read past end at a >32-bit bit position: got %d, want 0", got)
+	}
+}
+
+// TestDecodeRowStrideBeyondData decodes a multi-component 16-bit image whose declared rows are longer than the payload
+// supplies. Row 0 comes from real samples; the seeks for rows 1 and 2 land past the data and must read as zero samples
+// (the truncation leniency) rather than wrapping or panicking.
+func TestDecodeRowStrideBeyondData(t *testing.T) {
+	d := testDoc(t)
+	dict := cos.Dict{"W": cos.Integer(2), "H": cos.Integer(3), keyBPC: cos.Integer(16), "CS": cos.Name("CMYK")}
+	// One full row: two CMYK pixels at 16 bits per component, 16 bytes; the stride is 16, so rows 1 and 2 start at 16
+	// and 32, both at or past the end.
+	row := []byte{
+		0, 0, 0, 0, 0, 0, 0, 0, // 0% ink: white
+		0, 0, 0, 0, 0xff, 0xff, 0, 0, // full yellow
+	}
+	img, err := DecodeInline(d, dict, row, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Pix[0] != 255 || img.Pix[1] != 255 || img.Pix[2] != 255 {
+		t.Errorf("row 0 pixel 0 (no ink): %v", img.Pix[0:4])
+	}
+	if img.Pix[6] != 0 {
+		t.Errorf("row 0 pixel 1 (full yellow): %v", img.Pix[4:8])
+	}
+	// Rows 1 and 2 read as all-zero samples, which in CMYK is no ink at all: white.
+	for i := 8; i < len(img.Pix); i += 4 {
+		if img.Pix[i] != 255 || img.Pix[i+1] != 255 || img.Pix[i+2] != 255 {
+			t.Fatalf("truncated row pixel at %d: %v", i/4, img.Pix[i:i+4])
+		}
+	}
+}
+
 func TestGrayDecodeArray(t *testing.T) {
 	d := testDoc(t)
 	dict := cos.Dict{"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G")}
