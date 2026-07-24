@@ -379,6 +379,7 @@ func (r *rawDoc) rawSearch(page *C.fz_page, needles []string) (map[string][][8]f
 		cNeedle := C.CString(needle)
 		hits := int(C.oracle_fz_search_display_list(r.ctx, list, cNeedle, &quads[0], C.int(len(quads))))
 		C.free(unsafe.Pointer(cNeedle))
+		hits = clampHits(hits, len(quads))
 		result := make([][8]float32, 0, hits)
 		for i := range hits {
 			q := quads[i]

@@ -74,3 +74,28 @@ func TestValidateNeedles(t *testing.T) {
 		})
 	}
 }
+
+func TestClampHits(t *testing.T) {
+	// A hit count from MuPDF indexes the Go quad buffer directly, so anything outside [0, len(quads)] must be pulled
+	// back into range rather than panicking the dump.
+	for _, tc := range []struct {
+		name  string
+		hits  int
+		limit int
+		want  int
+	}{
+		{name: "none", hits: 0, limit: rawSearchMax, want: 0},
+		{name: "within range", hits: 7, limit: rawSearchMax, want: 7},
+		{name: "exactly at limit", hits: rawSearchMax, limit: rawSearchMax, want: rawSearchMax},
+		{name: "above limit", hits: rawSearchMax + 1, limit: rawSearchMax, want: rawSearchMax},
+		{name: "far above limit", hits: 1 << 30, limit: rawSearchMax, want: rawSearchMax},
+		{name: "negative", hits: -1, limit: rawSearchMax, want: 0},
+		{name: "empty buffer", hits: 5, limit: 0, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampHits(tc.hits, tc.limit); got != tc.want {
+				t.Fatalf("clampHits(%d, %d) = %d, want %d", tc.hits, tc.limit, got, tc.want)
+			}
+		})
+	}
+}

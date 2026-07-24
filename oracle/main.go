@@ -319,3 +319,9 @@ func convertHits(hits []image.Rectangle) [][4]int {
 	}
 	return converted
 }
+
+// clampHits bounds a hit count returned by MuPDF to the number of quads rawSearch actually handed to it. MuPDF honors
+// hit_max, so this should never alter the value; it exists so that a bad count cannot index past the buffer.
+func clampHits(hits, limit int) int {
+	return min(max(hits, 0), limit)
+}
