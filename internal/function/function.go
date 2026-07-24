@@ -26,9 +26,10 @@ import (
 
 // Limits. maxInputs bounds type 0 multilinear interpolation (2^m corner samples per evaluation); real functions rarely
 // exceed 2 inputs. maxNesting bounds type 3 subfunction and type 4 procedure nesting. maxProgramOps bounds a parsed
-// calculator program's total instruction count, and maxExecSteps bounds one evaluation's executed instructions
-// (if/ifelse can re-run instructions; loops do not exist in the calculator language, but the cap also hardens against
-// implementation slips). psStackLimit is the standard's own limit (ISO 32000-2 7.10.5.1).
+// calculator program's total instruction count and, as a per-Parse budget, the total number of function nodes parsed
+// across a whole graph (so branching cannot multiply with depth). maxExecSteps bounds one evaluation's executed
+// instructions (if/ifelse can re-run instructions; loops do not exist in the calculator language, but the cap also
+// hardens against implementation slips). psStackLimit is the standard's own limit (ISO 32000-2 7.10.5.1).
 const (
 	maxInputs     = 8
 	maxOutputs    = 64
@@ -44,6 +45,7 @@ var (
 	errBadRange    = errors.New("function has a missing or invalid /Range")
 	errUnsupported = errors.New("unsupported function type")
 	errTooDeep     = errors.New("functions nested too deeply")
+	errTooComplex  = errors.New("function graph too complex")
 )
 
 // Func is one parsed PDF function.
@@ -114,12 +116,21 @@ func interpolate(x, xmin, xmax, ymin, ymax float32) float32 {
 
 // Parse parses obj (resolving references) as a function.
 func Parse(d *cos.Document, obj cos.Object) (Func, error) {
-	return parse(d, obj, 0)
+	// budget caps the total number of function nodes parsed across the whole graph, not just its depth. maxNesting
+	// bounds depth alone, so a chain of stitching functions whose /Functions arrays fan out to shared references could
+	// otherwise force exponential (branching^depth) parse work from a tiny file. The shared budget makes total work
+	// linear in the file's declared node count.
+	budget := maxProgramOps
+	return parse(d, obj, 0, &budget)
 }
 
-func parse(d *cos.Document, obj cos.Object, depth int) (Func, error) {
+func parse(d *cos.Document, obj cos.Object, depth int, budget *int) (Func, error) {
 	if depth > maxNesting {
 		return nil, errTooDeep
+	}
+	*budget--
+	if *budget < 0 {
+		return nil, errTooComplex
 	}
 	resolved := d.Resolve(obj)
 	dict, ok := cos.AsDict(resolved)
@@ -145,7 +156,7 @@ func parse(d *cos.Document, obj cos.Object, depth int) (Func, error) {
 	case 2:
 		return parseExponential(d, dict, c)
 	case 3:
-		return parseStitching(d, dict, c, depth)
+		return parseStitching(d, dict, c, depth, budget)
 	case 4:
 		stream, isStream := cos.AsStream(resolved)
 		if !isStream {

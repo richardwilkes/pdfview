@@ -10,8 +10,10 @@
 package function
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -142,6 +144,55 @@ func TestStitchingRangeMustMatchSubfunctions(t *testing.T) {
 		t.Fatalf("Eval returned %d values, NOutputs reports %d", len(got), fn.NOutputs())
 	}
 	near(t, got, 0.5) // 0.25 encodes to 0.5 in the first subfunction, within the declared range
+}
+
+// TestStitchingGraphBudget pins the aggregate parse-node budget. A chain of stitching functions whose /Functions arrays
+// each reference the next object twice fans out multiplicatively: object k would be parsed 2^(k-1) times, so 16 levels
+// force >2^16 parse calls from a tiny file. maxNesting caps depth alone (the leaf sits at depth 16, within the limit),
+// so the shared budget is what must reject the branching^depth blowup.
+func TestStitchingGraphBudget(t *testing.T) {
+	const levels = 16
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n")
+	for i := 1; i <= levels; i++ {
+		fmt.Fprintf(&sb, "%d 0 obj\n<< /FunctionType 3 /Domain [0 1] /Bounds [0.5] "+
+			"/Functions [ %d 0 R %d 0 R ] /Encode [0 1 0 1] >>\nendobj\n", i, i+1, i+1)
+	}
+	// Leaf: a type-2 exponential function that the chain bottoms out on.
+	fmt.Fprintf(&sb, "%d 0 obj\n<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>\nendobj\n", levels+1)
+	catalog := levels + 2
+	fmt.Fprintf(&sb, "%d 0 obj\n<< /Type /Catalog >>\nendobj\n", catalog)
+	fmt.Fprintf(&sb, "trailer\n<< /Root %d 0 R /Size %d >>\nstartxref\n0\n%%%%EOF\n", catalog, catalog+1)
+	d, err := cos.Open([]byte(sb.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Parse(d, cos.Ref{Num: 1}); !errors.Is(err, errTooComplex) {
+		t.Fatalf("expected errTooComplex, got %v", err)
+	}
+}
+
+// TestStitchingLinearChainParses guards against the budget over-rejecting: a straight (non-branching) chain of stitching
+// functions right up to the nesting limit is a handful of nodes and must still parse.
+func TestStitchingLinearChainParses(t *testing.T) {
+	const levels = maxNesting
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n")
+	for i := 1; i <= levels; i++ {
+		fmt.Fprintf(&sb, "%d 0 obj\n<< /FunctionType 3 /Domain [0 1] "+
+			"/Functions [ %d 0 R ] /Encode [0 1] >>\nendobj\n", i, i+1)
+	}
+	fmt.Fprintf(&sb, "%d 0 obj\n<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>\nendobj\n", levels+1)
+	catalog := levels + 2
+	fmt.Fprintf(&sb, "%d 0 obj\n<< /Type /Catalog >>\nendobj\n", catalog)
+	fmt.Fprintf(&sb, "trailer\n<< /Root %d 0 R /Size %d >>\nstartxref\n0\n%%%%EOF\n", catalog, catalog+1)
+	d, err := cos.Open([]byte(sb.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Parse(d, cos.Ref{Num: 1}); err != nil {
+		t.Fatalf("linear chain rejected: %v", err)
+	}
 }
 
 func TestSampled(t *testing.T) {
