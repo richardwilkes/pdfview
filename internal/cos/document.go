@@ -39,7 +39,12 @@ var (
 type Document struct {
 	xref     map[int]xrefEntry
 	objCache map[int]Object
-	objStms  map[int]*objStm
+	// objFailed records the numbers whose load failed, and why, so a broken reference is parsed at most once. A failed
+	// load is not cheap — parseIndirectAt walks the object graph and captureRawStream scans for the stream's terminator
+	// — and nothing above this layer charges for it, so a content stream naming a broken reference once per operator
+	// would otherwise multiply a small input into O(operators × file size) work.
+	objFailed map[int]error
+	objStms   map[int]*objStm
 	// objStmLoading tracks object streams currently being parsed, breaking the mutual recursion that a malicious file
 	// can induce when an object stream's own dictionary keys (/N, /First, /Filter, /DecodeParms) are indirect
 	// references whose xref entries point back into the same not-yet-cached stream.
@@ -61,6 +66,7 @@ func Open(data []byte) (*Document, error) {
 		data:          data,
 		xref:          make(map[int]xrefEntry),
 		objCache:      make(map[int]Object),
+		objFailed:     make(map[int]error),
 		objStms:       make(map[int]*objStm),
 		objStmLoading: make(map[int]bool),
 	}
@@ -116,10 +122,14 @@ func (d *Document) Resolve(obj Object) Object {
 
 // loadObject returns the top-level object with the given number, parsing and caching it on first use. A load failure
 // (bad offset, mismatched header, unparseable content) triggers the document-wide repair scan once, then retries;
-// absent and free entries are not failures — they read as Null.
+// absent and free entries are not failures — they read as Null. Failures are cached too, so a broken reference costs
+// one parse attempt for the life of the document (or until a cache drop).
 func (d *Document) loadObject(num int) (Object, error) {
 	if obj, ok := d.objCache[num]; ok {
 		return obj, nil
+	}
+	if err, ok := d.objFailed[num]; ok {
+		return nil, err
 	}
 	obj, err := d.loadObjectUncached(num)
 	if err != nil && !d.repaired {
@@ -128,6 +138,12 @@ func (d *Document) loadObject(num int) (Object, error) {
 		}
 	}
 	if err != nil {
+		// The object-stream re-entrancy and nesting guards fire because of where this load sits in the current call
+		// stack, not because of anything about num: the same object can load cleanly when reached from the top level.
+		// Both refuse before parsing anything, so leaving them out of the failure cache costs nothing.
+		if !errors.Is(err, errObjStmCycle) && !errors.Is(err, errObjStmDepth) {
+			d.objFailed[num] = err
+		}
 		return nil, err
 	}
 	d.objCache[num] = obj
@@ -366,6 +382,7 @@ func (d *Document) filterParams(parmDict Dict) filter.Params {
 // cross-reference data may be wrong.
 func (d *Document) clearCaches() {
 	d.objCache = make(map[int]Object)
+	d.objFailed = make(map[int]error)
 	d.objStms = make(map[int]*objStm)
 	d.objStmLoading = make(map[int]bool)
 }

@@ -346,6 +346,7 @@ func TestLoadObjStmSelfReference(t *testing.T) {
 			2: {kind: xrefInStream, stmNum: 1, stmIdx: 0},
 		},
 		objCache:      map[int]Object{},
+		objFailed:     map[int]error{},
 		objStms:       map[int]*objStm{},
 		objStmLoading: map[int]bool{},
 		repaired:      true, // Suppress the load-failure repair retry so the test exercises only the recursion guard.
@@ -365,6 +366,7 @@ func TestLoadObjStmDepthCap(t *testing.T) {
 	d := &Document{
 		xref:          map[int]xrefEntry{},
 		objCache:      map[int]Object{},
+		objFailed:     map[int]error{},
 		objStms:       map[int]*objStm{},
 		objStmLoading: map[int]bool{},
 	}
@@ -400,6 +402,7 @@ func TestLoadObjStmChainTerminates(t *testing.T) {
 		data:          buf.Bytes(),
 		xref:          xref,
 		objCache:      map[int]Object{},
+		objFailed:     map[int]error{},
 		objStms:       map[int]*objStm{},
 		objStmLoading: map[int]bool{},
 		repaired:      true, // Suppress the load-failure repair retry so the test exercises only the recursion path.
