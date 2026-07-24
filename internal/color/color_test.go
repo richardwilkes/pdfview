@@ -12,6 +12,7 @@ package color
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 
@@ -159,6 +160,60 @@ func TestParseIndexed(t *testing.T) {
 	}
 	if got := space.ToNRGBA([]float32{-3}); got != (color.NRGBA{R: 255, A: 255}) {
 		t.Errorf("negative index = %v (must clamp to 0)", got)
+	}
+}
+
+// TestIndexedNonFiniteIndex pins the float-space clamp. An int-space clamp would be architecture-dependent here: Go
+// leaves an out-of-range float→int conversion implementation-defined, so +Inf becomes math.MaxInt64 on arm64 (clamping
+// up to hival) but math.MinInt64 on amd64 (clamping down to 0) — the same file rendering different pixels per platform.
+func TestIndexedNonFiniteIndex(t *testing.T) {
+	d := docWith(t, "[ /Indexed /DeviceRGB 2 <FF0000 00FF00 0000FF> ]")
+	space, err := Parse(d, cos.Ref{Num: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := color.NRGBA{R: 255, A: 255}
+	last := color.NRGBA{B: 255, A: 255}
+	for _, tc := range []struct {
+		name string
+		idx  float32
+		want color.NRGBA
+	}{
+		{name: "+Inf", idx: float32(math.Inf(1)), want: last},
+		{name: "-Inf", idx: float32(math.Inf(-1)), want: first},
+		{name: "NaN", idx: float32(math.NaN()), want: first},
+		{name: "huge", idx: math.MaxFloat32, want: last},
+		{name: "very negative", idx: -math.MaxFloat32, want: first},
+		{name: "past int64", idx: 1e19, want: last},
+		{name: "before int64", idx: -1e19, want: first},
+	} {
+		if got := space.ToNRGBA([]float32{tc.idx}); got != tc.want {
+			t.Errorf("index %s = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestSeparationIndexedAltOverflow walks the reachable path: a /Separation whose alternate is /Indexed and whose tint
+// transform is a type-2 function. /Range is optional for type 2, so nothing clamps the math.Pow overflow and the raw
+// +Inf reaches Indexed.ToNRGBA.
+func TestSeparationIndexedAltOverflow(t *testing.T) {
+	d := docWith(t, "[ /Separation /Spot 2 0 R 3 0 R ]",
+		"[ /Indexed /DeviceRGB 2 <FF0000 00FF00 0000FF> ]",
+		"<< /FunctionType 2 /Domain [0 1000] /C0 [0] /C1 [1] /N 400 >>")
+	space, err := Parse(d, cos.Ref{Num: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sep, ok := space.(*Separation)
+	if !ok {
+		t.Fatalf("space = %T, want *Separation", space)
+	}
+	tint := sep.tint.Eval([]float32{1000})
+	if len(tint) != 1 || !math.IsInf(float64(tint[0]), 1) {
+		t.Fatalf("tint = %v, want [+Inf] (the overflow this test guards is no longer reachable here)", tint)
+	}
+	if got := space.ToNRGBA([]float32{1000}); got != (color.NRGBA{B: 255, A: 255}) {
+		t.Errorf("overflowing tint = %v, want the hival palette entry on every architecture", got)
 	}
 }
 

@@ -104,13 +104,7 @@ func (x *Indexed) Initial() []float32 { return []float32{0} }
 // ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; table bytes map linearly
 // onto [0, 1] per base component, which is exact for the device-family bases this package supports.
 func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
-	idx := int(comp(comps, 0))
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > x.hival {
-		idx = x.hival
-	}
+	idx := clampIndex(comp(comps, 0), x.hival)
 	n := x.base.NComponents()
 	baseComps := make([]float32, n)
 	for j := range n {
@@ -119,6 +113,23 @@ func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
 		}
 	}
 	return x.base.ToNRGBA(baseComps)
+}
+
+// clampIndex truncates a palette index to an int in [0, maxV]. The bounds are applied in float space on purpose: Go
+// leaves a float→int conversion implementation-defined when the value does not fit, and the platforms disagree —
+// arm64 saturates (+Inf → math.MaxInt64) while amd64 wraps (+Inf → math.MinInt64), so an int-space clamp would pull
+// the same index to opposite ends of the palette on the two architectures and render different pixels for one file.
+// A non-finite index is reachable: an /Indexed space used as the alternate of a /Separation or /DeviceN whose tint
+// transform is a type-2 function without /Range hands the raw math.Pow result — possibly ±Inf or NaN — straight to
+// ToNRGBA, as do shading.parseGradient and shading.parseFunctionBased.
+func clampIndex(v float32, maxV int) int {
+	if !(v > 0) { // Catches NaN along with zero and every negative.
+		return 0
+	}
+	if v >= float32(maxV) { // Also catches +Inf.
+		return maxV
+	}
+	return int(v)
 }
 
 // Separation is a /Separation or /DeviceN color space: tint components transformed into an alternate space. A
