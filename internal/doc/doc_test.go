@@ -122,6 +122,61 @@ func TestPageTreeDepthLimit(t *testing.T) {
 	}
 }
 
+// TestPageTreeLeafCap feeds the walk more leaves than it will collect and checks the page list stops at the cap rather
+// than growing with the file. The kids are inline page dictionaries, so neither the visited set nor the depth cap
+// applies and only the leaf cap can stop the walk. wantPages mirrors the package's unexported maxPages.
+func TestPageTreeLeafCap(t *testing.T) {
+	const (
+		wantPages = 65536
+		kids      = wantPages + 100
+	)
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n1 0 obj\n" + catalogObj + "\nendobj\n2 0 obj\n<< /Type /Pages /Kids [")
+	for range kids {
+		sb.WriteString(pageObj)
+	}
+	sb.WriteString("] >>\nendobj\n%%EOF\n")
+	d := mustOpen(t, []byte(sb.String()))
+	if got := d.PageCount(); got != wantPages {
+		t.Errorf("PageCount = %d, want %d", got, wantPages)
+	}
+	// The last collected page is still fully usable: the cap truncates the walk, it does not leave it half-built.
+	if _, _, err := d.PageSize(wantPages - 1); err != nil {
+		t.Errorf("PageSize(%d): %v", wantPages-1, err)
+	}
+	if _, err := d.Page(wantPages); err == nil {
+		t.Error("expected an error for a page number past the cap")
+	}
+}
+
+// TestPageTreeLeafCapNested checks the cap also stops an interior-node walk, where the kid loop must abandon whole
+// subtrees rather than just refusing to append.
+func TestPageTreeLeafCapNested(t *testing.T) {
+	const (
+		wantPages = 65536
+		perNode   = 1024
+		nodes     = wantPages/perNode + 2
+	)
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n1 0 obj\n" + catalogObj + "\nendobj\n2 0 obj\n<< /Type /Pages /Kids [")
+	for i := range nodes {
+		fmt.Fprintf(&sb, "%d 0 R ", 3+i)
+	}
+	sb.WriteString("] >>\nendobj\n")
+	for i := range nodes {
+		fmt.Fprintf(&sb, "%d 0 obj\n<< /Type /Pages /Kids [", 3+i)
+		for range perNode {
+			sb.WriteString(pageObj)
+		}
+		sb.WriteString("] >>\nendobj\n")
+	}
+	sb.WriteString("%%EOF\n")
+	d := mustOpen(t, []byte(sb.String()))
+	if got := d.PageCount(); got != wantPages {
+		t.Errorf("PageCount = %d, want %d", got, wantPages)
+	}
+}
+
 func TestMissingTypesInferred(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: catalogObj,

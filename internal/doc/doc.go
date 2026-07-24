@@ -21,9 +21,14 @@ import (
 	"github.com/richardwilkes/pdfview/internal/crypt"
 )
 
-// maxPageTreeDepth caps page-tree recursion; combined with the visited set it guarantees the walk terminates on hostile
-// or cyclic trees.
-const maxPageTreeDepth = 64
+// Page-tree walk guards: depth is capped, reference cycles and duplicated subtrees are cut by a visited set shared
+// across the whole walk, and the total number of leaves collected is capped so a hostile tree cannot balloon memory —
+// matching the caps the outline (maxOutlineNodes) and link/annotation (maxPageLinks) walks apply. maxPages is far above
+// any real document's page count; a file that hits it is malformed or hostile, and the pages past the cap are dropped.
+const (
+	maxPageTreeDepth = 64
+	maxPages         = 65536
+)
 
 // Authentication-status bits, in the same layout as the public API's AuthenticationStatus so the root package maps an
 // AuthResult across the engine seam without reinterpreting it.
@@ -166,8 +171,9 @@ func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 // buildPageList walks the page tree from the catalog, collecting leaves in document order. The walk counts actual leaf
 // nodes rather than trusting /Count entries, which repair-recovered and hostile files get wrong. A global visited set
 // skips reference cycles and duplicated subtrees (each page has a single parent, so a legitimate tree never revisits a
-// node), and depth is capped by maxPageTreeDepth. It is idempotent: it resets its output first, so it can be re-run
-// after a successful authentication to recapture page dictionaries that were first parsed without the file key.
+// node), depth is capped by maxPageTreeDepth, and the number of pages collected is capped by maxPages. It is
+// idempotent: it resets its output first, so it can be re-run after a successful authentication to recapture page
+// dictionaries that were first parsed without the file key.
 func (d *Document) buildPageList() {
 	d.pages = nil
 	d.pageRefs = nil
@@ -193,7 +199,7 @@ func (d *Document) buildPageList() {
 }
 
 func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited map[cos.Ref]bool, attrs inheritedAttrs) {
-	if depth > maxPageTreeDepth {
+	if depth > maxPageTreeDepth || len(d.pages) >= maxPages {
 		return
 	}
 	attrs = attrs.override(node)
@@ -212,6 +218,9 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 		return
 	}
 	for _, kid := range kids {
+		if len(d.pages) >= maxPages {
+			return
+		}
 		var kidRef cos.Ref
 		if r, isRef := kid.(cos.Ref); isRef {
 			if visited[r] {
