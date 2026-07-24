@@ -10,8 +10,12 @@
 package doc_test
 
 import (
+	"bytes"
+	"compress/zlib"
+	"fmt"
 	"testing"
 
+	"github.com/richardwilkes/pdfview/internal/filter"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
@@ -37,6 +41,49 @@ func TestPageContentsSingleAndArray(t *testing.T) {
 	}
 	if got := d.PageContents(99); got != nil {
 		t.Errorf("bad page: %q", got)
+	}
+}
+
+// flateObj returns an object body for a FlateDecode stream that inflates to size bytes.
+func flateObj(t *testing.T, size int) string {
+	t.Helper()
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write(bytes.Repeat([]byte{'\n'}, size)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("<< /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream", compressed.Len(),
+		compressed.String())
+}
+
+func TestPageContentsAggregateBudget(t *testing.T) {
+	// One small deflate bomb listed enough times to blow past the aggregate budget. Each stream's own decode is within
+	// its individual cap, so only the running total stops the concatenation.
+	const (
+		perStream = 8 << 20
+		repeats   = 9
+	)
+	refs := ""
+	for range repeats {
+		refs += "5 0 R "
+	}
+	d := mustOpen(t, pdf(map[int]string{
+		1: catalogObj,
+		2: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		3: "<< /Type /Page /Parent 2 0 R /Contents [" + refs + "] >>",
+		5: flateObj(t, perStream),
+	}))
+	got := len(d.PageContents(0))
+	if unbounded := repeats * perStream; got >= unbounded {
+		t.Fatalf("PageContents produced %d bytes; the aggregate budget did not apply", got)
+	}
+	// The budget is the per-stream allowance computed over the array's total raw size, which for these tiny streams is
+	// MaxDecodedSize's floor.
+	if want := filter.MaxDecodedSize(0); got != want {
+		t.Errorf("PageContents = %d bytes, want the budget %d", got, want)
 	}
 }
 

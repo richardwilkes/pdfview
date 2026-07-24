@@ -11,12 +11,14 @@ package doc
 
 import (
 	"bytes"
+	"math"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/filter"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// maxContentStreams caps how many streams a /Contents array contributes, bounding the decode work a hostile page can
+// maxContentStreams caps how many entries of a /Contents array are examined, bounding the decode work a hostile page can
 // demand (each stream's own decode is already capped by internal/filter).
 const maxContentStreams = 8192
 
@@ -34,6 +36,11 @@ func (d *Document) PageResources(pageNumber int) cos.Dict {
 // separator is required and sufficient). Streams that cannot be decoded contribute what they yielded (internal/filter
 // returns partial output for corrupt-but-decodable input) or nothing; a page with no usable content returns an empty
 // slice, which renders blank.
+//
+// The array form's concatenation is truncated at filter.MaxDecodedSize of the array's total raw byte count. Each
+// stream's own decode is capped individually, but nothing stops one small compression bomb from being listed hundreds
+// of times, so the aggregate needs its own budget; the per-stream allowance applied to the sum leaves legitimate
+// multi-part content streams untouched.
 func (d *Document) PageContents(pageNumber int) []byte {
 	page, err := d.Page(pageNumber)
 	if err != nil {
@@ -51,16 +58,22 @@ func (d *Document) PageContents(pageNumber int) []byte {
 	if !ok {
 		return nil
 	}
-	var buf bytes.Buffer
-	count := 0
-	for _, entry := range arr {
-		if count >= maxContentStreams {
+	streams := make([]*cos.Stream, 0, min(len(arr), maxContentStreams))
+	var raw int64 // Accumulated as an int64 so at most maxContentStreams lengths cannot overflow the sum.
+	for i, entry := range arr {
+		if i >= maxContentStreams {
 			break
 		}
-		count++
-		stream, streamOK := cos.AsStream(d.cos.Resolve(entry))
-		if !streamOK {
-			continue
+		if stream, streamOK := cos.AsStream(d.cos.Resolve(entry)); streamOK {
+			streams = append(streams, stream)
+			raw += int64(len(stream.Raw))
+		}
+	}
+	budget := filter.MaxDecodedSize(int(min(raw, math.MaxInt)))
+	var buf bytes.Buffer
+	for _, stream := range streams {
+		if buf.Len() >= budget {
+			break
 		}
 		data, streamErr := d.cos.StreamData(stream)
 		if streamErr != nil {
@@ -68,6 +81,10 @@ func (d *Document) PageContents(pageNumber int) []byte {
 		}
 		if buf.Len() > 0 {
 			buf.WriteByte('\n')
+		}
+		if remaining := budget - buf.Len(); len(data) > remaining {
+			buf.Write(data[:remaining])
+			break
 		}
 		buf.Write(data)
 	}
