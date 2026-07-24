@@ -30,8 +30,8 @@ func applyPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	}
 }
 
-// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow and hostile
-// parameters cannot force absurd allocations.
+// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow an int64 and
+// hostile parameters cannot force absurd allocations.
 func validatePredictorParams(p Params) error {
 	if p.Colors < 1 || p.Colors > 64 {
 		return fmt.Errorf("%w: predictor with %d colors", ErrUnsupportedFilter, p.Colors)
@@ -47,20 +47,27 @@ func validatePredictorParams(p Params) error {
 	return nil
 }
 
+// predictorRowLen returns the number of bytes in one predictor row, clamped to dataLen. The product of the validated
+// parameters reaches 2^34 (64 colors * 16 bits * 2^24 columns), which wraps a 32-bit int (GOARCH=386/arm) and would
+// yield a negative row length that slips past both the clamp and the callers' zero checks, so it is computed in int64;
+// the clamp then brings the result back into int range on every platform. A row cannot be longer than the data itself,
+// and clamping also keeps hostile Columns values from forcing large allocations for a file that does not actually
+// contain such rows. The result is zero only when dataLen is zero.
+func predictorRowLen(p Params, dataLen int) int {
+	return int(min((int64(p.Colors)*int64(p.BitsPerComponent)*int64(p.Columns)+7)/8, int64(dataLen)))
+}
+
 // pngPredictor reverses the PNG row filters (RFC 2083 section 6): every row is one filter-type byte followed by the
 // filtered row bytes. A truncated final row is processed as far as the data goes.
 func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	if err := validatePredictorParams(p); err != nil {
 		return nil, err
 	}
-	rowLen := (p.Colors*p.BitsPerComponent*p.Columns + 7) / 8
 	// The number of bytes per complete pixel, rounded up to at least one, per the PNG specification's filtering model.
 	// A single sub-byte pixel rounds up to 1, but a multi-component sub-byte config (e.g. 5 colors * 2 bits) spans
 	// more than one byte, so round the whole pixel width up rather than flooring per component.
 	bpp := max(1, (p.Colors*p.BitsPerComponent+7)/8)
-	// A row cannot be longer than the data itself; clamping keeps hostile Columns values from forcing large allocations
-	// for a file that does not actually contain such rows.
-	rowLen = min(rowLen, len(data))
+	rowLen := predictorRowLen(p, len(data))
 	if rowLen == 0 {
 		return nil, nil
 	}
@@ -148,9 +155,11 @@ func tiffPredictor(p Params, data []byte) ([]byte, error) {
 	if err := validatePredictorParams(p); err != nil {
 		return nil, err
 	}
+	// Clamping rowLen to len(data) is behavior-preserving here: a row at least as long as the data yields a single
+	// iteration covering all of it either way.
+	rowLen := predictorRowLen(p, len(data))
 	switch p.BitsPerComponent {
 	case 8:
-		rowLen := p.Colors * p.Columns
 		for r := 0; r < len(data); r += rowLen {
 			end := min(r+rowLen, len(data))
 			for i := r + p.Colors; i < end; i++ {
@@ -158,7 +167,6 @@ func tiffPredictor(p Params, data []byte) ([]byte, error) {
 			}
 		}
 	case 16:
-		rowLen := 2 * p.Colors * p.Columns
 		stride := 2 * p.Colors
 		for r := 0; r < len(data); r += rowLen {
 			end := min(r+rowLen, len(data))

@@ -440,6 +440,54 @@ func TestTIFFPredictorSixteenBit(t *testing.T) {
 	}
 }
 
+// TestPredictorMaximumLayout drives both predictors with the largest layout the parameter validation accepts. The
+// untruncated row length is 2^34 bytes (2^31 for the 16-bit TIFF stride), so an int row-length computation wraps
+// negative on a 32-bit build and panics in make() or walks the row loops backwards; the decoded bytes are simply the
+// single truncated row the data actually contains.
+func TestPredictorMaximumLayout(t *testing.T) {
+	const colors = 64
+	const columns = 1 << 24
+	t.Run("PNG", func(t *testing.T) {
+		// One filter-type byte (0 = None) followed by a short, truncated row.
+		filtered := append([]byte{0}, sampleData()[:32]...)
+		s := spec(flateName)
+		s.Params.Predictor = 12
+		s.Params.Colors = colors
+		s.Params.BitsPerComponent = 16
+		s.Params.Columns = columns
+		if got := decode(t, s, zlibCompress(t, filtered)); !bytes.Equal(got, filtered[1:]) {
+			t.Errorf("maximum-layout PNG predictor: got % x, want % x", got, filtered[1:])
+		}
+	})
+	t.Run("TIFF8", func(t *testing.T) {
+		raw := sampleData()[:32]
+		filtered := append([]byte{}, raw...)
+		for i := len(filtered) - 1; i >= colors; i-- {
+			filtered[i] -= filtered[i-colors]
+		}
+		s := spec(flateName)
+		s.Params.Predictor = 2
+		s.Params.Colors = colors
+		s.Params.Columns = columns
+		if got := decode(t, s, zlibCompress(t, filtered)); !bytes.Equal(got, raw) {
+			t.Errorf("maximum-layout 8-bit TIFF predictor: got % x, want % x", got, raw)
+		}
+	})
+	t.Run("TIFF16", func(t *testing.T) {
+		// The stride is 2*colors bytes, so a 32-byte payload is a single truncated row that no differencing touches;
+		// it must come back unchanged rather than panic.
+		raw := sampleData()[:32]
+		s := spec(flateName)
+		s.Params.Predictor = 2
+		s.Params.Colors = colors
+		s.Params.BitsPerComponent = 16
+		s.Params.Columns = columns
+		if got := decode(t, s, zlibCompress(t, raw)); !bytes.Equal(got, raw) {
+			t.Errorf("maximum-layout 16-bit TIFF predictor: got % x, want % x", got, raw)
+		}
+	})
+}
+
 func TestDecodeChain(t *testing.T) {
 	want := sampleData()
 	compressed := zlibCompress(t, want)
