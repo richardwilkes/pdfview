@@ -14,12 +14,16 @@ import (
 	"testing"
 )
 
+// pdfPrefix is the file header the hand-built documents in this package's internal tests start with. Its only role is
+// to keep object offsets away from zero, where an off-by-one would go unnoticed.
+const pdfPrefix = "%PDF-1.7\n"
+
 // newFailureCacheDoc returns a document holding one directly-stored object, number 1, whose body is the string (ok),
 // and whose cross-reference entry deliberately points past the object's header, at the body. Loading object 1
 // therefore fails until the entry is corrected. The repaired flag is preset so that the failure does not trigger the
 // document-wide repair scan, which would rebuild the entry from the file and hide the failure.
 func newFailureCacheDoc() (d *Document, goodOffset int64) {
-	prefix := "%PDF-1.7\n"
+	prefix := pdfPrefix
 	header := "1 0 obj\n"
 	goodOffset = int64(len(prefix))
 	return &Document{
@@ -82,7 +86,7 @@ func TestDropCachesClearsFailures(t *testing.T) {
 // as a permanent failure. That guard fires because of where the load sits in the call stack — an object stream's own
 // header keys resolving back into the stream — so the same object must still load when reached from the top level.
 func TestObjStmGuardFailuresAreNotCached(t *testing.T) {
-	prefix := "%PDF-1.7\n"
+	prefix := pdfPrefix
 	d := &Document{
 		data: []byte(prefix + "5 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Length 8 >>\nstream\n7 0\n(ok)\nendstream\n" +
 			"endobj\n"),

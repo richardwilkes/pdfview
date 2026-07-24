@@ -48,6 +48,7 @@ type token struct {
 var (
 	errUnterminatedString = errors.New("unterminated string")
 	errUnterminatedHex    = errors.New("unterminated hex string")
+	errHexStringTooLong   = errors.New("hex string exceeds the scan limit")
 	errStrayDelimiter     = errors.New("stray delimiter")
 	errStringTooDeep      = errors.New("string parentheses nested too deeply")
 )
@@ -348,6 +349,13 @@ func (l *lexer) lexLiteralString() (token, error) {
 	return token{}, errUnterminatedString
 }
 
+// maxHexStringScan caps how many bytes a hex string may scan before giving up, the length counterpart of the literal
+// string parser's maxStringNesting. Without it an unterminated '<' consumes every remaining byte of the buffer, which is
+// harmless for a single top-level scan but amplifies the repair sweep, where the lexer is restarted at every candidate
+// offset. The bound is far above any real hex string — the largest in practice is a signature's /Contents, tens of
+// kilobytes — so only hostile or truncated input reaches it.
+const maxHexStringScan = 1 << 20
+
 // lexHexString scans a <...> string. Whitespace and invalid characters between the digits are skipped (leniency), and a
 // missing final digit is treated as 0, per ISO 32000-2 7.3.4.3.
 func (l *lexer) lexHexString() (token, error) {
@@ -355,7 +363,11 @@ func (l *lexer) lexHexString() (token, error) {
 	out := make([]byte, 0, 16)
 	var hi int
 	haveHi := false
-	for l.pos < len(l.data) {
+	limit := len(l.data)
+	if rem := len(l.data) - l.pos; rem > maxHexStringScan {
+		limit = l.pos + maxHexStringScan
+	}
+	for l.pos < limit {
 		c := l.data[l.pos]
 		l.pos++
 		if c == '>' {
@@ -375,6 +387,9 @@ func (l *lexer) lexHexString() (token, error) {
 			hi = v
 			haveHi = true
 		}
+	}
+	if l.pos < len(l.data) {
+		return token{}, errHexStringTooLong
 	}
 	return token{}, errUnterminatedHex
 }

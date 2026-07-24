@@ -138,6 +138,31 @@ func TestLexUnterminatedStringErrors(t *testing.T) {
 	}
 }
 
+// TestLexHexStringScanLimit checks that an unterminated '<' gives up after maxHexStringScan bytes instead of consuming
+// every remaining byte of the buffer. The bound matters because the repair sweep restarts the lexer at every candidate
+// offset, so an unamortized scan to end of input is an amplifier there.
+func TestLexHexStringScanLimit(t *testing.T) {
+	// Twice the cap of hex digits, never terminated.
+	l := lexer{data: []byte("<" + strings.Repeat("41", maxHexStringScan))}
+	if _, err := l.next(); !errors.Is(err, errHexStringTooLong) {
+		t.Fatalf("over-long hex string = %v, want %v", err, errHexStringTooLong)
+	}
+	if want := 1 + maxHexStringScan; l.pos != want {
+		t.Errorf("stopped at %d, want %d (the scan limit, not end of input at %d)", l.pos, want, len(l.data))
+	}
+	// A truncated hex string within the cap still reports the plain unterminated error.
+	l = lexer{data: []byte("<4141")}
+	if _, err := l.next(); !errors.Is(err, errUnterminatedHex) {
+		t.Errorf("short unterminated hex string = %v, want %v", err, errUnterminatedHex)
+	}
+	// A hex string that fits within the cap is unaffected.
+	body := strings.Repeat("41", maxHexStringScan/4)
+	tokens := lexAll(t, "<"+body+">")
+	if len(tokens) != 1 || tokens[0].kind != tkString || len(tokens[0].s) != len(body)/2 {
+		t.Errorf("a hex string within the cap failed to lex: %+v", tokens)
+	}
+}
+
 func TestLexComments(t *testing.T) {
 	tokens := lexAll(t, "abc% comment ( /% blah blah blah\n123")
 	if len(tokens) != 2 || tokens[0].kind != tkKeyword || string(tokens[0].s) != "abc" ||

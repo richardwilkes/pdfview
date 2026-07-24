@@ -132,7 +132,11 @@ func (d *Document) loadObject(num int) (Object, error) {
 		return nil, err
 	}
 	obj, err := d.loadObjectUncached(num)
-	if err != nil && !d.repaired {
+	// Repair is deferred while object-stream loads are in flight. It replaces the cross-reference table and drops every
+	// cache under frames that are still parsing against the old one, and its own loadObjStm sweep would re-enter a
+	// stream whose parse is suspended further down this stack. Skipping it here leaves d.repaired false, so the next
+	// failing load that is not nested inside an object-stream parse still triggers it.
+	if err != nil && !d.repaired && len(d.objStmLoading) == 0 {
 		if rerr := d.repair(); rerr == nil {
 			obj, err = d.loadObjectUncached(num)
 		}
@@ -354,6 +358,20 @@ func (d *Document) filterNamesAndParms(dict Dict) (names []Name, parms Array, er
 	return names, parms, nil
 }
 
+// maxFilterParam bounds the magnitude of a /DecodeParms value handed to internal/filter. It sits far above every value
+// that package's validation accepts (64 colors, 16 bits per component, 2^24 columns, predictor 15) and far below
+// math.MaxInt32, so it is representable on every architecture.
+const maxFilterParam = 1 << 30
+
+// clampFilterParam narrows a file-supplied int64 to int. A plain conversion truncates on 32-bit builds (GOARCH=386/arm,
+// which this package's row-length and sample-index arithmetic explicitly cares about), so a /Columns of 4294967297 would
+// arrive as 1, pass validatePredictorParams, and decode with a silently wrong row length; /Colors, /BitsPerComponent,
+// /Predictor, and /EarlyChange truncate the same way. Saturating instead keeps every legal value exact and keeps every
+// illegal one illegal, so internal/filter still rejects it rather than acting on a wrapped-around impostor.
+func clampFilterParam(v int64) int {
+	return int(min(max(v, -maxFilterParam), maxFilterParam))
+}
+
 // filterParams builds filter.Params from one /DecodeParms dictionary (which may be nil).
 func (d *Document) filterParams(parmDict Dict) filter.Params {
 	params := filter.DefaultParams()
@@ -361,28 +379,30 @@ func (d *Document) filterParams(parmDict Dict) filter.Params {
 		return params
 	}
 	if v, ok := d.GetInt(parmDict, "Predictor"); ok {
-		params.Predictor = int(v)
+		params.Predictor = clampFilterParam(v)
 	}
 	if v, ok := d.GetInt(parmDict, "Colors"); ok {
-		params.Colors = int(v)
+		params.Colors = clampFilterParam(v)
 	}
 	if v, ok := d.GetInt(parmDict, "BitsPerComponent"); ok {
-		params.BitsPerComponent = int(v)
+		params.BitsPerComponent = clampFilterParam(v)
 	}
 	if v, ok := d.GetInt(parmDict, "Columns"); ok {
-		params.Columns = int(v)
+		params.Columns = clampFilterParam(v)
 	}
 	if v, ok := d.GetInt(parmDict, "EarlyChange"); ok {
-		params.EarlyChange = int(v)
+		params.EarlyChange = clampFilterParam(v)
 	}
 	return params
 }
 
 // clearCaches drops every parsed-object cache. The repair scan calls this because entries parsed through the old
-// cross-reference data may be wrong.
+// cross-reference data may be wrong. objStmLoading is deliberately left alone: it is not a cache but the set of
+// object-stream loads currently on the stack, and each loadObjStm frame deletes its own entry on the way out. Replacing
+// the map would strand those frames' markers in the discarded one, disarming the re-entrancy guard for the rest of the
+// recursion and letting the same stream be re-entered while it is still being parsed.
 func (d *Document) clearCaches() {
 	d.objCache = make(map[int]Object)
 	d.objFailed = make(map[int]error)
 	d.objStms = make(map[int]*objStm)
-	d.objStmLoading = make(map[int]bool)
 }

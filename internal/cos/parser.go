@@ -59,6 +59,17 @@ func (p *parser) push(t token) {
 	p.stack = append(p.stack, t)
 }
 
+// resumePos returns the offset of the first byte this parser has not consumed: the start of the next pushed-back token
+// when lookahead was returned to the stack (token positions survive pushback), and the raw lexer position otherwise. The
+// repair sweep uses it to restart past a failed attempt instead of nudging the cursor forward a few bytes and re-lexing
+// the same span, which is what makes the sweep linear rather than quadratic on hostile input.
+func (p *parser) resumePos() int {
+	if n := len(p.stack); n > 0 {
+		return p.stack[n-1].pos
+	}
+	return p.lex.pos
+}
+
 // parseObject parses one object.
 func (p *parser) parseObject() (Object, error) {
 	tok, err := p.next()
@@ -219,6 +230,10 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 // look. The repair sweep passes the offset just past the file's last "endstream" so that a swept stream header with no
 // matching endstream fails its recovery scan immediately instead of scanning to end of input on every such header
 // (O(n²) on hostile input full of bare stream keywords). All other callers pass len(data), preserving prior behavior.
+//
+// On failure end is not zero but the offset the attempt stopped reading at (see parser.resumePos), so a caller sweeping
+// the buffer can charge itself for the work already done and continue past it. Every other caller ignores end when err
+// is non-nil.
 func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
 		return nil, 0, 0, errStreamOutOfRange
@@ -226,23 +241,23 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int)
 	p := newParser(data, int(off))
 	num, err := p.expectInt()
 	if err != nil {
-		return nil, 0, 0, errNotIndirect
+		return nil, 0, int64(p.resumePos()), errNotIndirect
 	}
 	genNum, err := p.expectInt()
 	if err != nil {
-		return nil, 0, 0, errNotIndirect
+		return nil, 0, int64(p.resumePos()), errNotIndirect
 	}
 	if err = p.expectKeyword("obj"); err != nil {
-		return nil, 0, 0, errNotIndirect
+		return nil, 0, int64(p.resumePos()), errNotIndirect
 	}
 	if wantNum >= 0 && num != int64(wantNum) {
-		return nil, 0, 0, errWrongObject
+		return nil, 0, int64(p.resumePos()), errWrongObject
 	}
 	if genNum < 0 || genNum > 0xffff {
 		genNum = 0 // A nonsensical generation cannot be a real one; the encryption key uses its low two bytes.
 	}
 	if obj, err = p.parseObject(); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, int64(p.resumePos()), err
 	}
 	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty here for any
 	// dictionary object (parseDict consumes through its closing >>), so the lexer position is authoritative for the
@@ -258,11 +273,11 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int)
 	}
 	dict, ok := obj.(Dict)
 	if !ok {
-		return nil, 0, 0, fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
+		return nil, 0, int64(p.resumePos()), fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
 	}
 	raw, rawEnd, err := captureRawStream(data, p.lex.pos, endstreamLimit, dict)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, int64(p.lex.pos), err
 	}
 	return &Stream{Dict: dict, Raw: raw}, int(genNum), rawEnd, nil
 }

@@ -49,7 +49,13 @@ func (d *Document) repair() error {
 		}
 		obj, _, end, err := parseIndirectAtBounded(d.data, int64(numStart), -1, endstreamLimit)
 		if err != nil || end <= int64(idx) {
-			pos = idx + 3
+			// A failed attempt reports how far it read, and the sweep resumes there rather than three bytes past the
+			// keyword. The work a failure already did is otherwise unbounded — an unterminated '(' or '<' scans toward
+			// end of input — so re-lexing the same span from every following candidate makes the sweep quadratic
+			// (measured through pdfview.New, a body of repeated "1 0 obj <" cost 0.19 s at 50 KB and 2.49 s at 200 KB,
+			// a clean 4x per doubling), contradicting the package's bounded-work contract. The bytes skipped are ones
+			// the file's own syntax places inside the object that failed to parse.
+			pos = max(idx+3, int(end))
 			continue
 		}
 		if num > 0 && num <= maxObjectNumber {
@@ -113,7 +119,9 @@ func (d *Document) installRepairedTrailer(trailers []Dict, catalogNum int) {
 	}
 }
 
-// scanTrailers finds every parseable dictionary following a "trailer" keyword, in file order.
+// scanTrailers finds every parseable dictionary following a "trailer" keyword, in file order. Like the object sweep, it
+// resumes past whatever each attempt read — successful or not — so that repeated "trailer <" (whose unterminated hex
+// string reads toward end of input) costs one pass over the buffer instead of one per keyword.
 func (d *Document) scanTrailers() []Dict {
 	var trailers []Dict
 	pos := 0
@@ -129,6 +137,7 @@ func (d *Document) scanTrailers() []Dict {
 		}
 		p := newParser(d.data, pos)
 		obj, err := p.parseObject()
+		pos = max(pos, p.resumePos())
 		if err != nil {
 			continue
 		}
