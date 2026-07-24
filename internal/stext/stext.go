@@ -19,6 +19,7 @@
 package stext
 
 import (
+	"image/color"
 	"math"
 	"unicode"
 	"unicode/utf8"
@@ -46,18 +47,24 @@ type Char struct {
 }
 
 // Device records the characters of every text run the interpreter emits. It implements device.Device; all non-text
-// operations (paths, images, clips, groups, masks) are ignored via the embedded Null.
+// operations (paths, images, clips, groups, masks) are ignored via the embedded Null — except the soft-mask brackets,
+// which nothing is drawn for but which delimit replayed content for the run-identity bookkeeping below.
 type Device struct {
 	device.Null
-	// seen deduplicates runs the interpreter delivers through several verbs (fill+stroke for render mode 2, fill+clip
-	// for mode 4, ...) by run identity; each run's characters are recorded once, at first delivery.
-	seen  map[*device.TextRun]struct{}
+	// last is the run recorded most recently at the current soft-mask nesting level. The interpreter delivers one run
+	// through several verbs (fill+stroke for render mode 2, fill+clip for mode 4, ...) back-to-back, so comparing
+	// against the previous delivery is enough to record each run's characters exactly once, at first delivery. Only
+	// that one pointer is retained, so the device does not pin a page's entire glyph stream alive for the search pass.
+	last *device.TextRun
+	// masks saves last across soft-mask content: the interpreter replays the mask ahead of each painting verb, so a
+	// mask body that shows text lands between a run's fill and stroke deliveries.
+	masks []*device.TextRun
 	chars []Char
 }
 
 // New returns an empty structured-text device.
 func New() *Device {
-	return &Device{seen: make(map[*device.TextRun]struct{})}
+	return &Device{}
 }
 
 // FillText implements device.Device.
@@ -78,12 +85,28 @@ func (d *Device) Chars() []Char {
 	return d.chars
 }
 
+// BeginMask implements device.Device. Soft-mask content is replayed ahead of each painting verb, so its own text runs
+// arrive between the deliveries of the run being painted; stacking the enclosing run keeps that run's later verbs
+// deduplicated while the mask body's runs deduplicate among themselves.
+func (d *Device) BeginMask(_ gfx.Rect, _ bool, _ color.NRGBA, _ []byte) {
+	d.masks = append(d.masks, d.last)
+	d.last = nil
+}
+
+// EndMask implements device.Device.
+func (d *Device) EndMask() {
+	if n := len(d.masks); n > 0 {
+		d.last = d.masks[n-1]
+		d.masks = d.masks[:n-1]
+	}
+}
+
 // record appends run's characters, once per run regardless of how many verbs delivered it.
 func (d *Device) record(run *device.TextRun) {
-	if _, ok := d.seen[run]; ok {
+	if run == d.last {
 		return
 	}
-	d.seen[run] = struct{}{}
+	d.last = run
 	asc, desc := run.Font.Ascender(), run.Font.Descender()
 	for _, g := range run.Glyphs {
 		d.chars = append(d.chars, Char{

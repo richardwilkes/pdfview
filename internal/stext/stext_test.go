@@ -10,11 +10,16 @@
 package stext
 
 import (
+	"image/color"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode"
 	"unicode/utf8"
+	"weak"
 
+	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
@@ -316,5 +321,116 @@ func TestSearchRotatedRun(t *testing.T) {
 	}
 	if got[0] != want {
 		t.Fatalf("quad = %+v, want %+v", got[0], want)
+	}
+}
+
+// mkRun builds a one-glyph run for r at (x, y) with the given em size. The font is metric-free (zero ascender and
+// descender), which is all the recording path needs: the tests below count characters, not quads.
+func mkRun(r rune, x, y, size float32) *device.TextRun {
+	return &device.TextRun{
+		Font: &font.Font{},
+		Glyphs: []device.Glyph{{
+			Trm:     gfx.Matrix{A: size, D: size, E: x, F: y},
+			Unicode: r,
+			Advance: 0.5,
+		}},
+	}
+}
+
+// runes returns the recorded characters' runes, as a string, for comparing recordings compactly.
+func runes(chars []Char) string {
+	var sb strings.Builder
+	for _, c := range chars {
+		sb.WriteRune(c.Rune)
+	}
+	return sb.String()
+}
+
+func TestRecordDedupsRepeatedDeliveries(t *testing.T) {
+	// Render mode 6 delivers one run through fill, stroke and clip back-to-back; mode 3 delivers through IgnoreText.
+	dev := New()
+	first := mkRun('A', 100, 200, 12)
+	dev.FillText(first, device.Paint{})
+	dev.StrokeText(first, &gfx.StrokeParams{}, device.Paint{})
+	dev.ClipText(first)
+	second := mkRun('B', 112, 200, 12)
+	dev.IgnoreText(second)
+	dev.IgnoreText(second)
+	if got := runes(dev.Chars()); got != "AB" {
+		t.Fatalf("recorded %q, want %q", got, "AB")
+	}
+}
+
+func TestRecordDedupsAcrossMaskReplay(t *testing.T) {
+	// A run painted under a soft mask: the interpreter replays the mask ahead of the fill and again ahead of the
+	// stroke, so mask-body text arrives between the two deliveries of the same run.
+	dev := New()
+	run := mkRun('A', 100, 200, 12)
+	maskRun := mkRun('m', 10, 20, 6)
+	dev.BeginMask(gfx.Rect{}, true, color.NRGBA{}, nil)
+	dev.FillText(maskRun, device.Paint{})
+	dev.StrokeText(maskRun, &gfx.StrokeParams{}, device.Paint{})
+	dev.EndMask()
+	dev.FillText(run, device.Paint{})
+	dev.PopMask()
+	secondReplay := mkRun('m', 10, 20, 6)
+	dev.BeginMask(gfx.Rect{}, true, color.NRGBA{}, nil)
+	dev.FillText(secondReplay, device.Paint{})
+	dev.EndMask()
+	dev.StrokeText(run, &gfx.StrokeParams{}, device.Paint{})
+	dev.ClipText(run)
+	dev.PopMask()
+	if got := runes(dev.Chars()); got != "mAm" {
+		t.Fatalf("recorded %q, want %q", got, "mAm")
+	}
+}
+
+func TestRecordDedupsAcrossNestedMasks(t *testing.T) {
+	// The mask body may itself paint under a soft mask, so the saved run identities nest.
+	dev := New()
+	outer := mkRun('A', 100, 200, 12)
+	middle := mkRun('m', 10, 20, 6)
+	inner := mkRun('i', 1, 2, 3)
+	dev.FillText(outer, device.Paint{})
+	dev.BeginMask(gfx.Rect{}, true, color.NRGBA{}, nil)
+	dev.BeginMask(gfx.Rect{}, true, color.NRGBA{}, nil)
+	dev.FillText(inner, device.Paint{})
+	dev.StrokeText(inner, &gfx.StrokeParams{}, device.Paint{})
+	dev.EndMask()
+	dev.FillText(middle, device.Paint{})
+	dev.StrokeText(middle, &gfx.StrokeParams{}, device.Paint{})
+	dev.PopMask()
+	dev.EndMask()
+	dev.StrokeText(outer, &gfx.StrokeParams{}, device.Paint{})
+	dev.PopMask()
+	if got := runes(dev.Chars()); got != "Aim" {
+		t.Fatalf("recorded %q, want %q", got, "Aim")
+	}
+}
+
+func TestRecordRetainsOnlyTheCurrentRun(t *testing.T) {
+	// The device must not pin the page's glyph stream: only the run needed to spot the next repeated delivery stays
+	// reachable through it.
+	const count = 16
+	dev := New()
+	refs := make([]weak.Pointer[device.TextRun], 0, count)
+	for i := range count {
+		run := mkRun(rune('a'+i), float32(i)*10, 200, 12)
+		refs = append(refs, weak.Make(run))
+		dev.FillText(run, device.Paint{})
+	}
+	if len(dev.Chars()) != count {
+		t.Fatalf("recorded %d characters, want %d", len(dev.Chars()), count)
+	}
+	runtime.GC()
+	runtime.GC()
+	live := 0
+	for _, ref := range refs {
+		if ref.Value() != nil {
+			live++
+		}
+	}
+	if live > 1 {
+		t.Fatalf("%d of %d runs still reachable, want at most 1", live, count)
 	}
 }
