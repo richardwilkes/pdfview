@@ -345,8 +345,14 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 		in.active[ref] = true
 		defer delete(in.active, ref)
 	}
-	body, err := in.doc.StreamData(stream)
-	if err != nil {
+	// The charproc is charged to the work budget per glyph shown (appendGlyphs' one unit per glyph does not cover
+	// re-running the proc's body); a reference lets the decode itself be cached for the Run.
+	var raw cos.Object
+	if ref != (cos.Ref{}) {
+		raw = ref
+	}
+	body, bodyOK := in.streamBody(raw, stream)
+	if !bodyOK {
 		return
 	}
 	// Guard the composed CTM's finiteness, like cm/Tm/execForm/replayMask: a finite /FontMatrix against a finite Trm can

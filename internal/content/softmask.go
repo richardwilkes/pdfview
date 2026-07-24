@@ -58,8 +58,9 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	if !ok {
 		return nil
 	}
-	body, err := in.doc.StreamData(stream)
-	if err != nil {
+	in.charge(resourceParseCost)
+	body, ok := in.streamBody(raw, stream)
+	if !ok {
 		return nil
 	}
 	sm := &softMaskRes{body: body, bbox: bbox, matrix: gfx.Identity(), backdrop: color.NRGBA{A: 255}}
@@ -115,6 +116,7 @@ func (in *interp) parseTransfer(obj cos.Object) []byte {
 	if err != nil {
 		return nil
 	}
+	in.charge(shadingParseCost) // 256 evaluations, like a shading's ramp.
 	lut := make([]byte, 256)
 	input := make([]float32, 1)
 	for i := range lut {
@@ -174,7 +176,8 @@ func (in *interp) masked(alpha float64, body func()) {
 }
 
 // replayMask emits BeginMask, runs the mask form's content with the form-XObject discipline (depth cap, cycle set,
-// shared budget; the mask group renders as an isolated group: alpha 1, blend Normal, no soft mask), and emits EndMask.
+// a per-replay body charge against the shared budget; the mask group renders as an isolated group: alpha 1, blend
+// Normal, no soft mask), and emits EndMask.
 // anchor is the CTM captured when the gs operator installed the mask. When the content cannot replay (recursion
 // limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
 func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
@@ -201,6 +204,8 @@ func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
 		in.active[sm.ref] = true
 		defer delete(in.active, sm.ref)
 	}
+	// Every wrapped painting operation replays the whole body, so it is charged per replay, not once per parse.
+	in.charge(bodyCost(len(sm.body)))
 	in.opSave()
 	in.gs.ctm = ctm
 	in.gs.fillAlpha, in.gs.strokeAlpha, in.gs.blend, in.gs.softMask = 1, 1, device.BlendNormal, nil

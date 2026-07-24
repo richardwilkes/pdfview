@@ -68,7 +68,8 @@ func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	return pat, pat.matrix.Mul(in.streamCTM)
 }
 
-// resolvePattern parses /Pattern[name] with per-frame caching (failures cache as nil).
+// resolvePattern parses /Pattern[name] with per-frame caching by name and per-Run caching by reference (failures cache
+// as nil), so the fresh resource frame every form invocation pushes does not force a re-parse.
 func (in *interp) resolvePattern(name cos.Name) *patternRes {
 	frame := &in.frames[len(in.frames)-1]
 	if frame.patterns == nil {
@@ -77,16 +78,32 @@ func (in *interp) resolvePattern(name cos.Name) *patternRes {
 	if pat, ok := frame.patterns[name]; ok {
 		return pat
 	}
-	pat := in.parsePattern(name)
+	var pat *patternRes
+	if raw, ok := in.resource(namePattern, name); ok {
+		pat = in.parsePatternEntry(raw)
+	}
 	frame.patterns[name] = pat
 	return pat
 }
 
-func (in *interp) parsePattern(name cos.Name) *patternRes {
-	raw, ok := in.resource(namePattern, name)
-	if !ok {
-		return nil
+// parsePatternEntry parses one /Pattern resource entry, charging the work budget and caching the result for the whole
+// Run when the entry is a reference.
+func (in *interp) parsePatternEntry(raw cos.Object) *patternRes {
+	ref, isRef := raw.(cos.Ref)
+	if isRef {
+		if pat, hit := in.caches.patterns[ref]; hit {
+			return pat
+		}
 	}
+	in.charge(resourceParseCost)
+	pat := in.parsePattern(raw)
+	if isRef {
+		in.caches.patterns[ref] = pat
+	}
+	return pat
+}
+
+func (in *interp) parsePattern(raw cos.Object) *patternRes {
 	resolved := in.doc.Resolve(raw)
 	dict, ok := cos.AsDict(resolved)
 	if !ok {
@@ -109,8 +126,8 @@ func (in *interp) parsePattern(name cos.Name) *patternRes {
 		}
 		pat.tile = tile
 	case 2:
-		sh, err := shading.Parse(in.doc, dict["Shading"])
-		if err != nil {
+		sh := in.parseShading(dict["Shading"])
+		if sh == nil {
 			return nil
 		}
 		pat.sh = sh
@@ -126,8 +143,8 @@ func (in *interp) parseTiling(raw cos.Object, stream *cos.Stream) *tilingRes {
 	if !ok || bbox.X1 <= bbox.X0 || bbox.Y1 <= bbox.Y0 {
 		return nil
 	}
-	body, err := in.doc.StreamData(stream)
-	if err != nil {
+	body, ok := in.streamBody(raw, stream)
+	if !ok {
 		return nil
 	}
 	tile := &tilingRes{body: body, bbox: bbox}
@@ -218,8 +235,11 @@ func (in *interp) tilingReplay(tile *tilingRes, cellColor color.NRGBA) func(devi
 			in.active[tile.ref] = true
 			defer delete(in.active, tile.ref)
 		}
+		// Each cell replay re-scans the whole cell body, so it is charged per replay, not once per parse.
+		in.charge(bodyCost(len(tile.body)))
 		child := newInterp(in.doc, tile.resources, ctm, dev, in.st)
 		child.active = in.active
+		child.caches = in.caches
 		child.formDepth = in.formDepth + 1
 		child.budget = in.budget
 		if tile.uncolored {
@@ -249,7 +269,8 @@ func (in *interp) opShading() {
 	})
 }
 
-// shadingFor parses /Shading[name] with per-frame caching (failures cache as nil).
+// shadingFor parses /Shading[name] with per-frame caching by name and per-Run caching by reference (failures cache as
+// nil).
 func (in *interp) shadingFor(name cos.Name) *shading.Shading {
 	frame := &in.frames[len(in.frames)-1]
 	if frame.shadings == nil {
@@ -260,9 +281,7 @@ func (in *interp) shadingFor(name cos.Name) *shading.Shading {
 	}
 	var sh *shading.Shading
 	if obj, ok := in.resource("Shading", name); ok {
-		if parsed, err := shading.Parse(in.doc, obj); err == nil {
-			sh = parsed
-		}
+		sh = in.parseShading(obj)
 	}
 	frame.shadings[name] = sh
 	return sh

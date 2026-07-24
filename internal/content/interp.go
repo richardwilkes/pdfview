@@ -16,8 +16,9 @@
 // Robustness contract: unknown operators are skipped with the operand list reset (the convention every deployed viewer
 // follows); operators with missing or mistyped operands are skipped likewise; unbalanced q/Q at stream end
 // auto-unwinds; and all work is bounded — graphics-state depth, form recursion (with a cycle set), operand count,
-// container nesting, and total executed operators are all capped — so hostile input terminates without timeouts. The
-// interpreter guarantees the device's push/pop balance no matter how malformed the content is.
+// container nesting, and total work (executed operators plus the stream bodies and resource parses those operators
+// trigger; see budget.go) are all capped — so hostile input terminates without timeouts. The interpreter guarantees the
+// device's push/pop balance no matter how malformed the content is.
 package content
 
 import (
@@ -44,7 +45,8 @@ type (
 // survives). maxFormDepth is the XObject recursion cap; the per-page cycle set makes self-referential forms terminate
 // even below it. maxOperands bounds the operand list — when content pushes more, the oldest are dropped, keeping the
 // operands an operator actually consumes. maxDashEntries matches the dash-array truncation MuPDF exhibits. maxTotalOps
-// bounds one Run's total executed operators (across form recursion), the backstop that keeps pathological streams from
+// bounds one Run's total work (across form recursion): operators charge one unit each, and the stream bodies and
+// resource parses they trigger charge by budget.go's cost model — the backstop that keeps pathological streams from
 // turning small inputs into huge work.
 const (
 	maxQDepth      = 256
@@ -147,9 +149,12 @@ type interp struct {
 	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference; an LRU
 	// capped at maxCachedFonts entries.
 	fonts *lruCache[cos.Ref, *font.Font]
-	gs    gstate
-	cur   gfx.Point
-	start gfx.Point
+	// caches holds the Run's reference-keyed decoded-body and parsed-resource caches (budget.go); child interpreters
+	// share the set with their parent.
+	caches *runCaches
+	gs     gstate
+	cur    gfx.Point
+	start  gfx.Point
 	// tm and tlm are the text and text-line matrices of the current text object (reset by BT).
 	tm  gfx.Matrix
 	tlm gfx.Matrix
@@ -241,6 +246,7 @@ func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.D
 		active: make(map[cos.Ref]bool),
 		images: newLRUCache[cos.Ref, *imaging.Image](maxCachedImages),
 		fonts:  newLRUCache[cos.Ref, *font.Font](maxCachedFonts),
+		caches: newRunCaches(),
 		budget: maxTotalOps,
 	}
 	in.gs.text.scale = 1
@@ -421,13 +427,10 @@ func (in *interp) colorSpace(name cos.Name) (pdfcolor.Space, bool) {
 		cache[name] = nil
 		return nil, false
 	}
-	space, err := pdfcolor.Parse(in.doc, obj)
-	if err != nil {
-		cache[name] = nil // Negative entries are cached too: repeated failures must not repeat the work.
-		return nil, false
-	}
+	// Negative entries are cached too (here and in parseSpace): repeated failures must not repeat the work.
+	space := in.parseSpace(obj)
 	cache[name] = space
-	return space, true
+	return space, space != nil
 }
 
 // isFinitePt reports whether both coordinates are finite.

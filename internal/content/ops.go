@@ -536,9 +536,10 @@ func (in *interp) opDo() {
 	in.execForm(raw, stream)
 }
 
-// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle set, q +
-// /Matrix concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the current graphics
-// state. opDo dispatches here; RunAnnot enters here directly for annotation appearance streams (which are form XObjects
+// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle set, a
+// work-budget charge for the body on every invocation (the cycle set stops re-entry, not repetition), q + /Matrix
+// concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the current graphics state.
+// opDo dispatches here; RunAnnot enters here directly for annotation appearance streams (which are form XObjects
 // positioned by the caller's CTM).
 func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if in.formDepth >= maxFormDepth {
@@ -552,8 +553,8 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 		in.active[ref] = true
 		defer delete(in.active, ref)
 	}
-	body, err := in.doc.StreamData(stream)
-	if err != nil {
+	body, ok := in.streamBody(raw, stream)
+	if !ok {
 		return
 	}
 	// A form executes like q; cm /Matrix; W-clip /BBox; its content; Q — with its own resources and a fresh per-stream
