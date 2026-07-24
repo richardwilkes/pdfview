@@ -598,6 +598,56 @@ func TestRenderGlyphMaskRejectsHugeFiniteBounds(t *testing.T) {
 	}
 }
 
+// A glyph whose device origin is finite but enormous (Trm passes IsFinite, yet E/F reach ~3.4e38) must not reach the
+// direct mask blit, where int(ox)/int(oy) overflow. The fast path folds it into the leftover outline instead, so a
+// normal glyph blitted in the same run stays byte-for-byte identical to rendering that glyph alone.
+func TestBlitGlyphHugeOriginDoesNotCorruptSibling(t *testing.T) {
+	f := helveticaFont(t)
+	trm := gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28)) // on-screen, visible
+	render := func(glyphs []device.Glyph) []byte {
+		d := newDevice(t, 32, 32)
+		d.FillText(&device.TextRun{Font: f, Glyphs: glyphs, CTM: gfx.Identity()}, redPaint())
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	normal := device.Glyph{Trm: trm, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	// Same glyph, but translated far off any real surface: int(floor(3e30)) would overflow the blit's origin math.
+	huge := device.Glyph{Trm: gfx.Matrix{A: 24, D: -24, E: 3e30, F: 3e30}, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	alone := render([]device.Glyph{normal})
+	withHuge := render([]device.Glyph{normal, huge})
+	if len(alone) != len(withHuge) {
+		t.Fatalf("pixel length mismatch: %d vs %d", len(alone), len(withHuge))
+	}
+	for i := range alone {
+		if alone[i] != withHuge[i] {
+			t.Fatalf("huge-origin glyph perturbed the surface at byte %d: %d vs %d", i, alone[i], withHuge[i])
+		}
+	}
+	// Sanity: the normal glyph actually inked, so the equality above is not comparing two blank surfaces.
+	if !inkIn(alone, 32*4, 0, 0, 31, 31) {
+		t.Fatal("normal glyph produced no ink")
+	}
+}
+
+// A run of nothing but huge-origin glyphs must blit cleanly to a blank surface without panicking on the overflowing
+// float→int origin conversion.
+func TestBlitGlyphHugeOriginBlankNoPanic(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 16, 16)
+	huge := device.Glyph{Trm: gfx.Matrix{A: 8, D: -8, E: -3e30, F: 3e30}, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	d.FillText(&device.TextRun{Font: f, Glyphs: []device.Glyph{huge}, CTM: gfx.Identity()}, redPaint())
+	pix, _, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inkIn(pix, 16*4, 0, 0, 15, 15) {
+		t.Fatal("off-surface glyph left ink")
+	}
+}
+
 // coveragePlane must degrade to nil on a nil pixmap — the same guard compositeMask and Pixels apply — so a scratch
 // surface with no backing store makes renderGlyphMask fall back to the outline fill instead of dereferencing nil.
 func TestCoveragePlaneNilPixmap(t *testing.T) {
@@ -963,6 +1013,29 @@ func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
 	}
 	if replayCTM.A != maxTileDim { // XStep is 1, so the window's x scale is the tile width in pixels
 		t.Errorf("tiling cell rasterized %v pixels wide, want the clamped %d", replayCTM.A, maxTileDim)
+	}
+}
+
+// gridfit's 90/270 branch (A==D==0) must snap the x axis from the C/E pair and the y axis from the B/F pair: with
+// A==0 the device x is C*v+E and with D==0 the device y is B*u+F. This pins that pairing — the branch's comment once
+// inverted it (claiming C/F for x and B/E for y), and a maintainer trusting the wrong comment could swap the code.
+func TestGridfitRotatedSnapsXFromCEyFromBF(t *testing.T) {
+	m := gfx.Matrix{A: 0, B: 10.3, C: -7.6, D: 0, E: 3.2, F: 5.9}
+	got := gridfit(m)
+	wantC, wantE := snapSpan(m.C, m.E)
+	wantB, wantF := snapSpan(m.B, m.F)
+	if got.C != wantC || got.E != wantE {
+		t.Errorf("x axis: got C=%v E=%v, want C=%v E=%v (must snap from the C/E pair)", got.C, got.E, wantC, wantE)
+	}
+	if got.B != wantB || got.F != wantF {
+		t.Errorf("y axis: got B=%v F=%v, want B=%v F=%v (must snap from the B/F pair)", got.B, got.F, wantB, wantF)
+	}
+	if got.A != 0 || got.D != 0 {
+		t.Errorf("A/D must pass through unchanged as 0, got A=%v D=%v", got.A, got.D)
+	}
+	// The inverted pairing (C/F for x, B/E for y) would land elsewhere, so this test discriminates the two.
+	if badC, badE := snapSpan(m.C, m.F); got.C == badC && got.E == badE {
+		t.Fatal("x axis snapped from the C/F pair — the inverted pairing the comment fix corrects")
 	}
 }
 

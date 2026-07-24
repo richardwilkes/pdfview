@@ -677,7 +677,7 @@ func gridfit(m gfx.Matrix) gfx.Matrix {
 		m.A, m.E = snapSpan(m.A, m.E)
 		m.D, m.F = snapSpan(m.D, m.F)
 	case m.A == 0 && m.D == 0 && m.B != 0 && m.C != 0:
-		// A 90/270-degree transform: x comes from the C/F pair, y from the B/E pair.
+		// A 90/270-degree transform: x comes from the C/E pair, y from the B/F pair.
 		m.C, m.E = snapSpan(m.C, m.E)
 		m.B, m.F = snapSpan(m.B, m.F)
 	}

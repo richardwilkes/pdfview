@@ -126,7 +126,13 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 		ox := float32(math.Floor(float64(g.Trm.E)))
 		oy := float32(math.Floor(float64(g.Trm.F)))
 		mask := d.glyphMask(run.Font, g, gp, g.Trm.E-ox, g.Trm.F-oy)
-		if mask == nil || mask.plane == nil {
+		// Clamp the glyph origin exactly where every sibling float→int site here does. Trm passed IsFinite above, but
+		// ox/oy can still be finite ~3.4e38, so int(ox)/int(oy) below would overflow (saturating, architecture-defined).
+		// A glyph whose device origin is that far out cannot go through the mask blit; fold it into the leftover outline
+		// like any other glyph the fast path declines. Mirrors renderGlyphMask's 1<<24 bounds clamp.
+		const maxReasonable = 1 << 24
+		originOverflow := ox < -maxReasonable || ox > maxReasonable || oy < -maxReasonable || oy > maxReasonable
+		if mask == nil || mask.plane == nil || originOverflow {
 			if leftover == nil {
 				leftover = path.New()
 			}
