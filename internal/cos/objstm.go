@@ -120,11 +120,17 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	// Each header pair needs at least three bytes (a digit, a separator, and a digit), so /N values beyond that are
 	// lies; clamping keeps the slice allocations proportional to real data.
 	n = min(n, int64(len(data))/3)
+	// /First and the header offsets are file-supplied and otherwise unbounded, and objFromStm adds them together. Any
+	// magnitude past the payload length can only ever name a position outside it, so clamping both here preserves every
+	// reachable position while keeping that sum from wrapping — either in int on 32-bit builds, or in int64 for a pair
+	// of astronomically large values. Without it a wrap to a small positive value slips past the bounds check there and
+	// parses an object from the wrong offset inside the stream.
+	limit := int64(len(data))
 	stm := &objStm{
 		data:  data,
 		nums:  make([]int, 0, n),
 		offs:  make([]int, 0, n),
-		first: int(first),
+		first: int(min(first, limit)),
 	}
 	p := newParser(data, 0)
 	for range n {
@@ -135,6 +141,9 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 		off, oerr := p.expectInt()
 		if oerr != nil {
 			break
+		}
+		if off < 0 || off > limit {
+			off = limit // Out of spec either way; limit makes objFromStm's bounds check reject the entry.
 		}
 		stm.nums = append(stm.nums, int(num))
 		stm.offs = append(stm.offs, int(off))
@@ -154,10 +163,12 @@ func (d *Document) objFromStm(stmNum, idx, wantNum int) (Object, error) {
 			return nil, errObjStmEntry
 		}
 	}
-	pos := stm.first + stm.offs[idx]
-	if pos < 0 || pos >= len(stm.data) {
+	// Both terms are clamped to len(stm.data) by parseObjStm, so widening to int64 leaves the sum well inside range on
+	// every architecture.
+	pos := int64(stm.first) + int64(stm.offs[idx])
+	if pos < 0 || pos >= int64(len(stm.data)) {
 		return nil, errObjStmEntry
 	}
-	p := newParser(stm.data, pos)
+	p := newParser(stm.data, int(pos))
 	return p.parseObject()
 }

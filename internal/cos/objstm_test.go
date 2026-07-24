@@ -11,9 +11,12 @@ package cos
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 )
+
+const firstKey = "First"
 
 // TestParseObjStmClampsHeaderCount checks that a hostile /N cannot drive the header slice allocations beyond what the
 // decoded payload could possibly hold: every header pair needs at least three bytes, so the capacities stay within
@@ -23,7 +26,7 @@ func TestParseObjStmClampsHeaderCount(t *testing.T) {
 	for _, n := range []int64{2, 1 << 40} {
 		d := &Document{}
 		stm, err := d.parseObjStm(&Stream{
-			Dict: Dict{"N": Integer(n), "First": Integer(8)},
+			Dict: Dict{"N": Integer(n), firstKey: Integer(8)},
 			Raw:  payload,
 		})
 		if err != nil {
@@ -42,13 +45,53 @@ func TestParseObjStmClampsHeaderCount(t *testing.T) {
 	}
 }
 
+// TestParseObjStmClampsHeaderOffsets checks that an unbounded /First and unbounded header offsets cannot combine into a
+// position inside the payload. Both are file-supplied and objFromStm adds them together, so without clamping a pair such
+// as /First math.MaxInt64 with an offset of -(math.MaxInt64-3) lands on offset 3 — an object parsed from the wrong place
+// in the stream, reported as if it were the one asked for. Every such entry must be rejected instead.
+func TestParseObjStmClampsHeaderOffsets(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		body  string
+		first int64
+	}{
+		{name: "huge /First with a negative offset", first: math.MaxInt64, body: "9 -9223372036854775804"},
+		{name: "huge /First with a zero offset", first: math.MaxInt64, body: "9 0"},
+		{name: "sane /First with a negative offset", first: 6, body: "9 -3"},
+		{name: "sane /First with a huge offset", first: 6, body: "9 9223372036854775807"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d := &Document{}
+			stm, err := d.parseObjStm(&Stream{
+				Dict: Dict{"N": Integer(1), firstKey: Integer(test.first)},
+				Raw:  []byte(test.body + "\n(a)\n(b)\n(c)"),
+			})
+			if err != nil {
+				t.Fatalf("parseObjStm: %v", err)
+			}
+			d.objStms = map[int]*objStm{5: stm}
+			// Both terms must stay within the payload so that their sum is always representable, and the sum itself must
+			// land outside it so that the entry is reported as missing rather than parsed from a bogus position.
+			if stm.first < 0 || stm.first > len(stm.data) {
+				t.Errorf("first = %d, want within [0, %d]", stm.first, len(stm.data))
+			}
+			if stm.offs[0] < 0 || stm.offs[0] > len(stm.data) {
+				t.Errorf("offset = %d, want within [0, %d]", stm.offs[0], len(stm.data))
+			}
+			if obj, oerr := d.objFromStm(5, 0, 9); !errors.Is(oerr, errObjStmEntry) {
+				t.Errorf("objFromStm = %v, %v; want %v", obj, oerr, errObjStmEntry)
+			}
+		})
+	}
+}
+
 // newTestObjStmDoc returns a document holding one object stream, number 5, whose header names objects 7, 9, and 7 again
 // (a deliberate duplicate) at the payloads "(a)", "(b)", and "(c)" respectively.
 func newTestObjStmDoc(t *testing.T) (*Document, *objStm) {
 	t.Helper()
 	d := &Document{}
 	stm, err := d.parseObjStm(&Stream{
-		Dict: Dict{"N": Integer(3), "First": Integer(12)},
+		Dict: Dict{"N": Integer(3), firstKey: Integer(12)},
 		Raw:  []byte("7 0 9 4 7 8\n(a)\n(b)\n(c)"),
 	})
 	if err != nil {

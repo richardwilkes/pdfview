@@ -317,6 +317,33 @@ func TestLexLargeIntegerOverflow(t *testing.T) {
 	}
 }
 
+// TestLexNumbersBeyondFloat64Range checks that a magnitude strconv.ParseFloat reports as out of range still lexes to the
+// value it hands back — the correctly-signed infinity — rather than to the arbitrary truncated prefix accumulated before
+// the integer overflow was detected. An infinity is rejected by the downstream finiteness guards (isFinitePt,
+// Matrix.IsFinite, numbers6); a bogus finite coordinate is not.
+func TestLexNumbersBeyondFloat64Range(t *testing.T) {
+	huge := strings.Repeat("9", 400)
+	for _, tc := range []struct {
+		src  string
+		want float64
+	}{
+		{huge + ".5", math.Inf(1)},
+		{"-" + huge + ".5", math.Inf(-1)},
+		{huge, math.Inf(1)},
+		{"-" + huge, math.Inf(-1)},
+		{"." + strings.Repeat("0", 400) + "1", 0}, // Underflow is also ErrRange, and zero is the right answer there.
+	} {
+		tokens := lexAll(t, tc.src)
+		if len(tokens) != 1 || tokens[0].kind != tkReal {
+			t.Errorf("%.12q… lexed to %#v", tc.src, tokens)
+			continue
+		}
+		if tokens[0].f != tc.want {
+			t.Errorf("%.12q… = %g, want %g", tc.src, tokens[0].f, tc.want)
+		}
+	}
+}
+
 func TestSetPosClamps(t *testing.T) {
 	data := []byte("0123456789")
 	l := NewLexer(data, 0)

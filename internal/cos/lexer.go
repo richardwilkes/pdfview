@@ -192,13 +192,16 @@ func (l *lexer) lexNumber() token {
 	}
 	if i < len(span) && span[i] == '.' {
 		// Real: parse the mantissa span with strconv for correct rounding, ignoring any junk beyond a second decimal
-		// point.
+		// point. A range error is not a parse failure: strconv still hands back the correctly-signed infinity (or zero,
+		// on underflow), which is the right answer and one the downstream finiteness guards reject. Falling back to
+		// `whole` there would instead yield the arbitrary truncated prefix accumulated before the integer overflow was
+		// detected, letting a bogus finite coordinate through.
 		end := i + 1
 		for end < len(span) && span[end] >= '0' && span[end] <= '9' {
 			end++
 		}
 		f, err := strconv.ParseFloat(string(span[:end]), 64)
-		if err != nil {
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
 			f = float64(whole)
 			if neg {
 				f = -f
@@ -208,7 +211,7 @@ func (l *lexer) lexNumber() token {
 	}
 	if overflow || !digits {
 		f, err := strconv.ParseFloat(string(span), 64)
-		if err != nil {
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
 			f = 0
 		}
 		if overflow {
