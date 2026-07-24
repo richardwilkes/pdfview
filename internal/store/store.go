@@ -29,7 +29,7 @@ import (
 type Store struct {
 	entries map[any]*list.Element
 	lru     *list.List // Front = most recently used.
-	max     uint64
+	max     uint64     // Immutable after New; read lock-free (e.g. by Max). Do not add a setter without taking mu.
 	used    uint64
 	mu      sync.Mutex
 }
@@ -136,7 +136,8 @@ func (s *Store) Used() uint64 {
 	return s.used
 }
 
-// Max returns the configured budget (0 = unlimited).
+// Max returns the configured budget (0 = unlimited). No lock is taken: max is immutable after New (see its field
+// comment), so this read is race-free even when called concurrently with Get/Put.
 func (s *Store) Max() uint64 {
 	if s == nil {
 		return 0

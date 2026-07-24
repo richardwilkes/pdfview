@@ -138,6 +138,15 @@ func TestNilStoreSafe(t *testing.T) {
 	}
 }
 
+func TestMaxReportsBudget(t *testing.T) {
+	if got := New(4096).Max(); got != 4096 {
+		t.Errorf("Max() = %d, want 4096", got)
+	}
+	if got := New(0).Max(); got != 0 {
+		t.Errorf("Max() = %d, want 0 (unlimited)", got)
+	}
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	s := New(1 << 10)
 	var wg sync.WaitGroup
@@ -149,6 +158,11 @@ func TestConcurrentAccess(t *testing.T) {
 				k := keyA{i % 61}
 				s.Put(k, fmt.Sprintf("%d-%d", g, i), 16)
 				s.Get(k)
+				// Max is read lock-free; exercise it under -race concurrently with the writers above to prove the
+				// documented immutable-after-New invariant holds and no race is introduced.
+				if got := s.Max(); got != 1<<10 {
+					t.Errorf("Max() = %d, want %d", got, 1<<10)
+				}
 			}
 		}()
 	}
