@@ -176,6 +176,15 @@ func alphaByte(v float32) byte {
 	return byte(v*255 + 0.5)
 }
 
+// nearestSampleIndex maps destination pixel v of a dst-pixel span onto the nearest of src samples covering the same
+// unit square. The product v*src reaches 2^52 (a row index just under the 2^26 pixel cap against a mask dimension at
+// the same cap — say a 1 x 2^26 /SMask, only a few KB of payload, over a tall base image), which wraps a 32-bit int
+// (GOARCH=386/arm) to a truncated or negative index that then reads the mask plane out of range, so it is computed in
+// int64 the way rowStrideFor is.
+func nearestSampleIndex(v, src, dst int) int {
+	return int(int64(v) * int64(src) / int64(dst))
+}
+
 // compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (the mask and
 // the image both span the same unit square).
 func compositeAlpha(img *Image, plane []byte, mw, mh int) {
@@ -183,9 +192,9 @@ func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 		return
 	}
 	for y := range img.Height {
-		my := y * mh / img.Height
+		my := nearestSampleIndex(y, mh, img.Height)
 		for x := range img.Width {
-			mx := x * mw / img.Width
+			mx := nearestSampleIndex(x, mw, img.Width)
 			a := plane[my*mw+mx]
 			if a == 255 {
 				continue

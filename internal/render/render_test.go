@@ -1402,6 +1402,65 @@ func TestTextIdenticalWhateverTheStoreBudget(t *testing.T) {
 	comparePixels(t, render(nil), unlimited, 64*4, "text with no store wired") // the per-render map instead
 }
 
+// PopMask must be inert for a span EndMask never closed: with no EndMask there is no masked-content layer, so ms.layer
+// is still zero and restoring to it would unwind the canvas past the interpreter's own saves — on the mask surface's
+// canvas rather than the page's, at that. The span must instead close the way EndMask would: the page canvas back, the
+// text clip back, the mask surface (and its byte charge) released, and nothing applied to the page.
+func TestPopMaskWithoutEndMask(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bbox gfx.Rect
+	}{
+		{name: "with mask surface", bbox: gfx.Rect{X0: 0, Y0: 0, X1: 16, Y1: 16}},
+		{name: "no mask surface", bbox: gfx.Rect{X0: 1000, Y0: 1000, X1: 1010, Y1: 1010}}, // wholly off the surface
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDevice(t, 16, 16)
+			var clip gfx.Path
+			clip.Rect(0, 0, 8, 16) // interpreter state the unpaired PopMask must not unwind
+			d.ClipPath(&clip, false, gfx.Identity())
+			page := d.c
+			base := d.c.SaveCount()
+			d.BeginMask(tc.bbox, false, color.NRGBA{}, nil)
+			var content gfx.Path
+			content.Rect(0, 0, 16, 16)
+			d.FillPath(&content, false, gfx.Identity(), redPaint()) // mask content, never turned into a plane
+			d.PopMask()                                             // no EndMask for this span
+			if d.c != page {
+				t.Error("PopMask left the canvas pointed at the mask surface")
+			}
+			if got := d.c.SaveCount(); got != base {
+				t.Errorf("save count %d after the unpaired PopMask, want %d", got, base)
+			}
+			if d.maskBytes != 0 {
+				t.Errorf("mask byte charge not refunded: %d left", d.maskBytes)
+			}
+			if len(d.maskStack) != 0 {
+				t.Errorf("mask stack not unwound: %d left", len(d.maskStack))
+			}
+			// The clip open before the span must still be there, and still poppable.
+			var p gfx.Path
+			p.Rect(0, 0, 16, 16)
+			d.FillPath(&p, false, gfx.Identity(), redPaint())
+			pix, stride, err := d.Pixels()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inkIn(pix, stride, 8, 0, 15, 15) {
+				t.Error("ink outside the clip open before the mask span: the save stack was unwound")
+			}
+			d.PopClip()
+			d.FillPath(&p, false, gfx.Identity(), device.Paint{Color: color.NRGBA{G: 255, A: 255}, Alpha: 1})
+			if pix, stride, err = d.Pixels(); err != nil {
+				t.Fatal(err)
+			}
+			if !inkIn(pix, stride, 8, 8, 15, 15) {
+				t.Error("the clip was never restored after PopMask")
+			}
+		})
+	}
+}
+
 // EndMask must be idempotent: a repeated call for the same span used to take the no-surface branch and restore to a
 // guard count only that branch ever sets, unwinding the whole canvas save stack — including the clip the interpreter
 // still expects to pop — and then open a second masked-content layer whose count overwrote the first.

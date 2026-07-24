@@ -622,6 +622,57 @@ func TestCCITTSMaskMissingBitsPerComponent(t *testing.T) {
 	}
 }
 
+// TestMaskNearestSampleIndex pins compositeAlpha's nearest-sample arithmetic at the extremes the caps allow. The
+// products asserted here exceed math.MaxInt32, so an int computation would wrap on a 32-bit build (GOARCH=386/arm) and
+// index the mask plane out of range — a panic the public API's recover guard turns into a whole failed page render
+// instead of an ignored mask.
+func TestMaskNearestSampleIndex(t *testing.T) {
+	// A 1 x 2^26 /SMask (the tallest single dimension run accepts, a few KB of payload) over a 2^24-row base image: the
+	// last row's y*mh product is just under 2^50, which truncates to 0 in an int32 and picks the mask's first row.
+	if got, want := nearestSampleIndex((1<<24)-1, maxImagePixels, 1<<24), maxImagePixels-4; got != want {
+		t.Errorf("last row of a tall mask: got %d, want %d", got, want)
+	}
+	// The largest product either axis can reach: 2^52 - 2^26, which wraps negative in an int32.
+	if got, want := nearestSampleIndex(maxImagePixels-1, maxImagePixels, maxImagePixels), maxImagePixels-1; got != want {
+		t.Errorf("identity mapping at the pixel cap: got %d, want %d", got, want)
+	}
+	// The ordinary small cases the mapping still has to get right: stretch, shrink, and identity all stay in range.
+	for _, tc := range []struct{ v, src, dst, want int }{
+		{v: 0, src: 2, dst: 4, want: 0},
+		{v: 1, src: 2, dst: 4, want: 0},
+		{v: 2, src: 2, dst: 4, want: 1},
+		{v: 3, src: 2, dst: 4, want: 1},
+		{v: 3, src: 4, dst: 4, want: 3},
+		{v: 3, src: 1, dst: 4, want: 0},
+		{v: 7, src: 4, dst: 8, want: 3},
+	} {
+		if got := nearestSampleIndex(tc.v, tc.src, tc.dst); got != tc.want {
+			t.Errorf("nearestSampleIndex(%d, %d, %d): got %d, want %d", tc.v, tc.src, tc.dst, got, tc.want)
+		}
+	}
+}
+
+// A mask taller and narrower than the base image must sample every plane row exactly once and never step outside it.
+func TestSMaskCompositeTallMask(t *testing.T) {
+	const mh = 64
+	plane := make([]byte, mh)
+	for i := range plane {
+		plane[i] = uint8(i * 4)
+	}
+	img := &Image{Width: 3, Height: mh, Pix: make([]byte, 3*mh*4)}
+	for i := 3; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 255
+	}
+	compositeAlpha(img, plane, 1, mh)
+	for y := range mh {
+		for x := range 3 {
+			if got, want := img.Pix[(y*3+x)*4+3], plane[y]; got != want {
+				t.Fatalf("alpha at (%d,%d): got %d, want %d", x, y, got, want)
+			}
+		}
+	}
+}
+
 func TestMaskDimensionsBounded(t *testing.T) {
 	d := testDoc(t)
 	// An /SMask whose Width×Height overflows int64 must be rejected without panicking; the base image stays opaque.

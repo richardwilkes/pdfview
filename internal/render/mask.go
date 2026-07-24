@@ -247,18 +247,10 @@ func (d *Device) EndMask() {
 		return
 	}
 	ms.ended = true
-	d.textClip = ms.savedClip
-	if ms.surf == nil {
-		d.c.RestoreToCount(ms.guard)
-	} else {
+	if ms.surf != nil {
 		ms.mask = d.maskPlane(ms)
-		d.c = ms.saved
-		// The plane is a copy; the surface has served its purpose, so release it (and its budget charge) here rather
-		// than holding it for the masked op's whole span.
-		ms.surf = nil
-		d.maskBytes -= ms.bytes
-		ms.bytes = 0
 	}
+	d.closeMaskSpan(ms)
 	switch {
 	case ms.mask != nil && ms.outside == 0:
 		// Nothing outside the plane survives the DstIn, so bound the masked-content layer to the plane's rectangle: the
@@ -280,6 +272,21 @@ func (d *Device) EndMask() {
 	}
 }
 
+// closeMaskSpan undoes BeginMask's canvas swap: it puts the interrupted text-clip accumulation back and either closes
+// the no-surface guard layer or restores the page canvas and releases the mask surface. The plane EndMask builds is a
+// copy, so the surface (and its budget charge) goes here rather than being held for the masked op's whole span.
+func (d *Device) closeMaskSpan(ms *maskState) {
+	d.textClip = ms.savedClip
+	if ms.surf == nil {
+		d.c.RestoreToCount(ms.guard)
+		return
+	}
+	d.c = ms.saved
+	ms.surf = nil
+	d.maskBytes -= ms.bytes
+	ms.bytes = 0
+}
+
 // rect is the plane's device-pixel rectangle.
 func (ms *maskState) rect() geom.Rect {
 	return geom.RectXYWH(float32(ms.x0), float32(ms.y0), float32(ms.w), float32(ms.h))
@@ -293,6 +300,15 @@ func (d *Device) PopMask() {
 	}
 	ms := d.maskStack[n-1]
 	d.maskStack = d.maskStack[:n-1]
+	if !ms.ended {
+		// EndMask never ran for this span, so there is no coverage plane and no masked-content layer: ms.layer is still
+		// zero and d.c may still be the mask surface's canvas. Restoring to count 0 would unwind past the interpreter's
+		// own saves — on the wrong canvas at that. Close the span the way EndMask would instead and apply nothing, the
+		// mirror of EndMask's guard against a repeated call. The interpreter always pairs Begin/End/Pop, so this is
+		// defense in depth.
+		d.closeMaskSpan(ms)
+		return
+	}
 	// A constant zero-coverage mask needs no DstIn at all: EndMask already realized it as an empty layer.
 	if ms.mask != nil || (ms.constant && ms.outside != 0) {
 		paint := canvas.NewPaint() // Opaque color: the plane's alpha is the DstIn source.
