@@ -85,12 +85,18 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 				}
 			}
 		}
+		// Each /BC entry overwrites the matching component of the space's initial color in place; an empty array, a
+		// short one, a non-numeric entry, or a trailing surplus therefore leaves the untouched components at their
+		// defaults rather than reading as 0. Truncating first would turn a malformed /BC on a DeviceCMYK mask group
+		// from the correct black backdrop into white, which inverts what the area outside the group's BBox does.
 		comps := space.Initial()
 		if arr, has := in.doc.GetArray(dict, "BC"); has {
-			comps = comps[:0]
-			for _, entry := range arr {
+			for i, entry := range arr {
+				if i >= len(comps) {
+					break
+				}
 				if v, numOK := cos.AsReal(in.doc.Resolve(entry)); numOK {
-					comps = append(comps, float32(v))
+					comps[i] = float32(v)
 				}
 			}
 		}

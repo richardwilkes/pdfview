@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"testing"
 
+	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
@@ -71,6 +72,62 @@ func TestSoftMaskEmission(t *testing.T) {
 	}
 	if rec.calls[6].paint.Alpha != 1 {
 		t.Errorf("masked op alpha not reset: %v", rec.calls[6].paint.Alpha)
+	}
+}
+
+// TestSoftMaskBackdropBC pins how /BC composes with the mask group's /CS default color: every entry that resolves as a
+// number replaces the matching component, and every component the array does not supply — because it is absent, empty,
+// short, non-numeric, or surplus — keeps the space's initial value. A malformed /BC on a DeviceCMYK group must stay
+// black (the initial [0 0 0 1]) rather than collapsing to the all-zero white that would let everything outside the
+// group's BBox through unmasked.
+func TestSoftMaskBackdropBC(t *testing.T) {
+	const csCMYK = "/DeviceCMYK"
+	maskForm := func(cs string) string {
+		return `<< /Type /XObject /Subtype /Form /BBox [0 0 50 50]
+   /Group << /S /Transparency /CS ` + cs + ` >> /Length 20 >>
+stream
+1 g 0 0 25 50 re f
+endstream`
+	}
+	black := pdfcolor.DeviceCMYK.ToNRGBA([]float32{0, 0, 0, 1})
+	white := pdfcolor.DeviceCMYK.ToNRGBA([]float32{0, 0, 0, 0})
+	if black == white {
+		t.Fatal("the CMYK conversion maps black and white alike; the test cannot distinguish them")
+	}
+	for _, tc := range []struct {
+		name string
+		cs   string
+		bc   string
+		want color.NRGBA
+	}{
+		{name: "cmyk absent", cs: csCMYK, bc: "", want: black},
+		{name: "cmyk empty", cs: csCMYK, bc: " /BC []", want: black},
+		{name: "cmyk short", cs: csCMYK, bc: " /BC [0 0 0]", want: black},
+		{name: "cmyk non-numeric", cs: csCMYK, bc: " /BC [/Bad /Bad /Bad /Bad]", want: black},
+		{name: "cmyk white", cs: csCMYK, bc: " /BC [0 0 0 0]", want: white},
+		{name: "cmyk surplus", cs: csCMYK, bc: " /BC [0 0 0 0 1 1]", want: white},
+		{
+			name: "rgb partial",
+			cs:   "/DeviceRGB",
+			bc:   " /BC [1 /Bad 1]", // Green keeps its 0 default; the positions of the numeric entries are held.
+			want: color.NRGBA{R: 255, B: 255, A: 255},
+		},
+		{name: "gray", cs: "/DeviceGray", bc: " /BC [1]", want: color.NRGBA{R: 255, G: 255, B: 255, A: 255}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pdf := minimalPDF(maskForm(tc.cs),
+				`<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R`+tc.bc+` >> >>`)
+			d, err := cos.Open([]byte(pdf))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catExtGState: cos.Dict{resGSName: cos.Ref{Num: 2}}}
+			rec := run(t, d, res, "/GS0 gs 0 0 10 10 re f")
+			wantOps(t, rec, "beginmask", opClip, opFill, opPopClip, "endmask", opFill, "popmask")
+			if got := rec.calls[0].paint.Color; got != tc.want {
+				t.Errorf("backdrop = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
