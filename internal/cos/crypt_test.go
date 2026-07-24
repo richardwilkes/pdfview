@@ -35,7 +35,8 @@ func (m markingDecryptor) EncryptsMetadata() bool {
 
 // TestDecryptSkipsUnencryptedStreams checks the two stream types that are stored in the clear: cross-reference streams
 // always (ISO 32000-2 7.5.8.2), and metadata streams when the encryption dictionary carries /EncryptMetadata false
-// (7.6.2). The exemption covers the payload only — strings in the stream's own dictionary are still encrypted.
+// (7.6.2). A cross-reference stream is exempt entirely, including the strings in its own dictionary; a metadata stream's
+// exemption covers the payload only — strings in its dictionary are still encrypted.
 func TestDecryptSkipsUnencryptedStreams(t *testing.T) {
 	const metadataPayload = "<x:xmpmeta/>"
 	const contentPayload = "BT ET"
@@ -45,7 +46,7 @@ func TestDecryptSkipsUnencryptedStreams(t *testing.T) {
 	b.add(2, pagesBody)
 	b.addStream(3, "/Type /Metadata /Subtype /XML /Note (hi)", []byte(metadataPayload))
 	b.addStream(4, "", []byte(contentPayload))
-	b.addStream(5, "/Type /XRef", []byte(xrefPayload))
+	b.addStream(5, "/Type /XRef /ID [(raw)]", []byte(xrefPayload))
 	d := mustOpen(t, b.finishClassic(""))
 	for _, encryptsMetadata := range []bool{true, false} {
 		d.SetDecryptor(markingDecryptor{encryptsMetadata: encryptsMetadata})
@@ -77,6 +78,16 @@ func TestDecryptSkipsUnencryptedStreams(t *testing.T) {
 				if note, _ := d.GetString(stream.Dict, "Note"); string(note) != "S:hi" {
 					t.Errorf("EncryptMetadata=%v: metadata dictionary string = %q, want %q", encryptsMetadata, note,
 						"S:hi")
+				}
+			}
+			if tc.num == 5 {
+				id, _ := cos.AsArray(stream.Dict["ID"])
+				if len(id) != 1 {
+					t.Fatalf("EncryptMetadata=%v: xref /ID = %v, want one element", encryptsMetadata, id)
+				}
+				if s, _ := cos.AsString(id[0]); string(s) != "raw" {
+					t.Errorf("EncryptMetadata=%v: xref dictionary string = %q, want %q (must not be decrypted)",
+						encryptsMetadata, s, "raw")
 				}
 			}
 		}

@@ -80,14 +80,19 @@ func (d *Document) decryptValue(num, gen int, obj Object) Object {
 		}
 		return v
 	case *Stream:
+		typ, _ := AsName(v.Dict["Type"])
+		// Cross-reference streams are never encrypted at all (ISO 32000-2 7.5.8.2) — this includes the strings in their
+		// own dictionary (e.g. a direct /ID), so the whole object passes through untouched.
+		if typ == typeXRef {
+			return v
+		}
 		for k, e := range v.Dict {
 			v.Dict[k] = d.decryptValue(num, gen, e)
 		}
-		// Cross-reference streams are never encrypted (ISO 32000-2 7.5.8.2), and metadata streams are not either when
-		// the encryption dictionary sets /EncryptMetadata false (7.6.2); everything else — including object streams —
-		// is.
-		if typ, _ := AsName(v.Dict["Type"]); typ != typeXRef &&
-			(typ != typeMetadata || d.decryptor.EncryptsMetadata()) {
+		// A metadata stream's payload is stored in the clear when the encryption dictionary sets /EncryptMetadata false
+		// (ISO 32000-2 7.6.2), but the strings in its dictionary are still encrypted; every other stream — including
+		// object streams — has its payload encrypted too.
+		if typ != typeMetadata || d.decryptor.EncryptsMetadata() {
 			v.Raw = d.decryptor.DecryptStream(num, gen, v.Raw)
 		}
 		return v
