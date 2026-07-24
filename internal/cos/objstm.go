@@ -16,10 +16,30 @@ import (
 
 // objStm is a parsed object stream (/Type /ObjStm): the decoded payload plus the header's object-number/offset pairs.
 type objStm struct {
+	index map[int]int // Object number to header index; built on demand by indexOf().
 	data  []byte
 	nums  []int
 	offs  []int
 	first int
+}
+
+// indexOf returns the header index of the given object number, or -1 if the stream does not carry it. The first
+// occurrence wins, matching what a linear scan of the header would find. The lookup map is built on the first call,
+// since a document whose cross-reference data agrees with the stream headers never needs it, while one that disagrees
+// would otherwise pay a linear scan per object — O(n²) over a full sweep of a stream with many entries.
+func (s *objStm) indexOf(num int) int {
+	if s.index == nil {
+		s.index = make(map[int]int, len(s.nums))
+		for i, n := range s.nums {
+			if _, exists := s.index[n]; !exists {
+				s.index[n] = i
+			}
+		}
+	}
+	if idx, ok := s.index[num]; ok {
+		return idx
+	}
+	return -1
 }
 
 var (
@@ -130,14 +150,7 @@ func (d *Document) objFromStm(stmNum, idx, wantNum int) (Object, error) {
 		return nil, err
 	}
 	if idx < 0 || idx >= len(stm.nums) || stm.nums[idx] != wantNum {
-		idx = -1
-		for i, num := range stm.nums {
-			if num == wantNum {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
+		if idx = stm.indexOf(wantNum); idx < 0 {
 			return nil, errObjStmEntry
 		}
 	}
