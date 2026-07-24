@@ -20,8 +20,8 @@ package stext
 
 import (
 	"math"
-	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
@@ -189,8 +189,7 @@ func matchAt(chars []Char, start int, needle []rune) (quads []gfx.Quad, end int,
 			}
 			continue
 		}
-		if pos >= len(chars) || isSpaceChar(chars[pos]) || chars[pos].Rune == 0 ||
-			!strings.EqualFold(string(chars[pos].Rune), string(r)) {
+		if pos >= len(chars) || isSpaceChar(chars[pos]) || chars[pos].Rune == 0 || !foldEqual(chars[pos].Rune, r) {
 			return nil, 0, false
 		}
 		if pos > segStart && lineBreakBetween(chars[pos-1], chars[pos]) {
@@ -209,6 +208,31 @@ func matchAt(chars []Char, start int, needle []rune) (quads []gfx.Quad, end int,
 }
 
 func isSpaceChar(c Char) bool { return unicode.IsSpace(c.Rune) }
+
+// foldEqual reports whether a and b are the same rune under Unicode simple case folding. It is the rune-level
+// equivalent of strings.EqualFold over their single-rune strings — the matcher's innermost comparison, run once per
+// (character, needle-rune) pair, so the two heap strings that spelling allocated dominated search cost on text-heavy
+// pages. Runes that string() could not have encoded (negative, surrogate, or above unicode.MaxRune) fold to
+// utf8.RuneError, exactly as the conversion would have replaced them.
+func foldEqual(a, b rune) bool {
+	if !utf8.ValidRune(a) {
+		a = utf8.RuneError
+	}
+	if !utf8.ValidRune(b) {
+		b = utf8.RuneError
+	}
+	if a == b {
+		return true
+	}
+	// A simple-folding orbit is a short cycle through the case variants of a rune; walking a's finds b iff they fold
+	// together.
+	for r := unicode.SimpleFold(a); r != a; r = unicode.SimpleFold(r) {
+		if r == b {
+			return true
+		}
+	}
+	return false
+}
 
 // advanceDir is the unit vector of a character's baseline advance ((1, 0) for a degenerate advance).
 func advanceDir(c Char) (ux, uy float64) {

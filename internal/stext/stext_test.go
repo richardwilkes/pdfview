@@ -10,7 +10,10 @@
 package stext
 
 import (
+	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
@@ -192,6 +195,69 @@ func TestSearchBudget(t *testing.T) {
 	}
 	if got := searchChars(chars, "ab", 0); got != nil {
 		t.Fatalf("expected nil for a zero budget, got %d quads", len(got))
+	}
+}
+
+// TestFoldEqualMatchesStringsEqualFold pins foldEqual to the strings.EqualFold spelling it replaced: over every rune,
+// its whole simple-folding orbit must compare equal and the next rune (outside the orbit) must not, with each verdict
+// cross-checked against EqualFold on the single-rune strings.
+func TestFoldEqualMatchesStringsEqualFold(t *testing.T) {
+	check := func(a, b rune) {
+		t.Helper()
+		if got, want := foldEqual(a, b), strings.EqualFold(string(a), string(b)); got != want {
+			t.Fatalf("foldEqual(%#U, %#U) = %v, want %v", a, b, got, want)
+		}
+	}
+	for a := rune(0); a <= unicode.MaxRune; a++ {
+		if !utf8.ValidRune(a) {
+			continue
+		}
+		check(a, a)
+		inOrbit := false
+		for b := unicode.SimpleFold(a); b != a; b = unicode.SimpleFold(b) {
+			check(a, b)
+			if !foldEqual(a, b) {
+				t.Fatalf("foldEqual(%#U, %#U) = false, want true for an orbit member", a, b)
+			}
+			if b == a+1 {
+				inOrbit = true
+			}
+		}
+		if b := a + 1; !inOrbit && utf8.ValidRune(b) {
+			check(a, b)
+		}
+	}
+}
+
+// TestFoldEqualInvalidRunes pins the invalid-rune handling: string(r) replaced negative, surrogate, and out-of-range
+// runes with U+FFFD, so the extracted character carrying one still matches a U+FFFD needle rune (which is what decoding
+// invalid UTF-8 in the needle yields) exactly as before.
+func TestFoldEqualInvalidRunes(t *testing.T) {
+	for _, r := range []rune{-1, -0x10000, 0xD800, 0xDFFF, unicode.MaxRune + 1, 0x7FFFFFFF} {
+		if !foldEqual(r, utf8.RuneError) {
+			t.Errorf("foldEqual(%d, RuneError) = false, want true", r)
+		}
+		if !foldEqual(utf8.RuneError, r) {
+			t.Errorf("foldEqual(RuneError, %d) = false, want true", r)
+		}
+		if foldEqual(r, 'a') {
+			t.Errorf("foldEqual(%d, 'a') = true, want false", r)
+		}
+	}
+}
+
+// TestSearchNonASCIICaseFold exercises folding pairs that are not a simple ASCII 0x20 apart: the Kelvin sign folds with
+// k/K and the long s folds with s/S, both three-member orbits.
+func TestSearchNonASCIICaseFold(t *testing.T) {
+	chars, _ := mkWord("Kelvin\u017F", 100, 200, 10, 12) // A word ending in a long s.
+	// The plain forms, then the Kelvin sign standing in for the leading K.
+	for _, needle := range []string{"kelvins", "KELVINS", "Kelvins", "\u212Aelvins"} {
+		if got := searchChars(chars, needle, 100); len(got) != 1 {
+			t.Errorf("needle %q: expected 1 quad, got %d", needle, len(got))
+		}
+	}
+	if got := searchChars(chars, "kelvint", 100); len(got) != 0 {
+		t.Errorf("expected 0 quads for a non-folding mismatch, got %d", len(got))
 	}
 }
 
