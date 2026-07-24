@@ -64,6 +64,7 @@ type maskState struct {
 	layer      int    // masked-content layer save count (valid after EndMask)
 	guard      int    // guard layer save count (surf == nil only)
 	outside    uint8  // the coverage every pixel the plane does not cover takes
+	ended      bool   // EndMask has run for this span; a repeat is ignored
 	luminosity bool
 	constant   bool // no plane: the mask is its outside value everywhere (bbox wholly off the surface)
 	bounded    bool // the masked-content layer is clipped to the plane's rectangle
@@ -237,6 +238,15 @@ func (d *Device) EndMask() {
 		return
 	}
 	ms := d.maskStack[n-1]
+	if ms.ended {
+		// EndMask leaves the span on the stack for PopMask, so a repeated call would land here again: it would take the
+		// no-surface branch (EndMask releases the surface) and restore to a guard count only that branch ever sets,
+		// unwinding the canvas to save count 0 — including state the interpreter still expects to pop — and then open a
+		// second masked-content layer whose count overwrote the first. The other stack operations here (EndGroup,
+		// PopMask, PopClip) all guard their own stack, so this one does too.
+		return
+	}
+	ms.ended = true
 	d.textClip = ms.savedClip
 	if ms.surf == nil {
 		d.c.RestoreToCount(ms.guard)

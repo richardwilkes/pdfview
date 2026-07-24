@@ -36,7 +36,8 @@ import (
 // (each glyph instance has its own x phase) and re-renders hit 100%; that is exactly the warm protocol both the
 // recorded perf numbers and real consumers (re-render on scroll/zoom) care about, and it keeps the pixel gates honest.
 // Entries live in the document's budgeted store when one is wired (kind-separated by the dedicated key type), else in a
-// per-render map.
+// per-render map. Neither cache's occupancy may steer a glyph onto a different path — see glyphMask for why cache state
+// has to stay invisible to the pixels.
 
 // maxGlyphMaskDim caps a cached coverage plane's extent; glyphs rendering larger than this (display-size text) fall
 // back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.
@@ -161,6 +162,13 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 
 // glyphMask returns the cached coverage plane for one glyph appearance, rendering it on first use. fx, fy are the
 // subpixel phase of the glyph origin in [0, 1).
+//
+// Which glyphs take the mask path can never depend on how much the cache is holding: the store is a pure cache, and a
+// budget of any size — down to one byte, where nothing is ever retained — must leave rendered output byte-identical
+// (see the store package comment, pinned by TestCacheBudget). Feeding hit rate or retention back into the choice would
+// break exactly that, since a blit and the merged-outline fill it replaces agree only within ±1 of compositing
+// rounding, so a cache-driven fallback would make a page's pixels a function of its budget. The cost of a miss is
+// therefore kept as low as it can be (a lazily wrapped image; a reused scratch surface) rather than avoided.
 func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy float32) *glyphMask {
 	key := glyphMaskKey{font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy}
 	if d.store != nil {
@@ -181,15 +189,22 @@ func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy 
 	if d.glyphMasks == nil {
 		d.glyphMasks = make(map[glyphMaskKey]*glyphMask)
 	}
-	if len(d.glyphMasks) < maxCachedGlyphPaths {
-		d.glyphMasks[key] = mask
+	if len(d.glyphMasks) >= maxCachedGlyphPaths {
+		// The per-render map has no eviction of its own, and simply refusing further entries retires the cache for the
+		// rest of the render: every later glyph appearance would miss, rebuild its plane, and throw it away, so a
+		// text-heavy page pays the miss cost on every remaining glyph with no prospect of a hit. Dropping the map instead
+		// keeps the cap on live planes while letting the page go on caching what it draws next (the store, when one is
+		// wired, evicts by LRU under its own budget and never gets here). Retention is invisible to output: a hit
+		// reproduces the plane a miss would have rendered, bit for bit.
+		clear(d.glyphMasks)
 	}
+	d.glyphMasks[key] = mask
 	return mask
 }
 
 // renderGlyphMask fills the glyph outline at its exact subpixel position into a scratch surface and captures the
 // coverage as an Alpha8 image. The mask carries the glyph's device bounding box relative to its floored origin, padded
-// a pixel so analytic-AA bleed is never clipped. Returns the mask (img nil when the glyph must use the outline fill)
+// a pixel so analytic-AA bleed is never clipped. Returns the mask (plane nil when the glyph must use the outline fill)
 // and its store size estimate.
 func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32) (mask *glyphMask, size uint64) {
 	local := gfx.Matrix{A: g.Trm.A, B: g.Trm.B, C: g.Trm.C, D: g.Trm.D, E: fx, F: fy}
@@ -246,18 +261,11 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	if plane == nil {
 		return &glyphMask{}, 96
 	}
-	info := imagecore.ImageInfo{
-		Width:     int32(w),
-		Height:    int32(h),
-		ColorType: imagecore.ColorTypeAlpha8,
-		AlphaType: imagecore.AlphaTypePremul,
-	}
-	img := imagecore.NewRasterData(info, plane, w)
-	if img == nil {
-		return &glyphMask{}, 96
-	}
-	return &glyphMask{img: img, plane: plane, w: int32(w), h: int32(h), ox: int32(mx0), oy: int32(my0)},
-		glyphMaskSize(w, h) * 2
+	// The canvas image stays unbuilt: the direct pixmap composite reads plane straight and is the route nearly every
+	// glyph takes, so wrapping the plane here would allocate a wrapper per miss that nothing reads (image() builds one
+	// the first time a glyph actually goes through DrawImage, and the blit skips the glyph if that ever fails). The
+	// size estimate still charges for it, since a mask that does reach DrawImage keeps one for the cache entry's life.
+	return &glyphMask{plane: plane, w: int32(w), h: int32(h), ox: int32(mx0), oy: int32(my0)}, glyphMaskSize(w, h) * 2
 }
 
 // coveragePlane extracts the w×h alpha coverage from a white-on-transparent scratch pixmap into a tightly packed

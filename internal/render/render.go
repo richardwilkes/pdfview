@@ -58,6 +58,8 @@ type Device struct {
 	glyphMasks map[glyphMaskKey]*glyphMask
 	// maskScratch is the reusable surface glyph coverage planes render into (glyphmask.go).
 	maskScratch *surface.Surface
+	// meshScratch is the reusable path each mesh-shading triangle is built in (shading.go).
+	meshScratch *path.Path
 	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.
 	textClip *path.Path
 	// clipStack records the canvas save count at each clip push so PopClip can restore precisely.

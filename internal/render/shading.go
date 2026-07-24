@@ -199,23 +199,39 @@ func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shad
 		if !ok {
 			return nil
 		}
-		sMin, sMax := float32(0), float32(1)
-		for _, c := range corners {
-			s := ((c.X-p0.X)*dx + (c.Y-p0.Y)*dy) / lenSq
-			sMin = min(sMin, s)
-			sMax = max(sMax, s)
-		}
+		sMin, sMax := axialSpan(p0, dx, dy, lenSq, corners)
 		if sh.Extend[0] {
-			e0 = min(-sMin+1, maxExtendFactor)
+			e0 = float32(min(-sMin+1, maxExtendFactor))
 		}
 		if sh.Extend[1] {
-			e1 = min(sMax, maxExtendFactor)
+			e1 = float32(min(sMax, maxExtendFactor))
 		}
 		p0 = geom.Point{X: p0.X - e0*dx, Y: p0.Y - e0*dy}
 		p1 = geom.Point{X: p1.X + e1*dx, Y: p1.Y + e1*dy}
 	}
+	// Whatever the extension arithmetic produced, only finite geometry crosses into canvas (see axialSpan).
+	if !isFinite32(p0.X) || !isFinite32(p0.Y) || !isFinite32(p1.X) || !isFinite32(p1.Y) {
+		return nil
+	}
 	colors, pos := gradientRamp(sh.Stops, e0, e1)
 	return shaders.NewLinearGradient(p0, p1, colors, pos, tile, &lm)
+}
+
+// axialSpan returns the parametric range the surface's corners occupy along the p0 + t*(dx, dy) axis, clamped to
+// include the gradient's own [0, 1] span. The projections run in float64 on purpose: the inputs are finite float32s,
+// but a float32 difference of two large opposite-sign coordinates overflows to ±Inf, and Inf*0 — the ordinary case for
+// an axis-aligned gradient, where dx or dy is exactly 0 — is NaN, which Go's min/max propagate into the extension
+// factors, from there into the extended endpoints and the ramp's stop offsets, and on into canvas. In float64 no
+// difference or product of finite float32s can overflow, so with lenSq already known positive and finite every
+// projection is finite, and the results stay in the range the caller's maxExtendFactor clamp bounds.
+func axialSpan(p0 geom.Point, dx, dy, lenSq float32, corners [4]gfx.Point) (sMin, sMax float64) {
+	sMin, sMax = 0, 1
+	for _, c := range corners {
+		s := ((float64(c.X)-float64(p0.X))*float64(dx) + (float64(c.Y)-float64(p0.Y))*float64(dy)) / float64(lenSq)
+		sMin = min(sMin, s)
+		sMax = max(sMax, s)
+	}
+	return sMin, sMax
 }
 
 // radialShader builds the two-point conical shader for a type 3 shading.
@@ -248,6 +264,12 @@ func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Sha
 		c0, c1 = gfx.Point{X: c0.X - e0*dx, Y: c0.Y - e0*dy}, gfx.Point{X: c1.X + e1*dx, Y: c1.Y + e1*dy}
 		r0, r1 = max(r0-e0*dr, 0), max(r1+e1*dr, 0)
 	}
+	// A finite-but-enormous /Coords can make the extension above overflow (a radius delta of ±Inf drives the extended
+	// radius to Inf, an extended center to ±Inf); only finite geometry crosses into canvas.
+	if !isFinite32(c0.X) || !isFinite32(c0.Y) || !isFinite32(c1.X) || !isFinite32(c1.Y) ||
+		!isFinite32(r0) || !isFinite32(r1) {
+		return nil
+	}
 	colors, pos := gradientRamp(sh.Stops, e0, e1)
 	return shaders.NewTwoPointConicalGradient(geom.Point{X: c0.X, Y: c0.Y}, r0,
 		geom.Point{X: c1.X, Y: c1.Y}, r1, colors, pos, tile, &lm)
@@ -256,45 +278,49 @@ func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Sha
 // radialExtension finds the parametric extension factor (in units of the t span) that either covers every corner with
 // the extended circle or reaches the radius-zero cutoff PDF prescribes (ISO 32000-2 8.7.4.5.4: extension continues
 // until the circles cover the area or the radius becomes 0).
+//
+// The search runs in float64 for the reason axialSpan does: every input is a finite float32, but their float32
+// differences and products can overflow to ±Inf and produce NaN (Inf-Inf in a center delta, Inf*0 in a
+// coincident-center gradient), which would flow out as a NaN factor and put NaN circles in front of canvas. In float64
+// nothing formed from finite float32s overflows, and the result is bounded by maxExtendFactor, so it converts back
+// exactly.
 func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atStart bool) float32 {
-	dr := r1 - r0
+	dr := float64(r1) - float64(r0)
 	// The factor at which the extended radius reaches zero, when it shrinks in this direction.
-	cap32 := float32(maxExtendFactor)
+	limit := float64(maxExtendFactor)
 	if atStart && dr > 0 {
-		cap32 = r0 / dr
+		limit = float64(r0) / dr
 	} else if !atStart && dr < 0 {
-		cap32 = r1 / -dr
+		limit = float64(r1) / -dr
 	}
-	covered := func(e float32) bool {
-		var t, r float32
+	covered := func(e float64) bool {
+		t := 1 + e
 		if atStart {
 			t = -e
-		} else {
-			t = 1 + e
 		}
-		cx := c0.X + t*(c1.X-c0.X)
-		cy := c0.Y + t*(c1.Y-c0.Y)
-		r = r0 + t*dr
+		cx := float64(c0.X) + t*(float64(c1.X)-float64(c0.X))
+		cy := float64(c0.Y) + t*(float64(c1.Y)-float64(c0.Y))
+		r := float64(r0) + t*dr
 		if r < 0 {
 			return false
 		}
 		for _, q := range corners {
-			dx, dy := q.X-cx, q.Y-cy
+			dx, dy := float64(q.X)-cx, float64(q.Y)-cy
 			if dx*dx+dy*dy > r*r {
 				return false
 			}
 		}
 		return true
 	}
-	for e := float32(1); e <= maxExtendFactor; e *= 2 {
-		if e >= cap32 {
-			return cap32
+	for e := float64(1); e <= maxExtendFactor; e *= 2 {
+		if e >= limit {
+			return float32(limit)
 		}
 		if covered(e) {
-			return e
+			return float32(e)
 		}
 	}
-	return min(float32(maxExtendFactor), cap32)
+	return float32(min(float64(maxExtendFactor), limit))
 }
 
 // functionShader realizes a type 1 shading as an image shader: the function is evaluated over a grid spanning the
@@ -610,9 +636,20 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 	paint := canvas.NewPaint()
 	paint.AntiAlias = false
 	paint.BlendMode = blendModes[blend]
+	// One scratch path, rewound per triangle, serves every triangle of every draw: a mesh carries up to maxTriangles of
+	// them and the whole loop re-runs for each fill, stroke, image mask or sh operator that uses the shading (the
+	// tessellation is cached on the *shading.Shading, the canvas-side conversion is not), so a fresh path each time was
+	// the dominant allocation here. Rewind keeps the verb/point storage, leaving the per-triangle cost at three points.
+	// The scratch cannot be shared out from under itself: drawMesh only calls into canvas, never back into the device,
+	// and a tiling replay that paints a mesh does so on its own cell device (rasterizeTile).
+	if d.meshScratch == nil {
+		d.meshScratch = path.New()
+		d.meshScratch.SetVolatile(true) // Its contents change on every draw; nothing downstream should cache them.
+	}
+	p := d.meshScratch
 	for i := range sh.Triangles {
 		tri := &sh.Triangles[i]
-		p := path.New()
+		p.Rewind()
 		p.MoveTo(tri.P[0].X, tri.P[0].Y)
 		p.LineTo(tri.P[1].X, tri.P[1].Y)
 		p.LineTo(tri.P[2].X, tri.P[2].Y)

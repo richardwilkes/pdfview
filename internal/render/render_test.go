@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/richardwilkes/canvas/geom"
 	"github.com/richardwilkes/canvas/raster"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -1162,4 +1163,294 @@ func TestShaderEmptyStopsNoPanic(t *testing.T) {
 	if s := d.radialShader(radial, gfx.Identity()); s != nil {
 		t.Error("radialShader with no stops returned a shader")
 	}
+}
+
+// textRun builds a multi-glyph run for text, advancing by step device pixels per glyph so each glyph lands on its own
+// subpixel phase (a fresh coverage-cache key apiece).
+func textRun(t *testing.T, f *font.Font, text string, size, x, y, step float32) *device.TextRun {
+	t.Helper()
+	run := &device.TextRun{Font: f, CTM: gfx.Identity()}
+	for i, r := range text {
+		code := uint32(r)
+		gid := f.GID(code)
+		if gid == 0 {
+			t.Fatalf("code %d unmapped", code)
+		}
+		trm := gfx.Matrix{A: size, D: -size}.Mul(gfx.Translate(x+float32(i)*step, y))
+		run.Glyphs = append(run.Glyphs, device.Glyph{Trm: trm, GID: gid, Code: code, Advance: f.Width(code)})
+	}
+	return run
+}
+
+// The per-render map (no store wired) has no eviction of its own. At its cap it must not simply stop accepting: that
+// retires the cache for the rest of the render, leaving every later glyph appearance to rebuild a plane and throw it
+// away with no prospect of a hit. Dropping the map keeps live planes capped while the page goes on caching.
+func TestGlyphMaskCacheKeepsCachingWhenMapFull(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	d.glyphMasks = make(map[glyphMaskKey]*glyphMask, maxCachedGlyphPaths)
+	for i := range maxCachedGlyphPaths {
+		d.glyphMasks[glyphMaskKey{gid: uint32(i) + 1}] = &glyphMask{}
+	}
+	gid := f.GID('H')
+	gp := d.glyphPath(f, gid)
+	if gp == nil {
+		t.Fatal("no glyph path")
+	}
+	trm := gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28))
+	g := &device.Glyph{Trm: trm, GID: gid, Code: 'H'}
+	mask := d.glyphMask(f, g, gp, 0.5, 0.25)
+	if mask == nil || mask.plane == nil {
+		t.Fatal("no coverage plane rendered")
+	}
+	if len(d.glyphMasks) > maxCachedGlyphPaths {
+		t.Errorf("per-render map holds %d entries, past its %d cap", len(d.glyphMasks), maxCachedGlyphPaths)
+	}
+	if again := d.glyphMask(f, g, gp, 0.5, 0.25); again != mask {
+		t.Error("the plane rendered past the cap was not cached; the map stopped accepting entries")
+	}
+}
+
+// A mask's canvas image is only needed by the DrawImage route (a glyph under a non-rectangular clip, or one straddling
+// the clip interior); the direct pixmap composite nearly every glyph takes reads the coverage plane itself. Wrapping
+// the plane eagerly would allocate for every cache miss, so it must be built on first use — and still be usable then.
+func TestGlyphMaskImageBuiltLazily(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	gid := f.GID('H')
+	gp := d.glyphPath(f, gid)
+	if gp == nil {
+		t.Fatal("no glyph path")
+	}
+	g := &device.Glyph{Trm: gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28)), GID: gid, Code: 'H'}
+	mask, _ := d.renderGlyphMask(g, gp, 0, 0)
+	if mask == nil || mask.plane == nil {
+		t.Fatal("no coverage plane rendered")
+	}
+	if mask.img != nil {
+		t.Error("the canvas image was built before anything asked for it")
+	}
+	img := mask.image()
+	if img == nil {
+		t.Fatal("image() built nothing")
+	}
+	if img.Width() != mask.w || img.Height() != mask.h {
+		t.Errorf("image is %dx%d, want %dx%d", img.Width(), img.Height(), mask.w, mask.h)
+	}
+	if second := mask.image(); second != img {
+		t.Error("image() rebuilt the wrapper instead of reusing it")
+	}
+}
+
+// The store is a pure cache: a budget of any size — including one too small to ever retain a coverage plane — must
+// leave rendered text byte-identical, because a blit and the merged-outline fill it replaces agree only within ±1 of
+// compositing rounding. Nothing about cache occupancy may therefore steer a glyph onto a different path (the same
+// contract TestCacheBudget pins for a whole document).
+func TestTextIdenticalWhateverTheStoreBudget(t *testing.T) {
+	f := helveticaFont(t)
+	render := func(st *store.Store) []byte {
+		t.Helper()
+		d := newDevice(t, 64, 32)
+		d.SetStore(st)
+		d.FillText(textRun(t, f, "Hunt", 18, 2.31, 24.63, 12.37), redPaint())
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	unlimited := render(store.New(0))
+	if !inkIn(unlimited, 64*4, 0, 0, 63, 31) {
+		t.Fatal("the reference render drew nothing")
+	}
+	for _, budget := range []uint64{1, 64, 1 << 20} {
+		comparePixels(t, render(store.New(budget)), unlimited, 64*4, fmt.Sprintf("text under a %d-byte budget", budget))
+	}
+	comparePixels(t, render(nil), unlimited, 64*4, "text with no store wired") // the per-render map instead
+}
+
+// EndMask must be idempotent: a repeated call for the same span used to take the no-surface branch and restore to a
+// guard count only that branch ever sets, unwinding the whole canvas save stack — including the clip the interpreter
+// still expects to pop — and then open a second masked-content layer whose count overwrote the first.
+func TestEndMaskIdempotent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bbox gfx.Rect
+	}{
+		{name: "with mask surface", bbox: gfx.Rect{X0: 0, Y0: 0, X1: 16, Y1: 16}},
+		{name: "no mask surface", bbox: gfx.Rect{X0: 1000, Y0: 1000, X1: 1010, Y1: 1010}}, // wholly off the surface
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDevice(t, 16, 16)
+			var clip gfx.Path
+			clip.Rect(0, 0, 8, 16) // interpreter state the stray EndMask must not unwind
+			d.ClipPath(&clip, false, gfx.Identity())
+			base := d.c.SaveCount()
+			d.BeginMask(tc.bbox, false, color.NRGBA{}, nil)
+			var content gfx.Path
+			content.Rect(0, 0, 16, 8)
+			d.FillPath(&content, false, gfx.Identity(), redPaint()) // mask content: the top half is opaque
+			d.EndMask()
+			want := d.c.SaveCount()
+			d.EndMask()
+			if got := d.c.SaveCount(); got != want {
+				t.Errorf("repeated EndMask moved the canvas save count from %d to %d", want, got)
+			}
+			var p gfx.Path
+			p.Rect(0, 0, 16, 16)
+			d.FillPath(&p, false, gfx.Identity(), redPaint())
+			d.PopMask()
+			if got := d.c.SaveCount(); got != base {
+				t.Errorf("save count %d after PopMask, want %d", got, base)
+			}
+			d.PopClip()
+			pix, stride, err := d.Pixels()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inkIn(pix, stride, 8, 0, 15, 15) {
+				t.Error("ink outside the clip open before the mask span: the save stack was unwound")
+			}
+			// Painting after the popped clip must reach everywhere again, which it cannot if the stack was destroyed.
+			d.FillPath(&p, false, gfx.Identity(), device.Paint{Color: color.NRGBA{G: 255, A: 255}, Alpha: 1})
+			pix, stride, err = d.Pixels()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !inkIn(pix, stride, 8, 8, 15, 15) {
+				t.Error("the clip was never restored after PopMask")
+			}
+		})
+	}
+}
+
+// A mixed-/Extend axial gradient projects the surface corners onto its axis; the corner and the axis endpoint are both
+// finite, but their float32 difference can overflow to ±Inf, and Inf*0 — the ordinary case for an axis-aligned
+// gradient, where dx or dy is exactly 0 — is NaN. Go's min/max propagate that into the extension factors, hence into
+// the extended endpoints and every stop offset, and on into canvas.
+func TestAxialSpanFiniteWhenCornerProjectionOverflows(t *testing.T) {
+	p0 := geom.Point{X: 3e38, Y: 0}
+	corners := [4]gfx.Point{{X: -3e38, Y: 0}, {X: -2e38, Y: 0}, {X: -3e38, Y: 1}, {X: -2e38, Y: 1}}
+	sMin, sMax := axialSpan(p0, 0, 1, 1, corners) // dx == 0: a vertical gradient
+	if math.IsNaN(sMin) || math.IsNaN(sMax) {
+		t.Fatalf("overflowing corner projection yielded NaN span [%v, %v]", sMin, sMax)
+	}
+	if sMin > 0 || sMax < 1 {
+		t.Errorf("span [%v, %v] no longer covers the gradient's own [0, 1]", sMin, sMax)
+	}
+}
+
+// The same overflow through the whole shader: the ramp handed to canvas must carry finite stop offsets, and the
+// gradient's endpoints must stay finite.
+func TestAxialShaderMixedExtendOverflowStaysFinite(t *testing.T) {
+	d := newDevice(t, 1, 1)
+	sh := &shading.Shading{
+		Kind:   shading.KindAxial,
+		Coords: [6]float32{3e38, 0, 3e38, 1}, // vertical axis at the far edge of float32
+		Extend: [2]bool{true, false},
+		Stops:  []shading.Stop{{Offset: 0, Color: color.NRGBA{R: 255, A: 255}}, {Offset: 1, Color: color.NRGBA{B: 255, A: 255}}},
+	}
+	// Inverting this maps the surface corners to about -3e38 in shading space, so every corner projection overflows.
+	local := gfx.Matrix{A: 1e-38, D: 1, E: 3}
+	corners, ok := d.coverageCorners(local)
+	if !ok {
+		t.Fatal("test setup: corners are not finite")
+	}
+	for _, c := range corners {
+		if c.X > -1e38 {
+			t.Fatalf("test setup: corner %v is not far enough out to overflow the projection", c)
+		}
+	}
+	if s := d.axialShader(sh, local); s == nil {
+		t.Fatal("axialShader returned no shader")
+	}
+	sMin, _ := axialSpan(geom.Point{X: sh.Coords[0], Y: sh.Coords[1]}, 0, 1, 1, corners)
+	e0 := float32(min(-sMin+1, maxExtendFactor))
+	_, pos := gradientRamp(sh.Stops, e0, 0)
+	for i, v := range pos {
+		if !isFinite32(v) {
+			t.Fatalf("stop offset %d is %v", i, v)
+		}
+	}
+}
+
+// radialExtension's search runs on differences of finite-but-enormous coordinates, which overflow in float32 the same
+// way; its factor must stay finite and inside the cap however hostile the geometry.
+func TestRadialExtensionStaysFinite(t *testing.T) {
+	corners := [4]gfx.Point{{X: -3e38, Y: -3e38}, {X: 3e38, Y: -3e38}, {X: -3e38, Y: 3e38}, {X: 3e38, Y: 3e38}}
+	for _, atStart := range []bool{true, false} {
+		e := radialExtension(gfx.Point{X: -3e38, Y: 0}, gfx.Point{X: 3e38, Y: 0}, 3e38, 0, corners, atStart)
+		if !isFinite32(e) || e < 0 || e > maxExtendFactor {
+			t.Errorf("atStart=%v: extension %v out of range", atStart, e)
+		}
+	}
+}
+
+// A radial extension can drive the extended radius or center past float32's range even when /Coords is finite; only
+// finite circles may cross into canvas, so the shader degrades to nil (the shading is skipped) instead.
+func TestRadialShaderRejectsNonFiniteExtension(t *testing.T) {
+	d := newDevice(t, 8, 8)
+	stops := []shading.Stop{{Offset: 0, Color: color.NRGBA{R: 255, A: 255}}, {Offset: 1, Color: color.NRGBA{B: 255, A: 255}}}
+	// r1 + e1*(r1-r0) overflows: the extended outer radius is +Inf.
+	huge := &shading.Shading{
+		Kind:   shading.KindRadial,
+		Coords: [6]float32{0, 0, 0, 1, 0, 3e38},
+		Extend: [2]bool{false, true},
+		Stops:  stops,
+	}
+	if s := d.radialShader(huge, gfx.Identity()); s != nil {
+		t.Error("non-finite extended geometry reached canvas")
+	}
+	// An ordinary mixed-extend radial must still build its shader.
+	sane := &shading.Shading{
+		Kind:   shading.KindRadial,
+		Coords: [6]float32{4, 4, 1, 4, 4, 3},
+		Extend: [2]bool{false, true},
+		Stops:  stops,
+	}
+	if s := d.radialShader(sane, gfx.Identity()); s == nil {
+		t.Error("ordinary mixed-extend radial rejected")
+	}
+}
+
+// drawMesh builds every triangle in one reused scratch path, so each draw must start from an empty path: a stale one
+// would carry earlier triangles into later draws (painting them in the wrong color), and a scratch shared across draws
+// must leave the second draw of a mesh identical to the first.
+func TestDrawMeshScratchPathIsClearPerTriangle(t *testing.T) {
+	red := color.NRGBA{R: 255, A: 255}
+	green := color.NRGBA{G: 255, A: 255}
+	sh := &shading.Shading{
+		Kind: shading.KindFreeTriangle,
+		Triangles: []shading.Triangle{
+			{P: [3]gfx.Point{{X: 1, Y: 1}, {X: 9, Y: 1}, {X: 1, Y: 9}}, Color: red},
+			{P: [3]gfx.Point{{X: 19, Y: 11}, {X: 11, Y: 19}, {X: 19, Y: 19}}, Color: green},
+		},
+	}
+	paint := device.Paint{Alpha: 1, Shading: sh, PatternCTM: gfx.Identity()}
+	render := func(draws int) []byte {
+		t.Helper()
+		d := newDevice(t, 20, 20)
+		var p gfx.Path
+		p.Rect(0, 0, 20, 20)
+		for range draws {
+			d.FillPath(&p, false, gfx.Identity(), paint)
+		}
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	pix := render(1)
+	stride := 20 * 4
+	if got := pixelAt(t, pix, stride, 2, 2); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("first triangle painted %v, want opaque red", got)
+	}
+	if got := pixelAt(t, pix, stride, 17, 17); got != [4]uint8{0, 255, 0, 255} {
+		t.Errorf("second triangle painted %v, want opaque green", got)
+	}
+	if got := pixelAt(t, pix, stride, 17, 2); got != [4]uint8{0, 0, 0, 0} {
+		t.Errorf("area covered by neither triangle painted %v, want transparent", got)
+	}
+	comparePixels(t, render(2), pix, stride, "mesh drawn twice through the reused scratch path")
 }
