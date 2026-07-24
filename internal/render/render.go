@@ -68,6 +68,8 @@ type Device struct {
 	// groupStack and maskStack track open transparency groups and soft-mask spans (see mask.go).
 	groupStack []groupState
 	maskStack  []*maskState
+	// maskBytes is the offscreen surface bytes the open mask spans hold, against maskByteBudget (mask.go).
+	maskBytes uint64
 	// untrackedState counts canvas clip/layer state pushed outside the tracked stacks (the tiling replay clips cell
 	// content directly); nonzero disables the direct blit path.
 	untrackedState int
@@ -160,6 +162,7 @@ func (d *Device) Reset() {
 	d.clipRects = d.clipRects[:0]
 	d.groupStack = d.groupStack[:0]
 	d.maskStack = d.maskStack[:0]
+	d.maskBytes = 0
 	d.untrackedState = 0
 }
 

@@ -11,6 +11,7 @@ package render
 
 import (
 	stdcolor "image/color"
+	"math"
 
 	"github.com/richardwilkes/canvas/canvas"
 	"github.com/richardwilkes/canvas/colorcore"
@@ -34,7 +35,14 @@ import (
 // Soft masks render their content to a separate offscreen surface: BeginMask swaps the canvas, EndMask reads the
 // surface back, reduces it to an 8-bit coverage plane (rendered alpha for /S /Alpha; the captured MuPDF luminosity
 // response for /S /Luminosity — see maskLuma), applies the /TR LUT, and opens the masked-content layer on the main
-// canvas; PopMask multiplies the layer by the plane (BlendDstIn over the full canvas) and restores it.
+// canvas; PopMask multiplies the layer by the plane (BlendDstIn) and restores it.
+//
+// Every span is sized to the mask's device-space bbox, not the page: the interpreter clips mask content to that box
+// (content.replayMask), so the surface, the readback, the coverage plane, and the DstIn all cover only it, and the
+// area beyond it takes the single coverage value an out-of-bbox mask sample has (maskOutsideValue). This matters
+// because the interpreter wraps EVERY painting operation under an active /SMask in its own Begin/End/Pop cycle — a
+// page-sized allocate-and-scan per operation would otherwise cost a full page's bytes per fill, stroke, glyph run, and
+// image.
 
 // groupState is one BeginGroup's record.
 type groupState struct {
@@ -45,14 +53,20 @@ type groupState struct {
 
 // maskState is one BeginMask..PopMask span's record.
 type maskState struct {
-	surf       *surface.Surface // nil when surface creation failed (the guard layer swallows mask content)
+	surf       *surface.Surface // nil when there is no mask surface (see BeginMask); released at EndMask
 	saved      *canvas.Canvas
 	savedClip  *path.Path       // the interrupted text-clip accumulation, restored at EndMask
 	mask       *imagecore.Image // the Alpha8 coverage plane, built at EndMask
 	transfer   []byte
-	layer      int // masked-content layer save count (valid after EndMask)
-	guard      int // guard layer save count (surf == nil only)
+	bytes      uint64 // the surface's charge against the device's mask-byte budget, refunded at EndMask
+	x0, y0     int    // the plane's device-pixel origin
+	w, h       int    // the plane's device-pixel extent
+	layer      int    // masked-content layer save count (valid after EndMask)
+	guard      int    // guard layer save count (surf == nil only)
+	outside    uint8  // the coverage every pixel the plane does not cover takes
 	luminosity bool
+	constant   bool // no plane: the mask is its outside value everywhere (bbox wholly off the surface)
+	bounded    bool // the masked-content layer is clipped to the plane's rectangle
 }
 
 // BeginGroup implements device.Device.
@@ -100,41 +114,120 @@ func (d *Device) applyKnockout(paint *canvas.Paint) {
 	}
 }
 
-// maxMaskDepth caps how many soft-mask spans may be open at once. Each open span holds a full width×height×4 offscreen
-// surface plus its readback buffer, so unbounded nesting is a memory-pressure vector. Upstream form-XObject recursion
-// already bounds mask nesting well below this; the local cap keeps the surface commitment bounded even if that upstream
-// invariant is ever broken, degrading deeper masks to the no-surface path (mask content is swallowed, the masked op
-// still draws) rather than allocating without limit.
-const maxMaskDepth = 16
+// maxMaskDepth caps how many soft-mask spans may be open at once, and maxMaskPages the offscreen surface bytes they may
+// hold between them, as a multiple of the page's own byte size. Each open span holds a bbox-sized offscreen surface, so
+// unbounded nesting is a memory-pressure vector; the depth cap alone bounds only the COUNT, which at page-sized boxes
+// is still maxMaskDepth pages of live commitment. Upstream form-XObject recursion already bounds mask nesting well
+// below the depth cap; both limits keep the commitment bounded even if that upstream invariant is ever broken,
+// degrading deeper masks to the no-surface path (mask content is swallowed, the masked op still draws) rather than
+// allocating without limit. The budget is a multiple of the page so the outermost mask — which can legitimately cover
+// the whole page at any dpi — always fits.
+const (
+	maxMaskDepth = 16
+	maxMaskPages = 4
+)
+
+// maskByteBudget is the ceiling on the offscreen bytes all open mask spans may hold at once.
+func (d *Device) maskByteBudget() uint64 {
+	return maxMaskPages * 4 * uint64(d.width) * uint64(d.height)
+}
 
 // BeginMask implements device.Device.
-func (d *Device) BeginMask(_ gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA, transfer []byte) {
+func (d *Device) BeginMask(bbox gfx.Rect, luminosity bool, backdrop stdcolor.NRGBA, transfer []byte) {
 	ms := &maskState{luminosity: luminosity, transfer: transfer, saved: d.c, savedClip: d.textClip}
 	d.textClip = nil
-	if len(d.maskStack) < maxMaskDepth {
-		ms.surf = surface.NewRasterN32Premul(int32(d.width), int32(d.height), nil)
+	ms.outside = maskOutsideValue(luminosity, backdrop, transfer)
+	// The mask content draws under whatever matrix the canvas being masked carries — a Wrapped device's caller may have
+	// translated, scaled, or rotated theirs — so the bbox (device space as the interpreter sees it) maps through that
+	// matrix to reach the pixels the coverage plane is applied at.
+	base := d.c.TotalMatrix()
+	var onSurface bool
+	ms.x0, ms.y0, ms.w, ms.h, onSurface = d.maskBounds(bbox, &base)
+	bytes := 4 * uint64(ms.w) * uint64(ms.h)
+	if onSurface && len(d.maskStack) < maxMaskDepth && d.maskBytes+bytes <= d.maskByteBudget() {
+		if ms.surf = surface.NewRasterN32Premul(int32(ms.w), int32(ms.h), nil); ms.surf != nil {
+			ms.bytes = bytes
+			d.maskBytes += bytes
+		}
 	}
 	if ms.surf == nil {
-		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page; the masked op
-		// then draws unmasked (degrade, never erase).
+		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page. With the bbox
+		// wholly off the surface there is nothing to rasterize and the mask is its outside value everywhere, which
+		// PopMask still applies; when the surface could not be created at all (depth or byte cap, allocation failure)
+		// the masked op instead draws unmasked (degrade, never erase).
+		ms.constant = !onSurface
 		ms.guard = d.c.SaveLayerAlpha(nil, 0)
 	} else {
 		d.c = ms.surf.Canvas()
-		// The mask surface is a fresh canvas at identity, but the masked content draws under whatever matrix the canvas
-		// being masked carries — a Wrapped device's caller may have translated, scaled, or rotated theirs. Adopt that
-		// matrix as the mask canvas's base so the mask content rasterizes into the same device pixels the coverage plane
-		// is later applied at (a no-op for a device that owns its surface, whose canvas is always at identity here).
-		base := ms.saved.TotalMatrix()
+		// The mask surface is a fresh canvas at identity covering only the bbox, so adopt the masked canvas's matrix
+		// with the surface's device-pixel origin removed: mask content then rasterizes into the same pixels the plane is
+		// applied at, offset into the smaller surface.
+		base.PostTranslate(float32(-ms.x0), float32(-ms.y0))
 		d.c.SetMatrix(&base)
 		if luminosity {
 			// The mask group composites over the /BC backdrop before luminance extraction; prefilling the whole surface
-			// also gives areas outside the group's BBox the backdrop's luminosity.
+			// also gives areas inside the surface but outside the group's BBox the backdrop's luminosity (areas outside
+			// the surface get it through ms.outside).
 			p := canvas.NewPaint()
 			p.Color = colorcore.ARGB(255, backdrop.R, backdrop.G, backdrop.B)
 			d.c.DrawPaint(p)
 		}
 	}
 	d.maskStack = append(d.maskStack, ms)
+}
+
+// maskOutsideValue is the coverage every pixel outside the mask's bbox takes: the mask content cannot mark there, so an
+// alpha mask samples zero and a luminosity mask samples the /BC backdrop the group composites over, both through /TR.
+// It is exactly what a page-sized mask surface would hold outside the bbox.
+func maskOutsideValue(luminosity bool, backdrop stdcolor.NRGBA, transfer []byte) uint8 {
+	v := uint8(0)
+	if luminosity {
+		v = maskLuma(backdrop.R, backdrop.G, backdrop.B)
+	}
+	if len(transfer) == 256 { // Only a full LUT is usable; see maskPlane.
+		v = transfer[v]
+	}
+	return v
+}
+
+// maskBounds returns the device-pixel rectangle a mask span's surface must cover: the mask content's bbox mapped
+// through base, snapped outward to whole pixels with a pixel of margin so the antialiased edge of the bbox clip is
+// never cut, and intersected with the surface. The interpreter clips mask content to this bbox, so nothing the mask
+// paints can fall outside it. A bbox with no area carries no information — the interpreter emits an empty one when the
+// mask's CTM is unusable, and a caller that does not compute one passes the zero rect — so it degrades to the whole
+// surface, as do non-finite and absurd corners. ok is false when the rectangle lies entirely off the surface: the mask
+// has no rasterizable content at all and reduces to its constant outside coverage.
+func (d *Device) maskBounds(bbox gfx.Rect, base *geom.Matrix) (x0, y0, w, h int, ok bool) {
+	if !(bbox.X1 > bbox.X0) || !(bbox.Y1 > bbox.Y0) {
+		return 0, 0, d.width, d.height, true
+	}
+	var minX, minY, maxX, maxY float32
+	for i, c := range [4][2]float32{{bbox.X0, bbox.Y0}, {bbox.X1, bbox.Y0}, {bbox.X0, bbox.Y1}, {bbox.X1, bbox.Y1}} {
+		p := base.MapXY(c[0], c[1])
+		if !isFinite32(p.X) || !isFinite32(p.Y) {
+			return 0, 0, d.width, d.height, true
+		}
+		if i == 0 {
+			minX, maxX, minY, maxY = p.X, p.X, p.Y, p.Y
+		} else {
+			minX, maxX = min(minX, p.X), max(maxX, p.X)
+			minY, maxY = min(minY, p.Y), max(maxY, p.Y)
+		}
+	}
+	// Keep the floor/ceil conversions in range; Go leaves an out-of-range float→int conversion implementation-defined
+	// and the platforms disagree (mirrors rectInterior's clamp).
+	const maxReasonable = 1 << 24
+	if minX < -maxReasonable || maxX > maxReasonable || minY < -maxReasonable || maxY > maxReasonable {
+		return 0, 0, d.width, d.height, true
+	}
+	x0 = max(int(math.Floor(float64(minX)))-1, 0)
+	y0 = max(int(math.Floor(float64(minY)))-1, 0)
+	x1 := min(int(math.Ceil(float64(maxX)))+1, d.width)
+	y1 := min(int(math.Ceil(float64(maxY)))+1, d.height)
+	if x1 <= x0 || y1 <= y0 {
+		return 0, 0, 0, 0, false
+	}
+	return x0, y0, x1 - x0, y1 - y0, true
 }
 
 // EndMask implements device.Device.
@@ -150,8 +243,36 @@ func (d *Device) EndMask() {
 	} else {
 		ms.mask = d.maskPlane(ms)
 		d.c = ms.saved
+		// The plane is a copy; the surface has served its purpose, so release it (and its budget charge) here rather
+		// than holding it for the masked op's whole span.
+		ms.surf = nil
+		d.maskBytes -= ms.bytes
+		ms.bytes = 0
 	}
-	ms.layer = d.c.SaveLayer(nil, nil)
+	switch {
+	case ms.mask != nil && ms.outside == 0:
+		// Nothing outside the plane survives the DstIn, so bound the masked-content layer to the plane's rectangle: the
+		// layer device covers the mask's area instead of the whole page, and PopMask's DstIn only has to touch it. The
+		// bounds are device pixels, so they are given with the canvas at identity and the caller's matrix put back for
+		// the content draws.
+		m := d.c.TotalMatrix()
+		ms.layer = d.c.Save()
+		d.c.ResetMatrix()
+		bounds := ms.rect()
+		d.c.SaveLayer(&bounds, nil)
+		d.c.SetMatrix(&m)
+		ms.bounded = true
+	case ms.constant && ms.outside == 0:
+		// Masked out everywhere: the layer's zero alpha makes canvas skip the content entirely.
+		ms.layer = d.c.SaveLayerAlpha(nil, 0)
+	default:
+		ms.layer = d.c.SaveLayer(nil, nil)
+	}
+}
+
+// rect is the plane's device-pixel rectangle.
+func (ms *maskState) rect() geom.Rect {
+	return geom.RectXYWH(float32(ms.x0), float32(ms.y0), float32(ms.w), float32(ms.h))
 }
 
 // PopMask implements device.Device.
@@ -162,20 +283,55 @@ func (d *Device) PopMask() {
 	}
 	ms := d.maskStack[n-1]
 	d.maskStack = d.maskStack[:n-1]
-	if ms.mask != nil {
+	// A constant zero-coverage mask needs no DstIn at all: EndMask already realized it as an empty layer.
+	if ms.mask != nil || (ms.constant && ms.outside != 0) {
 		paint := canvas.NewPaint() // Opaque color: the plane's alpha is the DstIn source.
 		paint.BlendMode = raster.BlendDstIn
 		paint.AntiAlias = false
-		full := geom.RectWH(float32(d.width), float32(d.height))
-		sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
 		// The plane is in device pixels (see BeginMask), so gate the layer with the canvas at identity rather than under
 		// whatever matrix a Wrapped device's caller left in place.
 		count := d.c.Save()
 		d.c.ResetMatrix()
-		d.c.DrawImageRect(ms.mask, full, full, sampling, paint, canvas.ConstraintFast)
+		if ms.mask != nil {
+			sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
+			src := geom.RectWH(float32(ms.w), float32(ms.h))
+			d.c.DrawImageRect(ms.mask, src, ms.rect(), sampling, paint, canvas.ConstraintFast)
+		}
+		if !ms.bounded {
+			d.maskOutside(ms, paint)
+		}
 		d.c.RestoreToCount(count)
 	}
 	d.c.RestoreToCount(ms.layer)
+}
+
+// maskOutside applies the mask's constant outside coverage to the part of the canvas the coverage plane does not cover
+// — the four bands around it, or the whole canvas when there is no plane. Called with the canvas at identity and paint
+// already set to DstIn. Nothing is drawn where the value would leave the layer untouched anyway (a full-coverage
+// outside value) or where the plane already covers everything.
+func (d *Device) maskOutside(ms *maskState, paint *canvas.Paint) {
+	if ms.outside == 255 { // Full coverage outside: the layer passes through there unchanged.
+		return
+	}
+	x0, y0, x1, y1 := 0, 0, 0, 0 // With no plane the empty rectangle leaves the bands covering the whole canvas.
+	if ms.mask != nil {
+		x0, y0, x1, y1 = ms.x0, ms.y0, ms.x0+ms.w, ms.y0+ms.h
+		if x0 <= 0 && y0 <= 0 && x1 >= d.width && y1 >= d.height {
+			return
+		}
+	}
+	paint.Color = colorcore.ARGB(ms.outside, 255, 255, 255)
+	w, h := float32(d.width), float32(d.height)
+	for _, r := range [4]geom.Rect{
+		geom.RectLTRB(0, 0, w, float32(y0)),                     // above
+		geom.RectLTRB(0, float32(y1), w, h),                     // below
+		geom.RectLTRB(0, float32(y0), float32(x0), float32(y1)), // left
+		geom.RectLTRB(float32(x1), float32(y0), w, float32(y1)), // right
+	} {
+		if !r.IsEmpty() {
+			d.c.DrawRect(r, paint)
+		}
+	}
 }
 
 // maskPlane reduces the mask surface to an Alpha8 coverage image.
@@ -184,18 +340,18 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 	if img == nil {
 		return nil
 	}
-	stride := d.width * 4
-	pix := make([]byte, stride*d.height)
+	stride := ms.w * 4
+	pix := make([]byte, stride*ms.h)
 	info := imagecore.ImageInfo{
-		Width:     int32(d.width),
-		Height:    int32(d.height),
+		Width:     int32(ms.w),
+		Height:    int32(ms.h),
 		ColorType: imagecore.ColorTypeRGBA8888,
 		AlphaType: imagecore.AlphaTypePremul,
 	}
 	if !img.ReadPixels(info, pix, stride, 0, 0, imagecore.CachingDisallow) {
 		return nil
 	}
-	plane := make([]byte, d.width*d.height)
+	plane := make([]byte, ms.w*ms.h)
 	if ms.luminosity {
 		// The luminosity surface is opaque (prefilled with the backdrop), so the premultiplied bytes are the straight
 		// color values.
@@ -215,12 +371,12 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 		}
 	}
 	ainfo := imagecore.ImageInfo{
-		Width:     int32(d.width),
-		Height:    int32(d.height),
+		Width:     int32(ms.w),
+		Height:    int32(ms.h),
 		ColorType: imagecore.ColorTypeAlpha8,
 		AlphaType: imagecore.AlphaTypePremul,
 	}
-	return imagecore.NewRasterData(ainfo, plane, d.width)
+	return imagecore.NewRasterData(ainfo, plane, ms.w)
 }
 
 // maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed, like the

@@ -659,6 +659,71 @@ func TestTilingPatternPaint(t *testing.T) {
 	}
 }
 
+// A tiling paint carries the identity a device needs to cache its rasterized cell: the pattern's reference, plus the
+// scn-supplied color for an uncolored pattern (the same stencil paints a different cell in a different color). The key
+// must be withheld — nil — whenever Replay would paint nothing, or a device would cache emptiness as the cell.
+func TestTilingPatternCacheKey(t *testing.T) {
+	d, res := patternPDF(t)
+	keyOf := func(content string) any {
+		t.Helper()
+		rec := run(t, d, res, content)
+		wantOps(t, rec, opFill)
+		paint := rec.calls[0].paint
+		if paint.Tiling == nil {
+			t.Fatal("expected tiling payload")
+		}
+		return paint.Tiling.Key
+	}
+	colored := keyOf("/Pattern cs /PT scn 0 0 5 5 re f")
+	if colored == nil {
+		t.Fatal("a colored tiling pattern with a reference has no cache key")
+	}
+	if again := keyOf("/Pattern cs /PT scn 0 0 5 5 re f"); again != colored {
+		t.Errorf("the same pattern produced different keys: %v vs %v", again, colored)
+	}
+	blue := keyOf("/CSP cs 0 0 1 /PU scn 0 0 5 5 re f")
+	red := keyOf("/CSP cs 1 0 0 /PU scn 0 0 5 5 re f")
+	switch {
+	case blue == nil || red == nil:
+		t.Error("an uncolored tiling pattern has no cache key")
+	case blue == red:
+		t.Errorf("the same uncolored pattern keys the same cell for two scn colors: %v", blue)
+	case blue == colored:
+		t.Error("an uncolored pattern collides with the colored pattern's key")
+	}
+}
+
+// A tiling pattern whose cell selects the pattern again paints NOTHING on the inner selection (the cycle guard), so
+// that inner paint must carry no cache key: a device that cached it would serve the empty cell for every later,
+// legitimate use of the same pattern.
+func TestTilingPatternCacheKeyWithheldWhileActive(t *testing.T) {
+	cell := "/Pattern cs /P scn 0 0 2 2 re f"
+	dict := "<< /PatternType 1 /PaintType 1 /BBox [0 0 4 4] /XStep 4 /YStep 4 /Resources << /Pattern << /P 1 0 R >> >>"
+	pdf := minimalPDF(fmt.Sprintf("%s /Length %d >>\nstream\n%s\nendstream", dict, len(cell), cell))
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catPattern: cos.Dict{"P": cos.Ref{Num: 1}}}
+	rec := run(t, d, res, "/Pattern cs /P scn 0 0 5 5 re f")
+	wantOps(t, rec, opFill)
+	outer := rec.calls[0].paint.Tiling
+	if outer == nil || outer.Key == nil {
+		t.Fatal("the outer selection of a self-referencing pattern must still be cacheable")
+	}
+	inner := &recorder{t: t}
+	outer.Replay(inner, gfx.Identity())
+	wantOps(t, inner, opFill)
+	nested := inner.calls[0].paint.Tiling
+	if nested == nil {
+		t.Fatal("expected a tiling payload from the cell's own selection")
+	}
+	if nested.Key != nil {
+		t.Errorf("the cell's re-selection of the active pattern carries key %v; it paints nothing and must not be cached",
+			nested.Key)
+	}
+}
+
 func TestUncoloredTilingPatternColor(t *testing.T) {
 	d, res := patternPDF(t)
 	rec := run(t, d, res, "/CSP cs 0 0 1 /PU scn 0 0 5 5 re f")

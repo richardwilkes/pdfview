@@ -30,7 +30,7 @@ import (
 // mesh kinds → flat tessellated triangles drawn directly. /Extend uses TileClamp when both ends extend and TileDecal
 // when neither does; MIXED extend is realized as a single decal draw over parametrically extended geometry (the
 // boundary color duplicated over the extension). Tiling patterns render one cell into an offscreen surface wrapped in a
-// repeating image shader.
+// repeating image shader, the rasterized cell cached in the document store (see tileImage).
 
 // Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates its
 // function once per grid cell (maxFunctionArea bounds that work); a tiling cell rasterizes at the pattern's device
@@ -390,17 +390,66 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 		w = max(w/2, 1)
 		h = max(h/2, 1)
 	}
-	cell, err := New(w, h)
-	if err != nil {
-		return nil
-	}
-	cell.store = d.store
 	// Pattern-space window [X0, X0+XStep] x [Y0, Y0+YStep] maps to the tile image with y flipped (image rows grow
 	// downward while pattern y grows upward under the usual page CTM; patCTM's own flip is applied when the shader
 	// samples, so the window mapping keeps pattern orientation).
 	fw := float32(w) / t.XStep
 	fh := float32(h) / t.YStep
 	window := gfx.Matrix{A: fw, D: -fh, E: -t.BBox.X0 * fw, F: (t.BBox.Y0 + t.YStep) * fh}
+	inv, ok := window.Invert()
+	if !ok {
+		return nil
+	}
+	img := d.tileImage(t, window, w, h)
+	if img == nil {
+		return nil
+	}
+	lm := matrix(inv.Mul(local))
+	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
+	return shaders.NewImage(img, shaders.TileRepeat, shaders.TileRepeat, sampling, &lm)
+}
+
+// tileCellKey identifies one rasterized tiling-pattern cell in the document store: the interpreter's identity for the
+// cell content (device.Tiling.Key) plus the pixel size it was rasterized at. Distinct store key type per the store's
+// kind-separation rule.
+type tileCellKey struct {
+	pattern any
+	w, h    int
+}
+
+// tileImageSize estimates a rasterized cell's cache footprint for the store budget.
+func tileImageSize(w, h int) uint64 { return 4*uint64(w)*uint64(h) + 128 }
+
+// tileImage returns the pattern's cell rasterized at w×h, rendering it on first use. The result depends only on the
+// cell content and that pixel size — window is derived from both, and the pattern's rotation and placement live in the
+// shader's matrix, not in the tile — so with a store wired the image is cached there and shared by every later draw of
+// the pattern at the same scale, across pages. Failures cache too (they are a property of the same inputs). Without a
+// store every call rasterizes, as before.
+func (d *Device) tileImage(t *device.Tiling, window gfx.Matrix, w, h int) *imagecore.Image {
+	key := tileCellKey{pattern: t.Key, w: w, h: h}
+	cacheable := t.Key != nil && d.store != nil
+	if cacheable {
+		if v, ok := d.store.Get(key); ok {
+			if img, isImage := v.(*imagecore.Image); isImage {
+				return img
+			}
+			return nil // Cached failure (negative entry).
+		}
+	}
+	img := d.rasterizeTile(t, window, w, h)
+	if cacheable {
+		d.store.Put(key, img, tileImageSize(w, h))
+	}
+	return img
+}
+
+// rasterizeTile replays one cell's content into a w×h offscreen surface and snapshots it.
+func (d *Device) rasterizeTile(t *device.Tiling, window gfx.Matrix, w, h int) *imagecore.Image {
+	cell, err := New(w, h)
+	if err != nil {
+		return nil
+	}
+	cell.store = d.store
 	// Cells whose box exceeds the steps spill into neighbors' windows; replay the necessary neighbor copies.
 	nx := spillCopies(t.BBox.X1-t.BBox.X0, t.XStep)
 	ny := spillCopies(t.BBox.Y1-t.BBox.Y0, t.YStep)
@@ -414,17 +463,7 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 			cell.PopClip()
 		}
 	}
-	img := cell.surf.MakeImageSnapshot()
-	if img == nil {
-		return nil
-	}
-	inv, ok := window.Invert()
-	if !ok {
-		return nil
-	}
-	lm := matrix(inv.Mul(local))
-	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
-	return shaders.NewImage(img, shaders.TileRepeat, shaders.TileRepeat, sampling, &lm)
+	return cell.surf.MakeImageSnapshot()
 }
 
 // spillCopies reports how many neighbor cells (per direction, capped) can spill content into one tile window when the

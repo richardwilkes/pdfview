@@ -75,9 +75,15 @@ type Paint struct {
 // the interpreter's recursion and work budgets (a cyclic or over-deep pattern replays nothing).
 type Tiling struct {
 	Replay func(dev Device, ctm gfx.Matrix)
-	BBox   gfx.Rect
-	XStep  float32
-	YStep  float32
+	// Key, when non-nil, identifies the cell content for caching a rasterization of it: two Tilings with equal Keys and
+	// equal cell geometry replay identical content, so a device may reuse one's rendered cell for the other. It is a
+	// comparable value usable as a map key. nil means the cell must be replayed on every use — the interpreter withholds
+	// a key when Replay would paint nothing (a pattern already active in the replay stack, or one at the recursion cap)
+	// or when the pattern has no stable identity to key on.
+	Key   any
+	BBox  gfx.Rect
+	XStep float32
+	YStep float32
 }
 
 // Glyph is one positioned glyph in a text run. Trm is the fully composed glyph-space→device-space matrix for this glyph

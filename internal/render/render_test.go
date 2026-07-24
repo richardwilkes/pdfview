@@ -10,6 +10,7 @@
 package render
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 	"strings"
@@ -635,13 +636,15 @@ func TestBeginMaskShortTransferLUTNoPanic(t *testing.T) {
 	}
 }
 
-// Soft-mask nesting beyond maxMaskDepth must degrade to the no-surface path rather than allocating another full-page
-// offscreen surface, and the Begin/End/Pop pairing must still unwind cleanly.
+// Soft-mask nesting beyond maxMaskDepth must degrade to the no-surface path rather than allocating another offscreen
+// surface, and the Begin/End/Pop pairing must still unwind cleanly. The boxes here are small enough that the byte
+// budget cannot be what bites (TestBeginMaskByteBudgetDegrades covers that).
 func TestBeginMaskDepthCapDegrades(t *testing.T) {
 	d := newDevice(t, 8, 8)
 	const depth = maxMaskDepth + 3
+	small := gfx.Rect{X0: 3, Y0: 3, X1: 4, Y1: 4}
 	for range depth {
-		d.BeginMask(gfx.Rect{}, false, color.NRGBA{}, nil)
+		d.BeginMask(small, false, color.NRGBA{}, nil)
 	}
 	for i, ms := range d.maskStack {
 		switch {
@@ -657,6 +660,126 @@ func TestBeginMaskDepthCapDegrades(t *testing.T) {
 	}
 	if len(d.maskStack) != 0 {
 		t.Fatalf("mask stack not unwound: %d left", len(d.maskStack))
+	}
+	if d.maskBytes != 0 {
+		t.Fatalf("mask byte charge not refunded: %d left", d.maskBytes)
+	}
+}
+
+// The depth cap bounds the COUNT of open spans, not their bytes; page-sized masks must additionally stop at the byte
+// budget, well before the depth cap, and still unwind cleanly. The first span always fits (the budget is a multiple of
+// the page), so a mask covering the whole page is never degraded on its own account.
+func TestBeginMaskByteBudgetDegrades(t *testing.T) {
+	d := newDevice(t, 8, 8)
+	const depth = maxMaskPages + 2
+	page := gfx.Rect{X0: 0, Y0: 0, X1: 8, Y1: 8}
+	for range depth {
+		d.BeginMask(page, false, color.NRGBA{}, nil)
+	}
+	surfaces := 0
+	for _, ms := range d.maskStack {
+		if ms.surf != nil {
+			surfaces++
+		}
+	}
+	if surfaces == 0 || surfaces > maxMaskPages {
+		t.Errorf("%d page-sized mask surfaces open at once, want 1..%d", surfaces, maxMaskPages)
+	}
+	if d.maskBytes > d.maskByteBudget() {
+		t.Errorf("open mask surfaces hold %d bytes, over the %d budget", d.maskBytes, d.maskByteBudget())
+	}
+	for range depth {
+		d.EndMask()
+		d.PopMask()
+	}
+	if d.maskBytes != 0 {
+		t.Fatalf("mask byte charge not refunded: %d left", d.maskBytes)
+	}
+}
+
+// The mask surface, its readback, and the coverage plane are sized to the mask's bbox rather than the page, so a mask
+// covering a corner of the page must produce exactly the pixels a page-sized mask surface produced: inside the box the
+// rendered coverage, outside it the value an out-of-bbox sample has (zero for an alpha mask, the /BC backdrop's
+// luminosity for a luminosity one, both through /TR). The zero rect is the "no usable bbox" signal that keeps the
+// page-sized path, so it renders the reference.
+func TestSoftMaskBBoxSizedPlaneMatchesFullPage(t *testing.T) {
+	// A /TR LUT that maps 0 to a non-zero coverage: the area outside the bbox then survives the mask, which is the case
+	// the bbox-sized plane has to reproduce with its own outside value rather than by scanning page pixels.
+	lifted := make([]byte, 256)
+	for i := range lifted {
+		lifted[i] = uint8(64 + i*191/255)
+	}
+	for _, tc := range []struct {
+		name       string
+		transfer   []byte
+		backdrop   color.NRGBA
+		luminosity bool
+	}{
+		{name: "alpha"},
+		{name: "alpha with lifted /TR", transfer: lifted},
+		{name: "luminosity black /BC", luminosity: true, backdrop: color.NRGBA{A: 255}},
+		{name: "luminosity gray /BC", luminosity: true, backdrop: color.NRGBA{R: 128, G: 128, B: 128, A: 255}},
+		{
+			name: "luminosity gray /BC with lifted /TR", luminosity: true,
+			backdrop: color.NRGBA{R: 128, G: 128, B: 128, A: 255}, transfer: lifted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The mask paints a disc inside the box; the masked content covers the whole surface.
+			bbox := gfx.Rect{X0: 6, Y0: 8, X1: 22, Y1: 26}
+			render := func(pass gfx.Rect) ([]byte, int, int, int) {
+				d := newDevice(t, 40, 32)
+				d.BeginMask(pass, tc.luminosity, tc.backdrop, tc.transfer)
+				w, h := d.maskStack[0].w, d.maskStack[0].h
+				var maskShape gfx.Path
+				maskShape.Rect(8, 10, 12, 14)
+				d.FillPath(&maskShape, false, gfx.Identity(), redPaint())
+				d.EndMask()
+				var content gfx.Path
+				content.Rect(0, 0, 40, 32)
+				d.FillPath(&content, false, gfx.Identity(), redPaint())
+				d.PopMask()
+				pix, stride, err := d.Pixels()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return pix, stride, w, h
+			}
+			want, stride, fullW, fullH := render(gfx.Rect{})
+			if fullW != 40 || fullH != 32 {
+				t.Fatalf("the zero bbox must keep the page-sized plane, got %dx%d", fullW, fullH)
+			}
+			got, _, w, h := render(bbox)
+			if w >= 40 || h >= 32 {
+				t.Fatalf("bbox %v produced a %dx%d plane; want one smaller than the 40x32 page", bbox, w, h)
+			}
+			comparePixels(t, got, want, stride, "bbox-sized soft mask")
+		})
+	}
+}
+
+// A mask whose bbox lies entirely off the surface has no rasterizable content at all, so it reduces to its constant
+// outside coverage — the masked op must be erased for an alpha mask, not left unmasked (the "degrade, never erase" path
+// is for masks whose surface could not be created, not for masks that legitimately cover nothing).
+func TestSoftMaskOffSurfaceBBoxMasksEverything(t *testing.T) {
+	d := newDevice(t, 16, 16)
+	d.BeginMask(gfx.Rect{X0: 100, Y0: 100, X1: 120, Y1: 120}, false, color.NRGBA{}, nil)
+	if ms := d.maskStack[0]; ms.surf != nil || !ms.constant {
+		t.Fatalf("off-surface bbox allocated a surface (surf != nil: %v, constant: %v)", ms.surf != nil, ms.constant)
+	}
+	var content gfx.Path
+	content.Rect(0, 0, 16, 16)
+	d.EndMask()
+	d.FillPath(&content, false, gfx.Identity(), redPaint())
+	d.PopMask()
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, xy := range [][2]int{{0, 0}, {8, 8}, {15, 15}} {
+		if got := pixelAt(t, pix, stride, xy[0], xy[1]); got[3] != 0 {
+			t.Errorf("pixel (%d,%d) = %v; content under a fully off-surface mask must not mark", xy[0], xy[1], got)
+		}
 	}
 }
 
@@ -689,19 +812,28 @@ func comparePixels(t *testing.T, got, want []byte, stride int, label string) {
 // the content matrices — the mask surface is at identity and PopMask's DstIn rectangle is in surface pixels, so both
 // have to compensate for the caller's matrix.
 func TestWrappedCanvasSoftMaskRegistersWithContent(t *testing.T) {
-	draw := func(d *Device, ctm gfx.Matrix) {
+	// bbox is the mask content's box in the space the DEVICE is handed (the interpreter's device space), which for a
+	// wrapped canvas is still one caller matrix away from the pixels — sizing the mask surface has to map it through
+	// that matrix or the plane lands in the wrong pixels.
+	draw := func(d *Device, ctm gfx.Matrix, sized bool) {
 		var maskArea gfx.Path
 		maskArea.Rect(-16, -12, 20, 20) // device (0,0)-(20,20)
 		var content gfx.Path
 		content.Rect(-16, -12, 40, 40) // the whole surface
-		d.BeginMask(gfx.Rect{}, false, color.NRGBA{}, nil)
+		bbox := gfx.Rect{}
+		if sized {
+			x0, y0 := ctm.ApplyXY(-16, -12)
+			x1, y1 := ctm.ApplyXY(4, 8)
+			bbox = gfx.Rect{X0: x0, Y0: y0, X1: x1, Y1: y1}
+		}
+		d.BeginMask(bbox, false, color.NRGBA{}, nil)
 		d.FillPath(&maskArea, false, ctm, redPaint())
 		d.EndMask()
 		d.FillPath(&content, false, ctm, redPaint())
 		d.PopMask()
 	}
 	ref := newDevice(t, 40, 40)
-	draw(ref, gfx.Translate(16, 12))
+	draw(ref, gfx.Translate(16, 12), false)
 	want, stride, err := ref.Pixels()
 	if err != nil {
 		t.Fatal(err)
@@ -715,13 +847,23 @@ func TestWrappedCanvasSoftMaskRegistersWithContent(t *testing.T) {
 			t.Fatalf("reference pixel (%d,%d) = %v, want opaque=%v", tc.x, tc.y, got, tc.opaque)
 		}
 	}
-	host := newDevice(t, 40, 40)
-	draw(wrappedOnto(t, host, 16, 12), gfx.Identity())
-	got, _, err := host.Pixels()
-	if err != nil {
-		t.Fatal(err)
+	compare := func(d *Device, label string) {
+		t.Helper()
+		got, _, pixErr := d.Pixels()
+		if pixErr != nil {
+			t.Fatal(pixErr)
+		}
+		comparePixels(t, got, want, stride, label)
 	}
-	comparePixels(t, got, want, stride, "masked fill through a translated canvas")
+	for _, sized := range []bool{false, true} {
+		host := newDevice(t, 40, 40)
+		draw(wrappedOnto(t, host, 16, 12), gfx.Identity(), sized)
+		compare(host, fmt.Sprintf("masked fill through a translated canvas (sized bbox: %v)", sized))
+	}
+	// The same content masked through a bbox-sized plane on an owned device must match the page-sized reference too.
+	sizedRef := newDevice(t, 40, 40)
+	draw(sizedRef, gfx.Translate(16, 12), true)
+	compare(sizedRef, "masked fill with a bbox-sized plane")
 }
 
 // The sh operator paints across the whole clip by covering the device surface, a rectangle in surface pixels. On a
@@ -821,6 +963,107 @@ func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
 	}
 	if replayCTM.A != maxTileDim { // XStep is 1, so the window's x scale is the tile width in pixels
 		t.Errorf("tiling cell rasterized %v pixels wide, want the clamped %d", replayCTM.A, maxTileDim)
+	}
+}
+
+// tilingFor builds a tiling paint whose cell paints one red square, counting the replays it takes.
+func tilingFor(key any, replays *int) device.Paint {
+	return device.Paint{
+		Alpha: 1,
+		Tiling: &device.Tiling{
+			Replay: func(dev device.Device, ctm gfx.Matrix) {
+				*replays++
+				var cell gfx.Path
+				cell.Rect(1, 1, 6, 6)
+				dev.FillPath(&cell, false, ctm, redPaint())
+			},
+			Key:   key,
+			BBox:  gfx.Rect{X0: 0, Y0: 0, X1: 8, Y1: 8},
+			XStep: 8,
+			YStep: 8,
+		},
+		PatternCTM: gfx.Identity(),
+	}
+}
+
+// A tiling pattern's rasterized cell is the same image for the same content at the same device scale, so with a store
+// wired it must be rasterized once and reused — across draws and across renders (devices) — instead of allocating and
+// replaying a fresh cell surface per painting operation. Only the pattern identity the interpreter supplies makes that
+// safe: a different key, a different scale, or no key at all must each replay again.
+func TestTileShaderCachesCellInStore(t *testing.T) {
+	st := store.New(0)
+	replays := 0
+	shaderFor := func(paint device.Paint, patCTM gfx.Matrix) {
+		t.Helper()
+		d := newDevice(t, 32, 32)
+		d.SetStore(st)
+		if s := d.tileShader(paint.Tiling, gfx.Identity(), patCTM); s == nil {
+			t.Fatal("no tile shader")
+		}
+	}
+	key := "pattern 7" // the device treats the interpreter's identity as an opaque comparable value
+	shaderFor(tilingFor(key, &replays), gfx.Identity())
+	if replays != 1 {
+		t.Fatalf("first tile rasterization took %d replays, want 1", replays)
+	}
+	shaderFor(tilingFor(key, &replays), gfx.Identity()) // a later draw, a later render: the cached cell must serve both
+	if replays != 1 {
+		t.Errorf("the same pattern at the same scale replayed again (%d replays total)", replays)
+	}
+	shaderFor(tilingFor(key, &replays), gfx.Matrix{A: 2, D: 2}) // a different device scale is a different cell image
+	if replays != 2 {
+		t.Errorf("a rescaled cell was not re-rasterized (%d replays total)", replays)
+	}
+	shaderFor(tilingFor("pattern 8", &replays), gfx.Identity()) // a different pattern
+	if replays != 3 {
+		t.Errorf("a different pattern reused the cached cell (%d replays total)", replays)
+	}
+	before := replays
+	shaderFor(tilingFor(nil, &replays), gfx.Identity())
+	shaderFor(tilingFor(nil, &replays), gfx.Identity())
+	if replays != before+2 {
+		t.Errorf("an unkeyed pattern was cached (%d replays, want %d)", replays-before, 2)
+	}
+	// No store wired: every call rasterizes, exactly as before the cache existed.
+	noStore := 0
+	paint := tilingFor(key, &noStore)
+	for range 2 {
+		d := newDevice(t, 32, 32)
+		if s := d.tileShader(paint.Tiling, gfx.Identity(), gfx.Identity()); s == nil {
+			t.Fatal("no tile shader without a store")
+		}
+	}
+	if noStore != 2 {
+		t.Errorf("storeless device replayed %d times, want 2", noStore)
+	}
+}
+
+// The cached cell must paint exactly what a freshly rasterized one paints; a stale or misindexed image would show up
+// as a pixel difference between the first draw of a pattern and every later one.
+func TestTileShaderCachedCellPaintsIdentically(t *testing.T) {
+	render := func(st *store.Store) []byte {
+		t.Helper()
+		replays := 0
+		d := newDevice(t, 32, 32)
+		d.SetStore(st)
+		var p gfx.Path
+		p.Rect(4, 4, 24, 24)
+		d.StrokePath(&p, &gfx.StrokeParams{Width: 6, MiterLimit: 10}, gfx.Identity(),
+			tilingFor("pattern 11", &replays))
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	st := store.New(0)
+	want := render(st) // populates the store
+	got := render(st)  // served from it
+	comparePixels(t, got, want, 32*4, "tiling pattern drawn from the cached cell")
+	if fresh := render(store.New(0)); len(fresh) != len(want) {
+		t.Fatal("unexpected pixel length")
+	} else {
+		comparePixels(t, fresh, want, 32*4, "tiling pattern drawn from a fresh cell")
 	}
 }
 

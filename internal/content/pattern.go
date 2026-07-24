@@ -177,10 +177,29 @@ func (in *interp) applyPattern(p *device.Paint, space pdfcolor.Space, pat *patte
 	}
 	p.Tiling = &device.Tiling{
 		Replay: in.tilingReplay(tile, cellColor),
+		Key:    in.tileKey(tile, cellColor),
 		BBox:   tile.bbox,
 		XStep:  tile.xstep,
 		YStep:  tile.ystep,
 	}
+}
+
+// tilingCellKey identifies one tiling pattern's cell content for a device-side rasterization cache: the pattern's own
+// reference plus, for an uncolored pattern, the scn-supplied color its stencil paints with (the same reference paints
+// different cells under different colors).
+type tilingCellKey struct {
+	ref   cos.Ref
+	color color.NRGBA
+}
+
+// tileKey returns the cache identity for the cell tilingReplay would paint, or nil when that content must not be
+// cached: without a reference there is nothing stable to key on, and a pattern that is already active in this replay
+// stack (or that is at the recursion cap) paints NOTHING, which must never be retained as if it were the cell.
+func (in *interp) tileKey(tile *tilingRes, cellColor color.NRGBA) any {
+	if !tile.hasRef || in.active[tile.ref] || in.formDepth >= maxFormDepth {
+		return nil
+	}
+	return tilingCellKey{ref: tile.ref, color: cellColor}
 }
 
 // tilingReplay builds the Replay closure for one tiling pattern: it runs the cell content through a child interpreter
