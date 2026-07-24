@@ -12,11 +12,13 @@ package pdfview_test
 import (
 	"errors"
 	"image"
+	"math"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/richardwilkes/pdfview"
+	"github.com/richardwilkes/pdfview/internal/render"
 )
 
 func TestPDF(t *testing.T) {
@@ -211,6 +213,48 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	}
 	if _, err = doc.RenderPage(0, 100, 0, ""); !errors.Is(err, pdfview.ErrImageTooLarge) {
 		t.Errorf("expected ErrImageTooLarge from RenderPage when exceeding OverallMaxPixels, got %v", err)
+	}
+}
+
+// TestOverLargeRenderUsesImageTooLarge pins the agreement between OverallMaxPixels and the raster surface's own pixel
+// cap. The default used to be twice the surface cap, so a request landing between the two passed every documented
+// guard and then failed inside the surface allocation, reaching the caller as ErrUnableToCreateImage instead of the
+// documented ErrImageTooLarge.
+func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
+	if pdfview.OverallMaxPixels != render.MaxSurfacePixels {
+		t.Fatalf("OverallMaxPixels default %d does not match the surface cap %d", pdfview.OverallMaxPixels,
+			render.MaxSurfacePixels)
+	}
+	// The renderPage guard on the buffer's byte size is only belt and braces while this holds.
+	if int64(render.MaxSurfacePixels)*4 > math.MaxInt32 {
+		t.Errorf("a %d pixel surface no longer fits a 32-bit byte size", render.MaxSurfacePixels)
+	}
+
+	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdfview.New(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Release()
+
+	// Measure the page at 72 dpi (scale 1) so the over-large request can be derived from its actual size.
+	base, err := doc.RenderPage(0, 72, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := base.Image.Bounds()
+	// Aim halfway between the surface cap and the old math.MaxInt32/4 default: too large to render, yet small enough
+	// that the previous default let it through. Nothing is allocated, since the guard precedes the surface creation.
+	// Only RenderPageForSize can ask for such a size; RenderPage clamps its scale at 10x.
+	target := float64(pdfview.OverallMaxPixels+math.MaxInt32/4) / 2
+	scale := math.Sqrt(target / (float64(b.Dx()) * float64(b.Dy())))
+	maxWidth := int(math.Ceil(float64(b.Dx()) * scale))
+	maxHeight := int(math.Ceil(float64(b.Dy()) * scale))
+	if _, err = doc.RenderPageForSize(0, maxWidth, maxHeight, 0, ""); !errors.Is(err, pdfview.ErrImageTooLarge) {
+		t.Errorf("expected ErrImageTooLarge for a %dx%d RenderPageForSize request, got %v", maxWidth, maxHeight, err)
 	}
 }
 

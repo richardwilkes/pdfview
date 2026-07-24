@@ -44,6 +44,11 @@ import (
 // ErrSurface is reported when the raster surface cannot be created (non-positive or absurd dimensions).
 var ErrSurface = errors.New("unable to create raster surface")
 
+// MaxSurfacePixels is the largest pixel count (width × height) New will allocate a surface for: a 1 GiB buffer at the
+// 4 bytes per pixel a premultiplied N32 surface uses. The root package's OverallMaxPixels defaults to this same value
+// so an over-large request is rejected by the documented public sentinel rather than failing here.
+const MaxSurfacePixels = 1 << 30 / 4
+
 // Device rasterizes device calls onto a canvas surface. Create one per render with New; it is not safe for concurrent
 // use (the document mutex in the public API serializes renders anyway).
 type Device struct {
@@ -89,9 +94,16 @@ func (d *Device) SetStore(st *store.Store) { d.store = st }
 // Size reports the surface dimensions in pixels, for the caller's reuse check (see Reset).
 func (d *Device) Size() [2]int { return [2]int{d.width, d.height} }
 
+// sizeAllowed reports whether a width×height surface may be allocated. The pixel product is computed in int64 so it
+// cannot overflow, making the cap exactly MaxSurfacePixels for every aspect ratio; the root package's OverallMaxPixels
+// guard rejects the same requests first, with its documented sentinel.
+func sizeAllowed(width, height int) bool {
+	return width > 0 && height > 0 && int64(width)*int64(height) <= MaxSurfacePixels
+}
+
 // New returns a device rendering to a zeroed (fully transparent) width×height premultiplied RGBA surface.
 func New(width, height int) (*Device, error) {
-	if width <= 0 || height <= 0 || width > 1<<30/4/max(height, 1) {
+	if !sizeAllowed(width, height) {
 		return nil, ErrSurface
 	}
 	surf := surface.NewRasterN32Premul(int32(width), int32(height), nil)

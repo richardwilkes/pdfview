@@ -55,6 +55,42 @@ func TestNewRejectsBadSizes(t *testing.T) {
 	}
 }
 
+// TestNewRejectsAbovePixelCap covers the surface cap at several aspect ratios. The rejection happens before any
+// allocation, so no memory is committed for these sizes.
+func TestNewRejectsAbovePixelCap(t *testing.T) {
+	for _, size := range [][2]int{
+		{MaxSurfacePixels + 1, 1},
+		{1, MaxSurfacePixels + 1},
+		{MaxSurfacePixels/3 + 1, 3},
+		{MaxSurfacePixels/7 + 1, 7},
+		{1 << 15, 1 << 15},
+		{math.MaxInt32, math.MaxInt32},
+	} {
+		if _, err := New(size[0], size[1]); err == nil {
+			t.Errorf("size %v accepted; its %d pixels exceed the cap of %d", size,
+				int64(size[0])*int64(size[1]), MaxSurfacePixels)
+		}
+	}
+	// Sizes at exactly the cap must be allowed whatever the aspect ratio, so the root package's OverallMaxPixels
+	// default rejects everything this would. Allocating them costs a gigabyte, so only the size check is exercised.
+	for _, size := range [][2]int{
+		{MaxSurfacePixels, 1},
+		{1, MaxSurfacePixels},
+		{MaxSurfacePixels / 3, 3},
+		{MaxSurfacePixels / 7, 7},
+		{1 << 14, 1 << 14},
+	} {
+		if !sizeAllowed(size[0], size[1]) {
+			t.Errorf("size %v rejected; its %d pixels are within the cap of %d", size,
+				int64(size[0])*int64(size[1]), MaxSurfacePixels)
+		}
+	}
+	// The cap must keep the surface's byte size inside a 32-bit int, which the root package's renderPage relies on.
+	if MaxSurfacePixels*4 != 1<<30 {
+		t.Errorf("expected a 1 GiB cap at 4 bytes per pixel, got %d bytes", MaxSurfacePixels*4)
+	}
+}
+
 func TestFillPathPixels(t *testing.T) {
 	d := newDevice(t, 20, 20)
 	var p gfx.Path

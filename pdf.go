@@ -68,9 +68,10 @@ var (
 	// OverallMaxPixels is the maximum number of pixels (width × height) a rendered page image may contain. Requests
 	// that would produce a larger image are rejected rather than attempting a very large allocation, safeguarding
 	// against untrusted input or bad sizing parameters that might otherwise cause an out of memory error. The default
-	// matches the largest image permitted by the internal 32-bit limit on the rendered buffer's byte size (4 bytes per
-	// pixel).
-	OverallMaxPixels = math.MaxInt32 / 4
+	// (268,435,456 pixels) is the largest image the internal raster surface will allocate: a 1 GiB buffer at the
+	// 4 bytes per pixel it stores. Raising it past that default does not enlarge the images that can be rendered; the
+	// surface allocation then fails instead, reporting ErrUnableToCreateImage rather than ErrImageTooLarge.
+	OverallMaxPixels = render.MaxSurfacePixels
 )
 
 // AuthenticationStatus holds the result of an authentication attempt. A non-zero value indicates success and the masks
@@ -317,7 +318,10 @@ func (d *Document) renderPage(pg *page, scale float64) (*image.NRGBA, error) {
 	if size <= 0 || len(pix) < size {
 		return nil, ErrUnableToCreateImage
 	}
-	if size > math.MaxInt32 {
+	// Belt and braces: unreachable while the surface caps itself at render.MaxSurfacePixels (a 1 GiB buffer), since
+	// that bounds size well under 32 bits. It is kept so a future, larger surface cap cannot silently hand back a
+	// buffer whose byte size overflows a 32-bit int.
+	if int64(size) > math.MaxInt32 {
 		return nil, ErrImageTooLarge
 	}
 	// The engine rasterizes with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so
