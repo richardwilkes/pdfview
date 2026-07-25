@@ -589,10 +589,17 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	// operation, so the FILL alpha composites it.
 	inGroup, isolated, knockout := in.transparencyGroup(stream.Dict)
 	maskWrapped := false
+	// One /BBox lookup serves both the group bbox and the clip: re-resolving four array entries per form invocation
+	// works against the repeat-cheapness the work budget in budget.go assumes.
+	bbox, hasBBox := rectFrom(in.doc, stream.Dict, "BBox")
 	if inGroup {
 		bboxDev := gfx.Rect{}
-		if bbox, has := rectFrom(in.doc, stream.Dict, "BBox"); has {
-			bboxDev = transformAABB(bbox, in.gs.ctm)
+		if hasBBox {
+			// Like replayMask: a finite bbox against a finite CTM can still overflow to ±Inf in the corner products, and
+			// device.BeginGroup documents the bbox as geometry a device may size its work to. Degrade to the empty rect.
+			if mapped := transformAABB(bbox, in.gs.ctm); mapped.IsFinite() {
+				bboxDev = mapped
+			}
 		}
 		in.dev.BeginGroup(bboxDev, isolated, knockout, in.gs.blend, in.gs.fillAlpha)
 		if sm := in.gs.softMask; sm != nil {
@@ -601,7 +608,7 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 		}
 		in.gs.fillAlpha, in.gs.strokeAlpha, in.gs.blend, in.gs.softMask = 1, 1, device.BlendNormal, nil
 	}
-	if bbox, has := rectFrom(in.doc, stream.Dict, "BBox"); has {
+	if hasBBox {
 		clip := &gfx.Path{}
 		clip.Rect(bbox.X0, bbox.Y0, bbox.X1-bbox.X0, bbox.Y1-bbox.Y0)
 		in.dev.ClipPath(clip, false, in.gs.ctm)

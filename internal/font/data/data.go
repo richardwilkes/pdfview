@@ -111,25 +111,35 @@ func AGL() map[string]string {
 	aglOnce.Do(func() {
 		aglNames = map[string]string{}
 		for line := range strings.Lines(string(gunzip("agl.txt.gz"))) {
-			name, codes, ok := strings.Cut(strings.TrimSuffix(line, "\n"), " ")
-			if !ok {
-				continue
-			}
-			var sb strings.Builder
-			for _, hex := range strings.Fields(codes) {
-				v, err := strconv.ParseUint(hex, 16, 32)
-				if err != nil || v > 0x10FFFF {
-					sb.Reset()
-					break
-				}
-				sb.WriteRune(rune(v))
-			}
-			if sb.Len() > 0 {
-				aglNames[name] = sb.String()
+			if name, value, ok := parseAGLLine(strings.TrimSuffix(line, "\n")); ok {
+				aglNames[name] = value
 			}
 		}
 	})
 	return aglNames
+}
+
+// parseAGLLine decodes one "name XXXX[ YYYY...]" blob line into its glyph name and Unicode string, reporting failure
+// for a line with no scalars or one carrying a scalar that is not a usable rune. Surrogates are rejected along with
+// out-of-range values: WriteRune would silently substitute U+FFFD for them, and GlyphNameToUnicode's uniXXXX/uXXXX
+// forms reject the same class, so both glyph-name→Unicode paths agree about the same input.
+func parseAGLLine(line string) (name, value string, ok bool) {
+	name, codes, ok := strings.Cut(line, " ")
+	if !ok {
+		return "", "", false
+	}
+	var sb strings.Builder
+	for _, hex := range strings.Fields(codes) {
+		v, err := strconv.ParseUint(hex, 16, 32)
+		if err != nil || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF) {
+			return "", "", false
+		}
+		sb.WriteRune(rune(v))
+	}
+	if sb.Len() == 0 {
+		return "", "", false
+	}
+	return name, sb.String(), true
 }
 
 // Liberation returns the named Liberation font (such as "LiberationSans-Bold"), decompressed, or nil when no such font

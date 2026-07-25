@@ -11,6 +11,7 @@ package crypt
 
 import (
 	"bytes"
+	"crypto/aes"
 	"crypto/sha256"
 	"errors"
 	"testing"
@@ -207,5 +208,40 @@ func TestObjectKeyLength(t *testing.T) {
 	short := &Handler{fileKey: bytes.Repeat([]byte{0xAB}, 5)}
 	if got := len(short.objectKey(3, 0, false)); got != 10 {
 		t.Errorf("5-byte file key yields a %d-byte object key, want 10", got)
+	}
+}
+
+// TestStripPKCS7 pins the padding leniency, including the empty-slice case. Nothing reaches stripPKCS7 with an empty
+// slice today (aesCBCDecrypt guarantees a whole block first), but the package promises hostile input yields errors or
+// pass-through data and never a panic, so the guard must not depend on that invariant holding.
+func TestStripPKCS7(t *testing.T) {
+	block := func(pad byte, n int) []byte {
+		out := make([]byte, aes.BlockSize)
+		for i := range out {
+			out[i] = 'x'
+		}
+		for i := aes.BlockSize - n; i < aes.BlockSize; i++ {
+			out[i] = pad
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name string
+		in   []byte
+		want int
+	}{
+		{"empty", []byte{}, 0},
+		{"nil", nil, 0},
+		{"valid", block(4, 4), aes.BlockSize - 4},
+		{"whole block", block(aes.BlockSize, aes.BlockSize), 0},
+		{"zero length", block(0, 1), aes.BlockSize},
+		{"over block size", append(block(0, 0)[:aes.BlockSize-1:aes.BlockSize-1], aes.BlockSize+1), aes.BlockSize},
+		{"exceeds data", []byte{9}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(stripPKCS7(tc.in)); got != tc.want {
+				t.Fatalf("len(stripPKCS7(%v)) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
 	}
 }

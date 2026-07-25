@@ -46,8 +46,9 @@ func loadFromDict(t *testing.T, bodies ...string) (*Font, error) {
 }
 
 const (
-	glyphAlpha = "alpha"
-	glyphSpace = "space"
+	glyphAlpha  = "alpha"
+	glyphSpace  = "space"
+	glyphNotdef = ".notdef"
 )
 
 func TestBundledData(t *testing.T) {

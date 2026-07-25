@@ -96,7 +96,13 @@ func (t *t1Info) glyphPath(gid uint32) *gfx.Path {
 		return nil
 	}
 	m := t.matrix
-	return segmentsToPath(segs, gfx.Matrix{A: m[0], B: m[1], C: m[2], D: m[3], E: m[4], F: m[5]})
+	// Like Type 3's /FontMatrix handling, the program's own matrix is only trusted when finite: a non-finite element
+	// would make every emitted outline point non-finite before the rasterizer ever sees it.
+	xf := gfx.Matrix{A: m[0], B: m[1], C: m[2], D: m[3], E: m[4], F: m[5]}
+	if !xf.IsFinite() {
+		return nil
+	}
+	return segmentsToPath(segs, xf)
 }
 
 // buildAdvances precomputes the hsbw advances of every encoded glyph, keyed by GID and in text space (glyph units

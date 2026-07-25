@@ -52,7 +52,7 @@ type call struct {
 	sp       gfx.StrokeParams
 	paint    device.Paint
 	ctm      gfx.Matrix
-	rect     gfx.Rect // beginmask's bbox
+	rect     gfx.Rect // beginmask's and begingroup's bbox
 	alpha    float64
 	evenOdd  bool
 	knockout bool
@@ -133,8 +133,11 @@ func (r *recorder) ClipImageMask(*imaging.Image, gfx.Matrix) {
 	r.add(&call{op: "clipimagemask"})
 }
 
-func (r *recorder) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
-	r.add(&call{op: "begingroup", evenOdd: isolated, knockout: knockout, paint: device.Paint{Blend: blend}, alpha: alpha})
+func (r *recorder) BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
+	r.add(&call{
+		op: "begingroup", rect: bbox, evenOdd: isolated, knockout: knockout,
+		paint: device.Paint{Blend: blend}, alpha: alpha,
+	})
 }
 
 func (r *recorder) EndGroup() { r.add(&call{op: "endgroup"}) }

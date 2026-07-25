@@ -492,3 +492,76 @@ SCN 0 0 m 1 1 l S
 		t.Errorf("stroke after a complete SC = %v, want %v", got, red)
 	}
 }
+
+// TestFormGroupBBoxNonFiniteGuarded verifies execForm drops a transparency-group bbox whose device-space mapping
+// overflows, degrading to the empty rect the way replayMask does. A finite /BBox against a finite CTM can still
+// produce ±Inf corner products, and device.BeginGroup documents its bbox as geometry a device may size its work to.
+func TestFormGroupBBoxNonFiniteGuarded(t *testing.T) {
+	const body = "0 0 1 1 re f"
+	d, err := cos.Open([]byte(minimalPDF(fmt.Sprintf(
+		`<< /Type /XObject /Subtype /Form /BBox [0 0 50 50] /Group << /S /Transparency >> /Length %d >>
+stream
+%s
+endstream`, len(body), body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catXObject: cos.Dict{resFormName: cos.Ref{Num: 1}}}
+	// 1e37 is finite in float32, so the cm guard accepts it; the BBox's 50-unit corner then maps to 5e38, which is not.
+	huge := "1" + strings.Repeat("0", 37)
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    gfx.Rect
+	}{
+		{caseValid, "2 0 0 2 10 10 cm " + formDo, gfx.Rect{X0: 10, Y0: 10, X1: 110, Y1: 110}},
+		{caseOverflow, fmt.Sprintf("%[1]s 0 0 %[1]s 0 0 cm %s", huge, formDo), gfx.Rect{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := run(t, d, res, tc.content)
+			groups := rec.byOp("begingroup")
+			if len(groups) != 1 {
+				t.Fatalf("begingroup calls = %d, want 1 (ops: %v)", len(groups), ops(rec))
+			}
+			if got := groups[0].rect; got != tc.want {
+				t.Fatalf("group bbox = %+v, want %+v", got, tc.want)
+			}
+			if !groups[0].rect.IsFinite() {
+				t.Fatalf("non-finite group bbox reached the device: %+v", groups[0].rect)
+			}
+		})
+	}
+}
+
+// formDo paints the shared test form.
+const formDo = "/" + string(resFormName) + " Do"
+
+// TestTextMatrixSurvivesNonFiniteAdvance verifies appendGlyphs leaves the text matrix alone when folding in a glyph's
+// advance would make it non-finite. Two finite factors (a huge /Widths entry and a huge Tf size) can still multiply to
+// ±Inf, and before the guard that poisoned in.tm permanently: newRun then returned nil for every later show operator
+// until the next BT, so the rest of the text object silently disappeared.
+func TestTextMatrixSurvivesNonFiniteAdvance(t *testing.T) {
+	// 1e30 glyph units is 1e27 in text space, and 1e27 * a 1e12 point size overflows float32's ~3.4e38 ceiling.
+	width := "1" + strings.Repeat("0", 30)
+	size := "1" + strings.Repeat("0", 12)
+	d, err := cos.Open([]byte(minimalPDF(
+		"<< /Font << /F1 2 0 R >> >>",
+		`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 65 /LastChar 65 /Widths [`+width+`] >>`,
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Four glyphs in the first show operator and two more in a second one, all within a single BT/ET.
+	rec := run(t, d, resourcesOf(t, d), "BT /F1 "+size+" Tf (AAAA) Tj (AA) Tj ET")
+	if len(rec.texts) != 2 {
+		t.Fatalf("text calls = %d, want 2 (ops: %+v)", len(rec.texts), rec.texts)
+	}
+	if rec.texts[0].glyphs != 4 {
+		t.Errorf("first show emitted %d glyphs, want 4: the text matrix was poisoned by the first advance",
+			rec.texts[0].glyphs)
+	}
+	if rec.texts[1].glyphs != 2 {
+		t.Errorf("second show emitted %d glyphs, want 2: the poisoned matrix outlived the show operator",
+			rec.texts[1].glyphs)
+	}
+}

@@ -55,3 +55,31 @@ func lastBytes(data []byte) []byte {
 	}
 	return data[len(data)-n:]
 }
+
+// TestUnusableAGLScalar pins the glyphlist guard: data.AGL turns each scalar into a rune, so a surrogate or an
+// out-of-range value would cost the entry its glyph name. Generation must fail on one rather than ship the loss.
+func TestUnusableAGLScalar(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		codes string
+		bad   string
+	}{
+		{"single", "03B1", ""},
+		{"ligature", "0066 0069", ""},
+		{"astral", "1F600", ""},
+		{"boundaries", "0000 D7FF E000 10FFFF", ""},
+		{"high surrogate", "D800", "D800"},
+		{"low surrogate", "DFFF", "DFFF"},
+		{"surrogate among valid", "0066 D83D 0069", "D83D"},
+		{"out of range", "110000", "110000"},
+		{"not hex", "ZZZZ", "ZZZZ"},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad, ok := unusableAGLScalar(tc.codes)
+			if ok != (tc.bad == "") || bad != tc.bad {
+				t.Fatalf("unusableAGLScalar(%q) = %q, %v; want %q, %v", tc.codes, bad, ok, tc.bad, tc.bad == "")
+			}
+		})
+	}
+}

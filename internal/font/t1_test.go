@@ -64,7 +64,7 @@ func buildT1Program() []byte {
 		name string
 		prog []byte
 	}{
-		{".notdef", cs(0, 500, opHsbw, opEndchar)},
+		{glyphNotdef, cs(0, 500, opHsbw, opEndchar)},
 		{"A", cs(50, 600, opHsbw, 0, 0, opRmoveto, 400, opHlineto, 0, 700, opRlineto,
 			-400, 0, opRlineto, opClosepath, opEndchar)},
 		{"T", cs(0, 400, opHsbw, 0, 0, opRmoveto, 300, opHlineto, -150, 500, opRlineto,

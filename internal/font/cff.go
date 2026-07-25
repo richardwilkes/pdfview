@@ -202,7 +202,14 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 	if yMin > yMax {
 		yMin, yMax = yMax, yMin
 	}
-	return yMax / upem, yMin / upem, true
+	asc, desc = yMax/upem, yMin/upem
+	// The bbox gets the same treatment as the upem above: a Type 1 /FontBBox can carry ±Inf (the program's own scanner
+	// accepts over-long literals), and a non-finite ascender/descender reaching stext would place every character quad
+	// at the page origin instead of at the text.
+	if !isFiniteF(asc) || !isFiniteF(desc) {
+		return 0, 0, false
+	}
+	return asc, desc, true
 }
 
 // cffIndex reads an INDEX at pos, returning up to maxEntries entry slices and the offset just past the INDEX. An INDEX

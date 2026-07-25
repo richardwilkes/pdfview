@@ -253,18 +253,26 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 				Advance: adv,
 			})
 		}
+		// Guard the advanced text matrix like every other matrix-composing site: the font's advance comes from the font
+		// object graph, where a hostile /Widths, /W or /MissingWidth entry can be ±Inf. Folding one in would poison in.tm
+		// permanently, making newRun return nil for every later show operator until the next BT — the rest of the text
+		// object would silently vanish. Leaving the matrix where it was drops that glyph's advance instead.
+		var advanced gfx.Matrix
 		if vertical {
 			ty := adv*ts.size + ts.charSpacing
 			if oneByte && code == 32 {
 				ty += ts.wordSpacing
 			}
-			in.tm = gfx.Translate(0, ty).Mul(in.tm)
+			advanced = gfx.Translate(0, ty).Mul(in.tm)
 		} else {
 			tx := w0*ts.size + ts.charSpacing
 			if oneByte && code == 32 {
 				tx += ts.wordSpacing
 			}
-			in.tm = gfx.Translate(tx*ts.scale, 0).Mul(in.tm)
+			advanced = gfx.Translate(tx*ts.scale, 0).Mul(in.tm)
+		}
+		if advanced.IsFinite() {
+			in.tm = advanced
 		}
 		return true
 	})

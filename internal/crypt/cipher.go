@@ -106,8 +106,12 @@ func aesCBCEncryptNoPad(key, iv, data []byte) ([]byte, bool) {
 
 // stripPKCS7 removes PKCS#7 padding. Malformed padding (a length of 0, one exceeding the data or the block size) is
 // left untouched rather than treated as an error, matching the leniency deployed readers extend to slightly damaged
-// streams.
+// streams. Empty input is returned as-is: callers guarantee a whole block today, but the package promises hostile input
+// never panics, so the guard does not depend on that invariant holding.
 func stripPKCS7(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
 	n := int(data[len(data)-1])
 	if n == 0 || n > len(data) || n > aes.BlockSize {
 		return data

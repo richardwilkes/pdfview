@@ -139,11 +139,13 @@ func standard14Name(base string, flags int) string {
 // replacements.
 func substituteMetrics(desc *descriptor, std14 string) (asc, dsc float32) {
 	if desc.present {
+		// loadDescriptor rejects a non-finite /Ascent or /Descent already; the finiteness test repeats here so this
+		// stays correct for any other descriptor source, since a non-finite slot would misplace every stext quad.
 		asc, dsc = 0.8, -0.2
-		if desc.ascent != 0 {
+		if desc.ascent != 0 && isFiniteF(desc.ascent) {
 			asc = desc.ascent / 1000
 		}
-		if desc.descent != 0 {
+		if desc.descent != 0 && isFiniteF(desc.descent) {
 			dsc = desc.descent / 1000
 		}
 		return asc, dsc

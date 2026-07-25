@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 
 	ot "github.com/go-text/typesetting/font/opentype"
@@ -757,5 +758,90 @@ func TestParseRejectsJunk(t *testing.T) {
 		if f, err := Parse(data); err == nil {
 			t.Errorf("Parse(%q...) succeeded: %v", data[:min(len(data), 12)], f)
 		}
+	}
+}
+
+// buildMetricsFont assembles a minimal program carrying the given /FontMatrix and /FontBBox declarations verbatim.
+func buildMetricsFont(matrix, bbox string) []byte {
+	var clearBuf bytes.Buffer
+	clearBuf.WriteString("%!PS-AdobeFont-1.0: Metrics 001.000\n")
+	clearBuf.WriteString("/FontName /Metrics def\n")
+	clearBuf.WriteString("/FontMatrix " + matrix + " readonly def\n")
+	clearBuf.WriteString("/FontBBox " + bbox + " readonly def\n")
+	clearBuf.WriteString("currentdict end\ncurrentfile eexec\n")
+
+	var priv bytes.Buffer
+	priv.WriteString("  dup /Private 15 dict dup begin\n")
+	priv.WriteString("/lenIV 4 def\n")
+	priv.WriteString("/CharStrings 2 dict dup begin\n")
+	for name, glyph := range map[string][]byte{
+		notdefName: cs(0, 500, oHsbw, oEndchar),
+		"A":        cs(0, 600, oHsbw, 0, 0, oRmoveto, 200, 0, oRlineto, oClosepath, oEndchar),
+	} {
+		enc := encryptT1(glyph, charstringR, 4)
+		fmt.Fprintf(&priv, "/%s %d RD ", name, len(enc))
+		priv.Write(enc)
+		priv.WriteString(" ND\n")
+	}
+	priv.WriteString("end\nend\n")
+
+	var out bytes.Buffer
+	out.Write(clearBuf.Bytes())
+	out.Write(encryptT1(priv.Bytes(), eexecR, 4))
+	out.WriteString(trailer())
+	return out.Bytes()
+}
+
+// TestParseRejectsNonFiniteMetrics verifies /FontMatrix and /FontBBox are rejected outright when any element does not
+// convert to a finite float32. scanner.next classifies numbers with strconv.ParseFloat, which accepts "inf", "nan" and
+// over-long digit strings, so without the guard the values were stored with HasMatrix/HasBBox set and flowed on to the
+// FontBBox-over-upem metrics (non-finite ascender/descender) and to the outline transform (non-finite path points).
+func TestParseRejectsNonFiniteMetrics(t *testing.T) {
+	const (
+		goodMatrix = "[0.001 0 0 0.001 0 0]"
+		goodBBox   = "{0 -200 1000 800}"
+	)
+	huge := "1" + strings.Repeat("0", 40) // Finite as a float64, +Inf once narrowed to float32.
+	for _, tc := range []struct {
+		name      string
+		matrix    string
+		bbox      string
+		hasMatrix bool
+		hasBBox   bool
+	}{
+		{"valid", goodMatrix, goodBBox, true, true},
+		{"inf matrix", "[inf 0 0 0.001 0 0]", goodBBox, false, true},
+		{"nan matrix", "[0.001 0 0 nan 0 0]", goodBBox, false, true},
+		{"overlong matrix", "[" + huge + " 0 0 0.001 0 0]", goodBBox, false, true},
+		{"inf bbox", goodMatrix, "{0 -inf 1000 +Inf}", true, false},
+		{"nan bbox", goodMatrix, "{0 -200 1000 nan}", true, false},
+		{"overlong bbox", goodMatrix, "{0 -200 1000 " + huge + "}", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := Parse(buildMetricsFont(tc.matrix, tc.bbox))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if f.HasMatrix != tc.hasMatrix {
+				t.Errorf("HasMatrix = %v (matrix %v), want %v", f.HasMatrix, f.FontMatrix, tc.hasMatrix)
+			}
+			if f.HasBBox != tc.hasBBox {
+				t.Errorf("HasBBox = %v (bbox %v), want %v", f.HasBBox, f.FontBBox, tc.hasBBox)
+			}
+			for _, v := range f.FontMatrix {
+				if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+					t.Fatalf("non-finite FontMatrix stored: %v", f.FontMatrix)
+				}
+			}
+			for _, v := range f.FontBBox {
+				if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+					t.Fatalf("non-finite FontBBox stored: %v", f.FontBBox)
+				}
+			}
+			// The rest of the program still parses: a rejected declaration must not derail the scan.
+			if _, _, gErr := f.Glyph("A"); gErr != nil {
+				t.Errorf("Glyph(A): %v", gErr)
+			}
+		})
 	}
 }

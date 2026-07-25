@@ -214,6 +214,9 @@ func buildAGLBlob(glyphlist []byte) []byte {
 		if !ok {
 			fatal("glyphlist: bad line %q", line)
 		}
+		if bad, usable := unusableAGLScalar(codes); !usable {
+			fatal("glyphlist: %s has unusable scalar %q", name, bad)
+		}
 		fmt.Fprintf(&buf, "%s %s\n", name, strings.TrimSpace(codes))
 		count++
 	}
@@ -221,6 +224,20 @@ func buildAGLBlob(glyphlist []byte) []byte {
 		fatal("glyphlist: only %d entries parsed", count)
 	}
 	return buf.Bytes()
+}
+
+// unusableAGLScalar reports whether every scalar in a glyphlist entry's code list is one data.AGL can turn into a rune,
+// naming the first that is not. Out-of-range values and surrogates both qualify: AGL drops such an entry (and
+// font.GlyphNameToUnicode rejects the same class in its uniXXXX/uXXXX forms), so an upstream refresh that introduced
+// one would silently lose a glyph name. Failing generation surfaces it instead.
+func unusableAGLScalar(codes string) (bad string, ok bool) {
+	for _, hex := range strings.Fields(codes) {
+		v, err := strconv.ParseUint(hex, 16, 32)
+		if err != nil || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF) {
+			return hex, false
+		}
+	}
+	return "", true
 }
 
 // writeAGLLicense extracts the license header comment from glyphlist.txt.

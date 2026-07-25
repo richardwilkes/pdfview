@@ -282,16 +282,12 @@ func (f *Font) parseClear(data []byte) {
 		switch tok.text {
 		case "FontMatrix":
 			if v, ok2 := s.numbers(6); ok2 {
-				for i := range 6 {
-					f.FontMatrix[i] = float32(v[i])
-				}
+				f.FontMatrix = [6]float32(v)
 				f.HasMatrix = true
 			}
 		case "FontBBox":
 			if v, ok2 := s.numbers(4); ok2 {
-				for i := range 4 {
-					f.FontBBox[i] = float32(v[i])
-				}
+				f.FontBBox = [4]float32(v)
 				f.HasBBox = true
 			}
 		case "Encoding":
@@ -613,9 +609,24 @@ func toInt64(v float64) (int64, bool) {
 	return int64(v), true
 }
 
-// numbers reads a bracketed (or braced) list of n numbers: [ n1 ... nN ] — tolerating a missing opener.
-func (s *scanner) numbers(n int) ([]float64, bool) {
-	out := make([]float64, 0, n)
+// toFloat32 narrows a scanned number to float32, reporting failure for anything that does not survive as a finite
+// value. It is the float counterpart of toInt64's guard: scanner.next classifies with strconv.ParseFloat, which accepts
+// "inf", "nan" and over-long digit strings, so /FontMatrix and /FontBBox would otherwise be stored non-finite with
+// HasMatrix/HasBBox set. Consumers divide by them (the FontBBox-over-upem metrics), multiply outline points through
+// them, and rasterize the result, so rejecting at this shared source closes both paths at once. A finite float64 too
+// large for float32 becomes ±Inf in the conversion and is caught by the same test.
+func toFloat32(v float64) (float32, bool) {
+	f := float32(v)
+	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
+		return 0, false
+	}
+	return f, true
+}
+
+// numbers reads a bracketed (or braced) list of n numbers: [ n1 ... nN ] — tolerating a missing opener. A number that
+// does not convert (see toFloat32) fails the whole list, leaving the caller's defaults in place.
+func (s *scanner) numbers(n int) ([]float32, bool) {
+	out := make([]float32, 0, n)
 	for range n * 2 {
 		tok, ok := s.next()
 		if !ok {
@@ -623,7 +634,11 @@ func (s *scanner) numbers(n int) ([]float64, bool) {
 		}
 		switch tok.kind {
 		case tokNumber:
-			out = append(out, tok.value)
+			v, okV := toFloat32(tok.value)
+			if !okV {
+				return nil, false
+			}
+			out = append(out, v)
 			if len(out) == n {
 				return out, true
 			}

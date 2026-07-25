@@ -130,17 +130,19 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 
 	// Per ISO 32000-2 9.7.4.3 the 1000-unit (1.0) default applies only when /DW is absent. An explicit /DW 0 is
 	// legitimate (e.g. an all-combining-marks CIDFont) and must override the default, so accept any non-negative value.
-	if v, ok := cos.AsReal(d.Resolve(descendant["DW"])); ok && v >= 0 {
+	// The magnitude gets checked along with the sign: an over-long numeric literal reaches here as ±Inf (see the COS
+	// lexer), and an infinite advance folded into the text matrix would drop the rest of the text object.
+	if v, ok := cos.AsReal(d.Resolve(descendant["DW"])); ok && v >= 0 && isFiniteF(float32(v)) {
 		info.dw = float32(v) / 1000
 	}
 	if arr, ok := d.GetArray(descendant, "W"); ok {
 		info.w = parseWArray(d, arr)
 	}
 	if arr, ok := d.GetArray(descendant, "DW2"); ok && len(arr) >= 2 {
-		if vy, okV := cos.AsReal(d.Resolve(arr[0])); okV {
+		if vy, okV := cos.AsReal(d.Resolve(arr[0])); okV && isFiniteF(float32(vy)) {
 			info.dw2[0] = float32(vy) / 1000
 		}
-		if w1, okW := cos.AsReal(d.Resolve(arr[1])); okW {
+		if w1, okW := cos.AsReal(d.Resolve(arr[1])); okW && isFiniteF(float32(w1)) {
 			info.dw2[1] = float32(w1) / 1000
 		}
 	}
@@ -255,7 +257,9 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 				if len(ws) >= 65536 {
 					break
 				}
-				if v, okV := cos.AsReal(d.Resolve(entry)); okV {
+				// A non-finite width lands as 0 like an unparseable one: it is a malformed entry either way, and an
+				// infinite advance would poison the interpreter's text matrix.
+				if v, okV := cos.AsReal(d.Resolve(entry)); okV && isFiniteF(float32(v)) {
 					ws = append(ws, float32(v)/1000)
 				} else {
 					ws = append(ws, 0)
@@ -270,7 +274,7 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 		if i+2 < len(arr) {
 			c2, ok2 := cos.AsInt(d.Resolve(next))
 			w, okW := cos.AsReal(d.Resolve(arr[i+2]))
-			if ok2 && okW && c2 >= c1 && c2-c1 < 1<<20 {
+			if ok2 && okW && isFiniteF(float32(w)) && c2 >= c1 && c2-c1 < 1<<20 {
 				out = append(out, wRange{lo: uint32(c1), hi: uint32(c2), ws: []float32{float32(w) / 1000}})
 			}
 			i += 3
@@ -329,7 +333,7 @@ func parseW2Array(d *cos.Document, arr cos.Array) []w2Range {
 		var t [3]float32
 		for j, o := range objs {
 			v, ok := cos.AsReal(d.Resolve(o))
-			if !ok {
+			if !ok || !isFiniteF(float32(v)) {
 				return t, false
 			}
 			t[j] = float32(v) / 1000

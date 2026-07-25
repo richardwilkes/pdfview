@@ -143,13 +143,17 @@ func loadDescriptor(d *cos.Document, dict cos.Dict) descriptor {
 	if v, has := d.GetInt(fd, "Flags"); has {
 		out.flags = int(v)
 	}
-	if v, has := cos.AsReal(d.Resolve(fd["MissingWidth"])); has {
+	// The COS lexer keeps an over-long numeric literal as the correctly-signed infinity on the documented understanding
+	// that the downstream guards reject it (internal/cos/lexer.go). These are those guards: a non-finite advance would
+	// poison the interpreter's text matrix and a non-finite ascent/descent would misplace every stext quad, so a value
+	// that does not survive the narrowing to float32 is treated as absent.
+	if v, has := cos.AsReal(d.Resolve(fd["MissingWidth"])); has && isFiniteF(float32(v)) {
 		out.missingWidth = float32(v) / 1000
 	}
-	if v, has := cos.AsReal(d.Resolve(fd["Ascent"])); has {
+	if v, has := cos.AsReal(d.Resolve(fd["Ascent"])); has && isFiniteF(float32(v)) {
 		out.ascent = float32(v)
 	}
-	if v, has := cos.AsReal(d.Resolve(fd["Descent"])); has {
+	if v, has := cos.AsReal(d.Resolve(fd["Descent"])); has && isFiniteF(float32(v)) {
 		out.descent = float32(v)
 	}
 	if s, has := cos.AsStream(d.Resolve(fd["FontFile"])); has {
@@ -291,7 +295,9 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 		if code < 0 || code > 255 {
 			continue
 		}
-		if v, numOK := cos.AsReal(d.Resolve(entry)); numOK {
+		// A non-finite entry is left as a gap (so the code falls back to /MissingWidth) rather than stored: an infinite
+		// advance folded into the text matrix would silently drop the remainder of the text object.
+		if v, numOK := cos.AsReal(d.Resolve(entry)); numOK && isFiniteF(float32(v)) {
 			f.widths[uint32(code)] = float32(v) / 1000
 		}
 	}

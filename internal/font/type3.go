@@ -77,8 +77,11 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 	desc := loadDescriptor(d, dict)
 	f.Flags = desc.flags
 	// /MissingWidth is in glyph space like /Widths: transform through the FontMatrix's x column the same way
-	// (loadDescriptor divided by 1000; undo, then apply the matrix). For the default matrix this is a no-op.
-	f.missingWidth = desc.missingWidth * 1000 * info.matrix[0]
+	// (loadDescriptor divided by 1000; undo, then apply the matrix). For the default matrix this is a no-op. Two finite
+	// factors can still multiply to ±Inf, so the product is checked the way the ascender/descender below is.
+	if mw := desc.missingWidth * 1000 * info.matrix[0]; isFiniteF(mw) {
+		f.missingWidth = mw
+	}
 
 	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults. (No search
 	// needles pin Type 3 quads; the corpus probe pins pixels.)
@@ -108,7 +111,13 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 	// Widths are in glyph space: transform to text space through the FontMatrix's x column.
 	f.hasWidths = loadWidths(d, dict, f)
 	for code, w := range f.widths {
-		f.widths[code] = w * 1000 * info.matrix[0] // loadWidths divided by 1000; undo, then apply the matrix.
+		// loadWidths divided by 1000; undo, then apply the matrix. A non-finite product drops the entry, leaving the
+		// code to fall back to /MissingWidth rather than poisoning the interpreter's text matrix.
+		if scaled := w * 1000 * info.matrix[0]; isFiniteF(scaled) {
+			f.widths[code] = scaled
+		} else {
+			delete(f.widths, code)
+		}
 	}
 
 	// Synthetic GIDs from the proc names (stext/cache identity; there are no program glyph indices).
