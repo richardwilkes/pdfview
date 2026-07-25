@@ -10,6 +10,7 @@
 package render
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
 	"math"
@@ -1192,9 +1193,9 @@ func TestClampDimClampsBeforeConverting(t *testing.T) {
 	}
 }
 
-// The two clampDim call sites must survive an over-range extent with their grids clamped to the maximum, not collapsed
-// to 1×1. Both dimensions are observable indirectly: the function grid is sampled once per cell, and the tiling cell's
-// replay matrix carries the tile width per pattern-space unit.
+// The float-space extent clamps (shading.GridSize's own and clampDim's here) must survive an over-range extent with
+// their grids clamped to the maximum, not collapsed to 1×1. Both dimensions are observable indirectly: the function
+// grid is sampled once per cell, and the tiling cell's replay matrix carries the tile width per pattern-space unit.
 func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
 	d := newDevice(t, 32, 32)
 	calls := 0
@@ -1210,7 +1211,7 @@ func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
 	if s := d.functionShader(sh, gfx.Identity()); s == nil {
 		t.Fatal("function shading with an over-range device extent produced no shader")
 	}
-	if want := maxFunctionDim * maxFunctionDim; calls != want {
+	if want := shading.MaxGridDim * shading.MaxGridDim; calls != want {
 		t.Errorf("function shading sampled a %d-cell grid, want the clamped %d", calls, want)
 	}
 	var replayCTM gfx.Matrix
@@ -2171,5 +2172,109 @@ func TestSpillCopiesBoundedInFloatSpace(t *testing.T) {
 				t.Fatalf("spillCopies(%v, %v) = %d, outside [0, %d]", tc.extent, tc.step, got, maxTileCopies)
 			}
 		})
+	}
+}
+
+// funcShadingFor returns a small function-based shading whose evaluations are counted, and a matrix that realizes it on
+// a grid of the given square size.
+func funcShadingFor(evals *int, extent float32) (*shading.Shading, gfx.Matrix) {
+	sh := &shading.Shading{
+		Kind:   shading.KindFunction,
+		Domain: [4]float32{0, 1, 0, 1},
+		Matrix: gfx.Matrix{A: extent, D: extent},
+		ColorAt: func(x, y float32) color.NRGBA {
+			*evals++
+			return color.NRGBA{R: uint8(x * 255), G: uint8(y * 255), A: 255}
+		},
+	}
+	return sh, gfx.Identity()
+}
+
+// A function-based shading's realized grid is the same image for the same shading at the same grid size — where it
+// lands on the surface lives in the shader's matrix, not in the image — so it must be evaluated once and reused instead
+// of re-running the whole grid (up to shading.MaxGridArea function evaluations and a 1 MB allocation) per painting
+// operation. That was measured at 10 ms per sh operator with the cheapest possible /Function and 304 ms with a
+// 200-instruction type 4 program, both linear in the operator count.
+func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
+	t.Run("with a store", func(t *testing.T) {
+		st := store.New(0)
+		evals := 0
+		sh, local := funcShadingFor(&evals, 16)
+		for range 3 { // Three draws, on three devices: one realization must serve them all.
+			d := newDevice(t, 32, 32)
+			d.SetStore(st)
+			if s := d.functionShader(sh, local); s == nil {
+				t.Fatal("no function shader")
+			}
+		}
+		w, h, _ := sh.GridSize(local)
+		if evals != w*h {
+			t.Errorf("the grid was evaluated %d times, want the %d cells of one realization", evals, w*h)
+		}
+		// A different grid size is a different image and must be realized on its own.
+		d := newDevice(t, 32, 32)
+		d.SetStore(st)
+		if s := d.functionShader(sh, gfx.Matrix{A: 2, D: 2}); s == nil {
+			t.Fatal("no function shader at the second scale")
+		}
+		if evals == w*h {
+			t.Error("a rescaled grid reused the cached realization")
+		}
+		// A different shading must not read another's cached grid.
+		otherEvals := 0
+		other, otherLocal := funcShadingFor(&otherEvals, 16)
+		if s := d.functionShader(other, otherLocal); s == nil {
+			t.Fatal("no function shader for the second shading")
+		}
+		if otherEvals != w*h {
+			t.Errorf("a different shading evaluated %d cells, want %d: it reused the cached grid", otherEvals, w*h)
+		}
+	})
+	t.Run("without a store", func(t *testing.T) {
+		// The per-render map is the storeless fallback: repeated draws on one device still realize once.
+		evals := 0
+		sh, local := funcShadingFor(&evals, 16)
+		d := newDevice(t, 32, 32)
+		for range 3 {
+			if s := d.functionShader(sh, local); s == nil {
+				t.Fatal("no function shader")
+			}
+		}
+		w, h, _ := sh.GridSize(local)
+		if evals != w*h {
+			t.Errorf("the grid was evaluated %d times, want the %d cells of one realization", evals, w*h)
+		}
+		// Reset drops the per-render map, since without a store nothing keeps its keyed shading pointers alive.
+		d.Reset()
+		if s := d.functionShader(sh, local); s == nil {
+			t.Fatal("no function shader after Reset")
+		}
+		if evals != 2*w*h {
+			t.Errorf("the grid was evaluated %d times across the reset, want %d", evals, 2*w*h)
+		}
+	})
+}
+
+// The cached grid must paint exactly what a freshly realized one paints; a stale or misindexed image would show up as a
+// pixel difference between the first draw of a shading and every later one.
+func TestFunctionShaderCachedGridPaintsIdentically(t *testing.T) {
+	render := func(draws int) []byte {
+		t.Helper()
+		evals := 0
+		sh, _ := funcShadingFor(&evals, 24)
+		d := newDevice(t, 24, 24)
+		for range draws {
+			d.FillShading(sh, gfx.Identity(), device.Paint{Alpha: 1})
+		}
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	first := render(1)
+	repeated := render(3) // The second and third draws come from the cache.
+	if !bytes.Equal(first, repeated) {
+		t.Error("a cached function-shading grid painted differently from a freshly realized one")
 	}
 }

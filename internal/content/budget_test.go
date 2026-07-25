@@ -11,6 +11,7 @@ package content
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
+	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
 // padding is the whitespace each repeatedly executed body in these tests carries: enough that re-running it is real
@@ -266,5 +268,149 @@ func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
 	}
 	if in.budget != afterFirst {
 		t.Fatalf("the cache hit charged %d, want 0", afterFirst-in.budget)
+	}
+}
+
+// TestFontLoadChargedPerDistinctFont verifies Tf charges the work budget for the font it loads. The per-reference cache
+// makes a repeated Tf on the same reference free, but the cost is per DISTINCT reference: a resource dictionary may
+// name up to maxContainerElements font entries, and an object stream supplies a million 30-byte font dictionaries that
+// all point at one descriptor. Before the charge, Tf was the one operator that could force an arbitrarily expensive
+// resource parse for one budget unit — a font load decodes the whole embedded program (up to internal/filter's
+// allowance) and then parses it, the most expensive parse in the engine.
+func TestFontLoadChargedPerDistinctFont(t *testing.T) {
+	const fonts = 3000
+	bodies := make([]string, fonts)
+	entries := cos.Dict{}
+	for i := range fonts {
+		bodies[i] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+		entries[cos.Name(fmt.Sprintf("F%d", i))] = cos.Ref{Num: i + 1}
+	}
+	d, err := cos.Open([]byte(minimalPDF(bodies...)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content strings.Builder
+	for i := range fonts {
+		fmt.Fprintf(&content, "BT /F%d 12 Tf (A) Tj ET ", i)
+	}
+	rec := run(t, d, cos.Dict{cos.Name("Font"): entries}, content.String())
+	shown := 0
+	for _, tc := range rec.texts {
+		if tc.op == opFillText {
+			shown++
+		}
+	}
+	// Every load here is a cheap non-embedded substitute, so the flat charge alone is what bounds the count.
+	limit := 1 + maxTotalOps/fontParseCost
+	switch {
+	case shown == 0:
+		t.Fatal("no text was shown at all: the font-load charge is too aggressive")
+	case shown >= fonts:
+		t.Fatalf("all %d distinct fonts loaded: a font load is not charged to the work budget", fonts)
+	case shown > limit:
+		t.Fatalf("%d distinct fonts loaded, want at most %d (one load charge each)", shown, limit)
+	}
+}
+
+// TestFontLoadChargeCountsTheProgramAndCachesFree verifies the shape of the charge: a load that parses charges the flat
+// parse cost plus the program it decoded, and the cache hit that follows charges nothing — which is what keeps one font
+// used across a whole page cheap while a page naming many distinct fonts pays for each.
+func TestFontLoadChargeCountsTheProgramAndCachesFree(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{cos.Name("Font"): cos.Dict{cos.Name("F0"): cos.Ref{Num: 1}}}
+	in := newInterp(d, res, gfx.Identity(), device.Null{}, nil)
+	before := in.budget
+	f, ok := in.loadFont("F0")
+	if !ok || f == nil {
+		t.Fatal("the font did not load")
+	}
+	afterFirst := in.budget
+	want := fontParseCost + int(f.MemoryEstimate()>>fontProgramCostShift)
+	if got := before - afterFirst; got != want {
+		t.Fatalf("the load charged %d, want %d", got, want)
+	}
+	if want <= fontParseCost {
+		t.Fatalf("the charge of %d ignores the %d-byte program the load decoded", want, f.MemoryEstimate())
+	}
+	if again, okAgain := in.loadFont("F0"); !okAgain || again != f {
+		t.Fatal("the repeat re-loaded the font instead of hitting the per-Run cache")
+	}
+	if in.budget != afterFirst {
+		t.Fatalf("the cache hit charged %d, want 0", afterFirst-in.budget)
+	}
+}
+
+// TestShadingPaintCost pins what each shading kind charges for its DEVICE-side realization, which happens per painting
+// operation rather than per parse: a type 1 shading's grid is evaluated cell by cell, and a mesh's triangles are
+// re-rasterized every time. Axial and radial shadings realize as a gradient built from the ramp parseShading already
+// sampled, so they cost only their operator unit.
+func TestShadingPaintCost(t *testing.T) {
+	if got := shadingPaintCost(nil, gfx.Identity()); got != 0 {
+		t.Errorf("a nil shading charged %d, want 0", got)
+	}
+	for _, kind := range []int{shading.KindAxial, shading.KindRadial} {
+		sh := &shading.Shading{Kind: kind, Stops: make([]shading.Stop, 256)}
+		if got := shadingPaintCost(sh, gfx.Identity()); got != 1 {
+			t.Errorf("kind %d charged %d, want 1", kind, got)
+		}
+	}
+	mesh := &shading.Shading{Kind: shading.KindCoons, Triangles: make([]shading.Triangle, 1<<12)}
+	if got, want := shadingPaintCost(mesh, gfx.Identity()), 1+(1<<12)>>shadingSampleCostShift; got != want {
+		t.Errorf("a %d-triangle mesh charged %d, want %d", len(mesh.Triangles), got, want)
+	}
+	// A function-based shading charges for the grid the device evaluates, which the domain's extent under the target
+	// matrix sizes: 100 units square here, and 1 cell per unit plus the inclusive edge.
+	fn := &shading.Shading{
+		Kind:    shading.KindFunction,
+		Domain:  [4]float32{0, 100, 0, 100},
+		Matrix:  gfx.Identity(),
+		ColorAt: func(float32, float32) color.NRGBA { return color.NRGBA{A: 255} },
+	}
+	w, h, ok := fn.GridSize(gfx.Identity())
+	if !ok || w != 101 || h != 101 {
+		t.Fatalf("GridSize = %d x %d (ok=%v), want 101 x 101", w, h, ok)
+	}
+	if got, want := shadingPaintCost(fn, gfx.Identity()), 1+w*h>>shadingSampleCostShift; got != want {
+		t.Errorf("a %dx%d grid charged %d, want %d", w, h, got, want)
+	}
+	// Geometry the device realizes nothing from evaluates nothing, so it charges nothing.
+	empty := &shading.Shading{Kind: shading.KindFunction, Domain: [4]float32{0, 0, 0, 0}, Matrix: gfx.Identity()}
+	if got := shadingPaintCost(empty, gfx.Identity()); got != 0 {
+		t.Errorf("an empty domain charged %d, want 0", got)
+	}
+}
+
+// TestShadingRealizationChargedPerPaint verifies a flood of sh operators on one shading drains the budget in proportion
+// to the device realization each one forces. The parse is cached and charged once, so before this charge a
+// flate-compressed run of sh operators — a few tens of kilobytes of file — bought one full grid evaluation and a 1 MB
+// image allocation per operator for one budget unit apiece: measured at 10 ms per sh with the cheapest possible
+// /Function and 304 ms with a 200-instruction type 4 program, both exactly linear in the repeat count.
+func TestShadingRealizationChargedPerPaint(t *testing.T) {
+	const paints = 400
+	d, err := cos.Open([]byte(minimalPDF(
+		`<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [0 1 0 1] /Matrix [500 0 0 500 0 0]
+  /Function << /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> >>`,
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{cos.Name("Shading"): cos.Dict{cos.Name("Sh0"): cos.Ref{Num: 1}}}
+	rec := run(t, d, res, strings.Repeat("/Sh0 sh ", paints))
+	painted := len(rec.byOp(opFillShading))
+	sh, err := shading.Parse(d, cos.Ref{Num: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 1 + maxTotalOps/shadingPaintCost(sh, gfx.Identity())
+	switch {
+	case painted == 0:
+		t.Fatal("no sh operator painted at all: the realization charge is too aggressive")
+	case painted >= paints:
+		t.Fatalf("all %d sh operators painted: the device realization is not charged to the work budget", paints)
+	case painted > limit:
+		t.Fatalf("%d sh operators painted, want at most %d (one realization charge each)", painted, limit)
 	}
 }

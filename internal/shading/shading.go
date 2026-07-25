@@ -294,6 +294,64 @@ func parseFunctionBased(d *cos.Document, dict cos.Dict, sh *Shading, space pdfco
 	return nil
 }
 
+// The grid caps for a function-based (type 1) shading's device realization. A device realizes one by evaluating the
+// shading's function once per grid cell over its domain, so the grid is where that work is bounded: MaxGridDim caps
+// either dimension and MaxGridArea their product. They live here rather than in the device because two packages need
+// the same numbers — internal/render sizes its evaluation grid with GridSize, and internal/content charges its work
+// budget for the evaluations that grid implies, since one painting operation can force a whole realization for its
+// single operator unit.
+const (
+	MaxGridDim  = 512
+	MaxGridArea = 1 << 18
+)
+
+// GridSize reports the evaluation grid a device realizes this function-based shading on: the domain rectangle's extent
+// under m — the target CTM the realization is drawn through, which this shading's own /Matrix is composed with — at one
+// cell per target unit, clamped to the caps above. ok is false when nothing can be realized at all (an empty domain, or
+// corners that leave the finite range under m), the same cases a device paints nothing for and charges nothing for.
+func (s *Shading) GridSize(m gfx.Matrix) (w, h int, ok bool) {
+	x0, x1, y0, y1 := s.Domain[0], s.Domain[1], s.Domain[2], s.Domain[3]
+	if !(x1 > x0) || !(y1 > y0) {
+		return 0, 0, false
+	}
+	full := s.Matrix.Mul(m)
+	var minX, minY, maxX, maxY float32
+	for i, c := range [4]gfx.Point{{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x0, Y: y1}, {X: x1, Y: y1}} {
+		px, py := full.ApplyXY(c.X, c.Y)
+		if !isFinite(float64(px)) || !isFinite(float64(py)) {
+			return 0, 0, false
+		}
+		if i == 0 {
+			minX, maxX, minY, maxY = px, px, py, py
+		} else {
+			minX, maxX = min(minX, px), max(maxX, px)
+			minY, maxY = min(minY, py), max(maxY, py)
+		}
+	}
+	w, h = clampGridDim(maxX-minX+1), clampGridDim(maxY-minY+1)
+	for w*h > MaxGridArea {
+		w = max(w/2, 1)
+		h = max(h/2, 1)
+	}
+	return w, h, true
+}
+
+// clampGridDim converts one target-space extent to a grid dimension in [1, MaxGridDim]. The bound is applied in float
+// space on purpose: Go leaves a float→int conversion implementation-defined when the value does not fit and the
+// platforms disagree — amd64 wraps to math.MinInt64 (which an int-space clamp reads as "too small" and rounds up to a
+// 1-cell grid, a shading rendered as one flat color) while arm64 saturates to math.MaxInt64 — so a /Matrix that blows
+// the domain up to a 1e30 extent must never reach the conversion unclamped. The !(v >= 1) form catches NaN along with
+// everything under a single cell.
+func clampGridDim(v float32) int {
+	if !(v >= 1) {
+		return 1
+	}
+	if v >= MaxGridDim {
+		return MaxGridDim
+	}
+	return int(v)
+}
+
 // rectFrom reads dict[key] as a normalized finite rectangle.
 func rectFrom(d *cos.Document, dict cos.Dict, key cos.Name) (gfx.Rect, bool) {
 	arr, ok := d.GetArray(dict, key)

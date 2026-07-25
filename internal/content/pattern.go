@@ -195,6 +195,9 @@ func (in *interp) applyPattern(p *device.Paint, space pdfcolor.Space, pat *patte
 	p.PatternCTM = patCTM
 	if pat.sh != nil {
 		p.Shading = pat.sh
+		// One shading-pattern fill or stroke realizes the shading exactly as sh does, so it is charged the same way: this
+		// runs once per painting operator, since fillPaint/strokePaint build the paint per operation.
+		in.charge(shadingPaintCost(pat.sh, patCTM))
 		return
 	}
 	tile := pat.tile
@@ -274,6 +277,9 @@ func (in *interp) opShading() {
 	if sh == nil {
 		return
 	}
+	// The device realizes the shading for THIS operator (see shadingPaintCost); sh is the operator that can force the
+	// most device work per unit, so it charges before emitting.
+	in.charge(shadingPaintCost(sh, in.gs.ctm))
 	in.masked(in.gs.fillAlpha, func() {
 		in.dev.FillShading(sh, in.gs.ctm, device.Paint{Alpha: in.gs.fillAlpha, Blend: in.gs.blend})
 	})

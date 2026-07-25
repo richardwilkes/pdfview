@@ -17,6 +17,10 @@ import (
 
 var errBadSampled = errors.New("invalid sampled function")
 
+// maxSampleSize is the per-dimension ceiling on /Size. It is exactly representable as a float32, so the bound can be
+// applied before the narrowed value reaches a float→int conversion (the total sample count is bounded separately).
+const maxSampleSize = 1 << 20
+
 // sampled is a type 0 (sampled) function: an m-dimensional table of n-component samples, evaluated with multilinear
 // interpolation (ISO 32000-2 7.10.3). Only linear interpolation is implemented; /Order 3 (cubic spline) is treated as
 // linear, the tolerance every deployed reader extends.
@@ -43,10 +47,15 @@ func parseSampled(d *cos.Document, stream *cos.Stream, c common) (Func, error) {
 	}
 	s.size = make([]int, m)
 	for i, v := range sizes {
-		s.size[i] = int(v)
-		if s.size[i] < 1 || s.size[i] > 1<<20 {
+		// The per-dimension bound is applied in float space, BEFORE the conversion. narrowAll has only established that v
+		// is a finite float32, and a /Size entry of 1 followed by 30 zeros is finite yet far outside int64's range, where
+		// Go leaves the conversion implementation-defined and the platforms disagree: amd64 wraps to math.MinInt64, arm64
+		// saturates to math.MaxInt64. Testing the float keeps the rejection identical everywhere, as every peer
+		// conversion in the engine does (render.clampDim, function.psToInt32, type1.toInt64).
+		if !(v >= 1) || v > maxSampleSize { // The !(v >= 1) form catches NaN along with everything under one sample.
 			return nil, errBadSampled
 		}
+		s.size[i] = int(v)
 	}
 	bps, ok := cos.AsInt(d.Resolve(stream.Dict["BitsPerSample"]))
 	if !ok {

@@ -178,9 +178,9 @@ func TestType3NonPaintingModesStayExtractable(t *testing.T) {
 		mode     int
 		procRuns bool
 	}{
-		{mode: 0, want: "filltext", procRuns: true},
+		{mode: 0, want: opFillText, procRuns: true},
 		{mode: 3, want: "ignoretext"},
-		{mode: 4, want: "filltext", procRuns: true},
+		{mode: 4, want: opFillText, procRuns: true},
 		{mode: 7, want: "ignoretext"},
 	} {
 		t.Run(fmt.Sprintf("Tr%d", tc.mode), func(t *testing.T) {

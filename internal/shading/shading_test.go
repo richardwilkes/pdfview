@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
 // Repeated dictionary keys, typed for map literals (and to satisfy goconst).
@@ -407,4 +408,60 @@ func TestOverRangeGeometryRejected(t *testing.T) {
 			t.Fatalf("Coords[2] = %v, want 3e38", sh.Coords[2])
 		}
 	})
+}
+
+// TestGridSize pins the evaluation grid a device realizes a function-based shading on. It lives here rather than in the
+// device because the interpreter's work budget is charged for the same grid: a type 1 shading is re-realized per
+// painting operation, so the charge and the realization must agree on how many function evaluations one operation
+// implies.
+func TestGridSize(t *testing.T) {
+	unit := func(m gfx.Matrix) *Shading {
+		return &Shading{Kind: KindFunction, Domain: [4]float32{0, 100, 0, 50}, Matrix: m}
+	}
+	for _, tc := range []struct {
+		sh   *Shading
+		name string
+		m    gfx.Matrix
+		w, h int
+		ok   bool
+	}{
+		{sh: unit(gfx.Identity()), name: "one cell per unit plus the edge", m: gfx.Identity(), w: 101, h: 51, ok: true},
+		{sh: unit(gfx.Identity()), name: "the target matrix scales it", m: gfx.Matrix{A: 2, D: 2}, w: 201, h: 101, ok: true},
+		{sh: unit(gfx.Matrix{A: 2, D: 2}), name: "the shading's own matrix too", m: gfx.Identity(), w: 201, h: 101, ok: true},
+		{
+			sh: unit(gfx.Matrix{A: 1e-6, D: 1e-6}), name: "a sub-pixel extent is one cell", m: gfx.Identity(),
+			w: 1, h: 1, ok: true,
+		},
+		// Over-range extents clamp in float space: an int-space clamp would read amd64's math.MinInt64 as "too small" and
+		// round the grid UP to a single flat-colored cell, while arm64 saturated the other way.
+		{
+			sh: unit(gfx.Matrix{A: 1e30, D: 1e30}), name: "an over-range extent clamps", m: gfx.Identity(),
+			w: MaxGridDim, h: MaxGridDim, ok: true,
+		},
+		{
+			sh: &Shading{Kind: KindFunction, Matrix: gfx.Identity()}, name: "an empty domain realizes nothing",
+			m: gfx.Identity(),
+		},
+		{
+			sh: unit(gfx.Matrix{A: 3e38, D: 3e38}), name: "a domain that overflows the mapping realizes nothing",
+			m: gfx.Matrix{A: 3e38, D: 3e38},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, h, ok := tc.sh.GridSize(tc.m)
+			if w != tc.w || h != tc.h || ok != tc.ok {
+				t.Fatalf("GridSize = %d x %d (ok=%v), want %d x %d (ok=%v)", w, h, ok, tc.w, tc.h, tc.ok)
+			}
+			if w*h > MaxGridArea {
+				t.Fatalf("the %d x %d grid exceeds the %d-cell area cap", w, h, MaxGridArea)
+			}
+		})
+	}
+	// The area cap halves both dimensions until the product fits, so a grid at the dimension cap in one axis and wide in
+	// the other still lands inside it.
+	wide := &Shading{Kind: KindFunction, Domain: [4]float32{0, 4000, 0, 4000}, Matrix: gfx.Identity()}
+	w, h, ok := wide.GridSize(gfx.Matrix{A: 1, D: 1})
+	if !ok || w*h > MaxGridArea || w < 1 || h < 1 {
+		t.Fatalf("GridSize = %d x %d (ok=%v), want a positive grid inside the %d-cell cap", w, h, ok, MaxGridArea)
+	}
 }

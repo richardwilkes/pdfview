@@ -33,13 +33,12 @@ import (
 // repeating image shader, the rasterized cell cached in the document store (see tileImage).
 
 // Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates its
-// function once per grid cell (maxFunctionArea bounds that work); a tiling cell rasterizes at the pattern's device
+// function once per grid cell (shading.MaxGridDim/MaxGridArea bound that work — they live beside the shading because
+// the interpreter charges its work budget against the same grid); a tiling cell rasterizes at the pattern's device
 // scale (maxTileDim/maxTileArea bound the surface), degrading to a coarser tile beyond them. maxExtendFactor bounds the
 // parametric gradient extension search. maxTileCopies bounds how many neighbor-cell copies replay into one tile when
 // the cell box overlaps its steps.
 const (
-	maxFunctionDim  = 512
-	maxFunctionArea = 1 << 18
 	maxTileDim      = 2048
 	maxTileArea     = 1 << 22
 	maxExtendFactor = 1 << 20
@@ -343,34 +342,81 @@ func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atS
 }
 
 // functionShader realizes a type 1 shading as an image shader: the function is evaluated over a grid spanning the
-// domain at roughly device resolution (capped), and the image is placed by the domain-to-device mapping with decal
-// tiling so points outside the domain stay unpainted.
+// domain at roughly device resolution (shading.GridSize caps it), and the image is placed by the domain-to-device
+// mapping with decal tiling so points outside the domain stay unpainted.
 func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
-	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
-	if !(x1 > x0) || !(y1 > y0) {
+	w, h, ok := sh.GridSize(local)
+	if !ok {
 		return nil
 	}
-	full := sh.Matrix.Mul(local)
-	// Size the grid from the domain rectangle's device extent.
-	var minX, minY, maxX, maxY float32
-	for i, c := range [4]gfx.Point{{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x0, Y: y1}, {X: x1, Y: y1}} {
-		px, py := full.ApplyXY(c.X, c.Y)
-		if !isFinite32(px) || !isFinite32(py) {
-			return nil
-		}
-		if i == 0 {
-			minX, maxX, minY, maxY = px, px, py, py
-		} else {
-			minX, maxX = min(minX, px), max(maxX, px)
-			minY, maxY = min(minY, py), max(maxY, py)
-		}
+	img := d.functionImage(sh, w, h)
+	if img == nil {
+		return nil
 	}
-	w := clampDim(maxX-minX+1, maxFunctionDim)
-	h := clampDim(maxY-minY+1, maxFunctionDim)
-	for w*h > maxFunctionArea {
-		w = max(w/2, 1)
-		h = max(h/2, 1)
+	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
+	// Image pixel -> domain -> /Matrix -> target space.
+	toDomain := gfx.Matrix{A: (x1 - x0) / float32(w), D: (y1 - y0) / float32(h), E: x0, F: y0}
+	lm := matrix(toDomain.Mul(sh.Matrix.Mul(local)))
+	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
+	return shaders.NewImage(img, shaders.TileDecal, shaders.TileDecal, sampling, &lm)
+}
+
+// funcGridKey identifies one realized function-based shading grid: the parsed shading (immutable after shading.Parse,
+// and the interpreter hands out one instance per shading reference, so the pointer IS the content identity — the same
+// reasoning glyphMaskKey keys on a *font.Font) plus the grid size it was evaluated at. Distinct store key type per the
+// store's kind-separation rule.
+type funcGridKey struct {
+	sh   *shading.Shading
+	w, h int
+}
+
+// funcGridSize estimates a realized grid's cache footprint for the store budget.
+func funcGridSize(w, h int) uint64 { return 4*uint64(w)*uint64(h) + 128 }
+
+// maxCachedFuncGrids caps the per-render grid map used when no budgeted store is wired; at the grid-area cap each entry
+// is 1 MB, so the map holds a few megabytes at most.
+const maxCachedFuncGrids = 8
+
+// functionImage returns sh's domain grid realized at w×h, evaluating the shading's function once per cell on first use.
+// The realization depends only on the shading and that grid size — where it lands on the surface lives in the shader's
+// matrix, not in the image — so it is cached and reused by every later draw of the same shading at the same size.
+// Without the cache each painting operation re-evaluated the whole grid (up to shading.MaxGridArea function evaluations
+// for a 1 MB image), which is why the interpreter charges its budget per painting operation and not per parse: a
+// repeated sh costs one operator unit apiece, and a type 4 /Function's evaluations are bounded but far from free.
+func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
+	key := funcGridKey{sh: sh, w: w, h: h}
+	if d.store != nil {
+		if v, ok := d.store.Get(key); ok {
+			if img, isImage := v.(*imagecore.Image); isImage {
+				return img
+			}
+			return nil // Cached failure (negative entry).
+		}
+	} else if img, ok := d.funcGrids[key]; ok {
+		return img
 	}
+	img := d.realizeFunctionGrid(sh, w, h)
+	if d.store != nil {
+		d.store.Put(key, img, funcGridSize(w, h))
+		return img
+	}
+	if d.funcGrids == nil {
+		d.funcGrids = make(map[funcGridKey]*imagecore.Image)
+	}
+	if len(d.funcGrids) >= maxCachedFuncGrids {
+		// Dropping the map, rather than refusing further entries, for the reason glyphMask does it: refusing would retire
+		// the cache for the rest of the render, so every later draw would re-evaluate its grid with no prospect of a hit.
+		// Retention is invisible to output — a hit reproduces the grid a miss would have evaluated, sample for sample.
+		clear(d.funcGrids)
+	}
+	d.funcGrids[key] = img
+	return img
+}
+
+// realizeFunctionGrid evaluates the shading's function once per cell of a w×h grid spanning its domain, at the cell
+// centers, and wraps the samples as an opaque RGBA image. nil (a cached failure) when the image cannot be created.
+func (d *Device) realizeFunctionGrid(sh *shading.Shading, w, h int) *imagecore.Image {
+	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
 	pix := make([]byte, w*h*4)
 	for j := range h {
 		y := y0 + (float32(j)+0.5)/float32(h)*(y1-y0)
@@ -390,15 +436,7 @@ func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.S
 		ColorType: imagecore.ColorTypeRGBA8888,
 		AlphaType: imagecore.AlphaTypeOpaque,
 	}
-	img := imagecore.NewRasterData(info, pix, w*4)
-	if img == nil {
-		return nil
-	}
-	// Image pixel -> domain -> /Matrix -> target space.
-	toDomain := gfx.Matrix{A: (x1 - x0) / float32(w), D: (y1 - y0) / float32(h), E: x0, F: y0}
-	lm := matrix(toDomain.Mul(full))
-	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
-	return shaders.NewImage(img, shaders.TileDecal, shaders.TileDecal, sampling, &lm)
+	return imagecore.NewRasterData(info, pix, w*4)
 }
 
 // clampDim converts a pixel extent to a grid dimension in [1, maxV]. The bounds are applied in float space on purpose:
@@ -691,8 +729,10 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 	paint.BlendMode = blendModes[blend]
 	// One scratch path, rewound per triangle, serves every triangle of every draw: a mesh carries up to maxTriangles of
 	// them and the whole loop re-runs for each fill, stroke, image mask or sh operator that uses the shading (the
-	// tessellation is cached on the *shading.Shading, the canvas-side conversion is not), so a fresh path each time was
-	// the dominant allocation here. Rewind keeps the verb/point storage, leaving the per-triangle cost at three points.
+	// tessellation is cached on the *shading.Shading; the rasterization cannot be — each triangle carries its own flat
+	// color and lands under a different matrix — which is why the interpreter charges its work budget per painting
+	// operation for the triangles a draw rasterizes, see content's shadingPaintCost), so a fresh path each time was the
+	// dominant allocation here. Rewind keeps the verb/point storage, leaving the per-triangle cost at three points.
 	// The scratch cannot be shared out from under itself: drawMesh only calls into canvas, never back into the device,
 	// and a tiling replay that paints a mesh does so on its own cell device (rasterizeTile).
 	if d.meshScratch == nil {

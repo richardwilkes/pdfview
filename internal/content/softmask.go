@@ -86,9 +86,13 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 			}
 		}
 		// Each /BC entry overwrites the matching component of the space's initial color in place; an empty array, a
-		// short one, a non-numeric entry, or a trailing surplus therefore leaves the untouched components at their
-		// defaults rather than reading as 0. Truncating first would turn a malformed /BC on a DeviceCMYK mask group
-		// from the correct black backdrop into white, which inverts what the area outside the group's BBox does.
+		// short one, a non-numeric entry, a non-finite one, or a trailing surplus therefore leaves the untouched
+		// components at their defaults rather than reading as 0. Truncating first would turn a malformed /BC on a
+		// DeviceCMYK mask group from the correct black backdrop into white, which inverts what the area outside the
+		// group's BBox does. The finiteness test comes AFTER the narrowing, like every other narrowing site in the
+		// engine: a legal PDF number past float32's range (1e39) narrows to ±Inf, and this backdrop is the coverage
+		// every pixel outside the mask's bbox takes, so it must not reach the space's conversion for the consumers'
+		// clamps to absorb.
 		comps := space.Initial()
 		if arr, has := in.doc.GetArray(dict, "BC"); has {
 			for i, entry := range arr {
@@ -96,7 +100,9 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 					break
 				}
 				if v, numOK := cos.AsReal(in.doc.Resolve(entry)); numOK {
-					comps[i] = float32(v)
+					if narrowed := float32(v); isFinitePt(narrowed, 0) {
+						comps[i] = narrowed
+					}
 				}
 			}
 		}

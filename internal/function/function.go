@@ -190,7 +190,8 @@ func numbers(d *cos.Document, dict cos.Dict, key cos.Name, maxLen int) ([]float3
 // legal PDF number beyond float32's range (1 followed by 39 zeros) is a finite float64 but ±Inf here, and these arrays
 // are /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size. An infinite domain makes interpolate yield NaN,
 // a type 2 function (whose /Range is optional, so nothing clamps it) would return ±Inf from Eval in contradiction of
-// Func.Eval's contract, and parseSampled's int(v) on a /Size entry would be an implementation-defined conversion.
+// Func.Eval's contract. A /Size entry goes on to a float→int conversion, which parseSampled bounds in float space
+// itself — being finite is not enough to make int(v) architecture-independent — so the two guards are complementary.
 func narrowAll(d *cos.Document, arr cos.Array) ([]float32, bool) {
 	out := make([]float32, len(arr))
 	for i, entry := range arr {

@@ -70,7 +70,10 @@ func (in *interp) opTf() {
 
 // loadFont resolves /Resources /Font <name> and loads it, caching per reference — in the document's budgeted store when
 // one is wired (surviving across runs), else in the per-Run map. Failures are cached as nil either way, so hostile
-// content cannot force repeated parses.
+// content cannot force repeated parses. Each load that actually parses charges the work budget (fontLoadCost), like
+// every other resource parse an operator can force: the cache makes a repeat of the same reference free but bounds
+// nothing on its own, since a resource dictionary may name up to maxContainerElements distinct font references that all
+// share one expensive FontFile.
 func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	raw, ok := in.resource("Font", name)
 	if !ok {
@@ -97,6 +100,7 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 			f = loaded
 		}
 	}
+	in.charge(fontLoadCost(f))
 	if isRef {
 		switch {
 		case in.st != nil:

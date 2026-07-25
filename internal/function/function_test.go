@@ -217,6 +217,35 @@ func TestSampledMultiOut4Bit(t *testing.T) {
 	near(t, evalOne(t, fn, 0.5), 0.5, 0.5)
 }
 
+// TestSampledSizeBoundedBeforeConversion verifies parseSampled applies its per-dimension /Size bound in float space,
+// before the value reaches int(v). narrowAll establishes only that a /Size entry is a FINITE float32: "1" followed by
+// 30 zeros is finite there and far outside int64's range, where Go leaves the conversion implementation-defined and the
+// platforms disagree (amd64 wraps to math.MinInt64, arm64 saturates to math.MaxInt64) — the two ends happening to fail
+// an int-space range test on both is an accident, not a guarantee. The rejection must be the same everywhere, and the
+// in-range spellings on either side of the bound must still behave as before.
+func TestSampledSizeBoundedBeforeConversion(t *testing.T) {
+	for _, size := range []string{
+		"1" + strings.Repeat("0", 30),             // finite as a float32, past int64
+		fmt.Sprintf("%d", int64(maxSampleSize)+1), // one past the per-dimension cap
+		strings.Repeat("9", 40),                   // the lexer's +Inf spelling
+		"-" + strings.Repeat("9", 40),             // and -Inf
+		"0", "-1", "0.5",                          // under one sample
+	} {
+		t.Run("Size "+size, func(t *testing.T) {
+			d := docWithStream(t, "/FunctionType 0 /Domain [0 1] /Range [0 1] /Size ["+size+"] /BitsPerSample 8", "\x00\xff")
+			if _, err := Parse(d, cos.Ref{Num: 1}); err == nil {
+				t.Fatalf("a /Size entry of %s was accepted", size)
+			}
+		})
+	}
+	// A fractional size at or above one truncates exactly as int(v) did, so the float-space bound has not changed which
+	// grids parse: 2.7 is a 2-sample dimension, and the two samples of payload satisfy it.
+	fn := parseObj1(t, docWithStream(t,
+		"/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [2.7] /BitsPerSample 8", "\x00\xff"))
+	near(t, evalOne(t, fn, 0), 0)
+	near(t, evalOne(t, fn, 1), 1)
+}
+
 func TestSampledTooSmall(t *testing.T) {
 	d := docWithStream(t, "/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [300] /BitsPerSample 8", "abc")
 	if _, err := Parse(d, cos.Ref{Num: 1}); err == nil {
@@ -411,8 +440,8 @@ func TestParseRejects(t *testing.T) {
 // TestOverRangeNumbersRejected covers numberPairs/numbers, which tested NaN/Inf on the float64 and then narrowed to the
 // float32 the arrays are stored in: "1" followed by 39 zeros is a legal PDF integer and a finite float64, but ±Inf once
 // narrowed. That reached /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size — an infinite domain makes
-// interpolate yield NaN, a type 2 function has no required /Range to clamp its output, and parseSampled converts a
-// /Size entry with int(v), an implementation-defined conversion for a non-finite value.
+// interpolate yield NaN and a type 2 function has no required /Range to clamp its output. (A /Size entry goes on to a
+// float→int conversion, which parseSampled bounds in float space itself; see TestSampledSizeBoundedBeforeConversion.)
 func TestOverRangeNumbersRejected(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39)
 	for _, tc := range []struct {

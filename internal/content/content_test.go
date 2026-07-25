@@ -31,6 +31,7 @@ const (
 	opFillImage   = "fillimage"
 	opFillMask    = "fillimagemask"
 	opFillShading = "fillshading"
+	opFillText    = "filltext"
 )
 
 // Resource names shared across the tests and the fuzz harness.
@@ -105,7 +106,7 @@ func (r *recorder) PopClip() {
 	r.add(&call{op: opPopClip})
 }
 
-func (r *recorder) FillText(run *device.TextRun, _ device.Paint) { r.addText("filltext", run) }
+func (r *recorder) FillText(run *device.TextRun, _ device.Paint) { r.addText(opFillText, run) }
 
 func (r *recorder) StrokeText(run *device.TextRun, _ *gfx.StrokeParams, _ device.Paint) {
 	r.addText("stroketext", run)

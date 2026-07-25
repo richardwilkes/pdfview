@@ -60,15 +60,15 @@ func parseCFFTopDict(data []byte) (*cffTop, error) {
 	if err = cffWalkDict(entries[0], func(op int, operands []float64) {
 		switch {
 		case op == 5 && len(operands) >= 4: // FontBBox
-			for i := range 4 {
-				top.bbox[i] = float32(operands[i])
+			var bbox [4]float32
+			if cffNarrow(operands, bbox[:]) {
+				top.bbox, top.hasBBox = bbox, true
 			}
-			top.hasBBox = true
 		case op == 0x0c07 && len(operands) >= 6: // FontMatrix (escaped operator 12 7)
-			for i := range 6 {
-				top.matrix[i] = float32(operands[i])
+			var matrix [6]float32
+			if cffNarrow(operands, matrix[:]) {
+				top.matrix, top.hasMatrix = matrix, true
 			}
-			top.hasMatrix = true
 		case op == 15 && len(operands) >= 1: // charset offset
 			top.charsetOff = clampDictOffset(operands[len(operands)-1])
 		case op == 17 && len(operands) >= 1: // CharStrings offset
@@ -80,6 +80,23 @@ func parseCFFTopDict(data []byte) (*cffTop, error) {
 		return nil, err
 	}
 	return top, nil
+}
+
+// cffNarrow narrows the leading DICT operands into out, reporting failure unless every one survives as a finite float32
+// (an all-or-nothing list, like type1's numbers, so a partial /FontMatrix never mixes narrowed and default entries).
+// parseCFFFloat only rejects a non-finite float64: a packed-BCD real such as 1e300 is a perfectly finite float64 that
+// becomes ±Inf in the narrowing, and while cffTop.metrics guards its own use of the bbox and matrix[3], the same matrix
+// is copied into cffInfo.matrix, where Font.GlyphPath builds a gfx.Matrix from it and every emitted outline point comes
+// back non-finite. Rejecting here closes both paths at their shared source, as type1.toFloat32 does for these two keys.
+func cffNarrow(operands []float64, out []float32) bool {
+	for i := range out {
+		f := float32(operands[i])
+		if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
+			return false
+		}
+		out[i] = f
+	}
+	return true
 }
 
 // clampDictOffset converts a DICT operand to a non-negative int offset (junk collapses to 0 = unset).

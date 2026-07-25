@@ -255,3 +255,109 @@ func TestSubstituteMetricsNonFiniteDescriptor(t *testing.T) {
 		})
 	}
 }
+
+// bcdReal encodes one CFF DICT real operand (Adobe TN5176 packed BCD): nibbles 0-9 are digits, 0xa is '.', 0xb is 'E',
+// 0xf ends the number. Only the forms these tests need are covered.
+func bcdReal(mantissa, exponent string) []byte {
+	nibbles := []byte{}
+	for _, r := range mantissa {
+		if r == '.' {
+			nibbles = append(nibbles, 0x0a)
+			continue
+		}
+		nibbles = append(nibbles, byte(r-'0'))
+	}
+	if exponent != "" {
+		nibbles = append(nibbles, 0x0b)
+		for _, r := range exponent {
+			nibbles = append(nibbles, byte(r-'0'))
+		}
+	}
+	nibbles = append(nibbles, 0x0f)
+	if len(nibbles)%2 != 0 {
+		nibbles = append(nibbles, 0x0f)
+	}
+	out := []byte{30}
+	for i := 0; i < len(nibbles); i += 2 {
+		out = append(out, nibbles[i]<<4|nibbles[i+1])
+	}
+	return out
+}
+
+// TestCFFTopDictNonFiniteNarrowingRejected verifies parseCFFTopDict validates /FontBBox and /FontMatrix AFTER the
+// narrowing to float32. parseCFFFloat only rejects a non-finite float64, so a packed-BCD real such as 1e300 — perfectly
+// finite as a float64 — was stored as ±Inf with hasBBox/hasMatrix set. cffTop.metrics guards its own use of the bbox
+// and of matrix[3], but parseCFFGlyphBytes copies the same matrix into cffInfo.matrix, where Font.GlyphPath builds a
+// gfx.Matrix from it and hands it to segmentsToPath unchecked. The two sibling paths both validate at their source
+// (type1.toFloat32 for these exact keys, loadType3's isFiniteF for a Type 3 /FontMatrix); the bare-CFF path was the
+// outlier. go-text's own charstring parser happens to refuse a program carrying such a matrix today, so what this pins
+// is that the rejection is ours and deterministic: the stored matrix is the 0.001 default and hasMatrix stays clear,
+// whatever the glyph layer decides.
+func TestCFFTopDictNonFiniteNarrowingRejected(t *testing.T) {
+	huge := bcdReal("1", "300") // 1e300: a finite float64, +Inf once narrowed to float32
+	zero := []byte{139}         // the small-integer encoding of 0
+	concat := func(parts ...[]byte) []byte {
+		var out []byte
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	t.Run("FontMatrix", func(t *testing.T) {
+		dict := concat(huge, zero, zero, huge, zero, zero, []byte{12, 7})
+		top, err := parseCFFTopDict(buildCFF(dict))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if top.hasMatrix {
+			t.Error("a FontMatrix that narrows to ±Inf was accepted")
+		}
+		want := [6]float32{0.001, 0, 0, 0.001, 0, 0}
+		if top.matrix != want {
+			t.Errorf("matrix = %v, want the default %v", top.matrix, want)
+		}
+	})
+	t.Run("FontBBox", func(t *testing.T) {
+		dict := concat(zero, zero, huge, huge, []byte{5})
+		top, err := parseCFFTopDict(buildCFF(dict))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if top.hasBBox {
+			t.Error("a FontBBox that narrows to ±Inf was accepted")
+		}
+		if top.bbox != [4]float32{} {
+			t.Errorf("bbox = %v, want the absent zero value", top.bbox)
+		}
+	})
+	t.Run("in range still parses", func(t *testing.T) {
+		// The same shape with representable reals must still be stored, so the guard has not simply rejected reals.
+		dict := concat(bcdReal(".002", ""), zero, zero, bcdReal(".002", ""), zero, zero, []byte{12, 7})
+		top, err := parseCFFTopDict(buildCFF(dict))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !top.hasMatrix || top.matrix[0] != 0.002 || top.matrix[3] != 0.002 {
+			t.Errorf("matrix = %v (has=%v), want 0.002 on the diagonal", top.matrix, top.hasMatrix)
+		}
+	})
+	t.Run("glyph program keeps the finite matrix", func(t *testing.T) {
+		// A whole program whose Top DICT carries the over-range matrix: whatever the glyph layer makes of it, the matrix it
+		// is handed — the one Font.GlyphPath transforms every outline point through — must be the finite default.
+		glyph := []byte{239, 239, 21, 247, 92, 139, 5, 14} // 100 100 rmoveto, 200 0 rlineto, endchar
+		cff := buildGlyphCFF(concat(huge, zero, zero, huge, zero, zero, []byte{12, 7}), glyph, glyph)
+		top, err := parseCFFTopDict(cff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range top.matrix {
+			if !isFiniteF(v) {
+				t.Fatalf("matrix = %v: a non-finite entry reaches cffInfo.matrix and every outline point built from it",
+					top.matrix)
+			}
+		}
+		if info := parseCFFGlyphBytes(cff, top); info != nil && info.matrix != top.matrix {
+			t.Errorf("the glyph layer's matrix %v disagrees with the validated %v", info.matrix, top.matrix)
+		}
+	})
+}

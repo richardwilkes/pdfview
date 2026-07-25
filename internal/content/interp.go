@@ -16,9 +16,10 @@
 // Robustness contract: unknown operators are skipped with the operand list reset (the convention every deployed viewer
 // follows); operators with missing or mistyped operands are skipped likewise; unbalanced q/Q at stream end
 // auto-unwinds; and all work is bounded — graphics-state depth, form recursion (with a cycle set), operand count,
-// container nesting, per-operand element count, and total work (executed operators plus the stream bodies and resource parses those operators
-// trigger; see budget.go) are all capped — so hostile input terminates without timeouts. The interpreter guarantees the
-// device's push/pop balance no matter how malformed the content is.
+// container nesting, per-operand element count, and total work (executed operators plus the stream bodies, resource
+// parses, image decodes and device-side shading realizations those operators trigger; see budget.go) are all capped —
+// so hostile input terminates without timeouts. The interpreter guarantees the device's push/pop balance no matter how
+// malformed the content is.
 package content
 
 import (
@@ -43,7 +44,7 @@ type (
 
 // Limits. maxQDepth caps q/Q nesting; pushes beyond it are ignored (with their matching Qs ignored too, so pairing
 // survives). maxFormDepth is the XObject recursion cap; the per-page cycle set makes self-referential forms terminate
-// even below it. maxOperands bounds the operand list — when content pushes more, the oldest are dropped, keeping the
+// even below it. maxOperands bounds the operand list — when content pushes more, the surplus is dropped, keeping the
 // operands an operator actually consumes. maxDashEntries matches the dash-array truncation MuPDF exhibits. maxTotalOps
 // bounds one Run's total work (across form recursion): operators charge one unit each, and the stream bodies and
 // resource parses they trigger charge by budget.go's cost model — the backstop that keeps pathological streams from
@@ -319,12 +320,12 @@ func (in *interp) exec(data []byte) {
 			continue
 		}
 		if obj, objOK := parseTopOperand(lex, tok); objOK {
-			// The list keeps the newest maxOperands operands: operators consume from its start, so for any well-formed
-			// operator the window is irrelevant, and for hostile floods it retains what the operator would actually
-			// use.
+			// The list keeps the OLDEST maxOperands operands, discarding everything past the cap: operators consume from
+			// its start, so the retained prefix is exactly what any operator would read, and the cap is invisible to
+			// every one of them. Keeping the newest instead would shift an operator's operands by the flood's length —
+			// after 70 stray numbers, cm would read pushes #7-#12 rather than #1-#6.
 			if len(in.operands) >= maxOperands {
-				copy(in.operands, in.operands[1:])
-				in.operands = in.operands[:len(in.operands)-1]
+				continue
 			}
 			in.operands = append(in.operands, obj)
 		}

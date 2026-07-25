@@ -842,3 +842,69 @@ func TestOversizedOperandKeepsTokenizerInSync(t *testing.T) {
 	rec := run(t, nil, nil, content)
 	wantOps(t, rec, opStroke)
 }
+
+// TestOperandFloodKeepsTheOperatorsOwnOperands verifies the operand cap drops the NEWEST operands past it, keeping the
+// front of the list. Operators read positionally from the list's start, so the window must be invisible to them:
+// keeping the newest maxOperands instead shifted every operator's operands by the flood's length — after 70 stray
+// numbers, cm read pushes #7-#12 rather than the #1-#6 a windowless interpreter uses, a value that moves with the
+// flood's size.
+func TestOperandFloodKeepsTheOperatorsOwnOperands(t *testing.T) {
+	for _, flood := range []int{0, 1, maxOperands, 4 * maxOperands} {
+		t.Run(fmt.Sprintf("flood %d", flood), func(t *testing.T) {
+			// The matrix operands come first, then the flood, then cm: whatever the flood's length, cm must read the six
+			// operands the content wrote for it.
+			content := "2 0 0 3 5 7 " + strings.Repeat("9 ", flood) + "cm 0 0 m 1 1 l S"
+			rec := run(t, nil, nil, content)
+			wantOps(t, rec, opStroke)
+			want := gfx.Matrix{A: 2, B: 0, C: 0, D: 3, E: 5, F: 7}
+			if got := rec.calls[0].ctm; got != want {
+				t.Fatalf("ctm = %+v, want %+v: the operand window moved cm's operands", got, want)
+			}
+		})
+	}
+}
+
+// TestSoftMaskBackdropNarrowingGuarded verifies a /BC entry is validated AFTER the narrowing to float32: a legal PDF
+// number past float32's range is ±Inf once narrowed, and the backdrop it forms is the mask coverage every pixel outside
+// the mask's bbox takes. Before the guard the ±Inf flowed into the space's conversion and only the consumers' clamps
+// contained it, turning what must be the /BC-absent black backdrop of a DeviceGray mask group into full white — the
+// inverse coverage — outside the box.
+func TestSoftMaskBackdropNarrowingGuarded(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39) // 1e39: finite as a float64, +Inf as a float32
+	for _, tc := range []struct {
+		name string
+		bc   string
+		want color.NRGBA
+	}{
+		{caseValid, "[1]", color.NRGBA{R: 255, G: 255, B: 255, A: 255}},
+		{caseOverflow, "[" + huge + "]", color.NRGBA{A: 255}},
+		{"lexer infinity", "[" + strings.Repeat("9", 400) + "]", color.NRGBA{A: 255}},
+		{caseNegative + " overflow", "[-" + huge + "]", color.NRGBA{A: 255}},
+		{"absent", "", color.NRGBA{A: 255}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bc := ""
+			if tc.bc != "" {
+				bc = "/BC " + tc.bc
+			}
+			body := "0 0 1 1 re f"
+			d, err := cos.Open([]byte(minimalPDF(
+				fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Group << /S /Transparency "+
+					"/CS /DeviceGray >> /Length %d >>\nstream\n%s\nendstream", len(body), body),
+				"<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R "+bc+" >> >>",
+			)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catExtGState: cos.Dict{resGSName: cos.Ref{Num: 2}}}
+			rec := run(t, d, res, "/GS0 gs 0 0 1 1 re f")
+			masks := rec.byOp("beginmask")
+			if len(masks) != 1 {
+				t.Fatalf("recorded %d BeginMask calls, want 1", len(masks))
+			}
+			if got := masks[0].paint.Color; got != tc.want {
+				t.Fatalf("mask backdrop = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

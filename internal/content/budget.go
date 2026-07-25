@@ -12,6 +12,8 @@ package content
 import (
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/font"
+	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
@@ -23,9 +25,9 @@ import (
 // Type 3 charprocs, tiling-pattern cells — therefore charges bodyCost for that body on every invocation, and every
 // resource parse an operator can force charges a flat cost. Image decodes — inline images and image XObjects — likewise
 // charge imageDecodeCost for the samples they produce, which the dictionary's dimensions dictate rather than the
-// payload's size. The reference-keyed per-Run caches (runCaches) make the repeat cheap on top of being bounded: the same
-// form invoked twice decodes once, and a parsed color space, shading or pattern survives the fresh resource frame each
-// form invocation pushes.
+// payload's size, and a font load charges fontLoadCost for the embedded program it decodes. The reference-keyed per-Run
+// caches (runCaches) make the repeat cheap on top of being bounded: the same form invoked twice decodes once, and a
+// parsed color space, shading or pattern survives the fresh resource frame each form invocation pushes.
 
 const (
 	// bodyCostShift scales a stream body's length into budget units. exec scans the whole body on every invocation (and
@@ -40,6 +42,23 @@ const (
 	// function 256 times, and a type 4 function's evaluations are bounded but far from free, so they cost several
 	// resource parses.
 	shadingParseCost = 1 << 12
+	// fontParseCost is the flat charge for loading one font resource: Tf resolves a descriptor chain, decodes the embedded
+	// program, and builds the encoding/width tables, so the floor is well above a color space's. The per-reference cache
+	// makes a repeat free but does not bound the total: the cost is per DISTINCT reference, and a resource dictionary may
+	// name up to maxContainerElements of them, all sharing one descriptor.
+	fontParseCost = 1 << 12
+	// fontProgramCostShift scales a loaded font's estimated footprint into budget units, on top of the flat charge. The
+	// decode is proportional to the program's bytes and internal/filter allows one stream to inflate to max(64 MB,
+	// 256xinput), so a handful of megabyte-scale fonts must cost a visible share of the budget while a page's worth of
+	// ordinary embedded subsets costs a small fraction of it.
+	fontProgramCostShift = 6
+	// shadingSampleCostShift scales one device-side shading realization's sample count into budget units: a type 1
+	// shading's grid cells (one PDF function evaluation each) and a mesh shading's triangles (one rasterized fill each).
+	// Both are far more expensive per sample than the image sample imagePixelCostShift charges at >>6, so they count
+	// sixteen times as much. At >>2 the whole budget buys 64 realizations of a full shading.MaxGridArea grid, or 256 draws
+	// of a maximally tessellated mesh, while a page's worth of ordinary gradient fills — sized from their own device
+	// extent, a few tens of thousands of cells each — costs a small fraction of it.
+	shadingSampleCostShift = 2
 	// imagePixelCostShift scales a decoded image's pixel count into budget units. A decode touches every sample it
 	// produces — unpacking, color conversion, mask compositing — and the sample count is bounded only by
 	// imaging.maxPixelsFor(payload), whose floor (2^22 pixels) is independent of how small the payload is: charging by
@@ -104,6 +123,44 @@ func imageDecodeCost(img *imaging.Image, payload int) int {
 	cost := bodyCost(payload)
 	if img != nil {
 		cost += int(int64(img.Width) * int64(img.Height) >> imagePixelCostShift)
+	}
+	return cost
+}
+
+// shadingPaintCost is the budget charge for handing one shading to the device to realize at device resolution, on top
+// of the parse parseShading charged for. The parse alone is not a bound, because the realization happens per PAINTING
+// OPERATION: a type 1 shading's grid is evaluated cell by cell into a device image, and a mesh shading's triangles are
+// re-rasterized every time (the tessellation is cached on the *shading.Shading, the device-side draw is not). A
+// flate-compressed run of sh operators is a few tens of kilobytes of file, so at one operator unit apiece those
+// realizations are what turns a small input into minutes of work. The charge is an upper bound on the device's work
+// rather than a measurement of it — a device that caches its realization (internal/render caches the grid per size)
+// does less, and one that ignores shadings entirely does none — which is the same conservative direction
+// imageDecodeCost takes for a decode. Axial and radial shadings realize as a canvas gradient built from the ramp
+// parseShading already sampled, so they cost only their operator unit.
+func shadingPaintCost(sh *shading.Shading, target gfx.Matrix) int {
+	switch {
+	case sh == nil:
+		return 0
+	case sh.Kind == shading.KindFunction:
+		w, h, ok := sh.GridSize(target)
+		if !ok {
+			return 0 // Geometry the device realizes nothing from; it evaluates no cells.
+		}
+		return 1 + w*h>>shadingSampleCostShift
+	case sh.Kind >= shading.KindFreeTriangle:
+		return 1 + len(sh.Triangles)>>shadingSampleCostShift
+	default:
+		return 1
+	}
+}
+
+// fontLoadCost is the budget charge for one font load: the flat parse charge plus the program the load decoded. f is
+// nil for a failed load, which still did the flat work before failing. The footprint is shifted in uint64 and capped at
+// the whole budget so a 64 MB inflated program cannot overflow the int counter on GOARCH=386/arm.
+func fontLoadCost(f *font.Font) int {
+	cost := fontParseCost
+	if f != nil {
+		cost += int(min(f.MemoryEstimate()>>fontProgramCostShift, uint64(maxTotalOps)))
 	}
 	return cost
 }

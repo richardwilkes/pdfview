@@ -61,6 +61,8 @@ type Device struct {
 	glyphPaths map[glyphKey]*path.Path
 	// glyphMasks caches rendered glyph coverage planes for this render when no store is wired (glyphmask.go).
 	glyphMasks map[glyphMaskKey]*glyphMask
+	// funcGrids caches realized function-based shading grids for this render when no store is wired (shading.go).
+	funcGrids map[funcGridKey]*imagecore.Image
 	// maskScratch is the reusable surface glyph coverage planes render into, maskPath the reusable path each glyph
 	// outline is transformed into and maskPaint the fixed white antialiased paint that fills it (glyphmask.go).
 	maskScratch *surface.Surface
@@ -165,8 +167,9 @@ func (d *Device) Pixels() (pix []byte, stride int, err error) {
 // Reset returns the device to its just-created state — canvas state unwound, pixels cleared to transparent, per-render
 // caches dropped — so one surface can serve a document's successive renders at the same size (fresh multi-megabyte
 // surfaces per render made the page-fault cost of faulting them in a top profile entry). Store-backed caches survive:
-// their keys hold the *font.Font pointers they reference, so entries can never collide with a later font instance. The
-// per-render maps are dropped because without a store nothing keeps their keyed font pointers alive across renders.
+// their keys hold the *font.Font and *shading.Shading pointers they reference, so entries can never collide with a
+// later font or shading instance. The per-render maps are dropped because without a store nothing keeps those keyed
+// pointers alive across renders.
 func (d *Device) Reset() {
 	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) must never unwind or clear that canvas.
 		return
@@ -176,6 +179,7 @@ func (d *Device) Reset() {
 	d.c.Clear(colorcore.Transparent)
 	d.glyphPaths = nil
 	d.glyphMasks = nil
+	d.funcGrids = nil
 	d.textClip = nil
 	d.clipStack = d.clipStack[:0]
 	d.clipRects = d.clipRects[:0]
