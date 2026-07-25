@@ -493,6 +493,43 @@ endbfrange`), 0, nil)
 	}
 }
 
+// TestCIDRangeRejectsOutOfRangeCID covers the CID bound in parseCIDRanges. CIDs are 16-bit (ISO 32000-2 9.7.4), and the
+// operand is a full int64 out of the lexer, so an entry naming a CID at or above 2^32 narrowed to an unrelated CID —
+// <0010> mapping to CID 1 rather than being rejected — and picked an arbitrary glyph out of the descendant program.
+func TestCIDRangeRejectsOutOfRangeCID(t *testing.T) {
+	cm := parseCMap([]byte(`1 begincodespacerange <0000> <ffff> endcodespacerange
+4 begincidrange
+<0010> <0013> 4294967297
+<0020> <0023> 65536
+<0030> <0033> 300
+<0060> <0063> -5
+endcidrange
+3 begincidchar
+<0040> 4294967297
+<0050> 70000
+<0051> 65535
+endcidchar`), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if len(cm.cids) != 2 {
+		t.Fatalf("kept %d cid ranges (%+v), want only the two in-range entries", len(cm.cids), cm.cids)
+	}
+	for code, want := range map[uint32]uint32{
+		0x0010: 0, 0x0013: 0, // 2^32 + 1 would wrap to CID 1.
+		0x0020: 0, 0x0023: 0, // 65536 is one past the last addressable CID.
+		0x0040: 0, // The begincidchar form takes the same bound.
+		0x0050: 0,
+		0x0060: 0,                // Negative, as before.
+		0x0030: 300, 0x0033: 303, // In range, so unaffected.
+		0x0051: 65535, // The largest addressable CID still maps.
+	} {
+		if got := cm.cid(code); got != want {
+			t.Errorf("cid(%#04x) = %d, want %d", code, got, want)
+		}
+	}
+}
+
 func TestCFFCIDCharset(t *testing.T) {
 	// A synthetic charset: format 1, GIDs 1.. mapping to CID ranges {100..102, 500}. CharStrings INDEX with 5 entries
 	// (nGlyphs = 5), each 1 byte.

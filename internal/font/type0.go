@@ -86,17 +86,21 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 
 	// Dispatch on which FontFile is actually present rather than trusting /Subtype: a font mislabeled "CIDFontType2"
 	// whose program really sits in FontFile3 (bare/Type1C CFF) must still be parsed from FontFile3, not routed into the
-	// SFNT arm with a nil stream and then substituted away (ISO 32000-2 9.7.4.2).
+	// SFNT arm with a nil stream and then substituted away (ISO 32000-2 9.7.4.2). Each entry is tried in turn and one
+	// that yields no usable program falls through to the next, so a descriptor carrying both a corrupt FontFile2 and a
+	// usable FontFile3 still renders its real glyphs — the same allowance loadSimple makes for simple fonts.
 	embedded := false
-	switch {
-	case desc.fontFile2 != nil:
+	if desc.fontFile2 != nil {
 		if sfnt := parseSFNTStream(d, desc.fontFile2); sfnt != nil {
 			info.sfnt = sfnt
 			f.ascender, f.descender = sfnt.ascender, sfnt.descender
 			embedded = true
+			// /CIDToGIDMap describes this program's glyph order, so it is read only when the program parsed. A
+			// fall-through to the CFF below must not route CIDs through a map that does not describe it.
+			info.cidToGID = loadCIDToGID(d, descendant["CIDToGIDMap"])
 		}
-		info.cidToGID = loadCIDToGID(d, descendant["CIDToGIDMap"])
-	case desc.fontFile3 != nil:
+	}
+	if info.sfnt == nil && desc.fontFile3 != nil {
 		// CIDFontType0: a CFF program (bare CID-keyed CFF or Type1C). Metrics follow the bare-CFF FontBBox rule;
 		// CID→GID comes from the program's charset when it is CID-keyed, else CID = GID.
 		if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {

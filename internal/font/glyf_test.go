@@ -135,6 +135,41 @@ func TestGlyfCompositeCycleSkipped(t *testing.T) {
 	}
 }
 
+// TestGlyfLocaBoundIsWidthIndependent covers the loca range guard glyphData and path share. The bound was computed as
+// int(gid)+1 >= len(g.loca), which on a 32-bit build (GOARCH=386/arm) narrows every gid at or above 2^31 to a negative
+// int, passes the guard, and panics indexing loca. The uint64 form must reject those gids on every architecture, and
+// must still accept the last real glyph — loca carries one more entry than there are glyphs.
+func TestGlyfLocaBoundIsWidthIndependent(t *testing.T) {
+	g := buildGlyf([][]byte{triangleGlyph(), triangleGlyph()}) // GIDs 0 and 1; loca has three entries.
+	for _, gid := range []uint32{0, 1} {
+		if !g.inRange(gid) {
+			t.Errorf("inRange(%d) = false for a glyph the loca table covers", gid)
+		}
+		if g.glyphData(gid) == nil {
+			t.Errorf("glyphData(%d) = nil for a glyph the loca table covers", gid)
+		}
+		if g.path(gid) == nil {
+			t.Errorf("path(%d) = nil for a glyph the loca table covers", gid)
+		}
+	}
+	// 2 indexes loca's terminating entry (no glyph follows it); the rest are the values whose int narrowing differs by
+	// architecture.
+	for _, gid := range []uint32{2, 3, 1 << 31, 1<<31 + 7, 0xFFFFFFFF} {
+		if gid >= 1<<31 && int32(gid)+1 >= int32(len(g.loca)) {
+			t.Errorf("gid %d no longer exercises the 32-bit narrowing this test guards", gid)
+		}
+		if g.inRange(gid) {
+			t.Errorf("inRange(%d) = true for a gid past the loca table", gid)
+		}
+		if g.glyphData(gid) != nil {
+			t.Errorf("glyphData(%d) returned a record for a gid past the loca table", gid)
+		}
+		if g.path(gid) != nil {
+			t.Errorf("path(%d) returned a path for a gid past the loca table", gid)
+		}
+	}
+}
+
 // TestGlyfSimpleGlyphRenders confirms the budgeted walk still emits an ordinary glyph's single contour unchanged.
 func TestGlyfSimpleGlyphRenders(t *testing.T) {
 	p := buildGlyf([][]byte{triangleGlyph()}).path(0)

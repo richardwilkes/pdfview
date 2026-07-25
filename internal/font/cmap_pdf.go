@@ -241,7 +241,10 @@ func (cm *cmapPDF) parseCIDRanges(lex *cos.Lexer, budget *int, char bool) {
 			continue
 		}
 		last := pending[need-1]
-		if last.Kind == cos.TokenInt && last.Int >= 0 && len(cm.cids) < maxCMapRanges {
+		// CIDs are 16-bit (ISO 32000-2 9.7.4), so an entry naming a larger starting CID is malformed and is dropped
+		// rather than narrowed — the same guard the /W and /W2 parsers apply. Without the upper bound the uint32
+		// conversion below wraps a value at or above 2^32 into an unrelated CID, silently selecting an arbitrary glyph.
+		if last.Kind == cos.TokenInt && last.Int >= 0 && last.Int <= maxCID && len(cm.cids) < maxCMapRanges {
 			lo, nLo, okLo := codeToken(pending[0])
 			hi, nHi, okHi := lo, nLo, okLo
 			if !char {

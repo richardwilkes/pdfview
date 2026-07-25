@@ -408,6 +408,53 @@ func TestType0DispatchByFontFile(t *testing.T) {
 	}
 }
 
+// TestType0FallsThroughToNextFontFile guards the composite-font counterpart of TestSimpleFallsThroughToNextFontFile: a
+// descendant descriptor carrying an unparseable FontFile2 alongside a usable FontFile3 must try the remaining entry
+// before giving up on the embedded program. Dispatching on which entry is merely *present* left info.sfnt nil and
+// substituted Liberation shapes for a font whose real glyphs sit in the CFF. The /CIDToGIDMap describes the TrueType
+// program's glyph order, so a fall-through must not route CIDs through it either.
+func TestType0FallsThroughToNextFontFile(t *testing.T) {
+	// A CFF carrying FontBBox [-166 -214 1076 952] (so top.metrics() resolves and the font counts as embedded) plus
+	// loadable charstrings (so it is the glyph source too).
+	endchar := []byte{139, 14} // "0 endchar": a valid, empty charstring.
+	cff := buildGlyphCFF([]byte{
+		28, 0xFF, 0x5A, // -166
+		28, 0xFF, 0x2A, // -214
+		28, 0x04, 0x34, // 1076
+		28, 0x03, 0xB8, // 952
+		5, // FontBBox
+	}, endchar, endchar, endchar)
+	junk := "not a truetype font at all"
+	cidToGID := "\x00\x00\x00\x07\x00\x07" // CID 1 -> GID 7, which no CFF glyph order would agree with.
+	f, err := loadFromDict(
+		t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCID /FontDescriptor 3 0 R /CIDToGIDMap 5 0 R >>",
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 /FontFile2 4 0 R /FontFile3 6 0 R >>",
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(junk), junk),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(cidToGID), cidToGID),
+		fmt.Sprintf("<< /Length %d /Subtype /CIDFontType0C >>\nstream\n%s\nendstream", len(cff), cff),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.cff == nil {
+		t.Error("the corrupt FontFile2 ended the dispatch and the FontFile3 program was never read")
+	}
+	if f.sub != nil {
+		t.Error("a substitute was loaded alongside the embedded CFF")
+	}
+	if f.ascender < 0.951 || f.ascender > 0.953 {
+		t.Errorf("ascender = %v, want ≈0.952 from the FontFile3 CFF FontBBox", f.ascender)
+	}
+	if f.type0.cidToGID != nil {
+		t.Error("the CIDFontType2 /CIDToGIDMap was kept for a font whose glyphs came from the CFF")
+	}
+	if got := f.GID(1); got != 1 {
+		t.Errorf("GID(1) = %d, want 1 through the embedded CFF (identity CID→GID)", got)
+	}
+}
+
 // TestSimpleFallsThroughToNextFontFile is the simple-font counterpart of TestType0DispatchByFontFile: a descriptor
 // carrying an unparseable FontFile2 alongside a usable FontFile3 must try the remaining entries before giving up on the
 // embedded program. Stopping at the first entry that is merely *present* renders Liberation stand-ins for a font whose
