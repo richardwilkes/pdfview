@@ -66,6 +66,20 @@ func maxPixelsFor(dataLen int) int64 {
 	return budget
 }
 
+// decodeParmDim narrows a dimension read from /DecodeParms to an int, reporting false when it is not a usable one. The
+// bound has to be applied in int64 space, before the conversion: GetInt returns an int64, and on a 32-bit build (which
+// this package's own sizing comments care about) int(2147483648) is -2147483648 — a negative count then passes every
+// downstream guard, since a comparison against maxImagePixels is false for it and the pixel product it forms is
+// negative, until the row-stride arithmetic makes a negative make() size and panics. internal/cos's clampFilterParam
+// applies the same reasoning to the same keys, but only for the parameters handed to internal/filter; the image codecs
+// read /DecodeParms themselves.
+func decodeParmDim(v int64) (dim int, ok bool) {
+	if v <= 0 || v > maxImagePixels {
+		return 0, false
+	}
+	return int(v), true
+}
+
 // Image is one decoded image resource, ready for the raster device.
 type Image struct {
 	// Pix holds the decoded pixels, row-major from the image's top-left sample: straight (non-premultiplied) RGBA, 4

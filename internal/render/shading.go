@@ -607,6 +607,15 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 			rx := float32(math.Floor(float64(sx)))
 			ry := float32(math.Floor(float64(sy)))
 			ctm := p.PatternCTM.Mul(gfx.Translate(rx, ry))
+			// Both factors of the offset are validated, their product is not: a finite matrix and a finite step still
+			// multiply past float32's range, and the ctm built from that is what Replay takes as a child interpreter's
+			// INITIAL CTM — the one precondition drawpage.go rejects its caller's matrix up front to preserve, since cm
+			// and a form's /Matrix only check the products they compute. A cell that far out cannot touch the surface
+			// anyway, so it is skipped rather than replayed under a poisoned matrix and an empty clip.
+			if !isFinite32(sx) || !isFinite32(sy) || !ctm.IsFinite() ||
+				!rectFiniteUnder(t.BBox.X0, t.BBox.Y0, t.BBox.X1, t.BBox.Y1, ctm) {
+				continue
+			}
 			m := matrix(ctm)
 			clip.Rewind()
 			clip.MoveTo(t.BBox.X0, t.BBox.Y0)
@@ -635,15 +644,18 @@ func (d *Device) withShadingBBox(p device.Paint, draw func()) {
 		draw()
 		return
 	}
+	// Through buildPath's seam, in corner form: shading.rectFrom validated the four /BBox entries individually, exactly
+	// as content.rectFrom does for a form's box, and exactly as there that validation does not survive the mapping into
+	// the space the box is clipped in. A box that maps past float32's range covers the whole surface — it clips nothing
+	// — so the draw goes out unclipped, where clipping to the ±Inf corners paints nothing at all.
+	var box gfx.Path
+	box.RectCorners(sh.BBox.X0, sh.BBox.Y0, sh.BBox.X1, sh.BBox.Y1)
+	bb, ok := buildPathIn(&box, false, p.PatternCTM)
+	if !ok {
+		draw()
+		return
+	}
 	count := d.c.Save()
-	bb := path.New()
-	bb.MoveTo(sh.BBox.X0, sh.BBox.Y0)
-	bb.LineTo(sh.BBox.X1, sh.BBox.Y0)
-	bb.LineTo(sh.BBox.X1, sh.BBox.Y1)
-	bb.LineTo(sh.BBox.X0, sh.BBox.Y1)
-	bb.Close()
-	m := matrix(p.PatternCTM)
-	bb.Transform(&m)
 	d.c.ClipPath(bb, raster.ClipIntersect, true)
 	draw()
 	d.c.RestoreToCount(count)

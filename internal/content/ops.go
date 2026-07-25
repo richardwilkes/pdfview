@@ -102,11 +102,17 @@ func (in *interp) op(word string) {
 			in.cur = in.start
 		}
 	case "re":
+		// The corners x+w / y+h are a float32 addition over validated operands, so they still reach ±Inf — the overflow
+		// gfx.Path.RectCorners exists to remove. It matters more here than at the /BBox sites: buildPath drops a path
+		// whole when any point is non-finite, so an unchecked corner discards every subpath built before it in the same
+		// construction. Validating the corners drops just the bad rectangle, the way m and l drop just their own point.
 		if v, ok := in.floats(4); ok && isFinitePt(v[0], v[1]) && isFinitePt(v[2], v[3]) {
-			in.path.Rect(v[0], v[1], v[2], v[3])
-			in.cur = gfx.Point{X: v[0], Y: v[1]}
-			in.start = in.cur
-			in.hasCur = true
+			if x1, y1 := v[0]+v[2], v[1]+v[3]; isFinitePt(x1, y1) {
+				in.path.RectCorners(v[0], v[1], x1, y1)
+				in.cur = gfx.Point{X: v[0], Y: v[1]}
+				in.start = in.cur
+				in.hasCur = true
+			}
 		}
 
 	// ---- path painting ----

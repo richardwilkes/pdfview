@@ -14,6 +14,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -452,6 +453,48 @@ func TestCCITTColumnsBounded(t *testing.T) {
 	}
 	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
 		t.Fatal("huge CCITT /Columns accepted")
+	}
+}
+
+// TestDecodeParmDimNarrowing pins the narrowing every /DecodeParms dimension goes through. The bound has to be applied
+// in int64 space: GetInt returns an int64, and on a 32-bit build int(2147483648) is -2147483648 — a value that then
+// passes every downstream guard (it is not greater than maxImagePixels, and the pixel product it forms is negative)
+// until the row-stride arithmetic makes a negative make() size and panics, failing the whole page instead of skipping
+// the image. The bug is unreachable on a 64-bit test host, so the narrowing is pinned at its own boundary here.
+func TestDecodeParmDimNarrowing(t *testing.T) {
+	for _, v := range []int64{0, -1, -1 << 31, 1 << 31, 1<<31 + 1728, 1 << 38, math.MaxInt64, maxImagePixels + 1} {
+		if dim, ok := decodeParmDim(v); ok {
+			t.Errorf("/DecodeParms dimension %d accepted as %d", v, dim)
+		}
+	}
+	for _, v := range []int64{1, 1728, maxImagePixels} {
+		dim, ok := decodeParmDim(v)
+		if !ok {
+			t.Errorf("usable /DecodeParms dimension %d rejected", v)
+		}
+		if int64(dim) != v {
+			t.Errorf("/DecodeParms dimension %d narrowed to %d", v, dim)
+		}
+	}
+}
+
+// A /Columns beyond the pixel cap must be rejected outright rather than narrowed. On a 32-bit build the value below
+// truncates to a negative int, which reaches make() as a negative length; on any build it is an image that must be
+// skipped, not one that fails the page.
+func TestCCITTColumnsAboveCapRejected(t *testing.T) {
+	d := testDoc(t)
+	dict := cos.Dict{
+		"W": cos.Integer(4), "H": cos.Integer(4), keyBPC: cos.Integer(1), "CS": cos.Name("G"),
+		"F":  cos.Name("CCF"),
+		"DP": cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(1 << 31)},
+	}
+	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err == nil {
+		t.Fatal("a /Columns of 2147483648 was accepted")
+	}
+	// A /Columns at the cap boundary is still a usable one, so the guard cannot be a blanket rejection of large values.
+	dict["DP"] = cos.Dict{"K": cos.Integer(-1), keyColumns: cos.Integer(2)}
+	if _, err := DecodeInline(d, dict, []byte{0x00}, nil); err != nil {
+		t.Fatalf("an ordinary /Columns was rejected: %v", err)
 	}
 }
 

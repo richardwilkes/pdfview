@@ -197,7 +197,9 @@ func matrix(m gfx.Matrix) geom.Matrix {
 // non-finite geometry stops: producers validate their own coordinates, but a value derived from validated ones (a
 // rectangle's X1-X0 extent, say) can still overflow, and ±Inf/NaN coordinates are not geometry a rasterizer can act on.
 // Such a path is dropped whole rather than partially built, which would fabricate segments the producer never described
-// (the same policy internal/shading's meshBuilder.emit applies to its own output).
+// (the same policy internal/shading's meshBuilder.emit applies to its own output). The guarantee covers the coordinates
+// as given: a caller that goes on to transform the result needs buildPathIn, which re-establishes it in the space the
+// path actually reaches canvas in.
 func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 	out := path.New()
 	if evenOdd {
@@ -241,6 +243,38 @@ func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 		}
 	}
 	return out
+}
+
+// buildPathIn converts a gfx.Path to a canvas path already mapped into the space ctm describes. buildPath establishes
+// its finiteness guarantee over the coordinates a producer wrote, and every caller then transforms the result, so the
+// guarantee lasts exactly one line: a path whose own coordinates are finite still lands on ±Inf under a
+// large-but-finite CTM. Re-establishing it against the transformed coordinates is what this does. ok is false when it
+// cannot be — the region the path describes is then larger than float32 can express, and what that means is the
+// caller's to decide. For a clip it means a region that selects everything, so the honest answer there is to skip the
+// clip rather than intersect with the empty one canvas builds from ±Inf corners.
+func buildPathIn(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) (cp *path.Path, ok bool) {
+	for _, pt := range p.Points {
+		if x, y := ctm.ApplyXY(pt.X, pt.Y); !isFinite32(x) || !isFinite32(y) {
+			return nil, false
+		}
+	}
+	cp = buildPath(p, evenOdd)
+	m := matrix(ctm)
+	cp.Transform(&m)
+	return cp, true
+}
+
+// rectFiniteUnder reports whether the axis-aligned box maps to finite coordinates under m. An affine map is monotone in
+// each coordinate, so its extremes over the box are reached at the corners: those four tests bound every point the box
+// contains. It serves the callers holding a box rather than a gfx.Path — the tiling cell clip, which rebuilds its box
+// into a reused scratch path, and a glyph outline, whose points live in canvas already.
+func rectFiniteUnder(x0, y0, x1, y1 float32, m gfx.Matrix) bool {
+	for _, c := range [4][2]float32{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}} {
+		if x, y := m.ApplyXY(c[0], c[1]); !isFinite32(x) || !isFinite32(y) {
+			return false
+		}
+	}
+	return true
 }
 
 // paintFor builds the canvas paint for a fill or stroke. The folded paint alpha multiplies the (normally opaque)
@@ -395,9 +429,13 @@ func (d *Device) StrokePath(p *gfx.Path, sp *gfx.StrokeParams, ctm gfx.Matrix, p
 func (d *Device) ClipPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) {
 	d.clipStack = append(d.clipStack, d.c.Save())
 	d.pushClipRect(p, ctm)
-	cp := buildPath(p, evenOdd)
-	m := matrix(ctm)
-	cp.Transform(&m)
+	cp, ok := buildPathIn(p, evenOdd, ctm)
+	if !ok {
+		// The clip region does not fit float32 once transformed, which means it covers the whole surface: leave the
+		// level open (so PopClip stays balanced) but push no clip. Intersecting with the ±Inf-cornered path instead
+		// empties the clip, and everything drawn under it vanishes.
+		return
+	}
 	d.c.ClipPath(cp, raster.ClipIntersect, true)
 }
 
@@ -547,6 +585,12 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 			trm = trm.Mul(*under)
 		}
 		if !trm.IsFinite() {
+			continue
+		}
+		// A finite Trm does not make the outline finite under it: an em-normalized glyph still overflows once Trm's
+		// scale or translation nears float32's maximum, and one such glyph would otherwise poison the whole merged
+		// path — which is also this run's stroke path and its contribution to the accumulated text clip.
+		if b := gp.Bounds(); !rectFiniteUnder(b.Left, b.Top, b.Right, b.Bottom, trm) {
 			continue
 		}
 		m := matrix(trm)

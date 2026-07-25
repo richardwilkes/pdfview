@@ -2024,3 +2024,115 @@ func TestTilingReplayReusesCellClipPath(t *testing.T) {
 			misplaced, replays)
 	}
 }
+
+// TestTilingReplayCellCTMStaysFinite pins the precondition every replayed cell inherits. A cell's device offset is
+// float32(i)*XStep*PatternCTM.A + …: both factors are validated, their product is not, and the matrix built from it
+// becomes a child interpreter's INITIAL CTM — which drawpage.go rejects its own caller's matrix up front to keep
+// finite, because cm and a form's /Matrix only check the products they compute and leave a poisoned gs.ctm poisoned for
+// the rest of the cell. Cells whose offset leaves float32's range sit far outside the surface, so they are skipped; the
+// ones that land on it must still replay.
+func TestTilingReplayCellCTMStaysFinite(t *testing.T) {
+	d := newDevice(t, 20, 20)
+	var p gfx.Path
+	p.Rect(0, 0, 20, 20)
+	replays, nonFinite := 0, 0
+	// Determinant -1e38, so the matrix still inverts; the step then multiplies past float32's range against A and D.
+	patCTM := gfx.Matrix{A: 1e19, D: -1e19, F: 200}
+	paint := device.Paint{
+		Alpha: 1,
+		Tiling: &device.Tiling{
+			Replay: func(_ device.Device, ctm gfx.Matrix) {
+				replays++
+				if !ctm.IsFinite() {
+					nonFinite++
+					t.Logf("cell replayed under %+v", ctm)
+				}
+			},
+			BBox:  gfx.Rect{X1: 1, Y1: 1},
+			XStep: 1e20,
+			YStep: 1e20,
+		},
+		PatternCTM: patCTM,
+	}
+	if !patCTM.IsFinite() {
+		t.Fatal("the pattern matrix is itself non-finite; it must pass patternFor's guard to exercise the new one")
+	}
+	d.FillPath(&p, false, gfx.Identity(), paint)
+	if replays == 0 {
+		t.Fatal("no cell replayed; the lattice path was not taken, so nothing was exercised")
+	}
+	if nonFinite != 0 {
+		t.Errorf("%d of %d cell replays received a non-finite CTM", nonFinite, replays)
+	}
+}
+
+// TestTextOutlineDropsOverflowingGlyph covers the other half of the text-side transform overflow: textOutline checks
+// that the Trm is finite and then transforms the glyph's outline through it, which is not the same thing — an
+// em-normalized outline still overflows once the Trm nears float32's maximum. The merged outline is one path, so a
+// single ±Inf point would make the whole run's geometry unusable: its fill, StrokeText's path, and the clip ClipText
+// and EndTextClip accumulate.
+func TestTextOutlineDropsOverflowingGlyph(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	gid := f.GID('H')
+	if gid == 0 {
+		t.Fatal("'H' unmapped")
+	}
+	normal := device.Glyph{Trm: gfx.Matrix{A: 24, D: -24}.Mul(gfx.Translate(2, 28)), GID: gid, Code: 'H'}
+	// Every entry is a legal float32 and the matrix passes IsFinite, yet A*x + E crosses float32's maximum for any
+	// outline point past 0.13 em — which 'H' has in quantity.
+	huge := device.Glyph{Trm: gfx.Matrix{A: 3e38, D: -3e38, E: 3e38, F: -3e38}, GID: gid, Code: 'H'}
+	if !huge.Trm.IsFinite() {
+		t.Fatal("the test's Trm is itself non-finite; it must pass the existing guard to exercise the new one")
+	}
+	outline := func(glyphs ...device.Glyph) *path.Path {
+		return d.textOutline(&device.TextRun{Font: f, Glyphs: glyphs, CTM: gfx.Identity()}, nil)
+	}
+	alone := outline(normal)
+	if alone.IsEmpty() {
+		t.Fatal("the normal glyph produced no outline; the comparisons below would be vacuous")
+	}
+	if got, want := outline(normal, huge).Bounds(), alone.Bounds(); got != want {
+		t.Errorf("the overflowing glyph reached the merged outline: bounds %v, want %v", got, want)
+	}
+	if only := outline(huge); !only.IsEmpty() {
+		t.Errorf("a run of nothing but overflowing glyphs built an outline bounded by %v, want an empty path",
+			only.Bounds())
+	}
+}
+
+// A clip whose path is finite but leaves float32's range once transformed selects the whole surface, so it must be
+// skipped outright: intersecting with the ±Inf-cornered path canvas would build empties the clip and everything drawn
+// under it vanishes. PopClip must still balance, and an ordinary clip must still restrict.
+func TestClipPathSkipsOverRangeTransform(t *testing.T) {
+	d := newDevice(t, 20, 20)
+	var clip gfx.Path
+	clip.RectCorners(-1e38, -1e38, 1e38, 1e38) // Finite corners; ×10 below is ±Inf.
+	d.ClipPath(&clip, false, gfx.Scale(10, 10))
+	if d.c.IsClipEmpty() {
+		t.Fatal("the over-range clip emptied the clip region; a region that large selects everything")
+	}
+	var p gfx.Path
+	p.Rect(0, 0, 20, 20)
+	d.FillPath(&p, false, gfx.Identity(), redPaint())
+	d.PopClip()
+	// The level still popped cleanly, so a genuine clip pushed after it still restricts.
+	var half gfx.Path
+	half.Rect(0, 0, 8, 20)
+	d.ClipPath(&half, false, gfx.Identity())
+	d.FillPath(&p, false, gfx.Identity(), device.Paint{Color: color.NRGBA{G: 255, A: 255}, Alpha: 1})
+	d.PopClip()
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pixelAt(t, pix, stride, 15, 15); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("under the over-range clip the fill painted %v, want opaque red", got)
+	}
+	if got := pixelAt(t, pix, stride, 4, 4); got != [4]uint8{0, 255, 0, 255} {
+		t.Errorf("inside the following clip = %v, want opaque green", got)
+	}
+	if got := pixelAt(t, pix, stride, 15, 4); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("outside the following clip = %v: the clip stack did not unwind", got)
+	}
+}
