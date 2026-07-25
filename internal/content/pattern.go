@@ -65,7 +65,15 @@ func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	if pat == nil {
 		return nil, gfx.Matrix{}
 	}
-	return pat, pat.matrix.Mul(in.streamCTM)
+	// Guard the composed matrix's finiteness (like cm/Do/Tm): numbers6 validates the six /Matrix entries individually,
+	// but finite operands can still multiply to a NaN/Inf matrix, which the device receives as Paint.PatternCTM and
+	// passes on unchecked to the /BBox clip transform and the shader's local matrix. An unusable pattern space cannot
+	// be painted, so the pattern is dropped and the paint does not mark.
+	m := pat.matrix.Mul(in.streamCTM)
+	if !m.IsFinite() {
+		return nil, gfx.Matrix{}
+	}
+	return pat, m
 }
 
 // resolvePattern parses /Pattern[name] with per-frame caching by name and per-Run caching by reference (failures cache

@@ -253,6 +253,47 @@ endstream`, big)
 	}
 }
 
+// TestPatternMatrixNonFiniteRejected verifies an scn-selected pattern is dropped when its /Matrix composed with the
+// stream's default-space CTM overflows to a non-finite matrix. numbers6 validates the six /Matrix entries individually,
+// so finite entries can still compose to a NaN/Inf Paint.PatternCTM — which the device passes on unchecked as the
+// /BBox clip transform and the shader's local matrix. Like cm/Do/Tm, the composition itself must be checked.
+func TestPatternMatrixNonFiniteRejected(t *testing.T) {
+	big := "1" + strings.Repeat("0", 20) // 1e20; composed with a 1e20 stream CTM the product overflows float32 to +Inf
+	cell := "1 0 0 rg 0 0 2 2 re f"
+	pdf := minimalPDF(
+		`<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 10 0] /Function 2 0 R >>`,
+		`<< /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >>`,
+		fmt.Sprintf(`<< /PatternType 2 /Shading 1 0 R /Matrix [%[1]s 0 0 %[1]s 0 0] >>`, big),
+		fmt.Sprintf("<< /PatternType 1 /PaintType 1 /BBox [0 0 4 4] /XStep 4 /YStep 4 /Resources << >> /Matrix [%[1]s 0 0 %[1]s 0 0] /Length %[2]d >>\nstream\n%[3]s\nendstream",
+			big, len(cell), cell),
+	)
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catPattern: cos.Dict{"PS": cos.Ref{Num: 3}, "PT": cos.Ref{Num: 4}}}
+	for _, name := range []cos.Name{"PS", "PT"} {
+		t.Run(string(name), func(t *testing.T) {
+			content := []byte(fmt.Sprintf("/Pattern cs /%s scn 0 0 5 5 re f", name))
+			// A stream CTM of 1e20 (as a page scale would produce) squares the pattern's own 1e20 scale.
+			rec := &recorder{t: t}
+			Run(d, res, content, gfx.Matrix{A: 1e20, D: 1e20}, rec, nil)
+			wantOps(t, rec) // The pattern is unusable, so the paint must not mark at all.
+			// The same pattern under a stream CTM that keeps the composition finite still paints.
+			rec = &recorder{t: t}
+			Run(d, res, content, gfx.Matrix{A: 2, D: 2}, rec, nil)
+			wantOps(t, rec, opFill)
+			patCTM := rec.calls[0].paint.PatternCTM
+			if !patCTM.IsFinite() {
+				t.Fatalf("non-finite PatternCTM reached the device: %+v", patCTM)
+			}
+			if want := (gfx.Matrix{A: 2e20, D: 2e20}); patCTM != want {
+				t.Fatalf("PatternCTM = %+v, want %+v: the guard must not block a finite composition", patCTM, want)
+			}
+		})
+	}
+}
+
 // TestImageCacheRetainsAfterCapReached verifies the no-store fallback image cache keeps a resource cached once decoded
 // even after the cap is reached, so a repeatedly drawn image is not re-decoded on every Do. Before the LRU, the
 // (maxCachedImages+1)-th distinct ref was never cached and each Do handed the device a freshly decoded image.
