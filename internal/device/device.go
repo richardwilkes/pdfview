@@ -154,6 +154,9 @@ type Device interface {
 	// surface starts at the backdrop color (/BC composited under the mask group, ISO 32000-2 11.6.5.2) and the mask
 	// value is the rendered luminosity; for an alpha mask it starts transparent and the mask value is the rendered
 	// alpha. transfer, when non-nil, is the /TR transfer function sampled to a 256-entry LUT applied to the mask value.
+	// bbox is the device-space box the mask content is clipped to, and a device may size its work to it: the zero rect
+	// means "not computed" (the device must assume the mask can mark anywhere), while a positioned box with no area
+	// means the mask content cannot mark at all.
 	BeginMask(bbox gfx.Rect, luminosity bool, backdrop color.NRGBA, transfer []byte)
 	// EndMask switches from mask content to masked content.
 	EndMask()

@@ -24,6 +24,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
 	"github.com/richardwilkes/pdfview/internal/store"
 )
@@ -967,6 +968,82 @@ func TestSoftMaskOffSurfaceBBoxMasksEverything(t *testing.T) {
 	}
 }
 
+// maskBounds must tell the two empty bboxes apart. The zero rect is the "not computed" signal — a caller that supplies
+// no box may still draw mask content — so it keeps the page-sized path (degrade, never erase), as do non-finite and
+// absurd corners, which carry no information either. A POSITIONED box with no area is a real answer: the mask content
+// is clipped to it and cannot rasterize anything, so the span reduces to its constant outside coverage (ok false).
+func TestMaskBoundsEmptyBBoxes(t *testing.T) {
+	d := newDevice(t, 40, 32)
+	base := d.c.TotalMatrix()
+	for _, tc := range []struct {
+		name     string
+		bbox     gfx.Rect
+		wantOK   bool
+		wantFull bool
+	}{
+		{name: "zero rect", bbox: gfx.Rect{}, wantOK: true, wantFull: true},
+		{name: "non-finite corner", bbox: gfx.Rect{X0: 4, Y0: 4, X1: float32(math.Inf(1)), Y1: 20}, wantOK: true, wantFull: true},
+		{name: "absurd corners", bbox: gfx.Rect{X0: -1e30, Y0: -1e30, X1: 1e30, Y1: 1e30}, wantOK: true, wantFull: true},
+		{name: "collapsed in x", bbox: gfx.Rect{X0: 10, Y0: 4, X1: 10, Y1: 28}},
+		{name: "collapsed in y", bbox: gfx.Rect{X0: 4, Y0: 12, X1: 36, Y1: 12}},
+		{name: "collapsed to a point", bbox: gfx.Rect{X0: 10, Y0: 12, X1: 10, Y1: 12}},
+		{name: "wholly off surface", bbox: gfx.Rect{X0: 100, Y0: 100, X1: 120, Y1: 120}},
+		{name: "reversed corners", bbox: gfx.Rect{X0: 22, Y0: 26, X1: 6, Y1: 8}, wantOK: true},
+	} {
+		x0, y0, w, h, ok := d.maskBounds(tc.bbox, &base)
+		if ok != tc.wantOK {
+			t.Errorf("%s: maskBounds ok = %v, want %v", tc.name, ok, tc.wantOK)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		full := x0 == 0 && y0 == 0 && w == 40 && h == 32
+		if full != tc.wantFull {
+			t.Errorf("%s: maskBounds = (%d,%d,%d,%d); page-sized: %v, want %v", tc.name, x0, y0, w, h, full, tc.wantFull)
+		}
+	}
+}
+
+// The same distinction through BeginMask: a /BBox that collapses under the anchor CTM reaches the device as a
+// positioned box with no area, and must commit no offscreen surface at all. The interpreter wraps EVERY painting
+// operation in its own Begin/End/Pop cycle, so falling back to the page-sized path would allocate, prefill, read back,
+// and scan a full page-sized offscreen per fill, stroke, glyph run, and image. The mask covers nothing, so an alpha
+// mask's coverage is zero everywhere and the masked op is erased.
+func TestSoftMaskCollapsedBBoxNeedsNoSurface(t *testing.T) {
+	for _, bbox := range []gfx.Rect{
+		{X0: 10, Y0: 4, X1: 10, Y1: 28},
+		{X0: 4, Y0: 12, X1: 36, Y1: 12},
+		{X0: 10, Y0: 12, X1: 10, Y1: 12},
+	} {
+		d := newDevice(t, 40, 32)
+		d.BeginMask(bbox, false, color.NRGBA{}, nil)
+		if ms := d.maskStack[0]; ms.surf != nil || !ms.constant {
+			t.Errorf("bbox %v: surf != nil: %v, constant: %v; want no surface and a constant mask",
+				bbox, ms.surf != nil, ms.constant)
+		}
+		if d.maskBytes != 0 {
+			t.Errorf("bbox %v: %d offscreen bytes committed for a mask that cannot mark", bbox, d.maskBytes)
+		}
+		var whole gfx.Path
+		whole.Rect(0, 0, 40, 32)
+		d.FillPath(&whole, false, gfx.Identity(), redPaint())
+		d.EndMask()
+		d.FillPath(&whole, false, gfx.Identity(), redPaint())
+		d.PopMask()
+		pix, stride, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, xy := range [][2]int{{0, 0}, {10, 12}, {20, 16}, {39, 31}} {
+			if got := pixelAt(t, pix, stride, xy[0], xy[1]); got[3] != 0 {
+				t.Errorf("bbox %v: pixel (%d,%d) = %v; a mask that cannot mark must erase its content",
+					bbox, xy[0], xy[1], got)
+			}
+		}
+	}
+}
+
 // wrappedOnto returns a device drawing onto host's canvas after applying shift to it, as DrawPage's Wrap does for a
 // caller who has already transformed their canvas. Pixels come back through host.
 func wrappedOnto(t *testing.T, host *Device, dx, dy float32) *Device {
@@ -1173,6 +1250,96 @@ func TestGridfitRotatedSnapsXFromCEyFromBF(t *testing.T) {
 	}
 }
 
+// snapSpan's interval arithmetic must not overflow: the sum off+extent once happened in float32, so two large finite
+// components (a `2e38 0 0 2e38 2e38 2e38 cm` image CTM) overflowed to ±Inf and the snapped extent came back Inf or NaN.
+// Whatever the span, the result must stay finite, keep the span's direction, and still contain the original interval —
+// grid fitting may only expand it.
+func TestSnapSpanLargeComponentsStayFinite(t *testing.T) {
+	for _, tc := range [][2]float32{
+		{2e38, 2e38},
+		{-2e38, 2e38},
+		{2e38, -2e38},
+		{-2e38, -2e38},
+		{3e38, 3e38},
+		{math.MaxFloat32, math.MaxFloat32},
+		{1, 3e38},
+		{3e38, 1},
+	} {
+		extent, off := snapSpan(tc[0], tc[1])
+		if !isFinite32(extent) || !isFinite32(off) {
+			t.Errorf("snapSpan(%v, %v) = (%v, %v); both must stay finite", tc[0], tc[1], extent, off)
+			continue
+		}
+		if (extent < 0) != (tc[0] < 0) {
+			t.Errorf("snapSpan(%v, %v) extent %v flipped the span's direction", tc[0], tc[1], extent)
+		}
+		lo, hi := float64(tc[1]), float64(tc[1])+float64(tc[0])
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		got0, got1 := float64(off), float64(off)+float64(extent)
+		if got0 > got1 {
+			got0, got1 = got1, got0
+		}
+		if got0 > lo || got1 < hi {
+			t.Errorf("snapSpan(%v, %v) = (%v, %v): [%v, %v] no longer contains [%v, %v]",
+				tc[0], tc[1], extent, off, got0, got1, lo, hi)
+		}
+	}
+	// Ordinary spans must still snap outward to whole pixels, in either direction.
+	for _, tc := range [4][4]float32{
+		{10.3, 3.2, 11, 3},
+		{-10.3, 13.5, -11, 14},
+		{8, 4, 8, 4},
+		{0.25, 7.5, 1, 7},
+	} {
+		if extent, off := snapSpan(tc[0], tc[1]); extent != tc[2] || off != tc[3] {
+			t.Errorf("snapSpan(%v, %v) = (%v, %v), want (%v, %v)", tc[0], tc[1], extent, off, tc[2], tc[3])
+		}
+	}
+}
+
+// gridfit runs AFTER drawImage's caller has validated the CTM, so it must never be what makes one non-finite: the
+// matrix flows into drawImage's matrix(ctm) and, for stencils, into FillImageMask's flip.Mul(fit) and on to
+// preparePaint. Both snapping branches are covered (axis-aligned and the 90/270 one).
+func TestGridfitLargeCTMStaysFinite(t *testing.T) {
+	for _, m := range []gfx.Matrix{
+		{A: 2e38, D: 2e38, E: 2e38, F: 2e38},
+		{B: 2e38, C: 2e38, E: 2e38, F: 2e38},
+		{A: -3e38, D: 3e38, E: 3e38, F: -3e38},
+		{B: -3e38, C: 3e38, E: -3e38, F: 3e38},
+		{A: math.MaxFloat32, D: math.MaxFloat32, E: -math.MaxFloat32, F: -math.MaxFloat32},
+	} {
+		if !m.IsFinite() {
+			t.Fatalf("test setup: %v is not finite to begin with", m)
+		}
+		if got := gridfit(m); !got.IsFinite() {
+			t.Errorf("gridfit(%v) = %v; a finite CTM must stay finite", m, got)
+		}
+	}
+}
+
+// And through the image entry points the fitted matrix reaches: an image drawn under such a CTM must leave a surface
+// that still reads back, rather than carrying Inf/NaN geometry into canvas.
+func TestImageWithLargeCTMDoesNotPoisonSurface(t *testing.T) {
+	huge := gfx.Matrix{A: 2e38, D: 2e38, E: 2e38, F: 2e38}
+	img := &imaging.Image{Pix: []byte{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255}, Width: 2, Height: 2}
+	stencil := &imaging.Image{Pix: []byte{255, 0, 0, 255}, Width: 2, Height: 2, Stencil: true, HasAlpha: true}
+	for _, tc := range []struct {
+		draw func(d *Device)
+		name string
+	}{
+		{name: "image", draw: func(d *Device) { d.FillImage(img, huge, 1) }},
+		{name: "stencil", draw: func(d *Device) { d.FillImageMask(stencil, huge, redPaint()) }},
+	} {
+		d := newDevice(t, 16, 16)
+		tc.draw(d)
+		if _, _, err := d.Pixels(); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+}
+
 // tilingFor builds a tiling paint whose cell paints one red square, counting the replays it takes.
 func tilingFor(key any, replays *int) device.Paint {
 	return device.Paint{
@@ -1280,6 +1447,60 @@ func TestGradientRampEmptyStops(t *testing.T) {
 		colors, pos := gradientRamp(nil, e[0], e[1])
 		if colors != nil || pos != nil {
 			t.Fatalf("e=%v: expected nil ramp, got %v / %v", e, colors, pos)
+		}
+	}
+}
+
+// Whatever the extension factors and whatever offsets the stops carry, the position array gradientRamp hands to canvas
+// must be a valid gradient ramp: one entry per color, every entry finite, inside [0, 1], and non-decreasing. A large
+// one-sided extension compresses the whole original span into ~1e-6 of the ramp — below float32's resolution there — so
+// the mapped offsets collapse onto each other, and nothing else validates them before they cross into canvas.
+func TestGradientRampPositionsAreAValidRamp(t *testing.T) {
+	sampled := make([]shading.Stop, 256)
+	for i := range sampled {
+		sampled[i] = shading.Stop{Offset: float32(i) / 255, Color: color.NRGBA{R: uint8(i), A: 255}}
+	}
+	// Offsets no parser produces today, so the guard is structural rather than incidental.
+	hostile := []shading.Stop{
+		{Offset: float32(math.NaN()), Color: color.NRGBA{A: 255}},
+		{Offset: 0.75, Color: color.NRGBA{R: 255, A: 255}},
+		{Offset: 0.25, Color: color.NRGBA{G: 255, A: 255}},
+		{Offset: 1e30, Color: color.NRGBA{B: 255, A: 255}},
+		{Offset: -1e30, Color: color.NRGBA{A: 255}},
+	}
+	for _, stops := range [][]shading.Stop{sampled, hostile} {
+		for _, e := range [][2]float32{
+			{0, 0},
+			{1, 0},
+			{0, 1},
+			{0.5, 2},
+			{maxExtendFactor, 0},
+			{0, maxExtendFactor},
+			{maxExtendFactor, maxExtendFactor},
+		} {
+			colors, pos := gradientRamp(stops, e[0], e[1])
+			if len(colors) != len(pos) {
+				t.Fatalf("stops=%d e=%v: %d colors but %d positions", len(stops), e, len(colors), len(pos))
+			}
+			prev := float32(0)
+			for i, v := range pos {
+				switch {
+				case !isFinite32(v):
+					t.Fatalf("stops=%d e=%v: position %d is %v", len(stops), e, i, v)
+				case v < 0 || v > 1:
+					t.Fatalf("stops=%d e=%v: position %d is %v, outside [0, 1]", len(stops), e, i, v)
+				case v < prev:
+					t.Fatalf("stops=%d e=%v: position %d is %v, below its predecessor %v", len(stops), e, i, v, prev)
+				}
+				prev = v
+			}
+		}
+	}
+	// An unextended ramp still reproduces the stop offsets exactly — the clamping may not perturb the ordinary case.
+	_, pos := gradientRamp(sampled, 0, 0)
+	for i, v := range pos {
+		if v != sampled[i].Offset {
+			t.Fatalf("unextended position %d is %v, want the stop's own offset %v", i, v, sampled[i].Offset)
 		}
 	}
 }

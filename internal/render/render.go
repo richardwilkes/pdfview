@@ -703,16 +703,27 @@ func gridfit(m gfx.Matrix) gfx.Matrix {
 
 // snapSpan snaps one axis of a rectilinear transform: the interval [off, off+extent] (in either direction) expands to
 // floor(min)…ceil(max), keeping the extent's sign.
+//
+// The interval arithmetic runs in float64 for the reason axialSpan and radialExtension do: both inputs are finite
+// float32s, but their float32 sum overflows to ±Inf for large components (a `2e38 0 0 2e38 2e38 2e38 cm` image CTM),
+// which would make the snapped extent Inf or NaN. In float64 no sum or difference of finite float32s overflows, but the
+// snapped span itself can still exceed float32's range on the way back (an interval spanning ±3e38 has an extent of
+// 6e38), so a result that is not finite falls back to the unsnapped input: the caller has already validated the CTM as
+// finite, and grid-fitting a span that large changes nothing visible anyway.
 func snapSpan(extent, off float32) (newExtent, newOff float32) {
-	lo, hi := float64(off), float64(off+extent)
+	lo, hi := float64(off), float64(off)+float64(extent)
 	if lo > hi {
 		lo, hi = hi, lo
 	}
 	lo, hi = math.Floor(lo), math.Ceil(hi)
+	newExtent, newOff = float32(hi-lo), float32(lo)
 	if extent < 0 {
-		return float32(lo - hi), float32(hi)
+		newExtent, newOff = float32(lo-hi), float32(hi)
 	}
-	return float32(hi - lo), float32(lo)
+	if !isFinite32(newExtent) || !isFinite32(newOff) {
+		return extent, off
+	}
+	return newExtent, newOff
 }
 
 // FillImage implements device.Device. alpha is the folded constant fill alpha; it modulates the image through the

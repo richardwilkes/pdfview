@@ -194,13 +194,25 @@ func maskOutsideValue(luminosity bool, backdrop stdcolor.NRGBA, transfer []byte)
 // maskBounds returns the device-pixel rectangle a mask span's surface must cover: the mask content's bbox mapped
 // through base, snapped outward to whole pixels with a pixel of margin so the antialiased edge of the bbox clip is
 // never cut, and intersected with the surface. The interpreter clips mask content to this bbox, so nothing the mask
-// paints can fall outside it. A bbox with no area carries no information — the interpreter emits an empty one when the
-// mask's CTM is unusable, and a caller that does not compute one passes the zero rect — so it degrades to the whole
-// surface, as do non-finite and absurd corners. ok is false when the rectangle lies entirely off the surface: the mask
-// has no rasterizable content at all and reduces to its constant outside coverage.
+// paints can fall outside it.
+//
+// The zero rect is the "no usable bbox" signal — the interpreter emits it when the mask's CTM is unusable, and a caller
+// that does not compute one passes it too — so it carries no information and degrades to the whole surface, as do
+// non-finite and absurd corners. A POSITIONED box with no area is different: it says exactly where the mask content is
+// clipped to, and that region cannot rasterize anything, so the mask reduces to its constant outside coverage
+// (ok false). Distinguishing the two matters for cost as much as clarity: a /BBox that collapses under the anchor CTM
+// (a degenerate scale, a zero-extent box) is common enough, and the interpreter wraps EVERY painting operation in its
+// own Begin/End/Pop cycle, so degrading it to the whole surface would allocate, prefill, read back, and scan a
+// page-sized offscreen per fill, stroke, glyph run, and image.
+//
+// ok is also false when the rectangle lies entirely off the surface, for the same reason: no rasterizable content.
 func (d *Device) maskBounds(bbox gfx.Rect, base *geom.Matrix) (x0, y0, w, h int, ok bool) {
-	if !(bbox.X1 > bbox.X0) || !(bbox.Y1 > bbox.Y0) {
+	if bbox == (gfx.Rect{}) || !bbox.IsFinite() {
 		return 0, 0, d.width, d.height, true
+	}
+	bbox = bbox.Normalize() // A reversed box still has area; only a truly zero-extent one is empty.
+	if !(bbox.X1 > bbox.X0) || !(bbox.Y1 > bbox.Y0) {
+		return 0, 0, 0, 0, false
 	}
 	var minX, minY, maxX, maxY float32
 	for i, c := range [4][2]float32{{bbox.X0, bbox.Y0}, {bbox.X1, bbox.Y0}, {bbox.X0, bbox.Y1}, {bbox.X1, bbox.Y1}} {

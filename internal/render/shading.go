@@ -119,11 +119,18 @@ func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Sh
 
 // gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by e0 before
 // offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
+//
+// The offsets map in float64 and come back through rampPos, which forces the array non-decreasing within [0, 1]. A large
+// one-sided extension (the factors are clamped only at maxExtendFactor) compresses the whole original span into ~1e-6 of
+// the ramp, below float32's resolution there, so the mapped offsets collapse onto each other and the float32 rounding of
+// a monotonic sequence is no longer guaranteed to stay ordered; a non-finite stop offset would otherwise cross into
+// canvas untouched as well. The visual result of such an extension is a hard boundary either way — this only keeps the
+// arrays handed to shaders.NewLinearGradient/NewTwoPointConicalGradient inside the contract they document.
 func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Color, pos []float32) {
 	if len(stops) == 0 {
 		return nil, nil
 	}
-	span := 1 + e0 + e1
+	span := 1 + float64(e0) + float64(e1)
 	n := len(stops)
 	if e0 > 0 {
 		n++
@@ -133,14 +140,16 @@ func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Colo
 	}
 	colors = make([]colorcore.Color, 0, n)
 	pos = make([]float32, 0, n)
+	prev := float32(0)
 	if e0 > 0 {
 		c := stops[0].Color
 		colors = append(colors, colorcore.ARGB(c.A, c.R, c.G, c.B))
-		pos = append(pos, 0)
+		pos = append(pos, prev)
 	}
 	for _, s := range stops {
 		colors = append(colors, colorcore.ARGB(s.Color.A, s.Color.R, s.Color.G, s.Color.B))
-		pos = append(pos, (s.Offset+e0)/span)
+		prev = rampPos((float64(s.Offset)+float64(e0))/span, prev)
+		pos = append(pos, prev)
 	}
 	if e1 > 0 {
 		c := stops[len(stops)-1].Color
@@ -148,6 +157,16 @@ func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Colo
 		pos = append(pos, 1)
 	}
 	return colors, pos
+}
+
+// rampPos narrows one ramp position to float32, holding it at or above the previous position and no higher than 1. The
+// comparison is written so a NaN (which no comparison satisfies) lands on prev rather than propagating.
+func rampPos(p float64, prev float32) float32 {
+	v := float32(p)
+	if !(v > prev) {
+		return prev
+	}
+	return min(v, 1)
 }
 
 // coverageCorners maps the device surface's corners into the space local maps FROM (the shading target space), for
