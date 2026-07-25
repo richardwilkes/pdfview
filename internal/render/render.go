@@ -66,8 +66,10 @@ type Device struct {
 	maskScratch *surface.Surface
 	maskPath    *path.Path
 	maskPaint   *canvas.Paint
-	// meshScratch is the reusable path each mesh-shading triangle is built in (shading.go).
+	// meshScratch is the reusable path each mesh-shading triangle is built in, tileScratch the reusable path each
+	// tiling-pattern cell's /BBox clip is built in (both shading.go).
 	meshScratch *path.Path
+	tileScratch *path.Path
 	// textClip accumulates ClipText outlines (device space) until EndTextClip pushes them as one clip.
 	textClip *path.Path
 	// clipStack records the canvas save count at each clip push so PopClip can restore precisely.
@@ -190,11 +192,21 @@ func matrix(m gfx.Matrix) geom.Matrix {
 	return out
 }
 
-// buildPath converts a gfx.Path to a canvas path with the given fill rule.
+// buildPath converts a gfx.Path to a canvas path with the given fill rule. It is the single seam every gfx.Path crosses
+// into canvas through — fills, strokes, clips, glyph outlines and mesh triangles all funnel here — so it is also where
+// non-finite geometry stops: producers validate their own coordinates, but a value derived from validated ones (a
+// rectangle's X1-X0 extent, say) can still overflow, and ±Inf/NaN coordinates are not geometry a rasterizer can act on.
+// Such a path is dropped whole rather than partially built, which would fabricate segments the producer never described
+// (the same policy internal/shading's meshBuilder.emit applies to its own output).
 func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 	out := path.New()
 	if evenOdd {
 		out.SetFillType(path.FillEvenOdd)
+	}
+	for _, pt := range p.Points {
+		if !isFinite32(pt.X) || !isFinite32(pt.Y) {
+			return out
+		}
 	}
 	pi := 0
 	pts := p.Points

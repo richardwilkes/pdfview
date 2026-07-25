@@ -565,3 +565,195 @@ func TestTextMatrixSurvivesNonFiniteAdvance(t *testing.T) {
 			rec.texts[1].glyphs)
 	}
 }
+
+// overRangeBox is a /BBox whose corners are individually finite but whose extent is not: 3e38 - -1e38 is 4e38, past
+// float32's ~3.4e38 ceiling. Every clip built from it must be spelled corner by corner.
+var overRangeBox = fmt.Sprintf("[%[1]s %[1]s %[2]s %[2]s]",
+	"-1"+strings.Repeat("0", 38), "3"+strings.Repeat("0", 38))
+
+// wantFiniteClipCorners checks that a clip path is the closed rectangle spanning box's corners, with nothing
+// non-finite in it.
+func wantFiniteClipCorners(t *testing.T, c *call, box gfx.Rect) {
+	t.Helper()
+	if c.op != opClip {
+		t.Fatalf("call is %q, not a clip", c.op)
+	}
+	for i, pt := range c.path.Points {
+		if !isFinitePt(pt.X, pt.Y) {
+			t.Fatalf("clip point %d = %v is not finite: the box's extent overflowed", i, pt)
+		}
+	}
+	want := []gfx.Point{
+		{X: box.X0, Y: box.Y0}, {X: box.X1, Y: box.Y0}, {X: box.X1, Y: box.Y1}, {X: box.X0, Y: box.Y1},
+	}
+	if len(c.path.Points) != len(want) {
+		t.Fatalf("clip has %d points, want %d", len(c.path.Points), len(want))
+	}
+	for i, w := range want {
+		if c.path.Points[i] != w {
+			t.Errorf("clip point %d = %v, want %v", i, c.path.Points[i], w)
+		}
+	}
+}
+
+// TestFormBBoxClipSurvivesOverRangeBox verifies execForm builds the form's /BBox clip from the box's corners rather
+// than from an origin plus a computed extent. rectFrom validates the four entries individually, but X1-X0 overflows to
+// +Inf for a box spanning more than float32's range, and Rect's x+w corners are then ±Inf — the clip degenerates and
+// the form paints nothing, when a box that large should clip nothing at all.
+func TestFormBBoxClipSurvivesOverRangeBox(t *testing.T) {
+	body := "1 0 0 rg 0 0 100 100 re f"
+	for _, tc := range []struct {
+		name string
+		bbox string
+		want gfx.Rect
+	}{
+		{caseValid, "[0 0 200 200]", gfx.Rect{X1: 200, Y1: 200}},
+		{caseOverflow, overRangeBox, gfx.Rect{X0: -1e38, Y0: -1e38, X1: 3e38, Y1: 3e38}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := cos.Open([]byte(minimalPDF(fmt.Sprintf(
+				"<< /Type /XObject /Subtype /Form /BBox %s /Length %d >>\nstream\n%s\nendstream",
+				tc.bbox, len(body), body))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catXObject: cos.Dict{resFormName: cos.Ref{Num: 1}}}
+			rec := run(t, d, res, formDo)
+			wantOps(t, rec, opClip, opFill, opPopClip)
+			wantFiniteClipCorners(t, &rec.calls[0], tc.want)
+		})
+	}
+}
+
+// TestSoftMaskBBoxClipSurvivesOverRangeBox verifies replayMask builds the mask body's clip the same way. Its failure
+// mode is the opposite of the form's and worse: the non-finite corners lose the clip rather than emptying it, so mask
+// content that belongs inside the box would paint everywhere.
+func TestSoftMaskBBoxClipSurvivesOverRangeBox(t *testing.T) {
+	const maskBody = "1 g 0 0 25 50 re f"
+	for _, tc := range []struct {
+		name string
+		bbox string
+		want gfx.Rect
+	}{
+		{caseValid, "[0 0 50 50]", gfx.Rect{X1: 50, Y1: 50}},
+		{caseOverflow, overRangeBox, gfx.Rect{X0: -1e38, Y0: -1e38, X1: 3e38, Y1: 3e38}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := cos.Open([]byte(minimalPDF(
+				fmt.Sprintf(`<< /Type /XObject /Subtype /Form /BBox %s
+   /Group << /S /Transparency /CS /DeviceGray >> /Length %d >>
+stream
+%s
+endstream`, tc.bbox, len(maskBody), maskBody),
+				`<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R >> >>`)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catExtGState: cos.Dict{"GL": cos.Ref{Num: 2}}}
+			rec := run(t, d, res, "/GL gs 1 0 0 rg 0 0 10 10 re f")
+			wantOps(t, rec, "beginmask", opClip, opFill, opPopClip, "endmask", opFill, "popmask")
+			wantFiniteClipCorners(t, &rec.calls[1], tc.want)
+		})
+	}
+}
+
+// TestTilingStepFallbackFinite verifies parseTiling's missing-/XStep fallback gets the same finiteness test the
+// file-supplied step gets. The fallback is the cell extent — a subtraction of two validated /BBox entries — so an
+// over-range box makes it +Inf, which every step consumer rejects: the pattern would silently paint nothing.
+func TestTilingStepFallbackFinite(t *testing.T) {
+	const cell = "1 0 0 rg 0 0 2 2 re f"
+	for _, tc := range []struct {
+		name string
+		bbox string
+		want float32
+	}{
+		{caseValid, "[0 0 4 6]", 4},
+		{caseOverflow, overRangeBox, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := cos.Open([]byte(minimalPDF(fmt.Sprintf(
+				"<< /PatternType 1 /PaintType 1 /BBox %s /Resources << >> /Length %d >>\nstream\n%s\nendstream",
+				tc.bbox, len(cell), cell))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := cos.Dict{catPattern: cos.Dict{"P": cos.Ref{Num: 1}}}
+			rec := run(t, d, res, "/Pattern cs /P scn 0 0 5 5 re f")
+			wantOps(t, rec, opFill)
+			tiling := rec.calls[0].paint.Tiling
+			if tiling == nil {
+				t.Fatal("expected a tiling payload")
+			}
+			if !isFinitePt(tiling.XStep, tiling.YStep) || tiling.XStep <= 0 || tiling.YStep <= 0 {
+				t.Fatalf("steps (%v, %v) are not usable: the renderer drops the pattern entirely",
+					tiling.XStep, tiling.YStep)
+			}
+			if tiling.XStep != tc.want {
+				t.Errorf("XStep = %v, want %v", tiling.XStep, tc.want)
+			}
+		})
+	}
+}
+
+// TestTilingCellChildSharesParentState verifies the cell-replay interpreter shares the parent's cycle set, parse
+// caches, and image/font LRUs instead of allocating its own. A single fill replays up to 4096 cells, so a fresh set per
+// cell is pure garbage — and the two LRUs used to be unshared while everything else was, which would have let a cell's
+// decoded images escape the caches the parent's own lookups consult.
+func TestTilingCellChildSharesParentState(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF("<< >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := newInterp(d, nil, gfx.Identity(), &recorder{t: t}, nil)
+	parent.budget = 1234
+	child := parent.newChild(nil, gfx.Identity(), &recorder{t: t})
+	if child.active == nil || len(parent.active) != 0 {
+		t.Fatal("the parent's cycle set is not usable")
+	}
+	parent.active[cos.Ref{Num: 9}] = true
+	if !child.active[cos.Ref{Num: 9}] {
+		t.Error("the child does not share the parent's cycle set: a cyclic pattern would not terminate")
+	}
+	if child.caches != parent.caches {
+		t.Error("the child does not share the parent's parse caches")
+	}
+	if child.images != parent.images {
+		t.Error("the child does not share the parent's image LRU")
+	}
+	if child.fonts != parent.fonts {
+		t.Error("the child does not share the parent's font LRU")
+	}
+	if child.budget != parent.budget {
+		t.Errorf("child budget = %d, want the parent's %d", child.budget, parent.budget)
+	}
+	if child.formDepth != parent.formDepth+1 {
+		t.Errorf("child formDepth = %d, want %d", child.formDepth, parent.formDepth+1)
+	}
+	if child.doc != parent.doc || child.st != parent.st {
+		t.Error("the child does not share the parent's document or store")
+	}
+}
+
+// TestStoreBackedInterpSkipsFallbackCaches verifies the per-Run image/font LRUs are built only when they are the
+// caching path. With a budgeted store wired every image and font lookup goes to the store, so the LRUs are never
+// consulted — they were pure dead weight on every interpreter the engine built, since the public API always wires one.
+func TestStoreBackedInterpSkipsFallbackCaches(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF("<< >>")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withStore := newInterp(d, nil, gfx.Identity(), &recorder{t: t}, store.New(1<<20))
+	if withStore.images != nil || withStore.fonts != nil {
+		t.Error("the no-store fallback caches were built alongside a store")
+	}
+	// The nil caches must be inert rather than a panic waiting to happen.
+	if _, hit := withStore.images.get(cos.Ref{Num: 1}); hit {
+		t.Error("a nil image cache reported a hit")
+	}
+	withStore.fonts.put(cos.Ref{Num: 1}, nil)
+	// Without a store they are the only cache there is, so they must exist.
+	noStore := newInterp(d, nil, gfx.Identity(), &recorder{t: t}, nil)
+	if noStore.images == nil || noStore.fonts == nil {
+		t.Error("the fallback caches are missing without a store")
+	}
+}

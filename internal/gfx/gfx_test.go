@@ -135,6 +135,37 @@ func TestPathRect(t *testing.T) {
 	}
 }
 
+// RectCorners must emit the same rectangle Rect does for an ordinary box, and — the reason it exists — must stay finite
+// for a box whose extent overflows float32. Every /BBox clip in the engine is built from validated corners, so the
+// origin-plus-extent spelling would hand ±Inf corners to the rasterizer for a box that is itself perfectly finite.
+func TestPathRectCorners(t *testing.T) {
+	var corners, extents Path
+	corners.RectCorners(10, 20, 40, 60)
+	extents.Rect(10, 20, 30, 40)
+	if len(corners.Verbs) != len(extents.Verbs) {
+		t.Fatalf("got %d verbs, want %d", len(corners.Verbs), len(extents.Verbs))
+	}
+	for i := range extents.Points {
+		if corners.Points[i] != extents.Points[i] {
+			t.Errorf("point %d = %v, want %v", i, corners.Points[i], extents.Points[i])
+		}
+	}
+	// -1e38..3e38 spans 4e38, past float32's range: Rect's x+w corners overflow, RectCorners' do not.
+	var wide Path
+	wide.RectCorners(-1e38, -1e38, 3e38, 3e38)
+	for i, pt := range wide.Points {
+		if math.IsInf(float64(pt.X), 0) || math.IsInf(float64(pt.Y), 0) {
+			t.Errorf("point %d = %v is not finite", i, pt)
+		}
+	}
+	x0, x1 := float32(-1e38), float32(3e38)
+	var overflowed Path
+	overflowed.Rect(x0, x0, x1-x0, x1-x0)
+	if !math.IsInf(float64(overflowed.Points[1].X), 1) {
+		t.Error("the extent spelling no longer overflows for this span; the test span needs widening")
+	}
+}
+
 func TestPathCloneAndTransform(t *testing.T) {
 	var p Path
 	p.MoveTo(1, 1)

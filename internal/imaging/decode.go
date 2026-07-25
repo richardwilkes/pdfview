@@ -95,6 +95,11 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 			}
 			if colorKey != nil && inColorKey(samples, colorKey) {
 				out.A = 0
+			}
+			// HasAlpha reports whether any pixel is non-opaque, so it tracks the emitted alpha rather than only the
+			// color-key path: a color space can produce a transparent color on its own (/Separation /None's ToNRGBA
+			// returns the zero NRGBA), and declaring that surface opaque to the renderer is a contract violation.
+			if out.A != 255 {
 				hasAlpha = true
 			}
 			off := (y*w + x) * 4

@@ -12,13 +12,70 @@ package font
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"testing"
 )
+
+// Type 1 charstring operator codes the fixtures below build with.
+const (
+	opRlineto   = byte(5)
+	opHlineto   = byte(6)
+	opClosepath = byte(9)
+	opHsbw      = byte(13)
+	opEndchar   = byte(14)
+	opRmoveto   = byte(21)
+	opEscape    = byte(12)
+	opDiv       = byte(12) // Escaped: 12 12.
+)
+
+// t1Num encodes one charstring integer operand (Adobe Type 1 Font Format 6.2).
+func t1Num(v int) []byte {
+	if v >= -107 && v <= 107 {
+		return []byte{byte(v + 139)}
+	}
+	if v >= 108 && v <= 1131 {
+		v -= 108
+		return []byte{byte(247 + v>>8), byte(v)}
+	}
+	return []byte{255, byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}
+}
+
+// t1CS assembles a charstring from ints (operands) and bytes (operator codes).
+func t1CS(parts ...any) []byte {
+	var out []byte
+	for _, p := range parts {
+		switch v := p.(type) {
+		case int:
+			out = append(out, t1Num(v)...)
+		case byte:
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// t1Glyph is one glyph of a synthesized program: its name and its plain-text charstring.
+type t1Glyph struct {
+	name string
+	prog []byte
+}
 
 // buildT1Program assembles a minimal but conformant Type 1 program (compare internal/type1's full test builder; this
 // compact variant keeps the font package's fixture self-contained): three glyphs — .notdef, a 600-wide box "A", and a
 // 400-wide wedge "T" bound to a non-ASCII code by the built-in encoding.
 func buildT1Program() []byte {
+	return buildT1ProgramFrom([]t1Glyph{
+		{glyphNotdef, t1CS(0, 500, opHsbw, opEndchar)},
+		{"A", t1CS(50, 600, opHsbw, 0, 0, opRmoveto, 400, opHlineto, 0, 700, opRlineto,
+			-400, 0, opRlineto, opClosepath, opEndchar)},
+		{"T", t1CS(0, 400, opHsbw, 0, 0, opRmoveto, 300, opHlineto, -150, 500, opRlineto,
+			opClosepath, opEndchar)},
+	}, "dup 65 /A put\ndup 200 /T put\n")
+}
+
+// buildT1ProgramFrom assembles a program around the given glyphs, with encoding supplying the built-in encoding's dup
+// entries.
+func buildT1ProgramFrom(glyphs []t1Glyph, encoding string) []byte {
 	encrypt := func(plain []byte, r uint16, lead int) []byte {
 		const c1, c2 = 52845, 22719
 		full := append(bytes.Repeat([]byte{0x55}, lead), plain...)
@@ -30,52 +87,12 @@ func buildT1Program() []byte {
 		}
 		return out
 	}
-	num := func(v int) []byte {
-		if v >= -107 && v <= 107 {
-			return []byte{byte(v + 139)}
-		}
-		if v >= 108 && v <= 1131 {
-			v -= 108
-			return []byte{byte(247 + v>>8), byte(v)}
-		}
-		return []byte{255, byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}
-	}
-	cs := func(parts ...any) []byte {
-		var out []byte
-		for _, p := range parts {
-			switch v := p.(type) {
-			case int:
-				out = append(out, num(v)...)
-			case byte:
-				out = append(out, v)
-			}
-		}
-		return out
-	}
-	const (
-		opRlineto   = byte(5)
-		opHlineto   = byte(6)
-		opClosepath = byte(9)
-		opHsbw      = byte(13)
-		opEndchar   = byte(14)
-		opRmoveto   = byte(21)
-	)
-	glyphs := []struct {
-		name string
-		prog []byte
-	}{
-		{glyphNotdef, cs(0, 500, opHsbw, opEndchar)},
-		{"A", cs(50, 600, opHsbw, 0, 0, opRmoveto, 400, opHlineto, 0, 700, opRlineto,
-			-400, 0, opRlineto, opClosepath, opEndchar)},
-		{"T", cs(0, 400, opHsbw, 0, 0, opRmoveto, 300, opHlineto, -150, 500, opRlineto,
-			opClosepath, opEndchar)},
-	}
 	var clearBuf bytes.Buffer
 	clearBuf.WriteString("%!PS-AdobeFont-1.0: FontT1 001.000\n/FontName /FontT1 def\n")
 	clearBuf.WriteString("/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n")
 	clearBuf.WriteString("/FontBBox {0 -250 1000 750} readonly def\n")
 	clearBuf.WriteString("/Encoding 256 array\n0 1 255 {1 index exch /.notdef put} for\n")
-	clearBuf.WriteString("dup 65 /A put\ndup 200 /T put\nreadonly def\ncurrentdict end\ncurrentfile eexec\n")
+	clearBuf.WriteString(encoding + "readonly def\ncurrentdict end\ncurrentfile eexec\n")
 	var priv bytes.Buffer
 	priv.WriteString("dup /Private 10 dict dup begin\n/lenIV 4 def\n")
 	fmt.Fprintf(&priv, "/CharStrings %d dict dup begin\n", len(glyphs))
@@ -195,5 +212,49 @@ func TestType1EncodingOverride(t *testing.T) {
 	}
 	if f.GlyphName(200) != "T" { // The built-in base still shows through where Differences are silent.
 		t.Errorf("built-in base lost under /Encoding dict: %q", f.GlyphName(200))
+	}
+}
+
+// TestType1NonFiniteHsbwAdvanceGuarded verifies buildAdvances keeps only finite advances. A charstring can reach hsbw
+// with a ±Inf width — div composes stack values without bound, and four rounds against a reciprocal take legal integer
+// operands past float32's range — and the FontMatrix scale can push a legal width out of range too. Without the guard
+// Font.Width returns +Inf for a font with no /Widths, which flows into the glyph advance the structured-text device
+// builds search quads from: every hit's right edge collapses to the page origin through the float→int clamp.
+func TestType1NonFiniteHsbwAdvanceGuarded(t *testing.T) {
+	// 2e9 div 1 div 2e9 leaves 2e9/(1/2e9) = 4e18; each further round multiplies by another 2e9, so after four the
+	// width is ~3.2e46 — +Inf once narrowed to float32.
+	const big = 2000000000
+	round := []any{1, big, opEscape, opDiv, opEscape, opDiv}
+	parts := make([]any, 0, 2+4*len(round)+2)
+	parts = append(parts, 0, big) // The sidebearing, then the first round's dividend.
+	for range 4 {
+		parts = append(parts, round...)
+	}
+	parts = append(parts, opHsbw, opEndchar)
+	prog := buildT1ProgramFrom([]t1Glyph{
+		{glyphNotdef, t1CS(0, 500, opHsbw, opEndchar)},
+		{"A", t1CS(parts...)},
+	}, "dup 65 /A put\n")
+	f, err := loadFromDict(
+		t,
+		"<< /Type /Font /Subtype /Type1 /BaseFont /FontT1 /FontDescriptor 2 0 R >>",
+		"<< /Type /FontDescriptor /FontName /FontT1 /Flags 4 /FontFile 3 0 R >>",
+		fmt.Sprintf("<< /Length %d /Length1 1 /Length2 1 /Length3 0 >>\nstream\n%s\nendstream", len(prog), prog),
+	)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if f.t1 == nil {
+		t.Fatal("embedded Type 1 program not parsed (substituted instead)")
+	}
+	// The premise: the program's own advance really is out of float32's range.
+	if adv, ok := f.t1.font.Advance("A"); !ok || !math.IsInf(float64(adv), 1) {
+		t.Fatalf("charstring advance = %v (ok %v), want +Inf: the fixture no longer overflows", adv, ok)
+	}
+	if _, ok := f.t1.advance(f.GID(65)); ok {
+		t.Error("an out-of-range hsbw advance was recorded; it must fall through to the missing-width path")
+	}
+	if w := f.Width(65); !isFiniteF(w) {
+		t.Errorf("Width(A) = %v; a non-finite width reaches the glyph quads the search pass builds", w)
 	}
 }

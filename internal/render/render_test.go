@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/richardwilkes/canvas/geom"
+	"github.com/richardwilkes/canvas/imagecore"
+	"github.com/richardwilkes/canvas/path"
 	"github.com/richardwilkes/canvas/raster"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -1866,4 +1868,159 @@ func TestDrawMeshScratchPathIsClearPerTriangle(t *testing.T) {
 		t.Errorf("area covered by neither triangle painted %v, want transparent", got)
 	}
 	comparePixels(t, render(2), pix, stride, "mesh drawn twice through the reused scratch path")
+}
+
+// TestBuildPathDropsNonFiniteGeometry pins the policy at the single seam every gfx.Path crosses into canvas through:
+// ±Inf/NaN coordinates are not geometry a rasterizer can act on, so the path is dropped whole rather than partially
+// built (which would fabricate segments the producer never described). Producers validate their own coordinates, but a
+// value derived from validated ones — a rectangle's X1-X0 extent — can still overflow, and the failure then surfaces as
+// "this form renders nothing" with no diagnostic.
+func TestBuildPathDropsNonFiniteGeometry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bad  gfx.Point
+	}{
+		{"inf", gfx.Point{X: float32(math.Inf(1)), Y: 0}},
+		{"neg inf", gfx.Point{X: 0, Y: float32(math.Inf(-1))}},
+		{"nan", gfx.Point{X: float32(math.NaN()), Y: 5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var p gfx.Path
+			p.MoveTo(0, 0)
+			p.LineTo(10, 0)
+			p.LineTo(tc.bad.X, tc.bad.Y)
+			p.Close()
+			if got := buildPath(&p, false); !got.IsEmpty() {
+				t.Errorf("path with a %s point built %v verbs; it must be dropped whole", tc.name, got.Bounds())
+			}
+			// A wholly finite path still converts, so the guard cannot be a blanket rejection.
+			var good gfx.Path
+			good.Rect(0, 0, 10, 10)
+			if buildPath(&good, false).IsEmpty() {
+				t.Error("a finite path was dropped")
+			}
+		})
+	}
+}
+
+// TestTilingCellClipSurvivesOverRangeBBox verifies the cell clip rasterizeTile builds spells the pattern /BBox corner
+// by corner. The extent form (X1-X0) overflows to +Inf for a box spanning more than float32's range — -1e38..3e38 here
+// — and the non-finite corners that yields clip the whole cell away, so a tiling pattern with an over-wide box paints
+// nothing at all.
+func TestTilingCellClipSurvivesOverRangeBBox(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bbox gfx.Rect
+	}{
+		{caseValidTile, gfx.Rect{X1: 20, Y1: 20}},
+		{caseOverflowTile, gfx.Rect{X0: -1e38, Y0: -1e38, X1: 3e38, Y1: 3e38}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDevice(t, 20, 20)
+			replays, emptyClips := 0, 0
+			tiling := &device.Tiling{
+				Replay: func(dev device.Device, _ gfx.Matrix) {
+					replays++
+					cell, ok := dev.(*Device)
+					if !ok {
+						t.Fatalf("cell device is %T, not the render device", dev)
+					}
+					if cell.c.IsClipEmpty() {
+						emptyClips++
+					}
+				},
+				BBox:  tc.bbox,
+				XStep: 20,
+				YStep: 20,
+			}
+			if img := d.rasterizeTile(tiling, gfx.Identity(), 20, 20); img == nil {
+				t.Fatal("cell rasterization failed")
+			}
+			if replays == 0 {
+				t.Fatal("the cell content never replayed")
+			}
+			if emptyClips != 0 {
+				t.Errorf("%d of %d cell replays ran under an empty clip: the /BBox clip degenerated", emptyClips,
+					replays)
+			}
+		})
+	}
+}
+
+// Sub-test case names for the over-range /BBox tables.
+const (
+	caseValidTile    = "valid"
+	caseOverflowTile = "overflow"
+)
+
+// TestRasterImageAlphaTypeFollowsPixels verifies rasterImage's alpha declaration follows the decoded pixels. The
+// declaration is a promise to canvas about the surface's contents, and an image whose color space produced transparent
+// pixels on its own (a /Separation /None space) must not be announced as opaque — a consumer taking that at its word
+// paints a solid rectangle where the file asks for nothing.
+func TestRasterImageAlphaTypeFollowsPixels(t *testing.T) {
+	transparent := &imaging.Image{
+		Pix: make([]byte, 4), Width: 1, Height: 1, HasAlpha: true, // A /Separation /None pixel: all four bytes zero.
+	}
+	if got := rasterImage(transparent).AlphaType(); got == imagecore.AlphaTypeOpaque {
+		t.Error("a transparent image is declared opaque")
+	}
+	opaque := &imaging.Image{Pix: []byte{10, 20, 30, 255}, Width: 1, Height: 1}
+	if got := rasterImage(opaque).AlphaType(); got != imagecore.AlphaTypeOpaque {
+		t.Errorf("opaque image declared %v, want AlphaTypeOpaque", got)
+	}
+}
+
+// TestTilingReplayReusesCellClipPath verifies the per-cell /BBox clip is built into one reusable scratch path rather
+// than cloned per cell. A single fill replays up to maxReplayTiles cells and each needs only a transformed copy of the
+// same five-point box, so the clone was this loop's whole allocation cost — the same reasoning meshScratch and maskPath
+// are built on. The scratch must also carry the CURRENT cell's box, which is what proves the loop rebuilds it rather
+// than reusing stale contents.
+func TestTilingReplayReusesCellClipPath(t *testing.T) {
+	d := newDevice(t, 64, 64)
+	var p gfx.Path
+	p.Rect(0, 0, 64, 64)
+	const step = 16
+	replays, distinct, misplaced := 0, 0, 0
+	var first *path.Path
+	paint := device.Paint{
+		Alpha: 1,
+		Tiling: &device.Tiling{
+			Replay: func(dev device.Device, ctm gfx.Matrix) {
+				replays++
+				cell, ok := dev.(*Device)
+				if !ok {
+					t.Fatalf("replay device is %T, not the render device", dev)
+				}
+				if cell.tileScratch == nil {
+					t.Fatal("no scratch path: the cell clip was built somewhere else")
+				}
+				switch {
+				case first == nil:
+					first = cell.tileScratch
+				case first != cell.tileScratch:
+					distinct++
+				}
+				// The scratch must hold this cell's box in device space, not a leftover from an earlier cell.
+				wantLeft, wantTop := ctm.ApplyXY(0, 0)
+				if b := cell.tileScratch.Bounds(); b.Left != wantLeft || b.Top != wantTop {
+					misplaced++
+				}
+			},
+			BBox:  gfx.Rect{X1: step, Y1: step},
+			XStep: step,
+			YStep: step,
+		},
+		PatternCTM: gfx.Identity(),
+	}
+	d.FillPath(&p, false, gfx.Identity(), paint)
+	if replays < 4 {
+		t.Fatalf("the fill replayed %d cells; the lattice path was not taken", replays)
+	}
+	if distinct != 0 {
+		t.Errorf("%d of %d cell replays saw a fresh clip path; one scratch must serve them all", distinct, replays)
+	}
+	if misplaced != 0 {
+		t.Errorf("%d of %d cell clips did not match their cell's box: the scratch was not rebuilt per cell",
+			misplaced, replays)
+	}
 }

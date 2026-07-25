@@ -789,3 +789,36 @@ func TestInlineNamedColorSpace(t *testing.T) {
 		t.Fatal("unresolvable colorspace accepted")
 	}
 }
+
+// TestSeparationNoneImageReportsAlpha verifies HasAlpha tracks the alpha actually emitted, not just the color-key and
+// mask paths. A /Separation /None space never marks the page — its ToNRGBA returns the zero NRGBA, alpha included — so
+// every pixel of such an image is transparent. Declaring that surface opaque violates HasAlpha's own contract, and a
+// consumer taking the declaration at its word paints a solid black rectangle.
+func TestSeparationNoneImageReportsAlpha(t *testing.T) {
+	d := testDoc(t)
+	sepNone := cos.Array{cos.Name("Separation"), cos.Name("None"), cos.Name("DeviceGray")}
+	dict := cos.Dict{
+		"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": sepNone,
+	}
+	img, err := DecodeInline(d, dict, []byte{0, 255}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		if a := img.Pix[i*4+3]; a != 0 {
+			t.Fatalf("pixel %d alpha = %d, want 0: a /None separation never marks", i, a)
+		}
+	}
+	if !img.HasAlpha {
+		t.Error("a fully transparent image is declared opaque; HasAlpha must report any non-opaque pixel")
+	}
+	// An ordinary opaque image must still be declared opaque, so the guard is not a blanket flag.
+	opaque := cos.Dict{"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G")}
+	img, err = DecodeInline(d, opaque, []byte{0, 255}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.HasAlpha {
+		t.Error("an all-opaque image was flagged as having alpha")
+	}
+}

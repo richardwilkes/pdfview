@@ -168,8 +168,14 @@ func (in *interp) parseTiling(raw cos.Object, stream *cos.Stream) *tilingRes {
 }
 
 // stepValue reads a tile step, degrading zero, missing, or non-finite values to the cell extent (the leniency viewers
-// apply) and folding negative steps to their magnitude (spacing is a distance).
+// apply) and folding negative steps to their magnitude (spacing is a distance). The fallback gets the same finiteness
+// test as the supplied value: the cell extent is a float32 subtraction of two validated /BBox entries, so a box
+// spanning more than float32's range makes it +Inf — which every step consumer rejects, leaving the pattern painting
+// nothing. A non-finite fallback degrades to 1, a step the renderer can act on.
 func stepValue(d *cos.Document, dict cos.Dict, key cos.Name, fallback float32) float32 {
+	if !isFinitePt(fallback, 0) {
+		fallback = 1
+	}
 	v, ok := d64(d, dict, key)
 	if !ok || !isFinitePt(float32(v), 0) || v == 0 {
 		return fallback
@@ -245,11 +251,7 @@ func (in *interp) tilingReplay(tile *tilingRes, cellColor color.NRGBA) func(devi
 		}
 		// Each cell replay re-scans the whole cell body, so it is charged per replay, not once per parse.
 		in.charge(bodyCost(len(tile.body)))
-		child := newInterp(in.doc, tile.resources, ctm, dev, in.st)
-		child.active = in.active
-		child.caches = in.caches
-		child.formDepth = in.formDepth + 1
-		child.budget = in.budget
+		child := in.newChild(tile.resources, ctm, dev)
 		if tile.uncolored {
 			child.suppressColor = true
 			comps := []float32{float32(cellColor.R) / 255, float32(cellColor.G) / 255, float32(cellColor.B) / 255}

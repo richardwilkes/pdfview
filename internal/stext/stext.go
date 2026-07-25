@@ -101,14 +101,28 @@ func (d *Device) EndMask() {
 	}
 }
 
-// record appends run's characters, once per run regardless of how many verbs delivered it.
+// maxChars caps the recorded characters of one page. The interpreter's work budget bounds how many glyphs a page can
+// show, but not the memory their records take: one Char is ~60 bytes, so an unbounded slice turns a 61 KB file (a form
+// XObject holding a huge Tj, invoked repeatedly) into most of a gigabyte of live heap on the search pass. The cap is
+// far above the densest real page — a full page of 6-point text runs to tens of thousands of characters — and the
+// excess is dropped exactly as the link and outline walks drop theirs: what was recorded stays searchable.
+const maxChars = 1 << 20
+
+// record appends run's characters, once per run regardless of how many verbs delivered it. Characters past maxChars are
+// dropped.
 func (d *Device) record(run *device.TextRun) {
 	if run == d.last {
 		return
 	}
 	d.last = run
+	if len(d.chars) >= maxChars {
+		return
+	}
 	asc, desc := run.Font.Ascender(), run.Font.Descender()
 	for _, g := range run.Glyphs {
+		if len(d.chars) >= maxChars {
+			return
+		}
 		d.chars = append(d.chars, Char{
 			Quad: gfx.Quad{
 				UL: g.Trm.Apply(gfx.Point{X: 0, Y: asc}),

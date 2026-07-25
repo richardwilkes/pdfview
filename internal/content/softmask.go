@@ -216,7 +216,10 @@ func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
 	in.gs.ctm = ctm
 	in.gs.fillAlpha, in.gs.strokeAlpha, in.gs.blend, in.gs.softMask = 1, 1, device.BlendNormal, nil
 	clip := &gfx.Path{}
-	clip.Rect(sm.bbox.X0, sm.bbox.Y0, sm.bbox.X1-sm.bbox.X0, sm.bbox.Y1-sm.bbox.Y0)
+	// Corner form for the same reason the device-space bbox above is re-validated: X1-X0 overflows to +Inf for a box
+	// spanning more than float32's range, and the non-finite corners Rect would emit lose the clip entirely — mask
+	// content that belongs inside the box would then paint everywhere.
+	clip.RectCorners(sm.bbox.X0, sm.bbox.Y0, sm.bbox.X1, sm.bbox.Y1)
 	in.dev.ClipPath(clip, false, in.gs.ctm)
 	in.gs.clips++
 	resources := in.res[len(in.res)-1]

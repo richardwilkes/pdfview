@@ -434,3 +434,33 @@ func TestRecordRetainsOnlyTheCurrentRun(t *testing.T) {
 		t.Fatalf("%d of %d runs still reachable, want at most 1", live, count)
 	}
 }
+
+// TestRecordCapsCharacters verifies record bounds what it accumulates. The interpreter's work budget bounds how many
+// glyphs a page may show, but not the memory their records take: a Char is ~60 bytes, so an unbounded slice turns a
+// 61 KB file — one form XObject holding a 60 000-byte Tj, invoked 80 times — into most of a gigabyte of live heap on
+// the search pass, a ~16 000x amplification over the input. Every other accumulation in the engine is capped; this one
+// drops its excess the way the link and outline walks drop theirs, and what was recorded stays searchable.
+func TestRecordCapsCharacters(t *testing.T) {
+	const perRun = 4096
+	dev := New()
+	glyphs := make([]device.Glyph, perRun)
+	for i := range glyphs {
+		glyphs[i] = device.Glyph{Trm: gfx.Matrix{A: 12, D: 12, E: float32(i) * 6, F: 200}, Unicode: 'a', Advance: 0.5}
+	}
+	// A fresh run pointer per delivery: the dedup guard keys on identity, so each of these records its glyphs.
+	for range maxChars/perRun + 4 {
+		dev.FillText(&device.TextRun{Font: &font.Font{}, Glyphs: glyphs}, device.Paint{})
+	}
+	if got := len(dev.Chars()); got != maxChars {
+		t.Fatalf("recorded %d characters, want the cap of %d", got, maxChars)
+	}
+	// The cap must not disturb what was recorded before it: the last recorded run is still intact and searchable.
+	if got := dev.Chars()[maxChars-1].Rune; got != 'a' {
+		t.Errorf("the last recorded character is %q, want 'a'", got)
+	}
+	// A run arriving past the cap is dropped whole rather than partially, and recording stays a no-op afterwards.
+	dev.FillText(&device.TextRun{Font: &font.Font{}, Glyphs: glyphs}, device.Paint{})
+	if got := len(dev.Chars()); got != maxChars {
+		t.Errorf("a post-cap run grew the recording to %d characters", got)
+	}
+}

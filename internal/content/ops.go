@@ -610,7 +610,10 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	}
 	if hasBBox {
 		clip := &gfx.Path{}
-		clip.Rect(bbox.X0, bbox.Y0, bbox.X1-bbox.X0, bbox.Y1-bbox.Y0)
+		// Corner form, not Rect's origin-plus-extent form: rectFrom validated the four entries individually, but
+		// X1-X0 overflows to +Inf for a box spanning more than float32's range, and the +Inf corners Rect would then
+		// emit degenerate the clip (the form paints nothing) for a box that should clip nothing at all.
+		clip.RectCorners(bbox.X0, bbox.Y0, bbox.X1, bbox.Y1)
 		in.dev.ClipPath(clip, false, in.gs.ctm)
 		in.gs.clips++
 	}

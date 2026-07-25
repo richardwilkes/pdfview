@@ -144,10 +144,11 @@ type interp struct {
 	path     *gfx.Path
 	active   map[cos.Ref]bool
 	// images caches decoded image XObjects (nil for failed decodes) for this Run, an LRU capped at maxCachedImages
-	// entries so a re-used image stays cached rather than being dropped once the cap is reached.
+	// entries so a re-used image stays cached rather than being dropped once the cap is reached. It is itself nil when
+	// st is wired, which is the caching path then; child interpreters share whichever the parent has.
 	images *lruCache[cos.Ref, *imaging.Image]
 	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference; an LRU
-	// capped at maxCachedFonts entries.
+	// capped at maxCachedFonts entries, nil with a store wired, exactly like images.
 	fonts *lruCache[cos.Ref, *font.Font]
 	// caches holds the Run's reference-keyed decoded-body and parsed-resource caches (budget.go); child interpreters
 	// share the set with their parent.
@@ -219,10 +220,40 @@ func RunAnnot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *c
 	in.popClips(0)
 }
 
-// newInterp builds a fresh interpreter with the default graphics state. Run uses it directly; a tiling pattern's Replay
-// closure uses it for the child interpreter that executes one cell's content (sharing the parent's cycle set and budget
-// by assignment after construction).
+// newInterp builds a fresh interpreter with the default graphics state, its own cycle set, resource caches, and full
+// work budget. Run and RunAnnot use it; a tiling pattern's cell replay uses newChild instead.
 func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.Device, st *store.Store) *interp {
+	in := baseInterp(d, resources, ctm, dev, st)
+	in.active = make(map[cos.Ref]bool)
+	if st == nil {
+		// The two LRUs are the no-store fallback only: with a store wired, every image and font lookup goes to it and
+		// these are never consulted, so they are not built (a nil cache reports a miss and discards puts).
+		in.images = newLRUCache[cos.Ref, *imaging.Image](maxCachedImages)
+		in.fonts = newLRUCache[cos.Ref, *font.Font](maxCachedFonts)
+	}
+	in.caches = newRunCaches()
+	in.budget = maxTotalOps
+	return in
+}
+
+// newChild builds the interpreter that executes one tiling pattern cell against dev. It shares the parent's cycle set,
+// parse caches, image/font LRUs, and remaining work budget (the caller folds the child's leftover budget back), and
+// enters one form level deeper. The sharing is not just consistency: a single fill replays up to maxReplayTiles cells,
+// so allocating a cycle set, a runCaches set, and two LRUs per cell — only to drop them — is pure garbage per cell.
+func (in *interp) newChild(resources cos.Dict, ctm gfx.Matrix, dev device.Device) *interp {
+	child := baseInterp(in.doc, resources, ctm, dev, in.st)
+	child.active = in.active
+	child.images = in.images
+	child.fonts = in.fonts
+	child.caches = in.caches
+	child.formDepth = in.formDepth + 1
+	child.budget = in.budget
+	return child
+}
+
+// baseInterp builds the parts of an interpreter that never come from a parent: the default graphics state, the
+// resource stack, and the path buffer. The caller supplies the cycle set, caches, and budget.
+func baseInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.Device, st *store.Store) *interp {
 	in := &interp{
 		doc:    d,
 		dev:    dev,
@@ -242,12 +273,7 @@ func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.D
 			fillAlpha:   1,
 			strokeAlpha: 1,
 		},
-		path:   &gfx.Path{},
-		active: make(map[cos.Ref]bool),
-		images: newLRUCache[cos.Ref, *imaging.Image](maxCachedImages),
-		fonts:  newLRUCache[cos.Ref, *font.Font](maxCachedFonts),
-		caches: newRunCaches(),
-		budget: maxTotalOps,
+		path: &gfx.Path{},
 	}
 	in.gs.text.scale = 1
 	return in

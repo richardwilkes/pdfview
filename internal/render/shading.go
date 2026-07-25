@@ -498,8 +498,10 @@ func (d *Device) rasterizeTile(t *device.Tiling, window gfx.Matrix, w, h int) *i
 	// Cells whose box exceeds the steps spill into neighbors' windows; replay the necessary neighbor copies.
 	nx := spillCopies(t.BBox.X1-t.BBox.X0, t.XStep)
 	ny := spillCopies(t.BBox.Y1-t.BBox.Y0, t.YStep)
+	// Corner form: the extents X1-X0/Y1-Y0 overflow to +Inf for a box spanning more than float32's range, and the
+	// non-finite corners that yields clip the whole cell away (buildPath's guard would drop the path outright).
 	bboxPath := &gfx.Path{}
-	bboxPath.Rect(t.BBox.X0, t.BBox.Y0, t.BBox.X1-t.BBox.X0, t.BBox.Y1-t.BBox.Y0)
+	bboxPath.RectCorners(t.BBox.X0, t.BBox.Y0, t.BBox.X1, t.BBox.Y1)
 	for i := -nx; i <= 0; i++ {
 		for j := -ny; j <= 0; j++ {
 			ctm := gfx.Translate(float32(i)*t.XStep, float32(j)*t.YStep).Mul(window)
@@ -585,12 +587,16 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 		layerPaint.BlendMode = blendModes[p.Blend]
 		d.c.SaveLayer(nil, layerPaint)
 	}
-	bboxPath := path.New()
-	bboxPath.MoveTo(t.BBox.X0, t.BBox.Y0)
-	bboxPath.LineTo(t.BBox.X1, t.BBox.Y0)
-	bboxPath.LineTo(t.BBox.X1, t.BBox.Y1)
-	bboxPath.LineTo(t.BBox.X0, t.BBox.Y1)
-	bboxPath.Close()
+	// One scratch path, rewound and rebuilt per cell, serves every cell of every fill: a fill replays up to
+	// maxReplayTiles of them and each needs only a transformed copy of the same five-point box, so cloning per cell was
+	// this loop's whole allocation cost. ClipPath rasterizes the path into clip runs before returning and retains no
+	// reference to it, and the scratch is rebuilt from t.BBox at the top of every iteration, so a nested tiling fill
+	// re-entering the device through Replay cannot leave stale contents behind.
+	if d.tileScratch == nil {
+		d.tileScratch = path.New()
+		d.tileScratch.SetVolatile(true) // Its contents change per cell; nothing downstream should cache them.
+	}
+	clip := d.tileScratch
 	for i := i0; i <= i1; i++ {
 		for j := j0; j <= j1; j++ {
 			// MuPDF rasterizes one tile and blits the copies at integer device offsets; quantizing each copy's device
@@ -602,7 +608,12 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 			ry := float32(math.Floor(float64(sy)))
 			ctm := p.PatternCTM.Mul(gfx.Translate(rx, ry))
 			m := matrix(ctm)
-			clip := bboxPath.Clone()
+			clip.Rewind()
+			clip.MoveTo(t.BBox.X0, t.BBox.Y0)
+			clip.LineTo(t.BBox.X1, t.BBox.Y0)
+			clip.LineTo(t.BBox.X1, t.BBox.Y1)
+			clip.LineTo(t.BBox.X0, t.BBox.Y1)
+			clip.Close()
 			clip.Transform(&m)
 			tileCount := d.c.Save()
 			d.c.ClipPath(clip, raster.ClipIntersect, true) // Cell content is clipped to /BBox.

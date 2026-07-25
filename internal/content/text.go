@@ -245,12 +245,20 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 			adv = w1
 		}
 		if trm.IsFinite() {
+			// The emitted advance is the glyph quad's width in the structured-text device (Trm × (advance, ...)), so a
+			// non-finite one collapses the quad's right edge to the origin through the device's float→int clamp — the
+			// hit tracks nothing. The width sources guard themselves, but the emission does not depend on that: an
+			// unusable advance is emitted as zero, which is what a zero-width glyph would carry anyway.
+			emitted := adv
+			if !isFinitePt(emitted, 0) {
+				emitted = 0
+			}
 			run.Glyphs = append(run.Glyphs, device.Glyph{
 				Trm:     trm,
 				GID:     ts.font.GID(code),
 				Code:    code,
 				Unicode: ts.font.Unicode(code),
-				Advance: adv,
+				Advance: emitted,
 			})
 		}
 		// Guard the advanced text matrix like every other matrix-composing site: the font's advance comes from the font

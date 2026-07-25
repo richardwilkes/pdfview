@@ -36,8 +36,13 @@ func newLRUCache[K comparable, V any](capacity int) *lruCache[K, V] {
 }
 
 // get returns the cached value for key and marks it most recently used. The bool distinguishes a cached value
-// (including a nil negative entry) from a miss.
+// (including a nil negative entry) from a miss. A nil cache — what an interpreter with a budgeted store carries, since
+// the store replaces this fallback — reports a miss.
 func (c *lruCache[K, V]) get(key K) (V, bool) {
+	if c == nil {
+		var zero V
+		return zero, false
+	}
 	if el, ok := c.entries[key]; ok {
 		if e, isEntry := el.Value.(*lruEntry[K, V]); isEntry { // Always true: only put creates elements.
 			c.order.MoveToFront(el)
@@ -48,8 +53,12 @@ func (c *lruCache[K, V]) get(key K) (V, bool) {
 	return zero, false
 }
 
-// put inserts or updates key, evicting the least-recently-used entry when the capacity would be exceeded.
+// put inserts or updates key, evicting the least-recently-used entry when the capacity would be exceeded. A nil cache
+// discards the value (see get).
 func (c *lruCache[K, V]) put(key K, val V) {
+	if c == nil {
+		return
+	}
 	if el, ok := c.entries[key]; ok {
 		if e, isEntry := el.Value.(*lruEntry[K, V]); isEntry {
 			e.val = val

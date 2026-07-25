@@ -123,7 +123,13 @@ func (t *t1Info) buildAdvances(enc *[256]string) {
 			continue
 		}
 		if adv, advOK := t.font.Advance(name); advOK {
-			t.advances[gid] = adv * t.matrix[0]
+			// Only the finite product is kept, like every other width source: a charstring can reach hsbw with a ±Inf
+			// width (div composes stack values without bound), and the FontMatrix scale can push a legal one out of
+			// range. An unusable advance is simply not recorded, so the glyph falls back to the missing-width path
+			// rather than handing ±Inf to Font.Width and on to the glyph quads the structured-text device builds.
+			if scaled := adv * t.matrix[0]; isFiniteF(scaled) {
+				t.advances[gid] = scaled
+			}
 		}
 	}
 }
