@@ -10,6 +10,8 @@
 package type1
 
 import (
+	"math"
+
 	psi "github.com/go-text/typesetting/font/cff/interpreter"
 	ot "github.com/go-text/typesetting/font/opentype"
 )
@@ -379,15 +381,32 @@ func (h *handler) flexMove(state *psi.Machine, op byte) error {
 	return nil
 }
 
+// csIndex converts a charstring operand that addresses something — an othersubr number, its argument count, a seac
+// component's StandardEncoding code — to an int, mapping anything that is not a finite value in [0, maxV] to -1 so the
+// caller's range check rejects it. The bounds are applied in float space on purpose: Go leaves a float→int conversion
+// implementation-defined when the value does not fit, and the platforms disagree — amd64 wraps every out-of-range
+// operand (and NaN) to the minimum integer while arm64 saturates to the nearest bound and maps NaN to 0. A hostile
+// charstring reaches such operands easily (a chain of div operators overflows to ±Inf, and dividing those yields NaN),
+// so clamping here makes the rejection identical on every architecture instead of leaving it to how the CPU converts.
+func csIndex(v float64, maxV int) int {
+	if math.IsNaN(v) || v < 0 || v > float64(maxV) {
+		return -1
+	}
+	return int(v)
+}
+
 // callOtherSubr implements the othersubr protocol (spec chapter 8): flex (0-2), hint replacement (3), and the
 // push-through convention for anything unknown.
 func (h *handler) callOtherSubr(state *psi.Machine) error {
 	if state.ArgStack.Top < 2 {
 		return ErrBadCharstring
 	}
-	which := int(state.ArgStack.Pop())
-	n := int32(state.ArgStack.Pop())
-	if n < 0 || n > state.ArgStack.Top {
+	// An othersubr number that does not convert lands on -1, which the switch below treats as the unknown othersubr it
+	// effectively is; an argument count that does not convert is fatal, since it selects the slice of arguments.
+	which := csIndex(state.ArgStack.Pop(), math.MaxInt32)
+	count := state.ArgStack.Pop()
+	n := int32(csIndex(count, int(state.ArgStack.Top)))
+	if n < 0 {
 		return ErrBadCharstring
 	}
 	args := state.ArgStack.Vals[state.ArgStack.Top-n : state.ArgStack.Top] // Bottom-first order.
@@ -462,10 +481,10 @@ func (h *handler) seac(state *psi.Machine) error {
 	asb := state.ArgStack.Vals[0]
 	adx := state.ArgStack.Vals[1]
 	ady := state.ArgStack.Vals[2]
-	bchar := int(state.ArgStack.Vals[3])
-	achar := int(state.ArgStack.Vals[4])
+	bchar := csIndex(state.ArgStack.Vals[3], 255)
+	achar := csIndex(state.ArgStack.Vals[4], 255)
 	state.ArgStack.Clear()
-	if h.font.StdEnc == nil || bchar < 0 || bchar > 255 || achar < 0 || achar > 255 {
+	if h.font.StdEnc == nil || bchar < 0 || achar < 0 {
 		return psi.ErrInterrupt // No encoding table: degrade to whatever was drawn (nothing, per the spec's layout).
 	}
 	if err := h.runComponent(h.font.StdEnc[bchar], 0, 0); err != nil {

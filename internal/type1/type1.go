@@ -20,6 +20,7 @@ package type1
 
 import (
 	"errors"
+	"math"
 	"slices"
 	"strconv"
 )
@@ -402,14 +403,16 @@ func (f *Font) parseSubrs(s *scanner, lenIV int) {
 		}
 		idx, okI := s.integer()
 		length, okL := s.integer()
-		if !okI || !okL {
+		if !okL {
 			continue
 		}
 		raw, okR := s.binary(length)
 		if !okR {
 			break
 		}
-		if idx >= 0 && idx < count {
+		// An index that is out of range (or is a number no integer can represent) discards the entry but still consumes
+		// its binary payload, so the scan resynchronizes on the next dup instead of tokenizing the charstring bytes.
+		if okI && idx >= 0 && idx < count {
 			subrs[idx] = decrypt(raw, charstringR, lenIV)
 		}
 		s.skipKeyword() // The NP token (or whatever the font calls it).
@@ -582,13 +585,32 @@ func (s *scanner) next() (token, bool) {
 	return token{kind: tokKeyword, text: word}, true
 }
 
-// integer returns the next token as an integer, failing (without consuming further) when it is not a number.
+// integer returns the next token as an integer, failing (without consuming further) when it is not a number, or is one
+// that does not convert (see toInt64).
 func (s *scanner) integer() (int64, bool) {
 	tok, ok := s.next()
 	if !ok || tok.kind != tokNumber {
 		return 0, false
 	}
-	return int64(tok.value), true
+	return toInt64(tok.value)
+}
+
+// toInt64 truncates a scanned number toward zero, reporting failure for anything that does not fit in an int64. The
+// bound is applied in float space on purpose: Go leaves a float→int conversion implementation-defined when the value
+// does not fit, and the platforms disagree — amd64 wraps every out-of-range value (and NaN) to math.MinInt64 while
+// arm64 saturates to the nearest bound and maps NaN to 0. The scanner's numbers come from strconv.ParseFloat, which
+// accepts "1e300", "inf" and "nan", so a hostile program can write a charstring length, /Subrs count, dup code, or
+// lenIV that would otherwise reach the callers' range checks as an architecture-dependent value. Failing here makes
+// the rejection identical everywhere.
+func toInt64(v float64) (int64, bool) {
+	// float64 represents math.MinInt64 (−2^63) exactly, so the lower guard is precise. It cannot represent
+	// math.MaxInt64 (2^63−1), which rounds up to 2^63 — comparing against it with `>` would let a v of exactly 2^63
+	// slip through to int64(v) and overflow. −math.MinInt64 is 2^63 (representable exactly, since math.MinInt64 is a
+	// power of two), so `v >= -float64(math.MinInt64)` rejects the first out-of-range value precisely.
+	if math.IsNaN(v) || v < math.MinInt64 || v >= -float64(math.MinInt64) {
+		return 0, false
+	}
+	return int64(v), true
 }
 
 // numbers reads a bracketed (or braced) list of n numbers: [ n1 ... nN ] — tolerating a missing opener.

@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 
 	ot "github.com/go-text/typesetting/font/opentype"
@@ -484,6 +485,265 @@ func TestGlyphErrors(t *testing.T) {
 	if _, _, err := f.Glyph("huge"); err == nil {
 		t.Errorf("segment flood did not error")
 	}
+}
+
+// ---- non-finite and out-of-range operands ---------------------------------------------------------------------
+//
+// Type 1's charstring number encoding carries int32s only, but div composes them into arbitrary float64s — including
+// ±Inf and NaN — and the scanner's numbers come from strconv.ParseFloat, which accepts "1e300", "inf" and "nan". Every
+// place either kind of value is converted to an int must reject it in float space, because Go leaves an out-of-range
+// float→int conversion implementation-defined and amd64 and arm64 disagree (amd64 wraps to the minimum integer, arm64
+// saturates and maps NaN to 0). These tests pin the converted results and the behavior that depends on them.
+
+// csScaleUp returns a charstring that pushes a seed of 2^30 and then multiplies the top of the stack by 2^30 k times:
+// each repetition of "1 2^30 div div" leaves 2^-30 on top and then divides the value beneath it by that. It is the
+// only way a charstring reaches a value the number encoding cannot express.
+func csScaleUp(k int) []byte {
+	out := cs(1 << 30)
+	for range k {
+		out = append(out, cs(1, 1<<30, oDiv, oDiv)...)
+	}
+	return out
+}
+
+// csInf leaves +Inf on the argument stack (2^30 scaled up past the float64 range).
+func csInf() []byte { return csScaleUp(35) }
+
+// csNaN leaves NaN on the argument stack (Inf divided by Inf).
+func csNaN() []byte { return append(append(csInf(), csInf()...), oDiv...) }
+
+func TestCsIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    float64
+		maxV int
+		want int
+	}{
+		{name: "zero", v: 0, maxV: 255, want: 0},
+		{name: "in range", v: 200, maxV: 255, want: 200},
+		{name: "at max", v: 255, maxV: 255, want: 255},
+		{name: "truncates", v: 200.9, maxV: 255, want: 200},
+		{name: "over max", v: 256, maxV: 255, want: -1},
+		{name: "negative", v: -1, maxV: 255, want: -1},
+		{name: "NaN", v: math.NaN(), maxV: 255, want: -1},
+		{name: "+Inf", v: math.Inf(1), maxV: 255, want: -1},
+		{name: "-Inf", v: math.Inf(-1), maxV: 255, want: -1},
+		{name: "huge finite", v: 1e300, maxV: math.MaxInt32, want: -1},
+		{name: "+Inf at int32 max", v: math.Inf(1), maxV: math.MaxInt32, want: -1},
+		{name: "int32 max", v: math.MaxInt32, maxV: math.MaxInt32, want: math.MaxInt32},
+	} {
+		if got := csIndex(tc.v, tc.maxV); got != tc.want {
+			t.Errorf("csIndex(%v, %d) = %d, want %d", tc.v, tc.maxV, got, tc.want)
+		}
+	}
+}
+
+// TestCharstringInfIsReachable is the premise the tests below rest on: the div chain really does produce +Inf on the
+// argument stack, so operators that consume it see a non-finite operand.
+func TestCharstringInfIsReachable(t *testing.T) {
+	f := parseTestFont(t, false, false, false)
+	f.CharStrings["inf"] = append(cs(0, 500, oHsbw, 0, 0, oRmoveto), append(csInf(), cs(0, oRlineto, oEndchar)...)...)
+	segs, _, err := f.Glyph("inf")
+	if err != nil {
+		t.Fatalf("Glyph(inf): %v", err)
+	}
+	got := flatten(segs)
+	if len(got) < 2 || !math.IsInf(float64(got[1].args[0]), 1) {
+		t.Fatalf("div chain did not reach +Inf: %v", got)
+	}
+}
+
+func TestSeacRejectsNonFiniteComponentCodes(t *testing.T) {
+	f := parseTestFont(t, false, false, false)
+	// bchar and achar are non-finite: seac must degrade like a missing encoding (draw nothing, no error), the same way
+	// on every architecture, rather than converting NaN to a code that happens to be in range.
+	for _, tc := range []struct {
+		name string
+		code []byte
+	}{
+		{name: "seacNaN", code: csNaN()},
+		{name: "seacInf", code: csInf()},
+		{name: "seacHuge", code: csScaleUp(2)}, // 2^90: finite, but far outside both int32 and the 0-255 code range.
+	} {
+		body := cs(0, 500, oHsbw, 0, 0, 0)
+		body = append(body, tc.code...)
+		body = append(body, tc.code...)
+		f.CharStrings[tc.name] = append(body, oSeac...)
+		segs, adv, err := f.Glyph(tc.name)
+		if err != nil {
+			t.Errorf("Glyph(%s): %v", tc.name, err)
+			continue
+		}
+		if len(segs) != 0 {
+			t.Errorf("Glyph(%s) drew %d segments, want none", tc.name, len(segs))
+		}
+		if adv != 500 {
+			t.Errorf("Glyph(%s) advance = %v, want 500", tc.name, adv)
+		}
+	}
+}
+
+func TestCallOtherSubrRejectsNonFiniteArgCount(t *testing.T) {
+	f := parseTestFont(t, false, false, false)
+	// The argument count selects the slice of arguments handed to the othersubr, so one that does not convert is fatal
+	// — deterministically, rather than depending on whether the CPU maps NaN to 0.
+	for _, tc := range []struct {
+		name  string
+		count []byte
+	}{
+		{name: "countNaN", count: csNaN()},
+		{name: "countInf", count: csInf()},
+		{name: "countHuge", count: csScaleUp(2)},
+	} {
+		f.CharStrings[tc.name] = append(append(cs(0, 500, oHsbw), tc.count...), cs(3, oOthersubr, oEndchar)...)
+		if _, _, err := f.Glyph(tc.name); err == nil {
+			t.Errorf("Glyph(%s) succeeded, want an error", tc.name)
+		}
+	}
+	// An othersubr *number* that does not convert is merely an othersubr this interpreter does not implement: its
+	// arguments pass through to the PostScript stack and the glyph keeps drawing.
+	body := append(cs(0, 500, oHsbw, 0), csNaN()...)
+	f.CharStrings["whichNaN"] = append(body, cs(oOthersubr, 0, 0, oRmoveto, 100, oHlineto, oEndchar)...)
+	segs, _, err := f.Glyph("whichNaN")
+	if err != nil {
+		t.Fatalf("Glyph(whichNaN): %v", err)
+	}
+	wantSegs(t, segs, []seg{
+		{op: ot.SegmentOpMoveTo, args: []float32{0, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{100, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{0, 0}}, // endchar closes the contour.
+	})
+}
+
+func TestToInt64(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		v    float64
+		want int64
+		ok   bool
+	}{
+		{name: "zero", v: 0, want: 0, ok: true},
+		{name: "positive", v: 42, want: 42, ok: true},
+		{name: "negative", v: -7, want: -7, ok: true},
+		{name: "truncates toward zero", v: 3.9, want: 3, ok: true},
+		{name: "truncates negative toward zero", v: -3.9, want: -3, ok: true},
+		{name: "min int64", v: math.MinInt64, want: math.MinInt64, ok: true},
+		// The nearest float64 to math.MaxInt64 is 2^63, one past the representable range.
+		{name: "max int64 rounds up out of range", v: math.MaxInt64},
+		{name: "below min int64", v: -1e300},
+		{name: "above max int64", v: 1e300},
+		{name: "NaN", v: math.NaN()},
+		{name: "+Inf", v: math.Inf(1)},
+		{name: "-Inf", v: math.Inf(-1)},
+	} {
+		got, ok := toInt64(tc.v)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("toInt64(%v) = %d, %v; want %d, %v", tc.v, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestScannerIntegerRejectsUnconvertibleNumbers(t *testing.T) {
+	s := scanner{data: []byte("42 -7 3.9 1e300 -1e300 inf -inf nan 9223372036854775807 notanumber")}
+	for _, tc := range []struct {
+		want int64
+		ok   bool
+	}{
+		{want: 42, ok: true},
+		{want: -7, ok: true},
+		{want: 3, ok: true},
+		{}, // 1e300
+		{}, // -1e300
+		{}, // inf
+		{}, // -inf
+		{}, // nan
+		{}, // 9223372036854775807 parses to 2^63, which no int64 holds.
+		{}, // notanumber is a keyword, not a number.
+	} {
+		got, ok := s.integer()
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("integer() = %d, %v; want %d, %v", got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// buildHostileNumberFont assembles a minimal program whose /Encoding codes, /lenIV, /Subrs index, and one charstring
+// length are written as numbers no integer can represent, alongside well-formed entries the parser must still find.
+func buildHostileNumberFont() []byte {
+	var clearBuf bytes.Buffer
+	clearBuf.WriteString("%!PS-AdobeFont-1.0: HostileNumbers 001.000\n")
+	clearBuf.WriteString("/FontName /HostileNumbers def\n")
+	clearBuf.WriteString("/Encoding 256 array\n")
+	clearBuf.WriteString("dup 1e300 /B put\ndup nan /C put\ndup -inf /D put\ndup 65 /A put\nreadonly def\n")
+	clearBuf.WriteString("currentdict end\ncurrentfile eexec\n")
+
+	sub := encryptT1(cs(200, 0, oRlineto, oReturn), charstringR, 4)
+	var priv bytes.Buffer
+	priv.WriteString("  dup /Private 15 dict dup begin\n")
+	priv.WriteString("/lenIV inf def\n") // Ignored: lenIV stays at the default 4, so the charstrings below decrypt.
+	priv.WriteString("/Subrs 2 array\n")
+	for _, idx := range []string{"1e300", "0"} { // The unconvertible index is discarded; the scan resyncs after it.
+		fmt.Fprintf(&priv, "dup %s %d RD ", idx, len(sub))
+		priv.Write(sub)
+		priv.WriteString(" NP\n")
+	}
+	priv.WriteString("ND\n")
+	glyphs := map[string][]byte{
+		notdefName: cs(0, 500, oHsbw, oEndchar),
+		"A":        cs(0, 600, oHsbw, 0, 0, oRmoveto, 0, oCallsubr, oClosepath, oEndchar),
+	}
+	priv.WriteString("/CharStrings 3 dict dup begin\n")
+	for _, name := range []string{notdefName, "A"} {
+		enc := encryptT1(glyphs[name], charstringR, 4)
+		fmt.Fprintf(&priv, "/%s %d RD ", name, len(enc))
+		priv.Write(enc)
+		priv.WriteString(" ND\n")
+	}
+	priv.WriteString("/Z 1e300 ND\n") // An unconvertible length: the entry is skipped, the scan continues.
+	priv.WriteString("end\nend\n")
+
+	var out bytes.Buffer
+	out.Write(clearBuf.Bytes())
+	out.Write(encryptT1(priv.Bytes(), eexecR, 4))
+	out.WriteString(trailer())
+	return out.Bytes()
+}
+
+func TestParseIgnoresUnconvertibleNumbers(t *testing.T) {
+	f, err := Parse(buildHostileNumberFont())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if f.Encoding == nil {
+		t.Fatalf("Encoding = nil, want the built-in array")
+	}
+	for code, want := range map[int]string{65: "A"} {
+		if f.Encoding[code] != want {
+			t.Errorf("Encoding[%d] = %q, want %q", code, f.Encoding[code], want)
+		}
+	}
+	for _, name := range []string{"B", "C", "D"} {
+		if slices.Contains(f.Encoding[:], name) {
+			t.Errorf("Encoding holds %q, which only an unconvertible code assigned", name)
+		}
+	}
+	if _, ok := f.CharStrings["Z"]; ok {
+		t.Errorf("CharStrings holds Z, whose length was unconvertible")
+	}
+	// lenIV survived as the default, so the well-formed glyph decrypts and its subr call (stored at the well-formed
+	// index, after the unconvertible one was discarded without desynchronizing the scan) draws.
+	segs, adv, err := f.Glyph("A")
+	if err != nil {
+		t.Fatalf("Glyph(A): %v", err)
+	}
+	if adv != 600 {
+		t.Errorf("advance = %v, want 600", adv)
+	}
+	wantSegs(t, segs, []seg{
+		{op: ot.SegmentOpMoveTo, args: []float32{0, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{200, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{0, 0}},
+	})
 }
 
 func TestParseRejectsJunk(t *testing.T) {
