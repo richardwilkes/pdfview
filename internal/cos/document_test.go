@@ -74,6 +74,11 @@ const (
 	pagesBody   = "<< /Type /Pages /Kids [] /Count 0 >>"
 )
 
+const (
+	filterKey      cos.Name = "Filter"
+	decodeParmsKey cos.Name = "DecodeParms"
+)
+
 func mustOpen(t *testing.T, data []byte) *cos.Document {
 	t.Helper()
 	d, err := cos.Open(data)
@@ -380,15 +385,14 @@ func TestOpenCorpus(t *testing.T) {
 
 func TestImageFilterSplit(t *testing.T) {
 	const hello = "Hello"
-	const filterKey cos.Name = "Filter"
 	const dctName cos.Name = "DCTDecode"
 	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
 	d := mustOpen(t, []byte(pdf))
 	hexPayload := []byte("48656c6c6f>")
 	// A non-image prefix filter is applied; the split stops at the codec and hands back its parms.
 	dict := cos.Dict{
-		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), dctName},
-		"DecodeParms": cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
+		filterKey:      cos.Array{cos.Name("ASCIIHexDecode"), dctName},
+		decodeParmsKey: cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
 	}
 	data, codec, parms, err := d.ImageFilterSplit(dict, hexPayload)
 	if err != nil {
@@ -416,10 +420,10 @@ func TestImageFilterSplit(t *testing.T) {
 	}
 	// The unabbreviated keys win when an inline image supplies both spellings.
 	dict = cos.Dict{
-		filterKey:     cos.Array{cos.Name("ASCIIHexDecode"), dctName},
-		"DecodeParms": cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
-		"F":           cos.Array{cos.Name("AHx"), cos.Name("CCF")},
-		"DP":          cos.Array{cos.Null{}, cos.Dict{"K": cos.Integer(-1)}},
+		filterKey:      cos.Array{cos.Name("ASCIIHexDecode"), dctName},
+		decodeParmsKey: cos.Array{cos.Null{}, cos.Dict{"ColorTransform": cos.Integer(0)}},
+		"F":            cos.Array{cos.Name("AHx"), cos.Name("CCF")},
+		"DP":           cos.Array{cos.Null{}, cos.Dict{"K": cos.Integer(-1)}},
 	}
 	if data, codec, parms, err = d.InlineImageFilterSplit(dict, hexPayload); err != nil {
 		t.Fatal(err)
@@ -455,5 +459,58 @@ func TestImageFilterSplit(t *testing.T) {
 	// No filters at all: raw samples pass through.
 	if data, codec, _, err = d.ImageFilterSplit(cos.Dict{}, []byte{9}); err != nil || codec != "" || len(data) != 1 {
 		t.Fatalf("no filters: %q %q %v", data, codec, err)
+	}
+}
+
+// TestCryptFilterInChain checks how a /Crypt filter in a stream's filter chain is handled, on both the general decode
+// path and the image split. /Identity — named explicitly or left to the default — is a no-op and drops out of the
+// chain; any other crypt filter is refused. The message must say so: document-level encryption is fully supported (it
+// is undone at parse time by internal/crypt), so wording about "encrypted streams" would point a reader at a
+// capability the package has rather than at the one it lacks.
+func TestCryptFilterInChain(t *testing.T) {
+	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
+	d := mustOpen(t, []byte(pdf))
+	hexPayload := []byte("48656c6c6f>")
+	// /Identity, and an absent /Name (which defaults to it), leave the rest of the chain to run.
+	for _, parms := range []cos.Object{
+		cos.Dict{"Name": cos.Name("Identity")},
+		cos.Dict{},
+		cos.Null{},
+	} {
+		stream := &cos.Stream{
+			Dict: cos.Dict{
+				filterKey:      cos.Array{cos.Name("Crypt"), cos.Name("ASCIIHexDecode")},
+				decodeParmsKey: cos.Array{parms, cos.Null{}},
+			},
+			Raw: hexPayload,
+		}
+		data, err := d.StreamData(stream)
+		if err != nil {
+			t.Fatalf("/Crypt with parms %v: %v", parms, err)
+		}
+		if string(data) != "Hello" {
+			t.Errorf("/Crypt with parms %v decoded to %q, want %q", parms, data, "Hello")
+		}
+	}
+	// A named crypt filter is not supported, on either path.
+	named := cos.Dict{
+		filterKey:      cos.Array{cos.Name("Crypt"), cos.Name("ASCIIHexDecode")},
+		decodeParmsKey: cos.Array{cos.Dict{"Name": cos.Name("StdCF")}, cos.Null{}},
+	}
+	_, err := d.StreamData(&cos.Stream{Dict: named, Raw: hexPayload})
+	if err == nil {
+		t.Fatal("a stream naming /StdCF in a /Crypt filter decoded without error")
+	}
+	if _, _, _, splitErr := d.ImageFilterSplit(named, hexPayload); splitErr == nil {
+		t.Error("the image split accepted a stream naming /StdCF in a /Crypt filter")
+	} else if splitErr.Error() != err.Error() {
+		t.Errorf("image split error %q differs from the decode error %q", splitErr, err)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "encrypted stream") {
+		t.Errorf("error is %q, but encrypted streams are supported; only a named /Crypt filter is not", msg)
+	}
+	if !strings.Contains(msg, "/Crypt") || !strings.Contains(msg, "/Identity") {
+		t.Errorf("error is %q, want it to name the /Crypt filter and the /Identity it accepts instead", msg)
 	}
 }

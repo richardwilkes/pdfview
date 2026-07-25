@@ -78,6 +78,10 @@ func (d *Document) findStartXref() (int64, error) {
 // /XRefStm) links. Sections are processed newest first and the first entry seen for an object number wins, implementing
 // incremental-update precedence. The trailer is merged the same way.
 func (d *Document) loadXref() error {
+	// Anything reached from here resolves against a table that is still being assembled, so the repair scan is deferred
+	// and failed loads are not cached for the life of the document. See Document.xrefLoading.
+	d.xrefLoading = true
+	defer func() { d.xrefLoading = false }()
 	start, err := d.findStartXref()
 	if err != nil {
 		return err
@@ -256,8 +260,18 @@ func (d *Document) readXrefStream(offset int64) (Dict, error) {
 }
 
 func (d *Document) readXrefStreamEntries(stream *Stream) error {
-	// Cross-reference streams are never encrypted and use only direct values in /W and /Index, so decoding here cannot
-	// recurse into object loading.
+	// A cross-reference stream defines the very table a reference from its own dictionary would be resolved against, and
+	// this section's entries are not registered until the loop below, so such a reference reads against data that is at
+	// best incomplete and at worst a stale entry from a newer section pointing at the wrong offset. ISO 32000-2 7.5.8.2
+	// accordingly requires these values to be direct; /W, /Index, and /Size are already read with direct-only
+	// accessors, and this rejects the two that StreamData would otherwise resolve. Failure here is not fatal to the
+	// document: a hybrid file's /XRefStm is optional, and for a primary section Open falls back to the repair scan,
+	// which rebuilds the table from the file itself rather than from a reference that cannot be trusted yet.
+	if hasIndirect(stream.Dict["Filter"], 0) || hasIndirect(stream.Dict["DecodeParms"], 0) {
+		return fmt.Errorf("%w: /Filter and /DecodeParms must be direct objects", errBadXrefStream)
+	}
+	// Cross-reference streams are never encrypted, and with the check above every value the decode consults is direct,
+	// so decoding here cannot recurse into object loading.
 	data, err := d.StreamData(stream)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errBadXrefStream, err)
@@ -308,6 +322,40 @@ func (d *Document) readXrefStreamEntries(stream *Stream) error {
 		}
 	}
 	return nil
+}
+
+// maxDirectCheckDepth bounds hasIndirect's walk. A /Filter is a name or an array of names and a /DecodeParms is a
+// dictionary of numbers or an array of those, so two levels cover every legal shape; the cap keeps a hostile structure
+// from turning the check into an unbounded walk, and treats anything deeper as unusable.
+const maxDirectCheckDepth = 4
+
+// hasIndirect reports whether obj is an indirect reference or contains one, so a caller that must not resolve
+// references can reject the value instead. A structure nested deeper than maxDirectCheckDepth counts as indirect: it is
+// past any legal /Filter or /DecodeParms shape, and refusing it costs the caller nothing it could have used.
+func hasIndirect(obj Object, depth int) bool {
+	switch v := obj.(type) {
+	case Ref:
+		return true
+	case Array:
+		if depth >= maxDirectCheckDepth {
+			return true
+		}
+		for _, entry := range v {
+			if hasIndirect(entry, depth+1) {
+				return true
+			}
+		}
+	case Dict:
+		if depth >= maxDirectCheckDepth {
+			return true
+		}
+		for _, entry := range v {
+			if hasIndirect(entry, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // xrefStreamIndex returns the /Index pairs, defaulting to [0 Size].

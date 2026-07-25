@@ -63,6 +63,37 @@ func TestRepairDeferredWhileObjStmLoading(t *testing.T) {
 	}
 }
 
+// TestRepairDeferredWhileLoadingXref checks the same deferral for the other in-flight state: a load reached from
+// loadXref. Repair there replaces the cross-reference table and trailer that loadXref is still filling in, so its
+// entries go into the discarded map and its final mergeTrailers overwrites the repaired trailer with one assembled from
+// the broken chain — while d.repaired, now set, makes Open skip the retry that would have used the repaired data. The
+// failure is not cached either: it was decided against a table that was still incomplete, so the object stays loadable
+// once the table is whole.
+func TestRepairDeferredWhileLoadingXref(t *testing.T) {
+	d := newRepairableDoc()
+	d.xrefLoading = true // As if a cross-reference stream's own /Filter were being resolved.
+	if obj, err := d.loadObject(1); err == nil {
+		t.Fatalf("load during the cross-reference load = %v, want an error rather than a mid-flight repair", obj)
+	}
+	if d.repaired {
+		t.Fatal("repair ran while the cross-reference load was in flight")
+	}
+	if len(d.objFailed) != 0 {
+		t.Fatalf("the failure was cached as %v, but it was decided against an incomplete table", d.objFailed)
+	}
+	d.xrefLoading = false
+	obj, err := d.loadObject(1)
+	if err != nil {
+		t.Fatalf("load from the top level: %v", err)
+	}
+	if s, ok := obj.(String); !ok || string(s) != "ok" {
+		t.Errorf("load from the top level = %v, want (ok)", obj)
+	}
+	if !d.repaired {
+		t.Error("the top-level load did not run the repair scan")
+	}
+}
+
 // TestClearCachesKeepsInFlightObjStmLoads checks that clearCaches leaves objStmLoading alone. That map is not a cache
 // but the set of loadObjStm frames currently on the stack; replacing it strands their markers in the discarded map and
 // disarms the re-entrancy guard for the rest of the recursion, letting a stream be re-entered while it is still being

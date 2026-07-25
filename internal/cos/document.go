@@ -30,7 +30,7 @@ const maxResolveDepth = 64
 var (
 	errNoRoot        = errors.New("document has no usable root object")
 	errNotObjStm     = errors.New("object is not an object stream")
-	errCryptFilter   = errors.New("encrypted streams are not supported yet")
+	errCryptFilter   = errors.New("a /Crypt filter naming a crypt filter other than /Identity is not supported")
 	errBadFilterName = errors.New("filter name is not a name object")
 )
 
@@ -56,6 +56,13 @@ type Document struct {
 	// meaningful only once decryptor is non-nil.
 	encryptNum int
 	repaired   bool
+	// xrefLoading reports whether loadXref is currently assembling the cross-reference table. A load attempted from
+	// there resolves against a table that does not yet hold the section being read, let alone the older ones behind it,
+	// so its failure says nothing about the object and must not be cached — and, more importantly, must not trigger the
+	// repair scan. Repair replaces d.xref and d.trailer mid-flight; loadXref would keep calling setEntry into the
+	// replaced map and then overwrite the repaired trailer with one merged from the broken chain, while d.repaired (now
+	// set) makes Open skip the retry that would have used the repaired data.
+	xrefLoading bool
 }
 
 // Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and
@@ -132,11 +139,12 @@ func (d *Document) loadObject(num int) (Object, error) {
 		return nil, err
 	}
 	obj, err := d.loadObjectUncached(num)
-	// Repair is deferred while object-stream loads are in flight. It replaces the cross-reference table and drops every
-	// cache under frames that are still parsing against the old one, and its own loadObjStm sweep would re-enter a
-	// stream whose parse is suspended further down this stack. Skipping it here leaves d.repaired false, so the next
-	// failing load that is not nested inside an object-stream parse still triggers it.
-	if err != nil && !d.repaired && len(d.objStmLoading) == 0 {
+	// Repair is deferred while object-stream loads or the cross-reference load are in flight. It replaces the
+	// cross-reference table and drops every cache under frames that are still parsing against the old one, its own
+	// loadObjStm sweep would re-enter a stream whose parse is suspended further down this stack, and loadXref would
+	// finish by writing entries into the replaced table and overwriting the repaired trailer. Skipping it here leaves
+	// d.repaired false, so the next failing load reached from neither of those states still triggers it.
+	if err != nil && !d.repaired && !d.xrefLoading && len(d.objStmLoading) == 0 {
 		if rerr := d.repair(); rerr == nil {
 			obj, err = d.loadObjectUncached(num)
 		}
@@ -144,8 +152,10 @@ func (d *Document) loadObject(num int) (Object, error) {
 	if err != nil {
 		// The object-stream re-entrancy and nesting guards fire because of where this load sits in the current call
 		// stack, not because of anything about num: the same object can load cleanly when reached from the top level.
-		// Both refuse before parsing anything, so leaving them out of the failure cache costs nothing.
-		if !errors.Is(err, errObjStmCycle) && !errors.Is(err, errObjStmDepth) {
+		// Both refuse before parsing anything, so leaving them out of the failure cache costs nothing. A failure during
+		// the cross-reference load is stack-dependent in the same way — it was decided against a table still being
+		// assembled — so it is not cached either, leaving the object loadable once the table is complete.
+		if !d.xrefLoading && !errors.Is(err, errObjStmCycle) && !errors.Is(err, errObjStmDepth) {
 			d.objFailed[num] = err
 		}
 		return nil, err
