@@ -186,3 +186,31 @@ func TestGlyfSimpleGlyphRenders(t *testing.T) {
 		}
 	}
 }
+
+// TestGlyfRecordBoundIsWidthIndependent covers the other half of the loca guard: the record slice bound. It was written
+// as int(end) > len(g.glyfData), and on a 32-bit build (GOARCH=386/arm, which this package's comments explicitly care
+// about) int(end) is negative for any long-format loca offset at or above 2^31 — the guard passes and the slice
+// expression panics, costing the glyph its outline behind Font.GlyphPath's recover. Like inRange, the comparison must be
+// done in uint64 so it holds on every architecture.
+func TestGlyfRecordBoundIsWidthIndependent(t *testing.T) {
+	record := triangleGlyph()
+	g := buildGlyf([][]byte{record})
+	if g.glyphData(0) == nil {
+		t.Fatal("glyphData(0) = nil for the one real glyph")
+	}
+	// A long-format loca whose terminator lies past the glyf table. Every value here narrows to a negative int32, so a
+	// 32-bit build would take the out-of-range end for an in-range one.
+	for _, end := range []uint32{1 << 31, 1<<31 + uint32(len(record)), 0xFFFFFFFF} {
+		if int32(end) > int32(len(g.glyfData)) {
+			t.Errorf("end %d no longer exercises the 32-bit narrowing this test guards", end)
+		}
+		wide := &glyfInfo{glyfData: g.glyfData, loca: []uint32{0, end}, upem: 1000}
+		if wide.glyphData(0) != nil {
+			t.Errorf("glyphData(0) returned a record for a loca end of %d, past the %d byte glyf table",
+				end, len(wide.glyfData))
+		}
+		if p := wide.path(0); p == nil || len(p.Verbs) != 0 {
+			t.Errorf("path(0) = %v for an out-of-range record; want an empty path", p)
+		}
+	}
+}

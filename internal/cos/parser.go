@@ -23,8 +23,18 @@ const maxNestingDepth = 512
 // is slightly more generous while still bounding lookup structures.
 const maxObjectNumber = 1 << 24
 
+// maxContainerElements caps how many array elements and dictionary entries one parsed object may hold, in total across
+// its whole object tree. Nesting depth is not a bound on size, and the payload an object can be built from is not
+// bounded by the file: a /Type /ObjStm decodes through internal/filter's max(64 MB, 256x input) allowance, so a small
+// file can hold one array of tens of millions of elements. That matters more here than in a content stream, because the
+// result is stored in Document.objCache, which has no size budget and is only dropped by clearCaches — the memory stays
+// live for the whole Document rather than for one render. The cap is orders of magnitude above the largest containers
+// real files carry (a CJK CIDFont's /W array, a flat page tree's /Kids).
+const maxContainerElements = 1 << 20
+
 var (
 	errTooDeep          = errors.New("objects nested too deeply")
+	errTooLarge         = errors.New("object has too many elements")
 	errUnexpectedEOF    = errors.New("unexpected end of input")
 	errBadDictKey       = errors.New("dictionary key is not a name")
 	errUnexpectedToken  = errors.New("unexpected token")
@@ -40,10 +50,14 @@ type parser struct {
 	stack []token
 	lex   lexer
 	depth int
+	// elems is the remaining element allowance (see maxContainerElements), shared by every container this parser
+	// builds so nesting cannot multiply the total. Each parser instance covers one object, so the budget is per
+	// object.
+	elems int
 }
 
 func newParser(data []byte, pos int) *parser {
-	return &parser{lex: lexer{data: data, pos: pos}}
+	return &parser{lex: lexer{data: data, pos: pos}, elems: maxContainerElements}
 }
 
 func (p *parser) next() (token, error) {
@@ -159,6 +173,10 @@ func (p *parser) parseArray() (Object, error) {
 		if err != nil {
 			return nil, err
 		}
+		p.elems--
+		if p.elems < 0 {
+			return nil, errTooLarge
+		}
 		arr = append(arr, obj)
 	}
 }
@@ -182,6 +200,10 @@ func (p *parser) parseDict() (Object, error) {
 			value, verr := p.parseObject()
 			if verr != nil {
 				return nil, verr
+			}
+			p.elems--
+			if p.elems < 0 {
+				return nil, errTooLarge
 			}
 			// Duplicate keys are undefined behavior per the spec; the last occurrence wins here.
 			dict[Name(tok.s)] = value

@@ -46,6 +46,8 @@ func mustOpen(t *testing.T, data []byte) *doc.Document {
 const (
 	catalogObj = "<< /Type /Catalog /Pages 2 0 R >>"
 	pageObj    = "<< /Type /Page >>"
+	// pagesOneKidObj mirrors the internal-test package's pagesOneKid, which this external test package cannot see.
+	pagesOneKidObj = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
 )
 
 func TestNestedPageTree(t *testing.T) {
@@ -83,7 +85,7 @@ func TestNestedPageTree(t *testing.T) {
 func TestPageTreeCycle(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: catalogObj,
-		2: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		2: pagesOneKidObj,
 		3: "<< /Type /Pages /Kids [2 0 R 4 0 R] /Count 1 >>", // Points back at its parent.
 		4: pageObj,
 	}))
@@ -221,5 +223,56 @@ func TestCorpusPageCounts(t *testing.T) {
 				t.Errorf("PageCount = %d, oracle says %d", got, golden.Truth.PageCount)
 			}
 		})
+	}
+}
+
+// TestOverRangeMediaBoxFallsBack covers rectFromObj's finiteness check, which tested the float64 before narrowing to the
+// float32 the geometry is stored in. "1" followed by 39 zeros is a legal PDF integer and a finite float64, but ±Inf as a
+// float32 — and such a box passes the x0 < x1 && y0 < y1 usability test, so it became the page's effective geometry
+// instead of falling back to the default MediaBox: PageSize handed ±Inf across the engine seam and every render of the
+// page failed. The narrowed value must be tested, as content.rectFrom and font.loadDescriptor already do.
+func TestOverRangeMediaBoxFallsBack(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39) // 1e39: finite as a float64, +Inf as a float32.
+	for _, tc := range []struct {
+		name          string
+		mediaBox      string
+		width, height float32
+	}{
+		{name: "in range", mediaBox: "[0 0 300 400]", width: 300, height: 400},
+		{name: "over range", mediaBox: "[0 0 " + huge + " " + huge + "]", width: 612, height: 792},
+		{name: "over range origin", mediaBox: "[-" + huge + " -" + huge + " 10 10]", width: 612, height: 792},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := mustOpen(t, pdf(map[int]string{
+				1: catalogObj,
+				2: pagesOneKidObj,
+				3: "<< /Type /Page /Parent 2 0 R /MediaBox " + tc.mediaBox + " >>",
+			}))
+			w, h, err := d.PageSize(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w != tc.width || h != tc.height {
+				t.Fatalf("PageSize = %v x %v, want %v x %v", w, h, tc.width, tc.height)
+			}
+		})
+	}
+}
+
+// TestOverRangeCropBoxIgnored is the same check for /CropBox, which intersects the MediaBox: an unusable crop must
+// leave the MediaBox in effect rather than replace it with a non-finite intersection.
+func TestOverRangeCropBoxIgnored(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39)
+	d := mustOpen(t, pdf(map[int]string{
+		1: catalogObj,
+		2: pagesOneKidObj,
+		3: fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /CropBox [0 0 %s %s] >>", huge, huge),
+	}))
+	w, h, err := d.PageSize(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w != 300 || h != 400 {
+		t.Fatalf("PageSize = %v x %v, want the MediaBox's 300 x 400", w, h)
 	}
 }

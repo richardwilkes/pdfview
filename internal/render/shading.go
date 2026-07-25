@@ -519,8 +519,19 @@ func spillCopies(extent, step float32) int {
 	if !(extent > step) {
 		return 0
 	}
-	n := int(math.Ceil(float64(extent/step))) - 1
-	return min(n, maxTileCopies)
+	// The cap is applied in float space, as every other conversion in this package does (clampDim, rectInterior,
+	// maskBounds, renderGlyphMask, fillTilingInto's lattice bounds, blitTextRun's origin clamp): extent is a float32
+	// difference of two validated /BBox corners, so it reaches +Inf for a box spanning more than float32's range, and
+	// int(+Inf) is implementation-defined (amd64 wraps to MinInt64, arm64 saturates to MaxInt64). Bounding first keeps
+	// the result from depending on that. The comparison also rejects NaN.
+	n := math.Ceil(float64(extent/step)) - 1
+	if !(n > 0) {
+		return 0
+	}
+	if n > maxTileCopies {
+		return maxTileCopies
+	}
+	return int(n)
 }
 
 // maxReplayTiles caps how many cell replays one fill may trigger; beyond it the fill falls back to the repeating-image

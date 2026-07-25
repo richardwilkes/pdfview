@@ -174,15 +174,7 @@ func numberPairs(d *cos.Document, dict cos.Dict, key cos.Name, maxPairs int) ([]
 	if !ok || len(arr) < 2 || len(arr)%2 != 0 || len(arr)/2 > maxPairs {
 		return nil, false
 	}
-	out := make([]float32, len(arr))
-	for i, entry := range arr {
-		v, numOK := cos.AsReal(d.Resolve(entry))
-		if !numOK || math.IsNaN(v) || math.IsInf(v, 0) {
-			return nil, false
-		}
-		out[i] = float32(v)
-	}
-	return out, true
+	return narrowAll(d, arr)
 }
 
 // numbers reads dict[key] as an array of finite numbers of length at most maxLen.
@@ -191,13 +183,23 @@ func numbers(d *cos.Document, dict cos.Dict, key cos.Name, maxLen int) ([]float3
 	if !ok || len(arr) > maxLen {
 		return nil, false
 	}
+	return narrowAll(d, arr)
+}
+
+// narrowAll converts every entry to float32, rejecting the array unless all of them are finite *after* the narrowing: a
+// legal PDF number beyond float32's range (1 followed by 39 zeros) is a finite float64 but ±Inf here, and these arrays
+// are /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size. An infinite domain makes interpolate yield NaN,
+// a type 2 function (whose /Range is optional, so nothing clamps it) would return ±Inf from Eval in contradiction of
+// Func.Eval's contract, and parseSampled's int(v) on a /Size entry would be an implementation-defined conversion.
+func narrowAll(d *cos.Document, arr cos.Array) ([]float32, bool) {
 	out := make([]float32, len(arr))
 	for i, entry := range arr {
 		v, numOK := cos.AsReal(d.Resolve(entry))
-		if !numOK || math.IsNaN(v) || math.IsInf(v, 0) {
+		f := float32(v)
+		if !numOK || math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
 			return nil, false
 		}
-		out[i] = float32(v)
+		out[i] = f
 	}
 	return out, true
 }

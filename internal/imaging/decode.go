@@ -153,10 +153,15 @@ func (dec *decoder) decodeArray(ncomp int) []float32 {
 	out := make([]float32, 2*ncomp)
 	for i := range out {
 		v, numOK := cos.AsReal(dec.d.Resolve(arr[i]))
-		if !numOK || math.IsNaN(v) || math.IsInf(v, 0) {
+		// The finiteness test is applied after the narrowing: a legal PDF number beyond float32's range is a finite
+		// float64 but ±Inf here, which makes decodeMapping's dmin/dscale non-finite and maps every sample to ±Inf/NaN.
+		// color.clamp01 and alphaByte absorb that today, but dctByteMapping and the lut tables take the same values, so
+		// the guarantee belongs at the validation.
+		f := float32(v)
+		if !numOK || math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
 			return nil
 		}
-		out[i] = float32(v)
+		out[i] = f
 	}
 	return out
 }

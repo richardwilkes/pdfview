@@ -2136,3 +2136,40 @@ func TestClipPathSkipsOverRangeTransform(t *testing.T) {
 		t.Errorf("outside the following clip = %v: the clip stack did not unwind", got)
 	}
 }
+
+// TestSpillCopiesBoundedInFloatSpace covers the tiling-cell spill count, which was computed as
+// int(math.Ceil(float64(extent/step))) - 1 before any bound was applied. extent is a float32 difference of two
+// individually validated /BBox corners, so it reaches +Inf for a box spanning more than float32's range, and int(+Inf)
+// is implementation-defined: amd64 wraps to MinInt64 and arm64 saturates to MaxInt64. The two happened to agree after
+// the -1 wrapped back around, but only by accident. Like every sibling conversion in this package, the bound belongs in
+// float space, before the conversion.
+func TestSpillCopiesBoundedInFloatSpace(t *testing.T) {
+	inf := float32(math.Inf(1))
+	for _, tc := range []struct {
+		name         string
+		extent, step float32
+		want         int
+	}{
+		{"cell within the step", 5, 10, 0},
+		{"cell equal to the step", 10, 10, 0},
+		{"one cell of spill", 15, 10, 1},
+		{"two cells of spill", 25, 10, 2},
+		{"capped", 1e6, 1, maxTileCopies},
+		{"overflowing extent", inf, 1, maxTileCopies},
+		{"overflowing ratio", 3e38, 1e-38, maxTileCopies},
+		{"NaN extent", float32(math.NaN()), 1, 0},
+		{"NaN step", 10, float32(math.NaN()), 0},
+		{"zero step", 10, 0, maxTileCopies},
+		{"negative step", 10, -1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := spillCopies(tc.extent, tc.step)
+			if got != tc.want {
+				t.Fatalf("spillCopies(%v, %v) = %d, want %d", tc.extent, tc.step, got, tc.want)
+			}
+			if got < 0 || got > maxTileCopies {
+				t.Fatalf("spillCopies(%v, %v) = %d, outside [0, %d]", tc.extent, tc.step, got, maxTileCopies)
+			}
+		})
+	}
+}

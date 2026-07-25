@@ -757,3 +757,88 @@ func TestStoreBackedInterpSkipsFallbackCaches(t *testing.T) {
 		t.Error("the fallback caches are missing without a store")
 	}
 }
+
+// countElements totals the array elements and dictionary entries in an operand's whole object tree — the quantity the
+// shared element budget bounds.
+func countElements(obj cos.Object) int {
+	switch v := obj.(type) {
+	case cos.Array:
+		n := len(v)
+		for _, e := range v {
+			n += countElements(e)
+		}
+		return n
+	case cos.Dict:
+		n := len(v)
+		for _, e := range v {
+			n += countElements(e)
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+// parseOneOperand assembles the single operand the source spells out.
+func parseOneOperand(t *testing.T, src string) cos.Object {
+	t.Helper()
+	lex := cos.NewLexer([]byte(src), 0)
+	tok, ok := lex.Next()
+	if !ok {
+		t.Fatal("the first token did not lex")
+	}
+	obj, objOK := parseTopOperand(lex, tok)
+	if !objOK {
+		t.Fatal("parseTopOperand rejected the operand outright")
+	}
+	return obj
+}
+
+// TestOperandElementBudget covers the per-operand element cap. Nesting was bounded but width was not: an array is a
+// single operand consumed by a single operator, so neither the work budget (one unit for the whole TJ) nor maxOperands
+// (a bound on how many operands are kept, not on how large one is) charged for its elements, and a small flate-
+// compressed content stream could buy tens of millions of them — measured at 623 MB of live heap for one RenderPage.
+func TestOperandElementBudget(t *testing.T) {
+	t.Run("flat", func(t *testing.T) {
+		obj := parseOneOperand(t, "["+strings.Repeat("1 ", maxOperandElements+64)+"]")
+		if got := countElements(obj); got != maxOperandElements {
+			t.Fatalf("kept %d elements, want the cap of %d", got, maxOperandElements)
+		}
+	})
+	t.Run("nesting shares the budget", func(t *testing.T) {
+		// Two sibling arrays, each on its own large enough to fit, together exceed the cap. A per-container cap would
+		// keep both in full; the shared budget must hold the total down.
+		const per = maxOperandElements/2 + 32
+		inner := "[" + strings.Repeat("1 ", per) + "]"
+		obj := parseOneOperand(t, "["+inner+inner+"]")
+		if got := countElements(obj); got > maxOperandElements {
+			t.Fatalf("kept %d elements across the nesting, want at most %d", got, maxOperandElements)
+		}
+	})
+	t.Run("dictionary entries count", func(t *testing.T) {
+		var sb strings.Builder
+		sb.WriteString("<<")
+		for i := range maxOperandElements + 64 {
+			fmt.Fprintf(&sb, " /K%d %d", i, i)
+		}
+		sb.WriteString(" >>")
+		obj := parseOneOperand(t, sb.String())
+		if got := countElements(obj); got != maxOperandElements {
+			t.Fatalf("kept %d entries, want the cap of %d", got, maxOperandElements)
+		}
+	})
+	t.Run("within the cap is untouched", func(t *testing.T) {
+		obj := parseOneOperand(t, "[1 2 [3 4] << /A 5 >>]")
+		if got := countElements(obj); got != 7 {
+			t.Fatalf("kept %d elements, want all 7", got)
+		}
+	})
+}
+
+// TestOversizedOperandKeepsTokenizerInSync verifies that dropping the elements past the cap does not abandon the array:
+// the assembler must still consume through the closing bracket, or every operator after it would be misread.
+func TestOversizedOperandKeepsTokenizerInSync(t *testing.T) {
+	content := "BT [" + strings.Repeat("1 ", maxOperandElements+64) + "] TJ ET 0 0 m 1 1 l S"
+	rec := run(t, nil, nil, content)
+	wantOps(t, rec, opStroke)
+}

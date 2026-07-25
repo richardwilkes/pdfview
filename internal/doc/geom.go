@@ -88,16 +88,29 @@ func (d *Document) rectFromObj(obj cos.Object) (rect [4]float32, ok bool) {
 	var vals [4]float32
 	for i := range vals {
 		f, numOK := cos.AsReal(d.cos.Resolve(arr[i]))
-		if !numOK || math.IsNaN(f) || math.IsInf(f, 0) {
+		// The finiteness test is applied to the narrowed value, as every peer site does (content.rectFrom,
+		// content.numbers6, font.loadDescriptor, function.numberPairs): a legal PDF integer such as 1 followed by 39
+		// zeros is finite as a float64 but ±Inf as the float32 this stores, and such a box passes the usability test
+		// below to become the page's effective geometry — non-finite page sizes across the engine seam, every render
+		// failing with ErrUnableToCreateImage instead of falling back to the default MediaBox, and link rectangles
+		// collapsed to the origin.
+		v := float32(f)
+		if !numOK || !isFinite32(v) {
 			return rect, false
 		}
-		vals[i] = float32(f)
+		vals[i] = v
 	}
 	rect[0] = min(vals[0], vals[2])
 	rect[1] = min(vals[1], vals[3])
 	rect[2] = max(vals[0], vals[2])
 	rect[3] = max(vals[1], vals[3])
 	return rect, rect[0] < rect[2] && rect[1] < rect[3]
+}
+
+// isFinite32 reports whether v is a finite float32.
+func isFinite32(v float32) bool {
+	f := float64(v)
+	return !math.IsNaN(f) && !math.IsInf(f, 0)
 }
 
 func intersectRect(a, b [4]float32) [4]float32 {

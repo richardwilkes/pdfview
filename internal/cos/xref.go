@@ -259,6 +259,25 @@ func (d *Document) readXrefStream(offset int64) (Dict, error) {
 	return stream.Dict, nil
 }
 
+// Cross-reference stream entry budget. A classic table pays 20 file bytes per entry, so the file's own size bounds how
+// many entries it can register; a cross-reference stream pays only rowLen bytes of *decoded* payload, and internal/
+// filter lets a stream decode to max(64 MB, 256x input), so /W [1 1 1] with /Index [0 16777216] fits setEntry's whole
+// object-number range inside a 49 KB file and leaves a map of 2^24 entries live for the document's lifetime (measured:
+// ~1.9 GB allocated by Open alone, before any page is rendered). minXrefStreamRows is the floor below which no
+// legitimate file can be constrained, and xrefStreamRowBytes charges each row a plausible minimum of file bytes for the
+// object it names — together they leave real documents unbounded in practice (past ~64 MB of file the object-number
+// ceiling binds first) while keeping the table proportional to the input. The budget is shared across every section of
+// the chain so a file cannot split the same total across many streams.
+const (
+	minXrefStreamRows  = 1 << 16
+	xrefStreamRowBytes = 4
+)
+
+// maxXrefStreamRows returns this document's row budget for the cross-reference stream path.
+func (d *Document) maxXrefStreamRows() int {
+	return max(minXrefStreamRows, len(d.data)/xrefStreamRowBytes)
+}
+
 func (d *Document) readXrefStreamEntries(stream *Stream) error {
 	// A cross-reference stream defines the very table a reference from its own dictionary would be resolved against, and
 	// this section's entries are not registered until the loop below, so such a reference reads against data that is at
@@ -294,6 +313,7 @@ func (d *Document) readXrefStreamEntries(stream *Stream) error {
 		return fmt.Errorf("%w: zero-width /W", errBadXrefStream)
 	}
 	index := d.xrefStreamIndex(stream.Dict)
+	rowBudget := d.maxXrefStreamRows()
 	pos := 0
 	for i := 0; i+1 < len(index); i += 2 {
 		start := index[i]
@@ -302,6 +322,12 @@ func (d *Document) readXrefStreamEntries(stream *Stream) error {
 			if pos+rowLen > len(data) {
 				return nil // Truncated stream data; keep the entries read so far (leniency).
 			}
+			if d.xrefStreamRows >= rowBudget {
+				// Past the budget the file is claiming more entries than it could plausibly carry objects for. Keep
+				// what has been read (leniency): Open falls back to the repair scan when the result is unusable.
+				return nil
+			}
+			d.xrefStreamRows++
 			f1 := readField(data[pos:], w[0], 1) // A zero-width type field defaults to type 1.
 			f2 := readField(data[pos+w[0]:], w[1], 0)
 			f3 := readField(data[pos+w[0]+w[1]:], w[2], 0)

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
@@ -863,5 +864,36 @@ func TestSeparationNoneImageReportsAlpha(t *testing.T) {
 	}
 	if img.HasAlpha {
 		t.Error("an all-opaque image was flagged as having alpha")
+	}
+}
+
+// TestOverRangeDecodeArrayIgnored covers decodeArray's finiteness check, which tested the float64 before narrowing to
+// the float32 the mapping is stored in. "1" followed by 39 zeros is a legal PDF number and a finite float64 but +Inf as
+// a float32, which makes decodeMapping's dmin/dscale non-finite and maps every sample to ±Inf/NaN. color.clamp01 and
+// alphaByte absorb that, but dctByteMapping and the lut tables take the same values, so the array must be rejected
+// here — falling back to the default [0 1] per component, as any other malformed /Decode does.
+func TestOverRangeDecodeArrayIgnored(t *testing.T) {
+	d := testDoc(t)
+	huge := cos.Real(1e39) // Finite as a float64; +Inf once narrowed to float32.
+	dict := cos.Dict{"W": cos.Integer(2), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G")}
+	dict["D"] = cos.Array{huge, cos.Integer(0)}
+	img, err := DecodeInline(d, dict, []byte{0x00, 0xff}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Pix[0] != 0 || img.Pix[4] != 255 {
+		t.Fatalf("an over-range /Decode must fall back to the identity default: %v", img.Pix)
+	}
+	// The mapping itself must be finite, not merely clamped downstream.
+	dec := &decoder{d: d, dict: dict}
+	if arr := dec.decodeArray(1); arr != nil {
+		t.Fatalf("decodeArray = %v, want nil for an entry that narrows to +Inf", arr)
+	}
+	m := dec.decodeMapping(pdfcolor.DeviceGray, 8)
+	for c := range m.dmin {
+		if math.IsInf(float64(m.dmin[c]), 0) || math.IsInf(float64(m.dscale[c]), 0) ||
+			math.IsNaN(float64(m.dmin[c])) || math.IsNaN(float64(m.dscale[c])) {
+			t.Fatalf("decodeMapping is non-finite: dmin %v dscale %v", m.dmin, m.dscale)
+		}
 	}
 }

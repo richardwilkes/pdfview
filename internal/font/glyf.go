@@ -82,7 +82,11 @@ func (g *glyfInfo) glyphData(gid uint32) []byte {
 		return nil
 	}
 	start, end := g.loca[gid], g.loca[gid+1]
-	if start >= end || int(end) > len(g.glyfData) {
+	// The upper bound is compared in uint64 for the reason inRange gives: on a 32-bit build int(end) is negative for
+	// any long-format loca offset at or above 2^31, which would let the guard pass and the slice expression below
+	// panic (recovered by Font.GlyphPath, but only after the glyph is lost). The bound belongs with the indexing it
+	// protects.
+	if start >= end || uint64(end) > uint64(len(g.glyfData)) {
 		return nil
 	}
 	return g.glyfData[start:end]

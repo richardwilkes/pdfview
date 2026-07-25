@@ -407,3 +407,66 @@ func TestParseRejects(t *testing.T) {
 		t.Error("missing domain parsed")
 	}
 }
+
+// TestOverRangeNumbersRejected covers numberPairs/numbers, which tested NaN/Inf on the float64 and then narrowed to the
+// float32 the arrays are stored in: "1" followed by 39 zeros is a legal PDF integer and a finite float64, but ±Inf once
+// narrowed. That reached /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size — an infinite domain makes
+// interpolate yield NaN, a type 2 function has no required /Range to clamp its output, and parseSampled converts a
+// /Size entry with int(v), an implementation-defined conversion for a non-finite value.
+func TestOverRangeNumbersRejected(t *testing.T) {
+	huge := "1" + strings.Repeat("0", 39)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"Domain", "<< /FunctionType 2 /Domain [0 " + huge + "] /C0 [0] /C1 [1] /N 1 >>"},
+		{"Bounds", "<< /FunctionType 3 /Domain [0 1] /Bounds [" + huge + "] /Encode [0 1 0 1] " +
+			"/Functions [<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >> " +
+			"<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>] >>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Parse(docWith(t, tc.body), cos.Ref{Num: 1}); err == nil {
+				t.Fatalf("a %s entry of 1e39 was accepted; it narrows to +Inf as a float32", tc.name)
+			}
+		})
+	}
+	// A type 0 function's /Size reaches int(v) directly, so its rejection is what keeps that conversion defined.
+	t.Run("Size", func(t *testing.T) {
+		d := docWithStream(t, "/FunctionType 0 /Domain [0 1] /Range [0 1] /Size ["+huge+"] /BitsPerSample 8", "\x00\xff")
+		if _, err := Parse(d, cos.Ref{Num: 1}); err == nil {
+			t.Fatal("a /Size entry of 1e39 was accepted")
+		}
+	})
+	// The optional arrays (/Range, /C0, /C1) are lenient: an unusable one falls back to the default rather than failing
+	// the parse. What must not happen is storing ±Inf, which for a type 2 function — whose /Range is optional, so
+	// nothing clamps the output — would put ±Inf/NaN in Eval's result, contradicting Func.Eval's contract that
+	// malformed data yields clamped or zero values.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"Range", "<< /FunctionType 2 /Domain [0 1] /Range [0 " + huge + "] /C0 [0] /C1 [1] /N 1 >>"},
+		{"C1", "<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [" + huge + "] /N 1 >>"},
+		{"C0", "<< /FunctionType 2 /Domain [0 1] /C0 [" + huge + "] /C1 [1] /N 1 >>"},
+	} {
+		t.Run(tc.name+" ignored", func(t *testing.T) {
+			fn := parseObj1(t, docWith(t, tc.body))
+			for _, x := range []float32{0, 0.5, 1} {
+				out := evalOne(t, fn, x)
+				for _, v := range out {
+					if math.IsInf(float64(v), 0) || math.IsNaN(float64(v)) {
+						t.Fatalf("Eval(%v) = %v; a rejected %s left a non-finite value in the function", x, out, tc.name)
+					}
+				}
+			}
+		})
+	}
+	// The in-range spelling of the same shape still parses, so the check has not simply rejected large numbers.
+	t.Run("in range", func(t *testing.T) {
+		fn := parseObj1(t, docWith(t, "<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1"+strings.Repeat("0", 30)+"] /N 1 >>"))
+		out := evalOne(t, fn, 1)
+		if len(out) != 1 || math.IsInf(float64(out[0]), 0) || math.IsNaN(float64(out[0])) {
+			t.Fatalf("Eval = %v, want a finite value", out)
+		}
+	})
+}

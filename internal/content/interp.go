@@ -16,7 +16,7 @@
 // Robustness contract: unknown operators are skipped with the operand list reset (the convention every deployed viewer
 // follows); operators with missing or mistyped operands are skipped likewise; unbalanced q/Q at stream end
 // auto-unwinds; and all work is bounded — graphics-state depth, form recursion (with a cycle set), operand count,
-// container nesting, and total work (executed operators plus the stream bodies and resource parses those operators
+// container nesting, per-operand element count, and total work (executed operators plus the stream bodies and resource parses those operators
 // trigger; see budget.go) are all capped — so hostile input terminates without timeouts. The interpreter guarantees the
 // device's push/pop balance no matter how malformed the content is.
 package content
@@ -318,7 +318,7 @@ func (in *interp) exec(data []byte) {
 			in.operands = in.operands[:0]
 			continue
 		}
-		if obj, objOK := parseOperand(lex, tok, 0); objOK {
+		if obj, objOK := parseTopOperand(lex, tok); objOK {
 			// The list keeps the newest maxOperands operands: operators consume from its start, so for any well-formed
 			// operator the window is irrelevant, and for hostile floods it retains what the operator would actually
 			// use.

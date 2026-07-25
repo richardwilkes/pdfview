@@ -65,7 +65,7 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 			if valTok.Kind == cos.TokenKeyword && string(valTok.Bytes) == "ID" {
 				return dict, true
 			}
-			if obj, objOK := parseOperand(lex, valTok, 0); objOK {
+			if obj, objOK := parseTopOperand(lex, valTok); objOK {
 				dict[key] = obj
 			}
 		}

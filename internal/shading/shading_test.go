@@ -22,6 +22,8 @@ const (
 	keyDomain      cos.Name = "Domain"
 	keyFunction    cos.Name = "Function"
 	keyBitsPerFlag cos.Name = "BitsPerFlag"
+	keyCoords      cos.Name = "Coords"
+	keyFuncType    cos.Name = "FunctionType"
 )
 
 // testDoc opens a minimal document; the shading objects under test are built directly as cos values, so the document
@@ -38,11 +40,11 @@ func testDoc(t *testing.T) *cos.Document {
 
 func expFn(c0, c1 cos.Array) cos.Dict {
 	return cos.Dict{
-		"FunctionType": cos.Integer(2),
-		keyDomain:      cos.Array{cos.Real(0), cos.Real(1)},
-		"C0":           c0,
-		"C1":           c1,
-		"N":            cos.Integer(1),
+		keyFuncType: cos.Integer(2),
+		keyDomain:   cos.Array{cos.Real(0), cos.Real(1)},
+		"C0":        c0,
+		"C1":        c1,
+		"N":         cos.Integer(1),
 	}
 }
 
@@ -51,7 +53,7 @@ func TestParseAxial(t *testing.T) {
 	sh, err := Parse(d, cos.Dict{
 		keyShadingType: cos.Integer(2),
 		keyColorSpace:  cos.Name("DeviceRGB"),
-		"Coords":       cos.Array{cos.Real(0), cos.Real(0), cos.Real(100), cos.Real(0)},
+		keyCoords:      cos.Array{cos.Real(0), cos.Real(0), cos.Real(100), cos.Real(0)},
 		keyFunction:    expFn(cos.Array{cos.Real(1), cos.Real(0), cos.Real(0)}, cos.Array{cos.Real(0), cos.Real(0), cos.Real(1)}),
 		"Extend":       cos.Array{cos.Boolean(true), cos.Boolean(false)},
 	})
@@ -82,7 +84,7 @@ func TestParseRejects(t *testing.T) {
 		{keyShadingType: cos.Integer(2), keyColorSpace: cos.Name("DeviceRGB")}, // no Coords/Function
 		{
 			keyShadingType: cos.Integer(3), keyColorSpace: cos.Name("DeviceRGB"), // negative radius
-			"Coords":    cos.Array{cos.Real(0), cos.Real(0), cos.Real(-1), cos.Real(0), cos.Real(0), cos.Real(5)},
+			keyCoords:   cos.Array{cos.Real(0), cos.Real(0), cos.Real(-1), cos.Real(0), cos.Real(0), cos.Real(5)},
 			keyFunction: expFn(cos.Array{cos.Real(0)}, cos.Array{cos.Real(1)}),
 		},
 		{keyShadingType: cos.Integer(4), keyColorSpace: cos.Name("DeviceRGB")}, // mesh without stream
@@ -103,10 +105,10 @@ func TestParseFunctionBased(t *testing.T) {
 		keyDomain:      cos.Array{cos.Real(0), cos.Real(2), cos.Real(0), cos.Real(4)},
 		"Matrix":       cos.Array{cos.Real(2), cos.Real(0), cos.Real(0), cos.Real(2), cos.Real(10), cos.Real(20)},
 		keyFunction: &cos.Stream{Dict: cos.Dict{
-			"FunctionType": cos.Integer(4),
-			keyDomain:      cos.Array{cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1)},
-			"Range":        cos.Array{cos.Real(0), cos.Real(1)},
-			"Length":       cos.Integer(int64(len(calc))),
+			keyFuncType: cos.Integer(4),
+			keyDomain:   cos.Array{cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1)},
+			"Range":     cos.Array{cos.Real(0), cos.Real(1)},
+			"Length":    cos.Integer(int64(len(calc))),
 		}, Raw: calc},
 	})
 	if err != nil {
@@ -307,4 +309,102 @@ func TestBitReader(t *testing.T) {
 	if _, ok := r.read(0); ok {
 		t.Fatal("zero-bit read should fail")
 	}
+}
+
+// TestOverRangeGeometryRejected covers isFinite, which was applied to the float64 while every caller stores float32(v).
+// "1" followed by 39 zeros is a legal PDF number and a finite float64, but ±Inf once narrowed — so /Coords, /Domain,
+// /Matrix, /BBox, and a mesh's /Decode could all hold ±Inf in what this package documents as a normalized form of pure
+// geometry. internal/render's withShadingBBox asserts the opposite: that rectFrom validates the four /BBox entries
+// "exactly as content.rectFrom does for a form's box", and content.rectFrom checks after narrowing.
+func TestOverRangeGeometryRejected(t *testing.T) {
+	d := testDoc(t)
+	huge := cos.Real(1e39) // Finite as a float64; +Inf once narrowed to float32.
+	gray := expFn(cos.Array{cos.Real(0)}, cos.Array{cos.Real(1)})
+	axial := func(extra cos.Dict) cos.Dict {
+		dict := cos.Dict{
+			keyShadingType: cos.Integer(2),
+			keyColorSpace:  cos.Name("DeviceGray"),
+			keyCoords:      cos.Array{cos.Real(0), cos.Real(0), cos.Real(100), cos.Real(0)},
+			keyFunction:    gray,
+		}
+		for k, v := range extra {
+			dict[k] = v
+		}
+		return dict
+	}
+
+	// An over-range coordinate is fatal: the gradient's geometry is the shading.
+	t.Run("Coords", func(t *testing.T) {
+		bad := axial(cos.Dict{keyCoords: cos.Array{cos.Real(0), cos.Real(0), huge, cos.Real(0)}})
+		if _, err := Parse(d, bad); err == nil {
+			t.Fatal("a /Coords entry of 1e39 was accepted; it narrows to +Inf as a float32")
+		}
+	})
+	// The optional entries degrade instead, but none of them may store a non-finite value.
+	t.Run("BBox", func(t *testing.T) {
+		sh, err := Parse(d, axial(cos.Dict{"BBox": cos.Array{cos.Real(0), cos.Real(0), huge, huge}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sh.BBox != nil {
+			t.Fatalf("BBox = %+v, want nil: an unusable /BBox is no clip at all", *sh.BBox)
+		}
+	})
+	t.Run("Domain", func(t *testing.T) {
+		fnBased := cos.Dict{
+			keyShadingType: cos.Integer(1),
+			keyColorSpace:  cos.Name("DeviceGray"),
+			keyDomain:      cos.Array{cos.Real(0), huge, cos.Real(0), cos.Real(1)},
+			keyFunction:    cos.Dict{keyFuncType: cos.Integer(2), keyDomain: cos.Array{cos.Real(0), cos.Real(1)}, "C0": cos.Array{cos.Real(0)}, "C1": cos.Array{cos.Real(1)}, "N": cos.Integer(1)},
+		}
+		sh, err := Parse(d, fnBased)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sh.Domain != [4]float32{0, 1, 0, 1} {
+			t.Fatalf("Domain = %v, want the default [0 1 0 1]", sh.Domain)
+		}
+	})
+	t.Run("Matrix", func(t *testing.T) {
+		fnBased := cos.Dict{
+			keyShadingType: cos.Integer(1),
+			keyColorSpace:  cos.Name("DeviceGray"),
+			"Matrix":       cos.Array{huge, cos.Real(0), cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(0)},
+			keyFunction:    cos.Dict{keyFuncType: cos.Integer(2), keyDomain: cos.Array{cos.Real(0), cos.Real(1)}, "C0": cos.Array{cos.Real(0)}, "C1": cos.Array{cos.Real(1)}, "N": cos.Integer(1)},
+		}
+		sh, err := Parse(d, fnBased)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !sh.Matrix.IsFinite() {
+			t.Fatalf("Matrix = %+v, want a finite fallback", sh.Matrix)
+		}
+	})
+	// A mesh's /Decode drives every vertex coordinate, so an over-range entry must fail the parse rather than yield a
+	// mesh whose triangles are all silently dropped as non-finite.
+	t.Run("mesh Decode", func(t *testing.T) {
+		data := make([]byte, 0, 24)
+		data = append(data, v4(0, 0, 0, 10, 20, 30)...)
+		data = append(data, v4(0, 100, 0, 10, 20, 30)...)
+		data = append(data, v4(0, 0, 100, 10, 20, 30)...)
+		stream := meshStream(4, cos.Dict{keyBitsPerFlag: cos.Integer(8)}, data)
+		stream.Dict["Decode"] = cos.Array{
+			cos.Real(0), huge, cos.Real(0), cos.Real(400),
+			cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1),
+		}
+		if _, err := Parse(d, stream); err == nil {
+			t.Fatal("a mesh /Decode entry of 1e39 was accepted")
+		}
+	})
+	// The largest in-range values still parse, so the check has not simply rejected big numbers.
+	t.Run("in range", func(t *testing.T) {
+		big := cos.Real(3e38)
+		sh, err := Parse(d, axial(cos.Dict{keyCoords: cos.Array{cos.Real(0), cos.Real(0), big, cos.Real(0)}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sh.Coords[2] != float32(3e38) {
+			t.Fatalf("Coords[2] = %v, want 3e38", sh.Coords[2])
+		}
+	})
 }

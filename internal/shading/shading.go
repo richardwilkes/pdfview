@@ -311,6 +311,13 @@ func rectFrom(d *cos.Document, dict cos.Dict, key cos.Name) (gfx.Rect, bool) {
 	return gfx.Rect{X0: vals[0], Y0: vals[1], X1: vals[2], Y1: vals[3]}.Normalize(), true
 }
 
+// isFinite reports whether v survives the narrowing to float32 as a finite value. Every caller stores float32(v) — the
+// width this package's normalized geometry (/Coords, /Domain, /Matrix, /BBox, a mesh's /Decode) is kept in — and a legal
+// PDF number beyond float32's range, such as 1 followed by 39 zeros, is a finite float64 that narrows to ±Inf. Testing
+// the float64 alone would let those through, contradicting internal/render's withShadingBBox, which relies on
+// rectFrom validating the four /BBox entries "exactly as content.rectFrom does for a form's box" — and content.rectFrom
+// checks after narrowing.
 func isFinite(v float64) bool {
-	return !math.IsNaN(v) && !math.IsInf(v, 0)
+	f := float64(float32(v))
+	return !math.IsNaN(f) && !math.IsInf(f, 0)
 }

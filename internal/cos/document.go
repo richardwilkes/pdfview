@@ -55,7 +55,10 @@ type Document struct {
 	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted; it is
 	// meaningful only once decryptor is non-nil.
 	encryptNum int
-	repaired   bool
+	// xrefStreamRows counts the cross-reference stream rows processed so far, across every section of the chain (see
+	// maxXrefStreamRows).
+	xrefStreamRows int
+	repaired       bool
 	// xrefLoading reports whether loadXref is currently assembling the cross-reference table. A load attempted from
 	// there resolves against a table that does not yet hold the section being read, let alone the older ones behind it,
 	// so its failure says nothing about the object and must not be cached — and, more importantly, must not trigger the

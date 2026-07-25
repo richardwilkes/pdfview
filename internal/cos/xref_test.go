@@ -231,3 +231,83 @@ func TestHasIndirect(t *testing.T) {
 		})
 	}
 }
+
+// bigIndexXrefStreamPDF builds a file whose single cross-reference stream claims rows entries through /Index [0 rows]
+// and backs every one of them with a /W [1 1 1] row — three bytes each, and flate-compressible to almost nothing. The
+// first three entries are real (free object 0, the catalog, the page tree), so the document is usable no matter how
+// many of the remaining rows are read; the rest are type 1 entries pointing at offset 0.
+func bigIndexXrefStreamPDF(rows int) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	off1 := buf.Len()
+	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	off2 := buf.Len()
+	buf.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	if off1 > 0xff || off2 > 0xff {
+		panic("the real objects must sit within the one-byte offset field /W [1 1 1] provides")
+	}
+	payload := make([]byte, 0, 3*rows)
+	// Object 0 is free; objects 1 and 2 are the catalog and the page tree.
+	payload = append(payload, 0, 0, 0xff, 1, byte(off1), 0, 1, byte(off2), 0)
+	for range rows - 3 {
+		payload = append(payload, 1, 0, 0)
+	}
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	zw.Write(payload) //nolint:errcheck // Writing to a bytes.Buffer cannot fail.
+	zw.Close()        //nolint:errcheck // See above.
+	xrefOff := buf.Len()
+	fmt.Fprintf(&buf, "3 0 obj\n<< /Type /XRef /Size %d /W [1 1 1] /Index [0 %d] /Root 1 0 R /Filter /FlateDecode "+
+		"/Length %d >>\nstream\n", rows, rows, compressed.Len())
+	buf.Write(compressed.Bytes())
+	buf.WriteString("\nendstream\nendobj\n")
+	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", xrefOff)
+	return buf.Bytes()
+}
+
+// TestXrefStreamRowBudget covers the bound on how many entries the cross-reference stream path may register. A classic
+// table pays 20 file bytes per entry, but a stream row costs rowLen bytes of decoded payload, and internal/filter lets
+// a stream decode to max(64 MB, 256x input): /W [1 1 1] with /Index [0 16777216] fits setEntry's whole object-number
+// range into a 49 KB file, and the resulting map is retained for the document's lifetime (measured: ~1.9 GB allocated
+// by Open alone, before any page is rendered). Rows past the budget are dropped like a truncated payload, keeping the
+// entries already read.
+func TestXrefStreamRowBudget(t *testing.T) {
+	t.Run("within the budget nothing is dropped", func(t *testing.T) {
+		const rows = 64
+		d, err := Open(bigIndexXrefStreamPDF(rows))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.repaired {
+			t.Fatal("the repair scan ran; the cross-reference stream is complete")
+		}
+		// Object 0 is free and numbered zero, which setEntry ignores; the rest are registered.
+		if got, want := len(d.xref), rows-1; got != want {
+			t.Errorf("registered %d entries, want %d", got, want)
+		}
+	})
+	t.Run("past the budget rows are dropped", func(t *testing.T) {
+		data := bigIndexXrefStreamPDF(4 * minXrefStreamRows)
+		d, err := Open(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		budget := d.maxXrefStreamRows()
+		if budget != minXrefStreamRows {
+			t.Fatalf("budget = %d for a %d byte file, want the floor of %d", budget, len(data), minXrefStreamRows)
+		}
+		if d.xrefStreamRows != budget {
+			t.Errorf("processed %d rows, want the budget of %d", d.xrefStreamRows, budget)
+		}
+		if len(d.xref) > budget {
+			t.Errorf("registered %d entries from a %d byte file, want at most %d", len(d.xref), len(data), budget)
+		}
+		// The entries that were read remain usable: the document opened without repair and its root resolves.
+		if d.repaired {
+			t.Error("the repair scan ran; the entries read before the budget ran out cover the whole document")
+		}
+		if _, ok := AsDict(d.Resolve(d.trailer[rootKey])); !ok {
+			t.Error("the root is no longer resolvable")
+		}
+	})
+}

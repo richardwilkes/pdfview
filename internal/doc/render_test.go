@@ -72,7 +72,7 @@ func TestPageContentsAggregateBudget(t *testing.T) {
 	}
 	d := mustOpen(t, pdf(map[int]string{
 		1: catalogObj,
-		2: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		2: pagesOneKidObj,
 		3: "<< /Type /Page /Parent 2 0 R /Contents [" + refs + "] >>",
 		5: flateObj(t, perStream),
 	}))
