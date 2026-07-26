@@ -12,6 +12,7 @@ package shading
 import (
 	"testing"
 
+	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
@@ -25,6 +26,7 @@ const (
 	keyBitsPerFlag cos.Name = "BitsPerFlag"
 	keyCoords      cos.Name = "Coords"
 	keyFuncType    cos.Name = "FunctionType"
+	keyVertsPerRow cos.Name = "VerticesPerRow"
 )
 
 // testDoc opens a minimal document; the shading objects under test are built directly as cos values, so the document
@@ -207,7 +209,7 @@ func TestParseMeshType5(t *testing.T) {
 		data = append(data, coord16(xy[1])...)
 		data = append(data, 50, 60, 70)
 	}
-	sh, err := Parse(d, meshStream(5, cos.Dict{"VerticesPerRow": cos.Integer(2)}, data))
+	sh, err := Parse(d, meshStream(5, cos.Dict{keyVertsPerRow: cos.Integer(2)}, data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +217,7 @@ func TestParseMeshType5(t *testing.T) {
 		t.Fatalf("2x2 uniform lattice should yield 2 flat triangles, got %d", len(sh.Triangles))
 	}
 	// A truncated final row keeps the complete rows' triangles.
-	sh, err = Parse(d, meshStream(5, cos.Dict{"VerticesPerRow": cos.Integer(2)}, append(data, 0x01, 0x02)))
+	sh, err = Parse(d, meshStream(5, cos.Dict{keyVertsPerRow: cos.Integer(2)}, append(data, 0x01, 0x02)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,5 +465,48 @@ func TestGridSize(t *testing.T) {
 	w, h, ok := wide.GridSize(gfx.Matrix{A: 1, D: 1})
 	if !ok || w*h > MaxGridArea || w < 1 || h < 1 {
 		t.Fatalf("GridSize = %d x %d (ok=%v), want a positive grid inside the %d-cell cap", w, h, ok, MaxGridArea)
+	}
+}
+
+// TestLatticeRowWidthBound pins the type 5 vertex budget. parseLattice needs a two-row floor (a lattice with one row
+// forms no triangles), so validating /VerticesPerRow only against maxMeshVertices let a row width above the halfway
+// point read — and allocate — two rows of up to maxMeshVertices vertices each, twice the documented cap. The row width
+// itself carries the bound now.
+func TestLatticeRowWidthBound(t *testing.T) {
+	d := testDoc(t)
+	for _, tc := range []struct {
+		name   string
+		perRow int64
+		want   bool // parses
+	}{
+		{name: "at the cap", perRow: maxMeshVertices / 2, want: true},
+		{name: "one past the cap", perRow: maxMeshVertices/2 + 1},
+		{name: "the old cap", perRow: maxMeshVertices},
+		{name: "below the two-row minimum", perRow: 1},
+	} {
+		_, err := Parse(d, meshStream(5, cos.Dict{keyVertsPerRow: cos.Integer(tc.perRow)}, nil))
+		if (err == nil) != tc.want {
+			t.Errorf("%s (/VerticesPerRow %d): err = %v", tc.name, tc.perRow, err)
+		}
+	}
+
+	// At the cap the reader stops after the two rows the floor allows, consuming exactly maxMeshVertices vertices even
+	// when the payload holds more. Three bits per vertex (1-bit coordinates, one 1-bit color value) keeps the payload
+	// small; the position after the read is what pins the consumption.
+	const perRow = maxMeshVertices / 2
+	m := meshDecode{
+		space:  pdfcolor.DeviceGray,
+		nComps: 1,
+		nColor: 1,
+		bpc:    1,
+		bpcomp: 1,
+		decode: []float32{0, 1, 0, 1, 0, 1},
+	}
+	const bitsPerVertex = 3
+	r := &bitReader{data: make([]byte, 3*perRow*bitsPerVertex/8)} // Three rows' worth of payload.
+	parseLattice(r, &m, &meshBuilder{}, perRow)
+	if want := 2 * perRow * bitsPerVertex; r.pos != want {
+		t.Errorf("lattice consumed %d bits (%d vertices), want %d (%d vertices, the whole budget and no more)",
+			r.pos, r.pos/bitsPerVertex, want, 2*perRow)
 	}
 }

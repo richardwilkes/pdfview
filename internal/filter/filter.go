@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 
 	tifflzw "golang.org/x/image/tiff/lzw"
 )
@@ -305,7 +306,14 @@ func runLengthDecode(data []byte, maxSize int) ([]byte, error) {
 			if len(out)+count > maxSize {
 				return nil, ErrTooLarge
 			}
-			out = append(out, bytes.Repeat(data[i:i+1], count)...)
+			// Grow once and fill the tail in place. bytes.Repeat here would allocate a throwaway slice per run — up to
+			// one allocation per two input bytes on RLE-heavy streams — just to copy it straight into out.
+			base := len(out)
+			out = slices.Grow(out, count)[:base+count]
+			tail := out[base:]
+			for j := range tail {
+				tail[j] = data[i]
+			}
 			i++
 		}
 	}

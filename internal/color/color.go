@@ -88,11 +88,13 @@ func comp(comps []float32, i int) float32 {
 	return 0
 }
 
-// Indexed is an /Indexed color space: a single index component looking up base-space components in a table.
+// Indexed is an /Indexed color space: a single index component looking up base-space components in a table. The whole
+// palette is resolved to device colors at parse time — hival caps it at 256 entries — so lookups are a single indexed
+// read with no per-call allocation and no repeated base-space conversion (a /Separation or /DeviceN base would
+// otherwise re-evaluate its tint transform for every pixel of a 16-bpc image, which internal/imaging's single-component
+// LUT does not cover).
 type Indexed struct {
-	base   Space
-	lookup []byte
-	hival  int
+	palette []color.NRGBA
 }
 
 // NComponents implements Space.
@@ -101,18 +103,30 @@ func (x *Indexed) NComponents() int { return 1 }
 // Initial implements Space.
 func (x *Indexed) Initial() []float32 { return []float32{0} }
 
-// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; table bytes map linearly
-// onto [0, 1] per base component, which is exact for the device-family bases this package supports.
+// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; the palette entry it
+// selects was built by buildPalette, where table bytes map linearly onto [0, 1] per base component — exact for the
+// device-family bases this package supports.
 func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
-	idx := clampIndex(comp(comps, 0), x.hival)
-	n := x.base.NComponents()
-	baseComps := make([]float32, n)
-	for j := range n {
-		if off := idx*n + j; off < len(x.lookup) {
-			baseComps[j] = float32(x.lookup[off]) / 255
+	return x.palette[clampIndex(comp(comps, 0), len(x.palette)-1)]
+}
+
+// buildPalette resolves every index in [0, hival] to its device color once, at parse time. Missing table bytes read as
+// 0, matching a short or absent lookup string.
+func buildPalette(base Space, lookup []byte, hival int) []color.NRGBA {
+	n := base.NComponents()
+	palette := make([]color.NRGBA, hival+1)
+	for idx := range palette {
+		// A fresh slice per entry: the base's conversion may hand its input to a tint transform, and nothing here
+		// promises the callee does not hold onto it.
+		baseComps := make([]float32, n)
+		for j := range n {
+			if off := idx*n + j; off < len(lookup) {
+				baseComps[j] = float32(lookup[off]) / 255
+			}
 		}
+		palette[idx] = base.ToNRGBA(baseComps)
 	}
-	return x.base.ToNRGBA(baseComps)
+	return palette
 }
 
 // clampIndex truncates a palette index to an int in [0, maxV]. The bounds are applied in float space on purpose: Go
@@ -311,7 +325,7 @@ func parseIndexed(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	default:
 		return nil, errBadSpace
 	}
-	return &Indexed{base: base, hival: int(hival), lookup: lookup}, nil
+	return &Indexed{palette: buildPalette(base, lookup, int(hival))}, nil
 }
 
 func parseSeparation(d *cos.Document, arr cos.Array, depth int) (Space, error) {

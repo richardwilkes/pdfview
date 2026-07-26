@@ -160,8 +160,11 @@ func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.
 	case KindFreeTriangle:
 		parseFreeTriangles(r, &m, b)
 	case KindLatticeTriangle:
+		// The row width is capped at half the vertex budget, not the whole of it: parseLattice must read at least two
+		// rows for a lattice to form any triangle at all, so a perRow above the halfway point would let the reader
+		// consume — and allocate — two rows of up to maxMeshVertices vertices each, twice the documented cap.
 		rows, hasRows := d.GetInt(dict, "VerticesPerRow")
-		if !hasRows || rows < 2 || rows > maxMeshVertices {
+		if !hasRows || rows < 2 || rows > maxMeshVertices/2 {
 			return errBadShading
 		}
 		parseLattice(r, &m, b, int(rows))
@@ -234,7 +237,8 @@ func parseFreeTriangles(r *bitReader, m *meshDecode, b *meshBuilder) {
 	}
 }
 
-// parseLattice reads a type 5 lattice stream: rows of perRow vertices, triangulated between adjacent rows.
+// parseLattice reads a type 5 lattice stream: rows of perRow vertices, triangulated between adjacent rows. The caller
+// caps perRow at maxMeshVertices/2, which keeps the two-row floor below within the vertex budget.
 func parseLattice(r *bitReader, m *meshDecode, b *meshBuilder, perRow int) {
 	maxRows := maxMeshVertices / perRow
 	var prev, row []vert

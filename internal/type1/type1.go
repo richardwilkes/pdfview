@@ -19,6 +19,7 @@
 package type1
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"slices"
@@ -160,12 +161,19 @@ func joinPFB(data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// indexToken finds a keyword at a token boundary (not inside a longer name), returning its byte offset or -1.
+// indexToken finds a keyword at a token boundary (not inside a longer name), returning its byte offset or -1. The scan
+// runs through bytes.Index rather than comparing at every position: the whole font program is searched for "eexec", and
+// a large embedded program should not pay a per-byte comparison (nor the string conversion of each candidate) to find
+// it.
 func indexToken(data []byte, word string) int {
-	for i := 0; i+len(word) <= len(data); i++ {
-		if data[i] != word[0] || string(data[i:i+len(word)]) != word {
-			continue
+	needle := []byte(word)
+	for at := 0; at+len(word) <= len(data); {
+		i := bytes.Index(data[at:], needle)
+		if i < 0 {
+			return -1
 		}
+		i += at
+		at = i + 1
 		if i > 0 && !isDelim(data[i-1]) && !isWhite(data[i-1]) {
 			continue
 		}

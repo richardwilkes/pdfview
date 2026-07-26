@@ -54,9 +54,23 @@ func (d *Document) DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) e
 }
 
 // drawPage wraps the caller's canvas in a raster device and runs the page through the interpreter under the composed
-// page-space→canvas matrix. The canvas state is restored to its entry depth on every path out, including a
-// hostile-content panic, which maps to ErrInternal.
+// page-space→canvas matrix. The canvas state is restored to its entry depth on every path out, including a panic —
+// whether raised by hostile content or by the caller's own canvas during setup — which maps to ErrInternal.
 func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (err error) {
+	// The guard is the first statement so that the setup calls below are covered too: render.Wrap, PageCTM and the
+	// matrix composition all touch the caller's canvas or hostile document geometry, and DrawPage's contract promises
+	// every failure — including a panic out of a canvas whose surface the caller already released — surfaces as an
+	// error rather than escaping. save stays negative until the state is actually pushed, since RestoreToCount(0) on a
+	// canvas the caller had saved at a deeper level would unwind state this call never pushed.
+	save := -1
+	defer func() {
+		if recover() != nil {
+			err = ErrInternal
+		}
+		if save >= 0 {
+			c.RestoreToCount(save)
+		}
+	}()
 	dev, derr := render.Wrap(c)
 	if derr != nil {
 		return ErrUnableToCreateImage
@@ -72,13 +86,7 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 	if !full.IsFinite() {
 		return ErrInvalidMatrix
 	}
-	save := c.Save()
-	defer func() {
-		if recover() != nil {
-			err = ErrInternal
-		}
-		c.RestoreToCount(save)
-	}()
+	save = c.Save()
 	dev.SetStore(e.store)
 	e.runPage(pg, full, dev)
 	return nil

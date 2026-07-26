@@ -302,3 +302,45 @@ func TestParseRejects(t *testing.T) {
 		}
 	}
 }
+
+// TestIndexedPaletteIsPrecomputed pins the /Indexed lookup cost. The palette is resolved to device colors once, at
+// parse time, so a conversion is a single indexed read: no per-call scratch slice, and no per-call re-evaluation of the
+// base space. That matters for the cases internal/imaging's single-component LUT does not cover — a 16-bpc /Indexed
+// image, or one whose base runs a /Separation tint transform — where ToNRGBA is called once per pixel.
+func TestIndexedPaletteIsPrecomputed(t *testing.T) {
+	d := docWith(t, "[ /Indexed 2 0 R 1 <0064> ]",
+		"[ /Separation /Spot /DeviceGray 3 0 R ]",
+		"<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>")
+	space, err := Parse(d, cos.Ref{Num: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Entry 1 is table byte 0x64 = 100/255 through the identity tint into /DeviceGray.
+	want := DeviceGray.ToNRGBA([]float32{100.0 / 255})
+	if got := space.ToNRGBA([]float32{1}); got != want {
+		t.Errorf("index 1 = %v, want %v", got, want)
+	}
+	comps := []float32{1} // Hoisted: the argument slice's own allocation is not what this measures.
+	if allocs := testing.AllocsPerRun(100, func() { space.ToNRGBA(comps) }); allocs != 0 {
+		t.Errorf("ToNRGBA allocated %v times per call, want 0 (the palette is precomputed)", allocs)
+	}
+}
+
+// TestIndexedShortLookupTable pins the fault tolerance the per-call conversion had: table bytes the lookup string does
+// not reach read as 0 rather than erroring or panicking, for every index up to hival.
+func TestIndexedShortLookupTable(t *testing.T) {
+	d := docWith(t, "[ /Indexed /DeviceRGB 2 <FF00> ]") // Two bytes for a nine-byte table.
+	space, err := Parse(d, cos.Ref{Num: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for idx, want := range map[float32]color.NRGBA{
+		0: {R: 255, A: 255},
+		1: {A: 255},
+		2: {A: 255},
+	} {
+		if got := space.ToNRGBA([]float32{idx}); got != want {
+			t.Errorf("index %v = %v, want %v", idx, got, want)
+		}
+	}
+}

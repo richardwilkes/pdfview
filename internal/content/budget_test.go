@@ -240,7 +240,8 @@ func TestInlineImageDecodeChargedPerSample(t *testing.T) {
 func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
 		"/Type /XObject /Subtype /Image /Width 64 /Height 64 /BitsPerComponent 8 /ColorSpace /DeviceGray",
-		"\x00\x01\x02\x03"))))
+		"\x00\x01\x02\x03",
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,5 +413,20 @@ func TestShadingRealizationChargedPerPaint(t *testing.T) {
 		t.Fatalf("all %d sh operators painted: the device realization is not charged to the work budget", paints)
 	case painted > limit:
 		t.Fatalf("%d sh operators painted, want at most %d (one realization charge each)", painted, limit)
+	}
+}
+
+// TestLexicalGarbageChargedToBudget pins the work budget over the one path that used to escape it. A token that fails
+// to lex advances the read position, so the scan always terminates — but without a charge its bound was the stream
+// length rather than maxTotalOps, and a stream of pure garbage was scanned end to end no matter how little budget
+// remained. Each stray ')' here is a one-byte lexical error; past the budget nothing more may run.
+func TestLexicalGarbageChargedToBudget(t *testing.T) {
+	tail := " 0 0 1 1 re f"
+	if rec := run(t, nil, nil, strings.Repeat(")", 16)+tail); len(rec.byOp(opFill)) != 1 {
+		t.Fatalf("a little garbage stopped the scan: %d fills, want 1", len(rec.byOp(opFill)))
+	}
+	if rec := run(t, nil, nil, strings.Repeat(")", maxTotalOps+1)+tail); len(rec.byOp(opFill)) != 0 {
+		t.Errorf("the operator past %d bytes of lexical garbage still ran: the scan is not charged to the budget",
+			maxTotalOps+1)
 	}
 }

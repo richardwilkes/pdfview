@@ -718,9 +718,13 @@ func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) 
 	if len(annots) == 0 {
 		return
 	}
+	// The page's resources are resolved once: PageResources re-resolves the page's (possibly indirect) /Resources entry
+	// through the COS layer on every call, the value cannot change during the pass, and a page may name tens of
+	// thousands of annotations.
+	res := e.doc.PageResources(pg.number)
 	run := content.NewAnnotRun(e.store)
 	for _, a := range annots {
-		run.Annot(e.doc.COS(), e.doc.PageResources(pg.number), a.Raw, a.Stream, a.Transform.Mul(ctm), dev)
+		run.Annot(e.doc.COS(), res, a.Raw, a.Stream, a.Transform.Mul(ctm), dev)
 	}
 }
 

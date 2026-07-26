@@ -42,6 +42,17 @@ type sfntInfo struct {
 	nGlyphs      int
 }
 
+// simpleGlyphs reports whether a parsed program can supply outlines for a simple font: either go-text accepted it
+// (GlyphPath's Face path) or its glyf/loca walker was built (the cmap-less fallback). A program that parsed far enough
+// to yield metrics but has neither draws nothing, so the loaders treat it as no program at all — the substitute owns
+// both the shapes and the metrics rather than the two coming from different fonts. Safe on a nil receiver: a stream
+// that did not parse answers the same "no".
+func (s *sfntInfo) simpleGlyphs() bool { return s != nil && (s.face != nil || s.glyf != nil) }
+
+// cidGlyphs reports the same for a CIDFontType2 program, where GlyphPath uses only the direct glyf walker (CID subsets
+// routinely omit the cmap table go-text requires), so a go-text face alone is not a usable outline source.
+func (s *sfntInfo) cidGlyphs() bool { return s != nil && s.glyf != nil }
+
 // parseSFNTStream decodes and parses a FontFile2/FontFile3(OpenType) stream. Any failure — undecodable stream,
 // unparseable font, hostile bytes that panic the parser — yields nil, and the caller substitutes.
 func parseSFNTStream(d *cos.Document, s *cos.Stream) (info *sfntInfo) {

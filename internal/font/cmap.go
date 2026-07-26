@@ -138,7 +138,11 @@ func pickCmaps(cm tables.Cmap) (unicode, symbol, macRoman *cmapTable) {
 	return unicode, symbol, macRoman
 }
 
-// usableCmapSubtable reports whether lookup understands the subtable's format.
+// usableCmapSubtable reports whether lookup understands the subtable's format. Format 2 (the legacy CJK high-byte
+// mapping) is deliberately out of scope, and a font whose only (1,0) or (3,0) subtable is format 2 is therefore treated
+// as having no such table at all: pickCmaps leaves the slot nil and sfntInfo.gid runs off the end of its chain into the
+// "code as GID" last resort. That fallthrough — not a lookup miss inside a rejected table — is the degradation such
+// fonts get; it renders the wrong glyphs for a format-2 CJK font, which is why a real implementation would go here.
 func usableCmapSubtable(sub tables.CmapSubtable) bool {
 	switch sub.(type) {
 	case tables.CmapSubtable0, tables.CmapSubtable4, tables.CmapSubtable6, tables.CmapSubtable12:

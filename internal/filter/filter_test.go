@@ -273,6 +273,35 @@ func TestRunLength(t *testing.T) {
 	}
 }
 
+// TestRunLengthManyRuns exercises the repeat branch's in-place fill over a stream that is nothing but back-to-back
+// runs — the shape that used to pay one throwaway allocation per encoded run. Every run length from the 2-byte minimum
+// to the 128-byte maximum is covered, and the expansion is checked byte for byte, since filling the grown tail by hand
+// is where an off-by-one would hide.
+func TestRunLengthManyRuns(t *testing.T) {
+	const runs = 127
+	in := make([]byte, 0, 2*runs+1)
+	want := make([]byte, 0, 8255)
+	for i := range runs {
+		n := 255 - byte(i)    // Length byte 255 down to 129: runs of 2 up to 128 bytes (128 itself is the EOD marker).
+		b := byte('a' + i%26) // A distinct byte per run, so a misplaced fill shows up as wrong content.
+		in = append(in, n, b)
+		want = append(want, bytes.Repeat([]byte{b}, 257-int(n))...)
+	}
+	in = append(in, 128) // EOD
+	if got := decode(t, spec(rlName), in); !bytes.Equal(got, want) {
+		t.Errorf("RunLength over 127 runs decoded %d bytes, want %d", len(got), len(want))
+	}
+
+	// The size cap still applies to the grown tail: a run that would cross it is a hard error, not a truncation.
+	huge := bytes.Repeat([]byte{129, 'z'}, 64) // 64 runs of 128 bytes = 8192 bytes of output.
+	if _, err := filter.Decode(spec(rlName), huge, 8191); !errors.Is(err, filter.ErrTooLarge) {
+		t.Errorf("oversized repeat run: err = %v, want ErrTooLarge", err)
+	}
+	if got, err := filter.Decode(spec(rlName), huge, 8192); err != nil || len(got) != 8192 {
+		t.Errorf("repeat runs filling the cap exactly: %d bytes, err = %v", len(got), err)
+	}
+}
+
 // pngFilterForward applies PNG filtering to raw so the decoder's inversion can be verified. Rows are filtered with the
 // given per-row filter types.
 func pngFilterForward(raw []byte, rowLen, bpp int, filters []byte) []byte {

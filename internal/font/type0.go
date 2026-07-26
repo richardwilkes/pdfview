@@ -88,10 +88,14 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 	// whose program really sits in FontFile3 (bare/Type1C CFF) must still be parsed from FontFile3, not routed into the
 	// SFNT arm with a nil stream and then substituted away (ISO 32000-2 9.7.4.2). Each entry is tried in turn and one
 	// that yields no usable program falls through to the next, so a descriptor carrying both a corrupt FontFile2 and a
-	// usable FontFile3 still renders its real glyphs — the same allowance loadSimple makes for simple fonts.
+	// usable FontFile3 still renders its real glyphs — the same allowance loadSimple makes for simple fonts. For a
+	// composite font "usable" means a glyf walker specifically (cidGlyphs): Font.GlyphPath draws a CIDFontType2 only
+	// through that walker, so an sfnt that parsed its head table but carries no glyf/loca/maxp — a truncated FontFile2,
+	// or the mislabeled but real-world case of a CFF-flavored OpenType program placed in FontFile2 — would otherwise
+	// render nothing at all while suppressing the substitute that could have drawn it.
 	embedded := false
 	if desc.fontFile2 != nil {
-		if sfnt := parseSFNTStream(d, desc.fontFile2); sfnt != nil {
+		if sfnt := parseSFNTStream(d, desc.fontFile2); sfnt.cidGlyphs() {
 			info.sfnt = sfnt
 			f.ascender, f.descender = sfnt.ascender, sfnt.descender
 			embedded = true

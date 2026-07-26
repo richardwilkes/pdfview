@@ -845,3 +845,30 @@ func TestParseRejectsNonFiniteMetrics(t *testing.T) {
 		})
 	}
 }
+
+// TestIndexToken pins the token-boundary rule the eexec split depends on. The scan runs through bytes.Index for speed,
+// so the cases that matter are the ones where a candidate hit must be rejected and the search resumed from the next
+// byte rather than abandoned: a keyword embedded in a longer name, and one whose only boundary-clean occurrence comes
+// after such a hit.
+func TestIndexToken(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data string
+		want int
+	}{
+		{name: "at the start", data: "eexec rest", want: 0},
+		{name: "after whitespace", data: "/Private 15 dict dup begin\neexec\n", want: 27},
+		{name: "after a delimiter", data: "{eexec}", want: 1},
+		{name: "absent", data: "no keyword here", want: -1},
+		{name: "prefix of a longer name", data: "eexecutable", want: -1},
+		{name: "suffix of a longer name", data: "myeexec", want: -1},
+		{name: "embedded, then real", data: "myeexec eexec", want: 8},
+		{name: "twice embedded, then real", data: "eexecutable myeexec\neexec x", want: 20},
+		{name: "at the very end", data: "dup begin eexec", want: 10},
+		{name: "shorter than the word", data: "eex", want: -1},
+	} {
+		if got := indexToken([]byte(tc.data), "eexec"); got != tc.want {
+			t.Errorf("%s: indexToken(%q) = %d, want %d", tc.name, tc.data, got, tc.want)
+		}
+	}
+}

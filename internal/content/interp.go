@@ -351,7 +351,12 @@ func (in *interp) exec(data []byte) {
 	for in.budget >= 0 {
 		tok, ok := lex.Next()
 		if !ok {
-			continue // Lexical error: position advanced; keep scanning.
+			// Lexical error: the position advanced, so scanning terminates regardless, but it is charged like an
+			// operator anyway. Without the charge a stream of pure garbage would be scanned end to end no matter how
+			// little budget remained, and the package's "all work is bounded by maxTotalOps" contract would hold only
+			// via the stream length.
+			in.budget--
+			continue
 		}
 		if tok.Kind == cos.TokenEOF {
 			break

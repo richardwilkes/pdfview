@@ -9,7 +9,13 @@
 
 package pdfview
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/richardwilkes/canvas/geom"
+	"github.com/richardwilkes/canvas/surface"
+)
 
 // The engine seam methods authenticate, outline, and links each run untrusted work through the internal engine
 // (decryption plus page-tree re-parsing, outline-tree resolution, and /Annots resolution respectively). Per the
@@ -38,5 +44,27 @@ func TestLinksRecoversPanic(t *testing.T) {
 	e := &engineDocument{} // doc is nil
 	if infos := e.links(&page{number: 0}); infos != nil {
 		t.Fatalf("expected nil links when the engine panics, got %+v", infos)
+	}
+}
+
+// TestDrawPageRecoversSetupPanic pins the placement of drawPage's guard. DrawPage's contract is that every failure
+// surfaces as an error, but the setup it runs before drawing anything — wrapping the caller's canvas, reading the page
+// CTM, composing the matrices — can itself panic: a canvas whose surface the caller already released panics inside
+// render.Wrap, and a nil engine document panics in PageCTM (the reliable stand-in used here). With the guard installed
+// after that setup, such a panic escaped to the caller instead of becoming ErrInternal. The canvas must come back
+// untouched, since nothing was saved before the panic.
+func TestDrawPageRecoversSetupPanic(t *testing.T) {
+	surf := surface.NewRasterN32Premul(8, 8, nil)
+	if surf == nil {
+		t.Fatal("unable to create surface")
+	}
+	c := surf.Canvas()
+	saves := c.SaveCount()
+	e := &engineDocument{} // doc is nil: PageCTM panics after render.Wrap has succeeded.
+	if err := e.drawPage(c, &page{number: 0}, geom.IdentityMatrix()); !errors.Is(err, ErrInternal) {
+		t.Fatalf("expected ErrInternal when the setup panics, got %v", err)
+	}
+	if got := c.SaveCount(); got != saves {
+		t.Fatalf("drawPage left the canvas save count at %d, want %d", got, saves)
 	}
 }

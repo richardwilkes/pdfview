@@ -182,17 +182,21 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	// The embedded program supplies the quad metrics; substituted fonts use the standard-14 pins. Each descriptor entry
 	// is tried in turn and a program that yields nothing falls through to the next one, so a dictionary carrying both a
 	// corrupt FontFile2 and a usable FontFile3 (or a program sitting in an entry its /Subtype does not predict) still
-	// renders its real glyphs instead of being substituted away — the same allowance loadType0 makes for composite fonts.
+	// renders its real glyphs instead of being substituted away — the same allowance loadType0 makes for composite
+	// fonts. "Yields nothing" includes an sfnt that parsed but has neither a go-text face nor a glyf walker
+	// (simpleGlyphs): its shapes would come from the substitute, so its metrics must not be taken either — the package
+	// rule is that a substituted font uses the pinned metrics of its replacement, not the quad of a program nothing
+	// draws.
 	embedded := false
 	if desc.fontFile2 != nil {
-		if info := parseSFNTStream(d, desc.fontFile2); info != nil {
+		if info := parseSFNTStream(d, desc.fontFile2); info.simpleGlyphs() {
 			f.sfnt, embedded = info, true
 			f.ascender, f.descender = info.ascender, info.descender
 		}
 	}
 	if f.sfnt == nil && desc.fontFile3 != nil {
 		if desc.fontFile3Sub == "OpenType" {
-			if info := parseSFNTStream(d, desc.fontFile3); info != nil {
+			if info := parseSFNTStream(d, desc.fontFile3); info.simpleGlyphs() {
 				f.sfnt, embedded = info, true
 				f.ascender, f.descender = info.ascender, info.descender
 			}
@@ -241,13 +245,11 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.hasWidths = loadWidths(d, dict, f)
 
 	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes yield no
-	// outline source at all — renders through the deterministic Liberation substitute (never an error, never a system
-	// font). An sfnt go-text rejects (no cmap table) but whose glyf/loca tables read keeps rendering its own shapes
-	// through the direct glyf walker. The substitute is the glyph source only when no embedded source exists, so
-	// GID/GlyphPath/Width stay mutually consistent.
-	if f.sfnt != nil && f.sfnt.face == nil && f.sfnt.glyf == nil {
-		f.sfnt = nil
-	}
+	// outline source at all (rejected by simpleGlyphs above, before their metrics were taken) — renders through the
+	// deterministic Liberation substitute (never an error, never a system font). An sfnt go-text rejects (no cmap
+	// table) but whose glyf/loca tables read keeps rendering its own shapes through the direct glyf walker. The
+	// substitute is the glyph source only when no embedded source exists, so GID/GlyphPath/Width stay mutually
+	// consistent.
 	if f.sfnt == nil && f.cff == nil && f.t1 == nil {
 		f.sub = loadSubstitute(std14)
 	}
