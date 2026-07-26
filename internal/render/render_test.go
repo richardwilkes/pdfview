@@ -2262,6 +2262,69 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 	})
 }
 
+// Every /Domain entry is validated finite on its own, but the extent of a wide box like [-3e38 3e38 0 1] overflows the
+// float32 subtraction to +Inf. Computed that way, every cell of the grid samples the function at x = +Inf (one wrong
+// flat grid, paid for at up to shading.MaxGridArea evaluations) and the placement matrix built from the same extent
+// carries the infinity into canvas, which silently drops the whole fill.
+func TestFunctionShaderOverflowingDomainExtent(t *testing.T) {
+	t.Run("the grid spans the domain", func(t *testing.T) {
+		var xs []float32
+		sh := &shading.Shading{
+			Kind:   shading.KindFunction,
+			Domain: [4]float32{-3e38, 3e38, 0, 1},
+			Matrix: gfx.Identity(),
+			ColorAt: func(x, _ float32) color.NRGBA {
+				xs = append(xs, x)
+				return color.NRGBA{A: 255}
+			},
+		}
+		d := newDevice(t, 32, 32)
+		if s := d.functionShader(sh, gfx.Identity()); s == nil {
+			t.Fatal("function shading with a wide domain produced no shader")
+		}
+		w, h, ok := sh.GridSize(gfx.Identity())
+		if !ok || w*h < 2 {
+			t.Fatalf("GridSize = %d x %d (ok = %v), want a multi-cell grid", w, h, ok)
+		}
+		if len(xs) != w*h {
+			t.Fatalf("the grid was evaluated %d times, want the %d cells of a %d x %d grid", len(xs), w*h, w, h)
+		}
+		for _, x := range xs {
+			if !isFinite32(x) {
+				t.Fatalf("a grid cell sampled the function at x = %v", x)
+			}
+		}
+		if xs[0] == xs[len(xs)-1] {
+			t.Errorf("every grid cell sampled x = %v, want samples spanning the domain", xs[0])
+		}
+	})
+	t.Run("a non-finite placement is refused before the grid is evaluated", func(t *testing.T) {
+		// A domain that wide, squeezed to a sub-pixel device extent, is realized on a single cell — so the cell extent is
+		// the whole overflowing span and the shader's local matrix goes non-finite even though GridSize's corner check
+		// passes (it maps the domain corners, which stay finite under the tiny scale).
+		evals := 0
+		sh := &shading.Shading{
+			Kind:   shading.KindFunction,
+			Domain: [4]float32{-3e38, 3e38, 0, 1},
+			Matrix: gfx.Matrix{A: 1e-39, D: 1},
+			ColorAt: func(_, _ float32) color.NRGBA {
+				evals++
+				return color.NRGBA{A: 255}
+			},
+		}
+		if _, _, ok := sh.GridSize(gfx.Identity()); !ok {
+			t.Fatal("GridSize refused the shading, so the placement gate is not what is under test here")
+		}
+		d := newDevice(t, 32, 32)
+		if s := d.functionShader(sh, gfx.Identity()); s != nil {
+			t.Error("a shading whose local matrix is non-finite produced a shader")
+		}
+		if evals != 0 {
+			t.Errorf("the grid was evaluated %d times for a fill canvas cannot place", evals)
+		}
+	})
+}
+
 // The cached grid must paint exactly what a freshly realized one paints; a stale or misindexed image would show up as a
 // pixel difference between the first draw of a shading and every later one.
 func TestFunctionShaderCachedGridPaintsIdentically(t *testing.T) {

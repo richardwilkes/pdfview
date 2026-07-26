@@ -349,14 +349,28 @@ func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.S
 	if !ok {
 		return nil
 	}
+	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
+	// Image pixel -> domain -> /Matrix -> target space. The per-cell extents are formed in float64 for the reason
+	// axialSpan runs there: each /Domain entry is individually finite, but the float32 difference of two far-apart
+	// bounds (a /Domain of [-3e38 3e38 0 1]) overflows to +Inf, which would scale the whole placement by infinity.
+	toDomain := gfx.Matrix{
+		A: float32((float64(x1) - float64(x0)) / float64(w)),
+		D: float32((float64(y1) - float64(y0)) / float64(h)),
+		E: x0,
+		F: y0,
+	}
+	// Only finite geometry crosses into canvas — the same gate axialShader applies to its own placement. Checked before
+	// the grid is realized, since canvas drops a fill with a non-finite local matrix and the up-to-MaxGridArea function
+	// evaluations behind it would be spent painting nothing.
+	full := toDomain.Mul(sh.Matrix.Mul(local))
+	if !full.IsFinite() {
+		return nil
+	}
 	img := d.functionImage(sh, w, h)
 	if img == nil {
 		return nil
 	}
-	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
-	// Image pixel -> domain -> /Matrix -> target space.
-	toDomain := gfx.Matrix{A: (x1 - x0) / float32(w), D: (y1 - y0) / float32(h), E: x0, F: y0}
-	lm := matrix(toDomain.Mul(sh.Matrix.Mul(local)))
+	lm := matrix(full)
 	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
 	return shaders.NewImage(img, shaders.TileDecal, shaders.TileDecal, sampling, &lm)
 }
@@ -417,12 +431,16 @@ func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
 // centers, and wraps the samples as an opaque RGBA image. nil (a cached failure) when the image cannot be created.
 func (d *Device) realizeFunctionGrid(sh *shading.Shading, w, h int) *imagecore.Image {
 	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
+	// Cell extents in float64, matching functionShader: the float32 difference of two far-apart finite domain bounds
+	// overflows to +Inf and would place every sample of the grid at the same infinite domain point.
+	dx := (float64(x1) - float64(x0)) / float64(w)
+	dy := (float64(y1) - float64(y0)) / float64(h)
 	pix := make([]byte, w*h*4)
 	for j := range h {
-		y := y0 + (float32(j)+0.5)/float32(h)*(y1-y0)
+		y := float32(float64(y0) + (float64(j)+0.5)*dy)
 		row := pix[j*w*4:]
 		for i := range w {
-			x := x0 + (float32(i)+0.5)/float32(w)*(x1-x0)
+			x := float32(float64(x0) + (float64(i)+0.5)*dx)
 			c := sh.ColorAt(x, y)
 			row[i*4] = c.R
 			row[i*4+1] = c.G
