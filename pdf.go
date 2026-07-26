@@ -710,10 +710,17 @@ func (e *engineDocument) runPage(pg *page, ctm gfx.Matrix, dev device.Device) {
 // from. internal/doc has already applied the selection gates (flags, subtype, /AS state) and computed each appearance's
 // ISO 32000-2 12.5.5 placement in page space; composing that with the page CTM positions it in device space. Each
 // appearance runs as its own interpreter pass with a fresh default graphics state, inheriting the page's resources when
-// it carries none of its own.
+// it carries none of its own. The passes share one content.AnnotRun, which is what bounds them as a group: a page may
+// name tens of thousands of annotations, and a per-annotation budget would let them all point at one appearance stream
+// and re-decode it under a full budget each (see AnnotRun's own comment).
 func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) {
-	for _, a := range e.doc.Annotations(pg.number) {
-		content.RunAnnot(e.doc.COS(), e.doc.PageResources(pg.number), a.Raw, a.Stream, a.Transform.Mul(ctm), dev, e.store)
+	annots := e.doc.Annotations(pg.number)
+	if len(annots) == 0 {
+		return
+	}
+	run := content.NewAnnotRun(e.store)
+	for _, a := range annots {
+		run.Annot(e.doc.COS(), e.doc.PageResources(pg.number), a.Raw, a.Stream, a.Transform.Mul(ctm), dev)
 	}
 }
 

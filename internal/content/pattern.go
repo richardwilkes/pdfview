@@ -39,7 +39,7 @@ type patternRes struct {
 type tilingRes struct {
 	resources cos.Dict
 	body      []byte
-	ref       cos.Ref
+	ref       cos.RefKey
 	bbox      gfx.Rect
 	xstep     float32
 	ystep     float32
@@ -99,14 +99,14 @@ func (in *interp) resolvePattern(name cos.Name) *patternRes {
 func (in *interp) parsePatternEntry(raw cos.Object) *patternRes {
 	ref, isRef := raw.(cos.Ref)
 	if isRef {
-		if pat, hit := in.caches.patterns[ref]; hit {
+		if pat, hit := in.caches.patterns[ref.Key()]; hit {
 			return pat
 		}
 	}
 	in.charge(resourceParseCost)
 	pat := in.parsePattern(raw)
 	if isRef {
-		in.caches.patterns[ref] = pat
+		in.caches.patterns[ref.Key()] = pat
 	}
 	return pat
 }
@@ -157,7 +157,7 @@ func (in *interp) parseTiling(raw cos.Object, stream *cos.Stream) *tilingRes {
 	}
 	tile := &tilingRes{body: body, bbox: bbox}
 	if ref, isRef := raw.(cos.Ref); isRef {
-		tile.ref, tile.hasRef = ref, true
+		tile.ref, tile.hasRef = ref.Key(), true
 	}
 	tile.resources, _ = in.doc.GetDict(stream.Dict, "Resources")
 	paintType, _ := in.doc.GetInt(stream.Dict, "PaintType")
@@ -222,7 +222,7 @@ func (in *interp) applyPattern(p *device.Paint, space pdfcolor.Space, pat *patte
 // reference plus, for an uncolored pattern, the scn-supplied color its stencil paints with (the same reference paints
 // different cells under different colors).
 type tilingCellKey struct {
-	ref   cos.Ref
+	ref   cos.RefKey
 	color color.NRGBA
 }
 

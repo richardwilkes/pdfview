@@ -23,6 +23,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/font"
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/store"
 )
 
 // The glyph coverage cache: filling every glyph outline through the analytic-AA rasterizer on every render dominated
@@ -41,6 +42,12 @@ import (
 // maxGlyphMaskDim caps a cached coverage plane's extent; glyphs rendering larger than this (display-size text) fall
 // back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.
 const maxGlyphMaskDim = 256
+
+// maxGlyphMaskBytes caps the live coverage planes the per-device cache holds. Bounding this cache by entry count is not
+// a bound on its memory: one plane may be maxGlyphMaskDim² = 64 KiB, so a few thousand entries is hundreds of
+// megabytes. At 16 MiB the cap holds tens of thousands of ordinary text-size glyphs — well past what any real page
+// draws — while a page of display-size glyphs costs 16 MiB rather than a quarter of a gigabyte.
+const maxGlyphMaskBytes = 16 << 20
 
 // glyphMaskKey identifies one cached glyph coverage plane: glyph identity, the Trm linear part, and the subpixel phase
 // of the glyph origin. Distinct store key type per the store's kind-separation rule.
@@ -133,6 +140,15 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 		const maxReasonable = 1 << 24
 		originOverflow := ox < -maxReasonable || ox > maxReasonable || oy < -maxReasonable || oy > maxReasonable
 		if mask == nil || mask.plane == nil || originOverflow {
+			// The glyphs arriving here are exactly the ones renderGlyphMask declined, which includes declining
+			// BECAUSE the outline's transformed corners were non-finite or past 1<<24 — so the same bounds test the
+			// merged-outline path applies (textOutline) has to apply here too. Without it a glyph the slow path skips
+			// crosses into canvas with ±Inf/NaN coordinates on the fast path, which every ordinary opaque solid fill
+			// takes, and buildPath's "no non-finite geometry crosses this seam" guarantee would hold on only one of
+			// the two paths that draw the same run.
+			if b := gp.Bounds(); !rectFiniteUnder(b.Left, b.Top, b.Right, b.Bottom, g.Trm) {
+				continue
+			}
 			if leftover == nil {
 				leftover = path.New()
 			}
@@ -173,8 +189,9 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 // nearly the whole of it.
 func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy float32) *glyphMask {
 	key := glyphMaskKey{font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy}
-	if d.store != nil {
-		if v, ok := d.store.Get(key); ok {
+	st := d.maskStore()
+	if st != nil {
+		if v, ok := st.Get(key); ok {
 			if m, isMask := v.(*glyphMask); isMask {
 				return m
 			}
@@ -184,24 +201,43 @@ func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy 
 		return m
 	}
 	mask, size := d.renderGlyphMask(g, gp, fx, fy)
-	if d.store != nil {
-		d.store.Put(key, mask, size)
+	if st != nil {
+		st.Put(key, mask, size)
 		return mask
 	}
 	if d.glyphMasks == nil {
 		d.glyphMasks = make(map[glyphMaskKey]*glyphMask)
 	}
-	if len(d.glyphMasks) >= maxCachedGlyphPaths {
-		// The per-render map has no eviction of its own, and simply refusing further entries retires the cache for the
-		// rest of the render: every later glyph appearance would miss, rebuild its plane, and throw it away, so a
-		// text-heavy page pays the miss cost on every remaining glyph with no prospect of a hit. Dropping the map instead
-		// keeps the cap on live planes while letting the page go on caching what it draws next (the store, when one is
-		// wired, evicts by LRU under its own budget and never gets here). Retention is invisible to output: a hit
-		// reproduces the plane a miss would have rendered, bit for bit.
+	if d.glyphMaskBytes+size > maxGlyphMaskBytes {
+		// The map has no eviction of its own, and simply refusing further entries retires the cache for the rest of the
+		// render: every later glyph appearance would miss, rebuild its plane, and throw it away, so a text-heavy page
+		// pays the miss cost on every remaining glyph with no prospect of a hit. Dropping the map instead keeps the cap
+		// on live planes while letting the page go on caching what it draws next. The cap is on BYTES, not entries:
+		// planes differ in size by three orders of magnitude, so an entry count bounds nothing about the memory held.
+		// Retention is invisible to output: a hit reproduces the plane a miss would have rendered, bit for bit.
 		clear(d.glyphMasks)
+		d.glyphMaskBytes = 0
 	}
 	d.glyphMasks[key] = mask
+	d.glyphMaskBytes += size
 	return mask
+}
+
+// maskStore returns the store coverage planes cache in, or nil when they cache in the per-device map instead.
+//
+// The document store holds them only when it carries a byte budget to evict them under. A plane's key is the glyph
+// identity plus the full float32 Trm linear part and the exact subpixel phase of its origin, so distinct keys
+// accumulate with GLYPHS DRAWN rather than with the distinct resources the rest of the store holds — and under the
+// unlimited budget New(buffer, 0) selects, nothing in the store is ever evicted, so "no limit" would come to mean
+// memory proportional to every glyph the document has ever rendered. The per-device map bounds itself
+// (maxGlyphMaskBytes) and, with a store wired, survives Reset, so the re-render-at-the-same-size protocol the blit path
+// exists for still hits — and a re-render at a DIFFERENT size could not have hit either way, since the Trm in the key
+// changes with the scale.
+func (d *Device) maskStore() *store.Store {
+	if d.store == nil || d.store.Max() == 0 {
+		return nil
+	}
+	return d.store
 }
 
 // renderGlyphMask fills the glyph outline at its exact subpixel position into a scratch surface and captures the

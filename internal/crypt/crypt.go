@@ -124,8 +124,24 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 			return errBadKeyEntry
 		}
 		if v >= 4 {
-			h.strM = h.cryptFilterMethod(c, encDict, "StrF")
-			h.stmM = h.cryptFilterMethod(c, encDict, "StmF")
+			var strLen, stmLen int
+			h.strM, strLen = h.cryptFilterMethod(c, encDict, "StrF")
+			h.stmM, stmLen = h.cryptFilterMethod(c, encDict, "StmF")
+			// The selected crypt filter carries its own /Length (ISO 32000-2 Table 25), and the top-level one is
+			// optional with a 40-bit default, so a V4 document that omits it must not be decrypted with a 40-bit key
+			// just because the crypt filter is where the real length was written. /AESV2 is defined to use a 128-bit
+			// key whatever either /Length says: without pinning it, objectKey hands aes.NewCipher a 10-byte key, the
+			// decrypt reports failure, and apply returns the CIPHERTEXT unchanged — the document authenticates and
+			// renders as garbage instead of failing. Streams win over strings when the two filters disagree, since one
+			// file key length serves both.
+			switch {
+			case h.stmM == methodAESV2 || h.strM == methodAESV2:
+				h.keyLen = 16
+			case stmLen > 0:
+				h.keyLen = stmLen
+			case strLen > 0:
+				h.keyLen = strLen
+			}
 		} else {
 			h.strM = methodRC4
 			h.stmM = methodRC4
@@ -150,30 +166,52 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 	return nil
 }
 
-// cryptFilterMethod resolves the method named by the /StmF or /StrF entry through the /CF dictionary. The default
-// filter name is /Identity (no encryption) per ISO 32000-2 7.6.5.
-func (h *Handler) cryptFilterMethod(c *cos.Document, encDict cos.Dict, which cos.Name) method {
+// cryptFilterMethod resolves the method named by the /StmF or /StrF entry through the /CF dictionary, along with the
+// key length in bytes that filter's own /Length declares (0 when it declares none usable). The default filter name is
+// /Identity (no encryption) per ISO 32000-2 7.6.5.
+func (h *Handler) cryptFilterMethod(c *cos.Document, encDict cos.Dict, which cos.Name) (m method, keyLen int) {
 	name, ok := c.GetName(encDict, which)
 	if !ok || name == "Identity" {
-		return methodIdentity
+		return methodIdentity, 0
 	}
 	cf, ok := c.GetDict(encDict, "CF")
 	if !ok {
-		return methodIdentity
+		return methodIdentity, 0
 	}
 	filter, ok := c.GetDict(cf, name)
 	if !ok {
-		return methodIdentity
+		return methodIdentity, 0
 	}
+	length := cryptFilterKeyLen(c, filter)
 	switch cfm, _ := c.GetName(filter, "CFM"); cfm {
 	case "V2":
-		return methodRC4
+		return methodRC4, length
 	case "AESV2":
-		return methodAESV2
+		return methodAESV2, length
 	case "AESV3":
-		return methodAESV3
+		return methodAESV3, length
 	default: // /None, /Identity, or absent
-		return methodIdentity
+		return methodIdentity, 0
+	}
+}
+
+// cryptFilterKeyLen reads a crypt filter dictionary's /Length as a key length in BYTES, or 0 when it is absent or
+// unusable. ISO 32000-2 Table 25 defines the entry in bits, but writers in the field also store it in bytes (the value
+// is then a plausible 5-16 where a bit length would be 40-128), so both spellings are accepted the way deployed readers
+// accept them. The result is capped at 16 for the same reason the top-level length is: the R<=4 file key is sliced out
+// of a 16-byte MD5 digest.
+func cryptFilterKeyLen(c *cos.Document, filter cos.Dict) int {
+	l, ok := c.GetInt(filter, "Length")
+	if !ok {
+		return 0
+	}
+	switch {
+	case l >= 40 && l <= 256 && l%8 == 0:
+		return min(int(l)/8, 16)
+	case l >= 5 && l <= 32:
+		return min(int(l), 16)
+	default:
+		return 0
 	}
 }
 

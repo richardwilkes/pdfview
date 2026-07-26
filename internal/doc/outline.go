@@ -45,12 +45,12 @@ func (d *Document) Outline() *OutlineItem {
 		return nil
 	}
 	budget := maxOutlineNodes
-	return d.walkOutline(outlines["First"], 0, &budget, make(map[cos.Ref]bool))
+	return d.walkOutline(outlines["First"], 0, &budget, make(map[cos.RefKey]bool))
 }
 
 // walkOutline builds the sibling chain starting at obj (a /First value), recursing into children. Siblings are walked
 // iteratively so only the tree depth — capped — consumes Go stack.
-func (d *Document) walkOutline(obj cos.Object, depth int, budget *int, visited map[cos.Ref]bool) *OutlineItem {
+func (d *Document) walkOutline(obj cos.Object, depth int, budget *int, visited map[cos.RefKey]bool) *OutlineItem {
 	if depth > maxOutlineDepth {
 		return nil
 	}
@@ -58,10 +58,10 @@ func (d *Document) walkOutline(obj cos.Object, depth int, budget *int, visited m
 	tail := &head
 	for *budget > 0 {
 		if ref, isRef := obj.(cos.Ref); isRef {
-			if visited[ref] {
+			if visited[ref.Key()] {
 				break
 			}
-			visited[ref] = true
+			visited[ref.Key()] = true
 		}
 		node, ok := cos.AsDict(d.cos.Resolve(obj))
 		if !ok {

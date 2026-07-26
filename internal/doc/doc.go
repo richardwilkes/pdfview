@@ -50,8 +50,9 @@ type Document struct {
 	// (unencrypted, or encrypted with an unsupported handler).
 	crypt *crypt.Handler
 	// pageIndex maps each page's indirect reference to its 0-based page number; destination arrays name their target
-	// page by reference, and this is how those references resolve to page numbers.
-	pageIndex map[cos.Ref]int
+	// page by reference, and this is how those references resolve to page numbers. It keys on the reference's
+	// resolution identity (cos.RefKey), so a destination naming the page with a different generation still finds it.
+	pageIndex map[cos.RefKey]int
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
 	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref otherwise);
@@ -179,16 +180,16 @@ func (d *Document) buildPageList() {
 	d.pageRefs = nil
 	d.geoms = nil
 	d.resources = nil
-	d.pageIndex = make(map[cos.Ref]int)
+	d.pageIndex = make(map[cos.RefKey]int)
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
 		return
 	}
 	pagesObj := root["Pages"]
-	visited := make(map[cos.Ref]bool)
+	visited := make(map[cos.RefKey]bool)
 	var pagesRef cos.Ref
 	if ref, isRef := pagesObj.(cos.Ref); isRef {
-		visited[ref] = true
+		visited[ref.Key()] = true
 		pagesRef = ref
 	}
 	node, ok := cos.AsDict(d.cos.Resolve(pagesObj))
@@ -198,7 +199,7 @@ func (d *Document) buildPageList() {
 	d.walkPageTree(node, pagesRef, 0, visited, inheritedAttrs{})
 }
 
-func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited map[cos.Ref]bool, attrs inheritedAttrs) {
+func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited map[cos.RefKey]bool, attrs inheritedAttrs) {
 	if depth > maxPageTreeDepth || len(d.pages) >= maxPages {
 		return
 	}
@@ -209,7 +210,7 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 	// node with neither is treated as a page (leniency for repair-recovered trees with missing /Type).
 	if typ == "Page" || (!hasKids && typ != "Pages") {
 		if ref != (cos.Ref{}) {
-			d.pageIndex[ref] = len(d.pages)
+			d.pageIndex[ref.Key()] = len(d.pages)
 		}
 		d.pages = append(d.pages, node)
 		d.pageRefs = append(d.pageRefs, ref)
@@ -223,10 +224,10 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 		}
 		var kidRef cos.Ref
 		if r, isRef := kid.(cos.Ref); isRef {
-			if visited[r] {
+			if visited[r.Key()] {
 				continue
 			}
-			visited[r] = true
+			visited[r.Key()] = true
 			kidRef = r
 		}
 		kidDict, ok := cos.AsDict(d.cos.Resolve(kid))

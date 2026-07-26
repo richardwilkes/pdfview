@@ -47,22 +47,23 @@ func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging
 // charged: a cache hit did no work beyond the Do operator's own unit, which is what makes a repeatedly drawn image
 // cheap.
 func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dict) *imaging.Image {
+	key := ref.Key()
 	if in.st != nil {
-		if v, hit := in.st.Get(imageKey{ref: ref}); hit {
+		if v, hit := in.st.Get(imageKey{ref: key}); hit {
 			if img, isImg := v.(*imaging.Image); isImg {
 				return img
 			}
 			return nil // Cached failure (negative entry).
 		}
 		img := in.decodeXObject(stream, resources)
-		in.st.Put(imageKey{ref: ref}, img, imageSize(img))
+		in.st.Put(imageKey{ref: key}, img, imageSize(img))
 		return img
 	}
-	if cached, seen := in.images.get(ref); seen {
+	if cached, seen := in.images.get(key); seen {
 		return cached
 	}
 	img := in.decodeXObject(stream, resources)
-	in.images.put(ref, img)
+	in.images.put(key, img)
 	return img
 }
 

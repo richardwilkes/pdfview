@@ -33,7 +33,7 @@ type softMaskRes struct {
 	resources  cos.Dict
 	body       []byte
 	transfer   []byte
-	ref        cos.Ref
+	ref        cos.RefKey
 	matrix     gfx.Matrix // the mask form's /Matrix (mask space -> anchor space)
 	bbox       gfx.Rect   // the mask form's /BBox (mask space)
 	backdrop   color.NRGBA
@@ -65,7 +65,7 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	}
 	sm := &softMaskRes{body: body, bbox: bbox, matrix: gfx.Identity(), backdrop: color.NRGBA{A: 255}}
 	if ref, isRef := raw.(cos.Ref); isRef {
-		sm.ref, sm.hasRef = ref, true
+		sm.ref, sm.hasRef = ref.Key(), true
 	}
 	if v, has := numbers6(in.doc, stream.Dict, "Matrix"); has {
 		sm.matrix = gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}

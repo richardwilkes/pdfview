@@ -754,10 +754,14 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 	d.c.RestoreToCount(count)
 }
 
-// fillMeshInto clips to the device-space path and draws the mesh through it.
+// fillMeshInto clips to the device-space path and draws the mesh through it. A nil path means the caller's region does
+// not fit float32 once mapped into device space, which is a region covering everything: the mesh then draws unclipped
+// rather than through the ±Inf-cornered path canvas would turn into an empty clip.
 func (d *Device) fillMeshInto(devicePath *path.Path, p device.Paint) {
 	count := d.c.Save()
-	d.c.ClipPath(devicePath, raster.ClipIntersect, true)
+	if devicePath != nil {
+		d.c.ClipPath(devicePath, raster.ClipIntersect, true)
+	}
 	d.withShadingBBox(p, func() {
 		d.drawMesh(p.Shading, p.PatternCTM, p.Alpha, p.Blend)
 	})

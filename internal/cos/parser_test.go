@@ -96,6 +96,49 @@ func TestContainerElementBudget(t *testing.T) {
 	})
 }
 
+// TestRefGenerationIdentityAndBound pins the two things a parsed generation number must satisfy. First, it takes no
+// part in a reference's identity: object lookup keys on the number alone, so "4 0 R" and "4 1 R" resolve to the same
+// object and their RefKeys have to be equal — anything keyed by reference (the interpreter's form-cycle set, every
+// reference-keyed cache) would otherwise treat one object as two, letting a form that alternates generations slip past
+// its cycle guard. Second, an absurd generation must not be narrowed into int: the lookahead used to accept exactly
+// 1<<31, which wraps negative where int is 32 bits (GOARCH=386/arm). It is clamped instead of rejected, so the object
+// the reference names is still reachable.
+func TestRefGenerationIdentityAndBound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		gen  string
+		want int
+	}{
+		{name: "zero", gen: "0", want: 0},
+		{name: "ordinary", gen: "1", want: 1},
+		{name: "the largest legal generation", gen: "65535", want: 65535},
+		{name: "past the legal maximum", gen: "65536", want: 0},
+		{name: "the 32-bit wrap point", gen: "2147483648", want: 0},
+		{name: "far past any int32", gen: "99999999999999", want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newParser([]byte("4 "+tc.gen+" R"), 0)
+			obj, err := p.parseObject()
+			if err != nil {
+				t.Fatalf("parseObject: %v", err)
+			}
+			ref, ok := obj.(Ref)
+			if !ok {
+				t.Fatalf("parsed %T (%v), want a Ref: an out-of-range generation must not cost the reference", obj, obj)
+			}
+			if ref.Num != 4 || ref.Gen != tc.want {
+				t.Errorf("parsed %v, want {Num:4 Gen:%d}", ref, tc.want)
+			}
+			if ref.Gen < 0 {
+				t.Errorf("the generation narrowed to %d: int(second.i) wrapped", ref.Gen)
+			}
+			if got, want := ref.Key(), (Ref{Num: 4}).Key(); got != want {
+				t.Errorf("RefKey = %v, want %v: the generation must not split one object's identity", got, want)
+			}
+		})
+	}
+}
+
 // TestOversizedObjectDoesNotLoad verifies the cap at the document level: the object fails to load, so nothing oversized
 // reaches objCache, references to it resolve to Null (ISO 32000-2 7.3.10's rule for objects that cannot be loaded), and
 // the rest of the document is unaffected.

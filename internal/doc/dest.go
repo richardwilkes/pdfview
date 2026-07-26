@@ -79,7 +79,7 @@ func (d *Document) destFromArray(arr cos.Array) Dest {
 	page := -1
 	switch v := arr[0].(type) {
 	case cos.Ref:
-		if n, ok := d.pageIndex[v]; ok {
+		if n, ok := d.pageIndex[v.Key()]; ok {
 			page = n
 		}
 	case cos.Integer:
@@ -143,7 +143,7 @@ func (d *Document) lookupNamedDest(key []byte) cos.Object {
 	}
 	if names, namesOK := d.cos.GetDict(root, "Names"); namesOK {
 		if tree, treeOK := d.cos.GetDict(names, "Dests"); treeOK {
-			if obj, found := d.lookupNameTree(tree, key, 0, make(map[cos.Ref]bool)); found {
+			if obj, found := d.lookupNameTree(tree, key, 0, make(map[cos.RefKey]bool)); found {
 				return obj
 			}
 		}
@@ -155,7 +155,7 @@ func (d *Document) lookupNamedDest(key []byte) cos.Object {
 // against the unsorted arrays repaired files exhibit — and /Kids are pruned by their /Limits only when the limits are
 // well-formed, so a node with broken limits is still descended into rather than silently skipped. Depth is capped and
 // reference cycles are skipped.
-func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited map[cos.Ref]bool) (cos.Object, bool) {
+func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited map[cos.RefKey]bool) (cos.Object, bool) {
 	if depth > maxNameTreeDepth {
 		return nil, false
 	}
@@ -172,10 +172,10 @@ func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited 
 	}
 	for _, kid := range kids {
 		if ref, isRef := kid.(cos.Ref); isRef {
-			if visited[ref] {
+			if visited[ref.Key()] {
 				continue
 			}
-			visited[ref] = true
+			visited[ref.Key()] = true
 		}
 		kidDict, kidOK := cos.AsDict(d.cos.Resolve(kid))
 		if !kidOK {

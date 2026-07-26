@@ -1539,15 +1539,22 @@ func textRun(t *testing.T, f *font.Font, text string, size, x, y, step float32) 
 	return run
 }
 
-// The per-render map (no store wired) has no eviction of its own. At its cap it must not simply stop accepting: that
+// The per-device map (no store wired) has no eviction of its own. At its cap it must not simply stop accepting: that
 // retires the cache for the rest of the render, leaving every later glyph appearance to rebuild a plane and throw it
-// away with no prospect of a hit. Dropping the map keeps live planes capped while the page goes on caching.
+// away with no prospect of a hit. Dropping the map keeps live planes capped while the page goes on caching. The cap is
+// on bytes rather than entries — one plane may be maxGlyphMaskDim² = 64 KiB and an ordinary text glyph a few hundred
+// bytes, so an entry count says nothing about the memory held.
 func TestGlyphMaskCacheKeepsCachingWhenMapFull(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 32, 32)
-	d.glyphMasks = make(map[glyphMaskKey]*glyphMask, maxCachedGlyphPaths)
-	for i := range maxCachedGlyphPaths {
-		d.glyphMasks[glyphMaskKey{gid: uint32(i) + 1}] = &glyphMask{}
+	d.glyphMasks = make(map[glyphMaskKey]*glyphMask)
+	for i := range 256 {
+		plane := make([]byte, maxGlyphMaskDim*maxGlyphMaskDim)
+		d.glyphMasks[glyphMaskKey{gid: uint32(i) + 1}] = &glyphMask{plane: plane, w: maxGlyphMaskDim, h: maxGlyphMaskDim}
+		d.glyphMaskBytes += glyphMaskSize(maxGlyphMaskDim, maxGlyphMaskDim) * 2
+	}
+	if d.glyphMaskBytes <= maxGlyphMaskBytes {
+		t.Fatalf("the prefill (%d bytes) did not reach the %d-byte cap", d.glyphMaskBytes, maxGlyphMaskBytes)
 	}
 	gid := f.GID('H')
 	gp := d.glyphPath(f, gid)
@@ -1560,8 +1567,8 @@ func TestGlyphMaskCacheKeepsCachingWhenMapFull(t *testing.T) {
 	if mask == nil || mask.plane == nil {
 		t.Fatal("no coverage plane rendered")
 	}
-	if len(d.glyphMasks) > maxCachedGlyphPaths {
-		t.Errorf("per-render map holds %d entries, past its %d cap", len(d.glyphMasks), maxCachedGlyphPaths)
+	if d.glyphMaskBytes > maxGlyphMaskBytes {
+		t.Errorf("the map holds %d bytes of planes, past its %d-byte cap", d.glyphMaskBytes, maxGlyphMaskBytes)
 	}
 	if again := d.glyphMask(f, g, gp, 0.5, 0.25); again != mask {
 		t.Error("the plane rendered past the cap was not cached; the map stopped accepting entries")
@@ -2276,5 +2283,149 @@ func TestFunctionShaderCachedGridPaintsIdentically(t *testing.T) {
 	repeated := render(3) // The second and third draws come from the cache.
 	if !bytes.Equal(first, repeated) {
 		t.Error("a cached function-shading grid painted differently from a freshly realized one")
+	}
+}
+
+// TestFillPathMeshOverRangeTransformStillPaints pins FillPath's mesh branch at the buildPath seam. The branch hands
+// canvas a path already in device space, which is past what buildPath guarantees — a path whose own coordinates are
+// finite still lands on ±Inf under a large-but-finite CTM — and fillMeshInto turns that path into a clip. Clipping to
+// ±Inf corners empties the clip and the mesh vanishes, where a region float32 cannot express is one that covers
+// everything: it must degrade to no clip, the way ClipPath and withShadingBBox already degrade.
+func TestFillPathMeshOverRangeTransformStillPaints(t *testing.T) {
+	sh := &shading.Shading{
+		Kind: shading.KindFreeTriangle,
+		Triangles: []shading.Triangle{
+			{P: [3]gfx.Point{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 0, Y: 20}}, Color: color.NRGBA{R: 255, A: 255}},
+		},
+	}
+	paint := device.Paint{Alpha: 1, Shading: sh, PatternCTM: gfx.Identity()}
+	d := newDevice(t, 20, 20)
+	var p gfx.Path
+	p.RectCorners(-1e38, -1e38, 1e38, 1e38) // Finite corners; the ×10 CTM below puts them past float32's range.
+	d.FillPath(&p, false, gfx.Scale(10, 10), paint)
+	pix, _, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pixelAt(t, pix, 20*4, 2, 2); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("the mesh painted %v at (2,2), want opaque red: the over-range fill path emptied its own clip", got)
+	}
+}
+
+// TestBlitLeftoverDropsOverflowingGlyph pins the coverage-blit fast path's leftover outline at the same seam the
+// merged-outline path is pinned at (TestTextOutlineDropsOverflowingGlyph). Glyphs reaching the leftover branch are
+// exactly the ones renderGlyphMask declined — including declining BECAUSE the transformed outline corners were
+// non-finite — so without the bounds test a glyph the slow path skips entirely crosses into canvas with ±Inf
+// coordinates on the fast path, which every ordinary opaque solid fill takes. Its neighbors in that same leftover
+// outline must be unaffected.
+func TestBlitLeftoverDropsOverflowingGlyph(t *testing.T) {
+	f := helveticaFont(t)
+	gid := f.GID('H')
+	if gid == 0 {
+		t.Fatal("'H' unmapped")
+	}
+	// Too tall for a coverage plane (maxGlyphMaskDim), so this one takes the leftover outline rather than a blit.
+	big := device.Glyph{Trm: gfx.Matrix{A: 600, D: -600}.Mul(gfx.Translate(20, 600)), GID: gid, Code: 'H'}
+	// Finite Trm, but A*x + E crosses float32's maximum for any outline point past ~0.13 em.
+	huge := device.Glyph{Trm: gfx.Matrix{A: 3e38, D: -3e38, E: 3e38, F: -3e38}, GID: gid, Code: 'H'}
+	if !huge.Trm.IsFinite() {
+		t.Fatal("the test's Trm is itself non-finite; it must pass the existing guard to exercise the new one")
+	}
+	render := func(glyphs ...device.Glyph) []byte {
+		t.Helper()
+		d := newDevice(t, 640, 640)
+		d.FillText(&device.TextRun{Font: f, Glyphs: glyphs, CTM: gfx.Identity()}, redPaint())
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	alone := render(big)
+	if !inkIn(alone, 640*4, 0, 0, 639, 639) {
+		t.Fatal("the oversized glyph produced no ink; the comparison below would be vacuous")
+	}
+	comparePixels(t, render(big, huge), alone, 640*4, "an overflowing glyph shared the leftover outline")
+	if blank := render(huge); inkIn(blank, 640*4, 0, 0, 639, 639) {
+		t.Error("a run of nothing but overflowing glyphs left ink")
+	}
+}
+
+// The per-render glyph path map has no eviction of its own. At its cap it must not simply stop accepting — that retires
+// the cache for the rest of the render, leaving every later glyph to re-convert its outline and throw it away with no
+// prospect of a hit. Its sibling glyphMask documents exactly that reasoning; the two must behave the same way.
+func TestGlyphPathCacheKeepsCachingWhenMapFull(t *testing.T) {
+	f := helveticaFont(t)
+	d := newDevice(t, 32, 32)
+	d.glyphPaths = make(map[glyphKey]*path.Path, maxCachedGlyphPaths)
+	for i := range maxCachedGlyphPaths {
+		d.glyphPaths[glyphKey{gid: uint32(i) + 1}] = nil
+	}
+	gid := f.GID('H')
+	if gid == 0 {
+		t.Fatal("'H' unmapped")
+	}
+	first := d.glyphPath(f, gid)
+	if first == nil {
+		t.Fatal("no glyph path converted")
+	}
+	if len(d.glyphPaths) > maxCachedGlyphPaths {
+		t.Errorf("the map holds %d entries, past its %d cap", len(d.glyphPaths), maxCachedGlyphPaths)
+	}
+	if again := d.glyphPath(f, gid); again != first {
+		t.Error("the path converted past the cap was not cached; the map stopped accepting entries")
+	}
+}
+
+// A coverage plane's cache key carries the full float32 Trm linear part and the exact subpixel phase of the glyph
+// origin, so distinct keys accumulate with GLYPHS DRAWN rather than with the distinct resources the rest of the store
+// holds. Under the unlimited budget New(buffer, 0) selects, the store never evicts anything, so retaining planes there
+// would make "no limit" mean memory proportional to every glyph the document has ever rendered. They cache in the
+// byte-capped per-device map instead — which survives Reset while a store is wired, so re-rendering the same page at
+// the same size, the warm protocol the blit path exists for, still hits.
+func TestGlyphMasksBypassUnlimitedStore(t *testing.T) {
+	f := helveticaFont(t)
+	st := store.New(0)
+	d := newDevice(t, 96, 64)
+	d.SetStore(st)
+	if d.maskStore() != nil {
+		t.Error("an unlimited store was chosen as the coverage-plane backing; nothing there would ever be evicted")
+	}
+	// Two batches of the same glyphs at different subpixel phases: no new glyph outlines, only new mask keys.
+	d.FillText(textRun(t, f, "Hello", 12, 2, 40, 7.3), redPaint())
+	if len(d.glyphMasks) == 0 {
+		t.Fatal("no coverage planes were cached anywhere")
+	}
+	afterFirst := st.Used()
+	if afterFirst == 0 {
+		t.Fatal("the store recorded no usage; the glyph outlines should be in it")
+	}
+	d.FillText(textRun(t, f, "Hello", 12, 2.37, 40.11, 7.91), redPaint())
+	if got := st.Used(); got != afterFirst {
+		t.Errorf("the store grew from %d to %d bytes for glyph instances that named no new resource: coverage planes "+
+			"are accumulating in a cache that never evicts", afterFirst, got)
+	}
+	// The planes outlive Reset while a store keeps their keyed *font.Font alive; without one nothing does.
+	held := len(d.glyphMasks)
+	d.Reset()
+	if len(d.glyphMasks) != held {
+		t.Errorf("Reset dropped %d cached planes; a re-render at the same size would rebuild every one",
+			held-len(d.glyphMasks))
+	}
+	noStore := newDevice(t, 96, 64)
+	noStore.FillText(textRun(t, f, "Hello", 12, 2, 40, 7.3), redPaint())
+	noStore.Reset()
+	if len(noStore.glyphMasks) != 0 {
+		t.Error("planes keyed by a *font.Font nothing keeps alive survived Reset")
+	}
+	// A store with a real budget does back them: it evicts under that budget, which is the bound the cache needs.
+	bounded := newDevice(t, 96, 64)
+	bounded.SetStore(store.New(1 << 20))
+	if bounded.maskStore() == nil {
+		t.Error("a budgeted store was not chosen as the coverage-plane backing")
+	}
+	bounded.FillText(textRun(t, f, "Hello", 12, 2, 40, 7.3), redPaint())
+	if len(bounded.glyphMasks) != 0 {
+		t.Error("planes were cached per device alongside a budgeted store that already holds them")
 	}
 }

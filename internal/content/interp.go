@@ -36,10 +36,11 @@ import (
 )
 
 // Store key types: one dedicated comparable type per cached resource kind (see internal/store's package comment), keyed
-// by the resource entry's object reference.
+// by the resource entry's object reference. The key is the reference's resolution identity (cos.RefKey), not the whole
+// cos.Ref: a generation the document never consults must not split one object across two cache entries.
 type (
-	fontKey  struct{ ref cos.Ref }
-	imageKey struct{ ref cos.Ref }
+	fontKey  struct{ ref cos.RefKey }
+	imageKey struct{ ref cos.RefKey }
 )
 
 // Limits. maxQDepth caps q/Q nesting; pushes beyond it are ignored (with their matching Qs ignored too, so pairing
@@ -143,14 +144,16 @@ type interp struct {
 	// operands is the pending operand list in content order (index 0 is the operator's first operand).
 	operands []cos.Object
 	path     *gfx.Path
-	active   map[cos.Ref]bool
+	// active is the form/pattern/charproc cycle set, keyed by resolution identity so a reference that alternates
+	// generations cannot slip past it (cos.RefKey).
+	active map[cos.RefKey]bool
 	// images caches decoded image XObjects (nil for failed decodes) for this Run, an LRU capped at maxCachedImages
 	// entries so a re-used image stays cached rather than being dropped once the cap is reached. It is itself nil when
 	// st is wired, which is the caching path then; child interpreters share whichever the parent has.
-	images *lruCache[cos.Ref, *imaging.Image]
+	images *lruCache[cos.RefKey, *imaging.Image]
 	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference; an LRU
 	// capped at maxCachedFonts entries, nil with a store wired, exactly like images.
-	fonts *lruCache[cos.Ref, *font.Font]
+	fonts *lruCache[cos.RefKey, *font.Font]
 	// caches holds the Run's reference-keyed decoded-body and parsed-resource caches (budget.go); child interpreters
 	// share the set with their parent.
 	caches *runCaches
@@ -207,30 +210,76 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 	in.popClips(0)
 }
 
-// RunAnnot interprets one annotation appearance stream (a form XObject) against dev. ctm must already compose the ISO
-// 32000-2 12.5.5 placement matrix (internal/doc's Annot.Transform) with the page CTM; the form's own /Matrix and /BBox
-// clip apply inside, exactly as for a form invoked by Do. pageResources is the page's resource dictionary: an
-// appearance stream without /Resources of its own inherits it (probe-pinned). Malformed content degrades exactly as in
-// Run.
-func RunAnnot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *cos.Stream, ctm gfx.Matrix, dev device.Device, st *store.Store) {
-	in := newInterp(d, pageResources, ctm, dev, st)
+// AnnotRun is one page's annotation appearance pass: every appearance the page draws runs through the same AnnotRun, so
+// they share one work budget and one set of reference-keyed caches instead of getting a fresh full budget each.
+//
+// The sharing is the bound, not an optimization. A page's /Annots may name up to internal/doc's cap (65536) of
+// annotations, and internal/doc hands each one its appearance stream — commonly the SAME stream, since nothing stops
+// every annotation from pointing at one appearance object. Run per annotation, each pass would re-decode that stream
+// (through internal/filter's max(64 MB, 256x input) inflation allowance) and re-execute it against a full maxTotalOps
+// budget, so a few kilobytes of crafted file would buy tens of thousands of decodes and interpretations — exactly the
+// "small input, huge work" the package comment's bounded-work contract rules out. With one budget across the page, the
+// appearances together cost what a single Run costs; with one body cache, the second annotation naming a stream reuses
+// the first's decoded bytes.
+type AnnotRun struct {
+	caches *runCaches
+	images *lruCache[cos.RefKey, *imaging.Image]
+	fonts  *lruCache[cos.RefKey, *font.Font]
+	active map[cos.RefKey]bool
+	st     *store.Store
+	budget int
+}
+
+// NewAnnotRun returns the shared state for one page's annotation appearance streams. st is the document's budgeted
+// resource store (nil degrades to the per-pass LRUs, exactly as in Run).
+func NewAnnotRun(st *store.Store) *AnnotRun {
+	r := &AnnotRun{
+		caches: newRunCaches(),
+		active: make(map[cos.RefKey]bool),
+		st:     st,
+		budget: maxTotalOps,
+	}
+	if st == nil {
+		r.images = newLRUCache[cos.RefKey, *imaging.Image](maxCachedImages)
+		r.fonts = newLRUCache[cos.RefKey, *font.Font](maxCachedFonts)
+	}
+	return r
+}
+
+// Annot interprets one annotation appearance stream (a form XObject) against dev, charging r's shared budget. ctm must
+// already compose the ISO 32000-2 12.5.5 placement matrix (internal/doc's Annot.Transform) with the page CTM; the
+// form's own /Matrix and /BBox clip apply inside, exactly as for a form invoked by Do. pageResources is the page's
+// resource dictionary: an appearance stream without /Resources of its own inherits it (probe-pinned). Malformed content
+// degrades exactly as in Run.
+func (r *AnnotRun) Annot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *cos.Stream, ctm gfx.Matrix, dev device.Device) {
+	if r.budget < 0 {
+		return // The page's appearances have spent the shared budget; the rest draw nothing, like an exhausted Run.
+	}
+	in := baseInterp(d, pageResources, ctm, dev, r.st)
+	in.active = r.active
+	in.images = r.images
+	in.fonts = r.fonts
+	in.caches = r.caches
+	in.budget = r.budget
 	in.execForm(raw, stream)
 	for len(in.gsStack) > 0 {
 		in.restoreState()
 	}
 	in.popClips(0)
+	r.budget = in.budget
 }
 
 // newInterp builds a fresh interpreter with the default graphics state, its own cycle set, resource caches, and full
-// work budget. Run and RunAnnot use it; a tiling pattern's cell replay uses newChild instead.
+// work budget. Run uses it; annotation appearances share one AnnotRun's state and a tiling pattern's cell replay uses
+// newChild instead.
 func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.Device, st *store.Store) *interp {
 	in := baseInterp(d, resources, ctm, dev, st)
-	in.active = make(map[cos.Ref]bool)
+	in.active = make(map[cos.RefKey]bool)
 	if st == nil {
 		// The two LRUs are the no-store fallback only: with a store wired, every image and font lookup goes to it and
 		// these are never consulted, so they are not built (a nil cache reports a miss and discards puts).
-		in.images = newLRUCache[cos.Ref, *imaging.Image](maxCachedImages)
-		in.fonts = newLRUCache[cos.Ref, *font.Font](maxCachedFonts)
+		in.images = newLRUCache[cos.RefKey, *imaging.Image](maxCachedImages)
+		in.fonts = newLRUCache[cos.RefKey, *font.Font](maxCachedFonts)
 	}
 	in.caches = newRunCaches()
 	in.budget = maxTotalOps

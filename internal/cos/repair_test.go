@@ -166,8 +166,54 @@ func TestRepairFindsObjectAfterFailedParse(t *testing.T) {
 	if !ok {
 		t.Fatalf("object 2 = %v, want a dictionary", d.LoadObject(2))
 	}
-	if typ, _ := d.GetName(dict, "Type"); typ != "Catalog" {
+	if typ, _ := d.GetName(dict, "Type"); typ != typeCatalog {
 		t.Errorf("object 2 = %v, want the catalog", dict)
+	}
+}
+
+// TestRepairAcceptsZeroPaddedObjectNumbers checks that the repair sweep recovers an object whose header number is
+// zero-padded ("0000000012 0 obj"), which writers that reserve a fixed-width field emit. The cheap digit-count
+// rejection is there to skip numbers too large to be real, so it has to count the SIGNIFICANT digits: counting the
+// token's whole length made padding alone — not magnitude — hide an object well inside maxObjectNumber.
+func TestRepairAcceptsZeroPaddedObjectNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		num    int
+		want   bool
+	}{
+		{name: "unpadded", header: "12 0 obj", num: 12, want: true},
+		{name: "padded to ten digits", header: "0000000012 0 obj", num: 12, want: true},
+		{name: "padded to twenty digits", header: "00000000000000000012 0 obj", num: 12, want: true},
+		{name: "all zeros", header: "0000000000 0 obj", num: 0, want: false}, // Object 0 is never a real object.
+		{name: "genuinely too large", header: "999999999 0 obj", num: 0, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Document{
+				data:          []byte(pdfPrefix + tc.header + " <</Type/Catalog>>\nendobj\n"),
+				xref:          make(map[int]xrefEntry),
+				objCache:      make(map[int]Object),
+				objFailed:     make(map[int]error),
+				objStms:       make(map[int]*objStm),
+				objStmLoading: make(map[int]bool),
+			}
+			if err := d.repair(); err != nil && tc.want {
+				t.Fatalf("repair: %v", err)
+			}
+			if _, ok := d.xref[tc.num]; ok != tc.want {
+				t.Fatalf("object %d recovered = %v, want %v (xref holds %v)", tc.num, ok, tc.want, d.xref)
+			}
+			if !tc.want {
+				return
+			}
+			dict, ok := AsDict(d.LoadObject(tc.num))
+			if !ok {
+				t.Fatalf("object %d = %v, want a dictionary", tc.num, d.LoadObject(tc.num))
+			}
+			if typ, _ := d.GetName(dict, "Type"); typ != typeCatalog {
+				t.Errorf("object %d = %v, want the catalog", tc.num, dict)
+			}
+		})
 	}
 }
 

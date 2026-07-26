@@ -49,9 +49,20 @@ type Dict map[Name]Object
 type Ref struct {
 	// Num is the object number.
 	Num int
-	// Gen is the generation number.
+	// Gen is the generation number. It is recorded for fidelity and folded into the standard security handler's
+	// per-object key by the object header, but it takes no part in resolution — see RefKey.
 	Gen int
 }
+
+// RefKey is the identity a Ref resolves under, and the type anything keyed by reference must key on. Resolution uses
+// the object number alone: the cross-reference table holds one entry per number and Document.loadObject never consults
+// a generation. Keying on the whole Ref instead makes "4 0 R" and "4 1 R" compare unequal while naming the same object,
+// so a cycle set built from them would not fire on a form that alternates generations and every reference-keyed cache
+// would hold the same resource twice.
+type RefKey int
+
+// Key returns r's resolution identity, for use as a map key. See RefKey.
+func (r Ref) Key() RefKey { return RefKey(r.Num) }
 
 // Stream is the PDF stream object: a dictionary plus the raw, still-encoded bytes exactly as stored in the file. Use
 // Document.StreamData to apply the /Filter chain.

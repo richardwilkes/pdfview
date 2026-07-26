@@ -80,9 +80,10 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 		return nil, false
 	}
 	ref, isRef := raw.(cos.Ref)
+	key := ref.Key()
 	if isRef {
 		if in.st != nil {
-			if v, hit := in.st.Get(fontKey{ref: ref}); hit {
+			if v, hit := in.st.Get(fontKey{ref: key}); hit {
 				if f, isFont := v.(*font.Font); isFont {
 					// A cached negative entry is a typed nil *font.Font, so report a miss on nil to match
 					// the no-store LRU path below; otherwise a repeated Tf would clear the current font.
@@ -90,7 +91,7 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 				}
 				return nil, false // Unexpected type; treat as a miss.
 			}
-		} else if f, cached := in.fonts.get(ref); cached {
+		} else if f, cached := in.fonts.get(key); cached {
 			return f, f != nil
 		}
 	}
@@ -104,9 +105,9 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	if isRef {
 		switch {
 		case in.st != nil:
-			in.st.Put(fontKey{ref: ref}, f, fontSize(f))
+			in.st.Put(fontKey{ref: key}, f, fontSize(f))
 		default:
-			in.fonts.put(ref, f)
+			in.fonts.put(key, f)
 		}
 	}
 	return f, f != nil
@@ -359,11 +360,12 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 		return
 	}
 	if ref != (cos.Ref{}) {
-		if in.active[ref] {
+		key := ref.Key()
+		if in.active[key] {
 			return
 		}
-		in.active[ref] = true
-		defer delete(in.active, ref)
+		in.active[key] = true
+		defer delete(in.active, key)
 	}
 	// The charproc is charged to the work budget per glyph shown (appendGlyphs' one unit per glyph does not cover
 	// re-running the proc's body); a reference lets the decode itself be cached for the Run.

@@ -59,7 +59,8 @@ type Device struct {
 	store *store.Store
 	// glyphPaths caches converted glyph-space outlines for this render (see glyphPath).
 	glyphPaths map[glyphKey]*path.Path
-	// glyphMasks caches rendered glyph coverage planes for this render when no store is wired (glyphmask.go).
+	// glyphMasks caches rendered glyph coverage planes when the document store is not the backing for them (no store
+	// wired, or one with an unlimited budget — see maskStore); glyphMaskBytes below is the live plane bytes it holds.
 	glyphMasks map[glyphMaskKey]*glyphMask
 	// funcGrids caches realized function-based shading grids for this render when no store is wired (shading.go).
 	funcGrids map[funcGridKey]*imagecore.Image
@@ -84,6 +85,8 @@ type Device struct {
 	maskStack  []*maskState
 	// maskBytes is the offscreen surface bytes the open mask spans hold, against maskByteBudget (mask.go).
 	maskBytes uint64
+	// glyphMaskBytes is the live coverage-plane bytes glyphMasks holds, against maxGlyphMaskBytes (glyphmask.go).
+	glyphMaskBytes uint64
 	// untrackedState counts canvas clip/layer state pushed outside the tracked stacks (the tiling replay clips cell
 	// content directly); nonzero disables the direct blit path.
 	untrackedState int
@@ -178,7 +181,14 @@ func (d *Device) Reset() {
 	d.c.ResetMatrix()
 	d.c.Clear(colorcore.Transparent)
 	d.glyphPaths = nil
-	d.glyphMasks = nil
+	if d.store == nil {
+		// Without a store nothing keeps the *font.Font pointers these keys hold alive across renders. With one wired,
+		// the coverage planes are kept: this map is their backing under an unlimited budget (maskStore), and a
+		// re-render at the same size — the warm protocol the blit path exists for — hits every one of them. Its own
+		// byte cap bounds what carrying them over can hold.
+		d.glyphMasks = nil
+		d.glyphMaskBytes = 0
+	}
 	d.funcGrids = nil
 	d.textClip = nil
 	d.clipStack = d.clipStack[:0]
@@ -375,18 +385,25 @@ func dashIntervals(dash []float32) []float32 {
 // FillPath implements device.Device. Paints carrying a gradient/tiling pattern draw with the corresponding shader;
 // mesh-shading patterns clip to the path and draw their triangles.
 func (d *Device) FillPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix, paint device.Paint) {
+	mesh := isMesh(paint)
+	if mesh || paint.Tiling != nil {
+		// These two branches hand canvas a path already in device space, which is one line past what buildPath
+		// guarantees — its finiteness covers the coordinates as given, and a path whose own coordinates are finite
+		// still lands on ±Inf under a large-but-finite CTM — so the transform goes through buildPathIn, which
+		// re-establishes the guarantee in the space the path actually reaches canvas in. A region float32 cannot
+		// express selects everything: the mesh's clip degrades to no clip, the way ClipPath and withShadingBBox
+		// already degrade, while a tiling fill has no such reading and is skipped.
+		devicePath, ok := buildPathIn(p, evenOdd, ctm)
+		switch {
+		case mesh:
+			d.fillMeshInto(devicePath, paint) // devicePath is nil when ok is false: an unclipped mesh.
+		case ok:
+			d.fillTilingInto(devicePath, paint)
+		}
+		return
+	}
 	cp := buildPath(p, evenOdd)
 	m := matrix(ctm)
-	if isMesh(paint) {
-		cp.Transform(&m)
-		d.fillMeshInto(cp, paint)
-		return
-	}
-	if paint.Tiling != nil {
-		cp.Transform(&m)
-		d.fillTilingInto(cp, paint)
-		return
-	}
 	cpaint, ok := d.preparePaint(paint, &ctm)
 	if !ok {
 		return
@@ -562,9 +579,14 @@ func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
 	if d.glyphPaths == nil {
 		d.glyphPaths = make(map[glyphKey]*path.Path)
 	}
-	if len(d.glyphPaths) < maxCachedGlyphPaths {
-		d.glyphPaths[key] = p
+	if len(d.glyphPaths) >= maxCachedGlyphPaths {
+		// Dropping the map rather than refusing the entry, for the reason glyphMask spells out: refusing retires the
+		// cache for the rest of the render, so every later glyph re-converts its outline and throws it away with no
+		// prospect of a hit, while dropping keeps the cap on live entries and lets the page go on caching what it draws
+		// next. Retention is invisible to output — a hit returns the path a miss would have converted.
+		clear(d.glyphPaths)
 	}
+	d.glyphPaths[key] = p
 	return p
 }
 

@@ -53,6 +53,55 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 	}
 }
 
+// TestConfigureUsesCryptFilterKeyLen checks that a V4 document's key length comes from the selected crypt filter when
+// the top-level /Length is absent or disagrees. /Length is optional there and defaults to 40 bits, so reading only the
+// top level gave a 5-byte key: with /CFM /AESV2 the 10-byte per-object key is one aes.NewCipher rejects, so the decrypt
+// reports failure and apply returns the CIPHERTEXT — the document authenticates and renders as garbage instead of
+// failing — and with /CFM /V2 the streams decrypt with 40-bit RC4 rather than the declared length.
+func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
+	cf := func(cfm string, length cos.Object) cos.Dict {
+		filter := cos.Dict{"CFM": cos.Name(cfm)}
+		if length != nil {
+			filter["Length"] = length
+		}
+		return cos.Dict{"CF": cos.Dict{"StdCF": filter}, "StmF": cos.Name("StdCF"), "StrF": cos.Name("StdCF")}
+	}
+	for _, tc := range []struct {
+		encDict cos.Dict
+		topLen  cos.Object
+		name    string
+		wantLen int
+	}{
+		{name: "AESV2 with no length anywhere", encDict: cf("AESV2", nil), wantLen: 16},
+		{name: "AESV2 with a 40-bit top-level length", encDict: cf("AESV2", nil), topLen: cos.Integer(40), wantLen: 16},
+		{name: "AESV2 whose filter lies about the length", encDict: cf("AESV2", cos.Integer(40)), wantLen: 16},
+		{name: "V2 with the length in bits on the filter", encDict: cf("V2", cos.Integer(128)), wantLen: 16},
+		{name: "V2 with the length in bytes on the filter", encDict: cf("V2", cos.Integer(16)), wantLen: 16},
+		{name: "V2 with no filter length", encDict: cf("V2", nil), wantLen: 5},
+		{name: "V2 with an unusable filter length", encDict: cf("V2", cos.Name("wat")), wantLen: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
+			if tc.topLen != nil {
+				tc.encDict["Length"] = tc.topLen
+			}
+			if err := h.configure(&cos.Document{}, tc.encDict, 4); err != nil {
+				t.Fatalf("configure: %v", err)
+			}
+			if h.keyLen != tc.wantLen {
+				t.Errorf("keyLen = %d, want %d", h.keyLen, tc.wantLen)
+			}
+			// The per-object key AESV2 hands aes.NewCipher must be a length it accepts.
+			if h.stmM == methodAESV2 {
+				h.fileKey = bytes.Repeat([]byte{0xAB}, h.keyLen)
+				if _, err := aes.NewCipher(h.objectKey(3, 0, true)); err != nil {
+					t.Errorf("the AESV2 per-object key is unusable: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // TestNewRevisionRange pins the accepted /R range to 2-6, the revisions the standard security handler defines (ISO
 // 32000-2 7.6.4). Everything outside that range — including a missing, non-integer, or out-of-range revision — has to
 // be reported as errBadRevision rather than reaching configure with a revision no derivation implements.

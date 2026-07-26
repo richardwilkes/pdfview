@@ -81,22 +81,24 @@ type cachedBody struct {
 }
 
 // runCaches are the reference-keyed parse caches of one Run, shared by every interpreter that Run spawns (the child
-// interpreter a tiling pattern's replay creates shares its parent's, like the cycle set and the budget). The per-frame
-// maps in resFrame remain the name-keyed layer: names are scoped to a resource frame, references are not.
+// interpreter a tiling pattern's replay creates shares its parent's, like the cycle set and the budget). They key on
+// cos.RefKey rather than the whole cos.Ref, so two references that differ only in generation — which resolve to the
+// same object — share one entry instead of parsing and storing it twice. The per-frame maps in resFrame remain the
+// name-keyed layer: names are scoped to a resource frame, references are not.
 type runCaches struct {
-	bodies   *lruCache[cos.Ref, cachedBody]
-	spaces   map[cos.Ref]pdfcolor.Space
-	shadings map[cos.Ref]*shading.Shading
-	patterns map[cos.Ref]*patternRes
+	bodies   *lruCache[cos.RefKey, cachedBody]
+	spaces   map[cos.RefKey]pdfcolor.Space
+	shadings map[cos.RefKey]*shading.Shading
+	patterns map[cos.RefKey]*patternRes
 }
 
 // newRunCaches returns the empty cache set for one Run.
 func newRunCaches() *runCaches {
 	return &runCaches{
-		bodies:   newLRUCache[cos.Ref, cachedBody](maxCachedBodies),
-		spaces:   make(map[cos.Ref]pdfcolor.Space),
-		shadings: make(map[cos.Ref]*shading.Shading),
-		patterns: make(map[cos.Ref]*patternRes),
+		bodies:   newLRUCache[cos.RefKey, cachedBody](maxCachedBodies),
+		spaces:   make(map[cos.RefKey]pdfcolor.Space),
+		shadings: make(map[cos.RefKey]*shading.Shading),
+		patterns: make(map[cos.RefKey]*patternRes),
 	}
 }
 
@@ -171,8 +173,9 @@ func fontLoadCost(f *font.Font) int {
 // cheaper, never free.
 func (in *interp) streamBody(raw cos.Object, stream *cos.Stream) ([]byte, bool) {
 	ref, isRef := raw.(cos.Ref)
+	key := ref.Key()
 	if isRef {
-		if cached, hit := in.caches.bodies.get(ref); hit {
+		if cached, hit := in.caches.bodies.get(key); hit {
 			in.charge(bodyCost(len(cached.data)))
 			return cached.data, cached.ok
 		}
@@ -186,7 +189,7 @@ func (in *interp) streamBody(raw cos.Object, stream *cos.Stream) ([]byte, bool) 
 		in.charge(bodyCost(len(body)))
 	}
 	if isRef && len(body) <= maxCachedBodyBytes {
-		in.caches.bodies.put(ref, cachedBody{data: body, ok: err == nil})
+		in.caches.bodies.put(key, cachedBody{data: body, ok: err == nil})
 	}
 	return body, err == nil
 }
@@ -196,7 +199,7 @@ func (in *interp) streamBody(raw cos.Object, stream *cos.Stream) ([]byte, bool) 
 func (in *interp) parseSpace(obj cos.Object) pdfcolor.Space {
 	ref, isRef := obj.(cos.Ref)
 	if isRef {
-		if space, hit := in.caches.spaces[ref]; hit {
+		if space, hit := in.caches.spaces[ref.Key()]; hit {
 			return space
 		}
 	}
@@ -206,7 +209,7 @@ func (in *interp) parseSpace(obj cos.Object) pdfcolor.Space {
 		space = nil
 	}
 	if isRef {
-		in.caches.spaces[ref] = space
+		in.caches.spaces[ref.Key()] = space
 	}
 	return space
 }
@@ -216,7 +219,7 @@ func (in *interp) parseSpace(obj cos.Object) pdfcolor.Space {
 func (in *interp) parseShading(obj cos.Object) *shading.Shading {
 	ref, isRef := obj.(cos.Ref)
 	if isRef {
-		if sh, hit := in.caches.shadings[ref]; hit {
+		if sh, hit := in.caches.shadings[ref.Key()]; hit {
 			return sh
 		}
 	}
@@ -226,7 +229,7 @@ func (in *interp) parseShading(obj cos.Object) *shading.Shading {
 		sh = nil
 	}
 	if isRef {
-		in.caches.shadings[ref] = sh
+		in.caches.shadings[ref.Key()] = sh
 	}
 	return sh
 }

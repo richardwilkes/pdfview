@@ -710,8 +710,8 @@ func TestTilingCellChildSharesParentState(t *testing.T) {
 	if child.active == nil || len(parent.active) != 0 {
 		t.Fatal("the parent's cycle set is not usable")
 	}
-	parent.active[cos.Ref{Num: 9}] = true
-	if !child.active[cos.Ref{Num: 9}] {
+	parent.active[cos.Ref{Num: 9}.Key()] = true
+	if !child.active[cos.Ref{Num: 9}.Key()] {
 		t.Error("the child does not share the parent's cycle set: a cyclic pattern would not terminate")
 	}
 	if child.caches != parent.caches {
@@ -747,10 +747,10 @@ func TestStoreBackedInterpSkipsFallbackCaches(t *testing.T) {
 		t.Error("the no-store fallback caches were built alongside a store")
 	}
 	// The nil caches must be inert rather than a panic waiting to happen.
-	if _, hit := withStore.images.get(cos.Ref{Num: 1}); hit {
+	if _, hit := withStore.images.get(cos.Ref{Num: 1}.Key()); hit {
 		t.Error("a nil image cache reported a hit")
 	}
-	withStore.fonts.put(cos.Ref{Num: 1}, nil)
+	withStore.fonts.put(cos.Ref{Num: 1}.Key(), nil)
 	// Without a store they are the only cache there is, so they must exist.
 	noStore := newInterp(d, nil, gfx.Identity(), &recorder{t: t}, nil)
 	if noStore.images == nil || noStore.fonts == nil {
@@ -906,5 +906,109 @@ func TestSoftMaskBackdropNarrowingGuarded(t *testing.T) {
 				t.Fatalf("mask backdrop = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestFormCycleGuardIgnoresGeneration verifies that a form re-entering itself under a DIFFERENT generation number is
+// caught by the cycle set. Object lookup keys on the object number alone, so "1 0 R" and "1 1 R" are the same form;
+// keying the cycle set on the whole reference made them compare unequal, leaving only maxFormDepth to stop the
+// recursion — twelve decodes and twelve executions of the body per invocation instead of one.
+func TestFormCycleGuardIgnoresGeneration(t *testing.T) {
+	body := "0 0 1 1 re f /Fm1 Do"
+	d, err := cos.Open([]byte(minimalPDF(streamObj(
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /XObject << /Fm1 1 1 R >> >>", body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catXObject: cos.Dict{resFormName: cos.Ref{Num: 1}}}
+	rec := run(t, d, res, formDo)
+	if got := len(rec.byOp(opFill)); got != 1 {
+		t.Errorf("the form ran %d times, want 1: re-entry under generation 1 slipped past the cycle set", got)
+	}
+}
+
+// TestFormCachesIgnoreGeneration verifies the reference-keyed per-Run caches treat two generations of one object as one
+// entry. Keying on the whole reference stored — and re-parsed — the same resource twice.
+func TestFormCachesIgnoreGeneration(t *testing.T) {
+	body := "0 0 1 1 re f"
+	d, err := cos.Open([]byte(minimalPDF(streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, ok := cos.AsStream(d.Resolve(cos.Ref{Num: 1}))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	in := newInterp(d, nil, gfx.Identity(), device.Device(nil), nil)
+	first, ok := in.streamBody(cos.Ref{Num: 1}, stream)
+	if !ok || len(first) == 0 {
+		t.Fatal("the first decode failed")
+	}
+	second, ok := in.streamBody(cos.Ref{Num: 1, Gen: 7}, stream)
+	if !ok {
+		t.Fatal("the second decode failed")
+	}
+	if &first[0] != &second[0] {
+		t.Error("generation 7 missed the cache entry generation 0 stored; the same body decoded twice")
+	}
+	if got := len(in.caches.bodies.entries); got != 1 {
+		t.Errorf("the body cache holds %d entries, want 1", got)
+	}
+}
+
+// TestAnnotRunSharesBudgetAcrossAppearances verifies that a page's annotation appearances are bounded AS A GROUP. Each
+// appearance used to get a fresh full budget and fresh caches, so a page naming tens of thousands of annotations that
+// all point at one appearance stream re-decoded and re-executed it that many times over — a few kilobytes of file
+// buying unbounded work, which is exactly what the package's bounded-work contract rules out.
+func TestAnnotRunSharesBudgetAcrossAppearances(t *testing.T) {
+	const appearances = 1200
+	body := paddedBody("0 0 1 1 re f")
+	d, err := cos.Open([]byte(minimalPDF(streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	rec := &recorder{t: t}
+	annots := NewAnnotRun(nil)
+	for range appearances {
+		annots.Annot(d, nil, ref, stream, gfx.Identity(), rec)
+	}
+	wantBounded(t, "the appearance stream", len(rec.byOp(opFill)), appearances, len(body))
+	if rec.depth != 0 {
+		t.Fatalf("device clip depth %d after the appearances; the auto-unwind failed", rec.depth)
+	}
+}
+
+// TestAnnotRunSharesBodyCacheAcrossAppearances verifies the decoded-body cache spans the page's appearances too: the
+// second annotation naming a stream reuses the first's bytes rather than inflating it again (internal/filter allows one
+// stream to reach max(64 MB, 256x input), so a per-appearance cache made that decode repeat per annotation).
+func TestAnnotRunSharesBodyCacheAcrossAppearances(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF(streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", "0 0 1 1 re f"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	rec := &recorder{t: t}
+	annots := NewAnnotRun(nil)
+	annots.Annot(d, nil, ref, stream, gfx.Identity(), rec)
+	first, hit := annots.caches.bodies.get(ref.Key())
+	if !hit {
+		t.Fatal("the first appearance cached no body")
+	}
+	annots.Annot(d, nil, ref, stream, gfx.Identity(), rec)
+	second, hit := annots.caches.bodies.get(ref.Key())
+	if !hit || &first.data[0] != &second.data[0] {
+		t.Error("the second appearance re-decoded the stream instead of hitting the shared body cache")
+	}
+	if got := len(rec.byOp(opFill)); got != 2 {
+		t.Errorf("the appearances drew %d fills, want 2", got)
 	}
 }

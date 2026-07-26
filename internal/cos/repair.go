@@ -62,7 +62,7 @@ func (d *Document) repair() error {
 			xref[num] = xrefEntry{kind: xrefInFile, offset: int64(numStart)}
 			switch v := obj.(type) {
 			case Dict:
-				if typ, _ := AsName(v["Type"]); typ == "Catalog" {
+				if typ, _ := AsName(v["Type"]); typ == typeCatalog {
 					catalogNum = num
 				}
 			case *Stream:
@@ -172,11 +172,20 @@ func headerBefore(data []byte, idx int) (numStart, num int, ok bool) {
 		return 0, 0, false // The number runs into other regular characters (e.g. "x12 0 obj").
 	}
 	numStart = i + 1
-	if numEnd-numStart >= 9 { // Longer than maxObjectNumber's decimal representation; reject cheaply.
+	// Leading zeros are legal padding ("0000000012 0 obj") and say nothing about the value's magnitude, so they do not
+	// count toward the cheap digit-count rejection: what must fit maxObjectNumber's 8 decimal digits is the significant
+	// part. Rejecting on the token's total length instead skipped well-in-range zero-padded headers the rest of the
+	// repair scan would happily accept. The offset returned is still the padded start, which is where the object's own
+	// header begins.
+	sig := numStart
+	for sig < numEnd && data[sig] == '0' {
+		sig++
+	}
+	if numEnd-sig >= 8 { // More significant digits than maxObjectNumber's decimal representation; reject cheaply.
 		return 0, 0, false
 	}
 	num = 0
-	for j := numStart; j <= numEnd; j++ {
+	for j := sig; j <= numEnd; j++ {
 		num = num*10 + int(data[j]-'0')
 	}
 	return numStart, num, true

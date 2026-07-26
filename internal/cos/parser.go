@@ -23,6 +23,13 @@ const maxNestingDepth = 512
 // is slightly more generous while still bounding lookup structures.
 const maxObjectNumber = 1 << 24
 
+// maxGenerationNumber is the largest generation ISO 32000-2 7.3.10 defines. A "N G R" lookahead whose G exceeds it is
+// still taken as a reference (leniency: the generation takes no part in resolution, so rejecting the reference would
+// lose the object over a field nothing reads), but the recorded generation is clamped to 0 — the same treatment
+// parseIndirectAtBounded gives a nonsensical header generation, and what keeps int(second.i) from wrapping negative on
+// GOARCH=386/arm, where int is 32 bits.
+const maxGenerationNumber = 0xffff
+
 // maxContainerElements caps how many array elements and dictionary entries one parsed object may hold, in total across
 // its whole object tree. Nesting depth is not a bound on size, and the payload an object can be built from is not
 // bounded by the file: a /Type /ObjStm decodes through internal/filter's max(64 MB, 256x input) allowance, so a small
@@ -135,7 +142,7 @@ func (p *parser) parseIntOrRef(tok token) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	if second.kind != tkInt || second.i < 0 || second.i > 1<<31 {
+	if second.kind != tkInt || second.i < 0 {
 		p.push(second)
 		return Integer(tok.i), nil
 	}
@@ -144,7 +151,11 @@ func (p *parser) parseIntOrRef(tok token) (Object, error) {
 		return nil, err
 	}
 	if third.kind == tkKeyword && bytes.Equal(third.s, []byte("R")) {
-		return Ref{Num: int(tok.i), Gen: int(second.i)}, nil
+		gen := second.i
+		if gen > maxGenerationNumber {
+			gen = 0
+		}
+		return Ref{Num: int(tok.i), Gen: int(gen)}, nil
 	}
 	p.push(third)
 	p.push(second)

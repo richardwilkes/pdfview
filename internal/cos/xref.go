@@ -50,6 +50,10 @@ var (
 // the decryptor skips them.
 const typeXRef Name = "XRef"
 
+// typeCatalog is the /Type value of the document catalog, which the repair sweep looks for when no recovered trailer
+// names a /Root.
+const typeCatalog Name = "Catalog"
+
 // startXrefWindow is how far from the end of the file the startxref keyword is searched for. The spec says the last
 // line holds the offset, but real files carry trailing junk; this matches the tolerance of deployed readers.
 const startXrefWindow = 2048
