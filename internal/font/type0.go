@@ -118,18 +118,21 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 			}
 		}
 	}
+	std14 := standard14Name(f.BaseFont, desc.flags)
 	if !embedded {
-		// Non-embedded CID fonts substitute like simple fonts: pinned substitute metrics and Liberation shapes through
-		// Unicode (which needs ToUnicode; without one, nothing renders — accepted until a corpus file demands better).
-		std14 := standard14Name(f.BaseFont, desc.flags)
+		// Non-embedded CID fonts substitute their metrics like simple fonts: the pinned standard-14 stand-in's.
 		f.ascender, f.descender = substituteMetrics(&desc, std14)
-		// Shapes, like loadSimple: the substitute owns the glyphs only when no embedded program does. A CFF whose Top
-		// DICT carries no usable /FontBBox lands here with outlines but without metrics — substituting its shapes too
-		// would have Font.GID resolve codes through the substitute's cmap while Font.GlyphPath pulled those indices out
-		// of the embedded charstrings, drawing arbitrary glyphs. Only the metrics fall back in that case.
-		if info.sfnt == nil && f.cff == nil {
-			f.sub = loadSubstitute(std14)
-		}
+	}
+	// Shapes, like loadSimple: the substitute owns the glyphs exactly when no embedded program can draw one — Liberation
+	// shapes reached through Unicode (which needs ToUnicode; without one, nothing renders — accepted until a corpus file
+	// demands better). The test is "no glyph source exists", not "no metrics were recovered": a FontFile3 whose Top DICT
+	// yields a usable /FontBBox but whose program go-text's cff.Parse rejects (truncated after the Top DICT INDEX)
+	// records metrics and nothing else, and gating substitution on those metrics left every glyph of that font invisible
+	// while its widths still advanced. Conversely, a program that parsed keeps its own shapes even when its /FontBBox was
+	// unusable: substituting those would have Font.GID resolve codes through the substitute's cmap while Font.GlyphPath
+	// pulled the same indices out of the embedded charstrings, drawing arbitrary glyphs.
+	if info.sfnt == nil && f.cff == nil {
+		f.sub = loadSubstitute(std14)
 	}
 
 	// Per ISO 32000-2 9.7.4.3 the 1000-unit (1.0) default applies only when /DW is absent. An explicit /DW 0 is
@@ -169,7 +172,7 @@ func loadToUnicode(d *cos.Document, dict cos.Dict) *cmapPDF {
 		return nil
 	}
 	cm := parseCMap(data, 0, nil)
-	if cm == nil || len(cm.bf) == 0 {
+	if cm == nil || !cm.hasBF() {
 		return nil
 	}
 	return cm

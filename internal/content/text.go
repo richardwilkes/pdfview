@@ -236,16 +236,17 @@ func (in *interp) newRun() *device.TextRun {
 func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 	ts := &in.gs.text
 	vertical := run.WMode == 1
-	ts.font.ForEachCode(s, func(code uint32, oneByte bool) bool {
+	ts.font.ForEachCode(s, func(code uint32, nBytes uint8) bool {
+		oneByte := nBytes == 1
 		if in.budget < 0 {
 			return false
 		}
 		in.budget--
 		trm := gfx.Matrix{A: ts.size * ts.scale, D: ts.size, F: ts.rise}.Mul(in.tm).Mul(in.gs.ctm)
-		w0 := ts.font.Width(code)
+		w0 := ts.font.Width(code, nBytes)
 		adv := w0
 		if vertical {
-			w1, vx, vy := ts.font.VMetrics(code)
+			w1, vx, vy := ts.font.VMetrics(code, nBytes)
 			trm = gfx.Translate(-vx, -vy).Mul(trm) // Glyph-space displacement to the vertical origin.
 			adv = w1
 		}
@@ -260,9 +261,9 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 			}
 			run.Glyphs = append(run.Glyphs, device.Glyph{
 				Trm:     trm,
-				GID:     ts.font.GID(code),
+				GID:     ts.font.GID(code, nBytes),
 				Code:    code,
-				Unicode: ts.font.Unicode(code),
+				Unicode: ts.font.Unicode(code, nBytes),
 				Advance: emitted,
 			})
 		}

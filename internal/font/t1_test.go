@@ -163,11 +163,11 @@ func TestType1Embedded(t *testing.T) {
 		t.Errorf("built-in encoding not applied: %q %q %q", f.GlyphName(65), f.GlyphName(200), f.GlyphName(66))
 	}
 	// GIDs are synthetic (.notdef=0, then sorted names: A=1, T=2).
-	if f.GID(65) != 1 || f.GID(200) != 2 || f.GID(66) != 0 {
-		t.Errorf("GIDs = %d %d %d, want 1 2 0", f.GID(65), f.GID(200), f.GID(66))
+	if f.GID(65, 1) != 1 || f.GID(200, 1) != 2 || f.GID(66, 1) != 0 {
+		t.Errorf("GIDs = %d %d %d, want 1 2 0", f.GID(65, 1), f.GID(200, 1), f.GID(66, 1))
 	}
 	// Outlines come from the program, em-normalized via the FontMatrix.
-	x0, y0, x1, y1 := pathBounds(t, f, f.GID(65))
+	x0, y0, x1, y1 := pathBounds(t, f, f.GID(65, 1))
 	for _, chk := range []struct {
 		name      string
 		got, want float32
@@ -177,20 +177,20 @@ func TestType1Embedded(t *testing.T) {
 		}
 	}
 	// Without /Widths, hsbw advances win (600/1000 for A, 400/1000 for T, unmapped codes → /MissingWidth 0).
-	if w := f.Width(65); w != 0.6 {
+	if w := f.Width(65, 1); w != 0.6 {
 		t.Errorf("Width(A) = %v, want 0.6", w)
 	}
-	if w := f.Width(200); w != 0.4 {
+	if w := f.Width(200, 1); w != 0.4 {
 		t.Errorf("Width(T) = %v, want 0.4", w)
 	}
 }
 
 func TestType1WidthsPrecedence(t *testing.T) {
 	f := loadT1TestFont(t, true)
-	if w := f.Width(65); w != 0.65 { // /Widths beats hsbw.
+	if w := f.Width(65, 1); w != 0.65 { // /Widths beats hsbw.
 		t.Errorf("Width(A) = %v, want 0.65", w)
 	}
-	if w := f.Width(200); w != 0 { // Present /Widths: gaps mean /MissingWidth, never hsbw.
+	if w := f.Width(200, 1); w != 0 { // Present /Widths: gaps mean /MissingWidth, never hsbw.
 		t.Errorf("Width(T) = %v, want 0 (MissingWidth)", w)
 	}
 }
@@ -207,8 +207,8 @@ func TestType1EncodingOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if f.GlyphName(65) != "T" || f.GID(65) != 2 {
-		t.Errorf("Differences not applied over built-in base: %q gid %d", f.GlyphName(65), f.GID(65))
+	if f.GlyphName(65) != "T" || f.GID(65, 1) != 2 {
+		t.Errorf("Differences not applied over built-in base: %q gid %d", f.GlyphName(65), f.GID(65, 1))
 	}
 	if f.GlyphName(200) != "T" { // The built-in base still shows through where Differences are silent.
 		t.Errorf("built-in base lost under /Encoding dict: %q", f.GlyphName(200))
@@ -251,10 +251,10 @@ func TestType1NonFiniteHsbwAdvanceGuarded(t *testing.T) {
 	if adv, ok := f.t1.font.Advance("A"); !ok || !math.IsInf(float64(adv), 1) {
 		t.Fatalf("charstring advance = %v (ok %v), want +Inf: the fixture no longer overflows", adv, ok)
 	}
-	if _, ok := f.t1.advance(f.GID(65)); ok {
+	if _, ok := f.t1.advance(f.GID(65, 1)); ok {
 		t.Error("an out-of-range hsbw advance was recorded; it must fall through to the missing-width path")
 	}
-	if w := f.Width(65); !isFiniteF(w) {
+	if w := f.Width(65, 1); !isFiniteF(w) {
 		t.Errorf("Width(A) = %v; a non-finite width reaches the glyph quads the search pass builds", w)
 	}
 }

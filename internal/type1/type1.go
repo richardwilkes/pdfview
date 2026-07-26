@@ -389,7 +389,13 @@ func (f *Font) parseSubrs(s *scanner, lenIV int) {
 		return
 	}
 	subrs := make([][]byte, count)
-	for range count + 8 { // A few non-dup tokens (array, noaccess, ...) may precede or interleave.
+	// Two iterations per entry plus slack for the surrounding boilerplate (array, noaccess, ...). One entry usually
+	// costs a single iteration — dup, its operands and payload, then skipKeyword eats the terminator — but the
+	// terminator's name is font-defined, and a font that spells it "noaccess put" instead of the "NP" shorthand leaves
+	// "put" to burn the next iteration. At count+8 any such font with more than a handful of subroutines silently lost
+	// the tail of its /Subrs array (those slots stay nil and CallSubroutine on one draws nothing), corrupting outlines
+	// with no error.
+	for range 2*count + 8 {
 		save := s.pos
 		tok, ok2 := s.next()
 		if !ok2 {

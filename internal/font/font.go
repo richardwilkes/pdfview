@@ -310,9 +310,12 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 // its value when the code resolves, /MissingWidth otherwise. Without one, substituted fonts use the standard-14 AFM
 // width for the code's glyph name and embedded sfnt programs their own hmtx advance, then /MissingWidth. Composite
 // fonts use /W with /DW as the default instead.
-func (f *Font) Width(code uint32) float32 {
+//
+// nBytes is the number of bytes the code spanned in the string it was decoded from (1 for every simple font, whatever
+// ForEachCode reported for a composite one): a CMap entry applies only to codes of the length it was written with.
+func (f *Font) Width(code uint32, nBytes uint8) float32 {
 	if f.type0 != nil {
-		return f.type0.cidWidth(f.type0.cmap.cid(code))
+		return f.type0.cidWidth(f.type0.cmap.cid(code, nBytes))
 	}
 	if w, ok := f.widths[code]; ok {
 		return w
@@ -327,18 +330,18 @@ func (f *Font) Width(code uint32) float32 {
 			}
 		}
 	}
-	if w, ok := f.programAdvance(f.GID(code)); ok {
+	if w, ok := f.programAdvance(f.GID(code, nBytes)); ok {
 		return w
 	}
 	return f.missingWidth
 }
 
-// Unicode returns the Unicode rune for a code, or 0 when none is known. A /ToUnicode CMap takes precedence over every
-// other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the one rune per code the
-// search/extraction seam carries.
-func (f *Font) Unicode(code uint32) rune {
+// Unicode returns the Unicode rune for a code decoded at nBytes bytes, or 0 when none is known. A /ToUnicode CMap takes
+// precedence over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the
+// one rune per code the search/extraction seam carries.
+func (f *Font) Unicode(code uint32, nBytes uint8) rune {
 	if f.toUni != nil {
-		if s := f.toUni.bfString(code); s != "" {
+		if s := f.toUni.bfString(code, nBytes); s != "" {
 			for _, r := range s {
 				return r
 			}
@@ -409,25 +412,26 @@ func (f *Font) WMode() uint8 {
 // VMetrics returns the vertical-mode metrics for a code in text space: the vertical displacement w1 (usually negative —
 // downward) and the position vector (vx, vy) displacing the glyph from its horizontal origin (ISO 32000-2 9.7.4.3).
 // Only meaningful when WMode() is 1.
-func (f *Font) VMetrics(code uint32) (w1, vx, vy float32) {
+func (f *Font) VMetrics(code uint32, nBytes uint8) (w1, vx, vy float32) {
 	if f.type0 == nil {
-		return -1, f.Width(code) / 2, 0.88
+		return -1, f.Width(code, nBytes) / 2, 0.88
 	}
-	cid := f.type0.cmap.cid(code)
+	cid := f.type0.cmap.cid(code, nBytes)
 	return f.type0.cidVMetrics(cid, f.type0.cidWidth(cid))
 }
 
 // ForEachCode decodes a PDF string operand into character codes: one byte per code for simple fonts, the CMap's
-// codespace ranges for composite fonts. oneByte reports whether the code came from a single byte (the word-spacing rule
-// applies only to single-byte code 32, ISO 32000-2 9.3.3).
-func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
+// codespace ranges for composite fonts. nBytes is how many bytes the code spanned, which the caller passes back to
+// Width, GID, Unicode and VMetrics (a CMap entry applies only to codes of its own length) and which also selects the
+// word-spacing rule: it applies only to single-byte code 32 (ISO 32000-2 9.3.3).
+func (f *Font) ForEachCode(s []byte, fn func(code uint32, nBytes uint8) bool) {
 	if f.type0 != nil {
 		for len(s) > 0 {
 			code, n := f.type0.cmap.nextCode(s)
 			if n <= 0 { // Defensive: nextCode always consumes, but never risk a spin here.
 				n = 1
 			}
-			if !fn(code, n == 1) {
+			if !fn(code, uint8(min(n, 4))) { // nextCode never reports more than 4, but the narrowing must not wrap.
 				return
 			}
 			s = s[n:]
@@ -435,7 +439,7 @@ func (f *Font) ForEachCode(s []byte, fn func(code uint32, oneByte bool) bool) {
 		return
 	}
 	for _, b := range s {
-		if !fn(uint32(b), true) {
+		if !fn(uint32(b), 1) {
 			return
 		}
 	}

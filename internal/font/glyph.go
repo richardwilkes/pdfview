@@ -155,20 +155,21 @@ func (f *Font) buildGIDs() {
 	}
 }
 
-// GID returns the font-program glyph index the code renders with (0 when unmapped — .notdef).
-func (f *Font) GID(code uint32) uint32 {
+// GID returns the font-program glyph index the code — decoded at nBytes bytes, as ForEachCode reported it — renders
+// with (0 when unmapped — .notdef).
+func (f *Font) GID(code uint32, nBytes uint8) uint32 {
 	if f.type0 != nil {
 		if f.sub != nil {
-			// A substituted (non-embedded) composite font has no CID→GID program; mapping through the substitute's cmap
-			// needs Unicode, which ToUnicode supplies when present.
-			if r := f.Unicode(code); r != 0 {
+			// A substituted (non-embedded, or embedded-but-unusable) composite font has no CID→GID program; mapping
+			// through the substitute's cmap needs Unicode, which ToUnicode supplies when present.
+			if r := f.Unicode(code, nBytes); r != 0 {
 				if g, ok := f.sub.face.Cmap.Lookup(r); ok {
 					return uint32(g)
 				}
 			}
 			return 0
 		}
-		return f.type0.gid(f.type0.cmap.cid(code))
+		return f.type0.gid(f.type0.cmap.cid(code, nBytes))
 	}
 	if code < 256 {
 		return f.gids[code]

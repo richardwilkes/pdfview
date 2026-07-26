@@ -32,9 +32,9 @@ func FuzzFontProgram(f *testing.F) {
 			fnt := &Font{sfnt: info, enc: &standardEncoding}
 			fnt.buildGIDs()
 			for _, code := range []uint32{0, 'A', 128, 255} {
-				fnt.GlyphPath(fnt.GID(code))
+				fnt.GlyphPath(fnt.GID(code, 1))
 			}
-			fnt.programAdvance(fnt.GID('A'))
+			fnt.programAdvance(fnt.GID('A', 1))
 		}
 		top, err := parseCFFTopDict(raw)
 		if err != nil {
@@ -46,7 +46,7 @@ func FuzzFontProgram(f *testing.F) {
 			fnt := &Font{cff: info, enc: &standardEncoding}
 			fnt.buildGIDs()
 			for _, code := range []uint32{0, 'A', 255} {
-				fnt.GlyphPath(fnt.GID(code))
+				fnt.GlyphPath(fnt.GID(code, 1))
 			}
 		}
 		if info := parseType1Bytes(raw, &standardEncoding); info != nil {
@@ -54,8 +54,8 @@ func FuzzFontProgram(f *testing.F) {
 			fnt.buildGIDs()
 			info.buildAdvances(fnt.enc)
 			for _, code := range []uint32{0, 'A', 255} {
-				fnt.GlyphPath(fnt.GID(code))
-				fnt.programAdvance(fnt.GID(code))
+				fnt.GlyphPath(fnt.GID(code, 1))
+				fnt.programAdvance(fnt.GID(code, 1))
 			}
 		}
 	})

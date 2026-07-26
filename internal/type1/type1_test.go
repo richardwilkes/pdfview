@@ -872,3 +872,105 @@ func TestIndexToken(t *testing.T) {
 		}
 	}
 }
+
+func TestCallSubrRejectsNonFiniteIndex(t *testing.T) {
+	f := parseTestFont(t, false, false, false)
+	// Subr 0 is replaced with a harmless drawing fragment so a NaN index the CPU happens to map to 0 would produce a
+	// glyph rather than an error: that is exactly the divergence this rejects. Delegating the operand to
+	// psi.LocalSubr's raw int32() narrowing called subr 0 on arm64 (NaN saturates to 0) and errored on amd64 (NaN wraps
+	// to -2^31), so the same font drew different glyphs on different machines.
+	f.Subrs[0] = cs(100, oHlineto, oReturn)
+	for _, tc := range []struct {
+		name string
+		idx  []byte
+	}{
+		{name: "callsubrNaN", idx: csNaN()},
+		{name: "callsubrInf", idx: csInf()},
+		{name: "callsubrNegInf", idx: append(csInf(), cs(-1, oDiv)...)},
+		{name: "callsubrHuge", idx: csScaleUp(2)}, // 2^90: finite, but far outside int32.
+		{name: "callsubrPastEnd", idx: cs(len(f.Subrs))},
+		{name: "callsubrNegative", idx: cs(-1)},
+	} {
+		body := append(cs(0, 500, oHsbw, 0, 0, oRmoveto), tc.idx...)
+		f.CharStrings[tc.name] = append(body, cs(oCallsubr, oEndchar)...)
+		if _, _, err := f.Glyph(tc.name); err == nil {
+			t.Errorf("Glyph(%s) succeeded, want an error for an index naming no subroutine", tc.name)
+		}
+	}
+	// A convertible, in-range index still runs its subroutine.
+	f.CharStrings["callsubrOK"] = cs(0, 500, oHsbw, 0, 0, oRmoveto, 0, oCallsubr, oEndchar)
+	segs, _, err := f.Glyph("callsubrOK")
+	if err != nil {
+		t.Fatalf("Glyph(callsubrOK): %v", err)
+	}
+	wantSegs(t, segs, []seg{
+		{op: ot.SegmentOpMoveTo, args: []float32{0, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{100, 0}},
+		{op: ot.SegmentOpLineTo, args: []float32{0, 0}}, // endchar closes the contour.
+	})
+}
+
+// buildSubrsFont assembles a program whose /Subrs entries end with the given binary-read terminator spelling. The
+// operator names are font-defined, so "NP", "|" and the two-token "noaccess put" are all legal — and the last costs the
+// scan two tokens per entry.
+func buildSubrsFont(count int, terminator string) []byte {
+	var header bytes.Buffer
+	header.WriteString("%!PS-AdobeFont-1.0: SubrsT1 001.000\n/FontName /SubrsT1 def\n")
+	header.WriteString("/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n")
+	header.WriteString("/FontBBox {0 -200 1000 800} readonly def\ncurrentdict end\ncurrentfile eexec\n")
+	var priv bytes.Buffer
+	priv.WriteString("dup /Private 15 dict dup begin\n/lenIV 4 def\n")
+	fmt.Fprintf(&priv, "/Subrs %d array\n", count)
+	for i := range count {
+		enc := encryptT1(cs(i+1, 0, oRlineto, oReturn), charstringR, 4) // Subr i draws a line of length i+1.
+		fmt.Fprintf(&priv, "dup %d %d RD ", i, len(enc))
+		priv.Write(enc)
+		fmt.Fprintf(&priv, " %s\n", terminator)
+	}
+	priv.WriteString("ND\n")
+	glyph := encryptT1(cs(0, 500, oHsbw, 0, 0, oRmoveto, count-1, oCallsubr, oEndchar), charstringR, 4)
+	priv.WriteString("/CharStrings 1 dict dup begin\n")
+	fmt.Fprintf(&priv, "/A %d RD ", len(glyph))
+	priv.Write(glyph)
+	priv.WriteString(" ND\nend\nend\n")
+	var out bytes.Buffer
+	out.Write(header.Bytes())
+	out.Write(encryptT1(priv.Bytes(), eexecR, 4))
+	out.WriteString(trailer())
+	return out.Bytes()
+}
+
+// TestParseSubrsTerminatorSpellings covers the /Subrs scan budget. The binary-read terminator's name is font-defined,
+// and a font spelling it "noaccess put" instead of the "NP" shorthand costs two tokens per entry: skipKeyword eats
+// "noaccess" and the leftover "put" burns another iteration. Budgeting one iteration per entry silently dropped roughly
+// the second half of such a font's /Subrs array — those slots stayed nil, callsubr on one drew nothing, and the glyphs
+// came out corrupted with no error at all.
+func TestParseSubrsTerminatorSpellings(t *testing.T) {
+	const count = 24
+	for _, terminator := range []string{"NP", "|", "noaccess put", "noaccess NP"} {
+		t.Run(strings.ReplaceAll(terminator, " ", "_"), func(t *testing.T) {
+			f, err := Parse(buildSubrsFont(count, terminator))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(f.Subrs) != count {
+				t.Fatalf("Subrs = %d, want %d", len(f.Subrs), count)
+			}
+			for i, sub := range f.Subrs {
+				if len(sub) == 0 {
+					t.Fatalf("subr %d of %d was dropped by the scan", i, count)
+				}
+			}
+			// The last subr is the one a short budget loses, so draw with it: it must move the pen by count.
+			segs, _, gErr := f.Glyph("A")
+			if gErr != nil {
+				t.Fatalf("Glyph(A): %v", gErr)
+			}
+			wantSegs(t, segs, []seg{
+				{op: ot.SegmentOpMoveTo, args: []float32{0, 0}},
+				{op: ot.SegmentOpLineTo, args: []float32{count, 0}},
+				{op: ot.SegmentOpLineTo, args: []float32{0, 0}}, // endchar closes the contour.
+			})
+		})
+	}
+}

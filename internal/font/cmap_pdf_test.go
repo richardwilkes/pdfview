@@ -42,13 +42,35 @@ CMapName currentdict /CMap defineresource pop
 end
 end`
 
+// cidCount totals the per-code-length cid buckets a CMap kept.
+func cidCount(cm *cmapPDF) int {
+	n := 0
+	for _, ranges := range cm.cids {
+		n += len(ranges)
+	}
+	return n
+}
+
+// bfCount totals the per-code-length bf buckets a CMap kept.
+func bfCount(cm *cmapPDF) int {
+	n := 0
+	for _, entries := range cm.bf {
+		n += len(entries)
+	}
+	return n
+}
+
 func TestParseCMapCore(t *testing.T) {
 	cm := parseCMap([]byte(testCMapContent), 0, predefinedCMap)
 	if cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	if len(cm.codespaces) != 3 || len(cm.cids) != 3 {
-		t.Fatalf("codespaces=%d cids=%d, want 3 and 3", len(cm.codespaces), len(cm.cids))
+	if len(cm.codespaces) != 3 || cidCount(cm) != 3 {
+		t.Fatalf("codespaces=%d cids=%d, want 3 and 3", len(cm.codespaces), cidCount(cm))
+	}
+	// The 1-byte ranges and the 2-byte one live in their own buckets: a cidrange applies only to codes of its length.
+	if len(cm.cids[0]) != 2 || len(cm.cids[1]) != 1 {
+		t.Fatalf("cid buckets = %d 1-byte, %d 2-byte; want 2 and 1", len(cm.cids[0]), len(cm.cids[1]))
 	}
 	if cm.wModeResolved() != 0 {
 		t.Errorf("wmode = %d", cm.wModeResolved())
@@ -74,7 +96,7 @@ func TestParseCMapCore(t *testing.T) {
 			t.Errorf("nextCode(% x) = %x, %d; want %x, %d", tc.in, code, n, tc.code, tc.n)
 			continue
 		}
-		if cid := cm.cid(code); cid != tc.cid {
+		if cid := cm.cid(code, uint8(n)); cid != tc.cid {
 			t.Errorf("cid(%x) = %d, want %d", code, cid, tc.cid)
 		}
 	}
@@ -123,7 +145,7 @@ func TestPredefinedIdentity(t *testing.T) {
 	if code != 0x1234 || n != 2 {
 		t.Errorf("nextCode = %x, %d", code, n)
 	}
-	if cid := h.cid(0x1234); cid != 0x1234 {
+	if cid := h.cid(0x1234, 2); cid != 0x1234 {
 		t.Errorf("cid = %d", cid)
 	}
 	if predefinedCMap("UniJIS-UCS2-H") != nil {
@@ -140,10 +162,10 @@ endcidrange`
 	if cm == nil || cm.base == nil {
 		t.Fatal("usecmap base not resolved")
 	}
-	if cid := cm.cid(0x41); cid != 500 { // Own range wins.
+	if cid := cm.cid(0x41, 2); cid != 500 { // Own range wins.
 		t.Errorf("cid(41) = %d, want 500", cid)
 	}
-	if cid := cm.cid(0x99); cid != 0x99 { // Falls through to the identity base.
+	if cid := cm.cid(0x99, 2); cid != 0x99 { // Falls through to the identity base.
 		t.Errorf("cid(99) = %d, want 153", cid)
 	}
 	if code, n := cm.nextCode([]byte{0x00, 0x99}); code != 0x99 || n != 2 { // Base codespace applies.
@@ -181,7 +203,7 @@ func TestToUnicodeBF(t *testing.T) {
 		0x22: "1",
 		0x99: "", // unmapped
 	} {
-		if got := cm.bfString(code); got != want {
+		if got := cm.bfString(code, 2); got != want {
 			t.Errorf("bfString(%#x) = %q, want %q", code, got, want)
 		}
 	}
@@ -411,9 +433,11 @@ endcidrange`), 0, nil)
 	if cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	for i := 1; i < len(cm.cids); i++ {
-		if prev, cur := cm.cids[i-1], cm.cids[i]; cur.lo <= prev.hi {
-			t.Fatalf("cid ranges not sorted and disjoint: %+v then %+v", prev, cur)
+	for _, ranges := range cm.cids {
+		for i := 1; i < len(ranges); i++ {
+			if prev, cur := ranges[i-1], ranges[i]; cur.lo <= prev.hi {
+				t.Fatalf("cid ranges not sorted and disjoint: %+v then %+v", prev, cur)
+			}
 		}
 	}
 	for code, want := range map[uint32]uint32{
@@ -425,7 +449,7 @@ endcidrange`), 0, nil)
 		0x0100: 9000, 0x0150: 9080, 0x0151: 9081, 0x0180: 9128, // [0100, 0180] wins everything [0150, 0151] claimed.
 		0x0200: 2000, 0x020a: 2010, // The entry listed first, now searched last.
 	} {
-		if got := cm.cid(code); got != want {
+		if got := cm.cid(code, 2); got != want {
 			t.Errorf("cid(%#04x) = %d, want %d", code, got, want)
 		}
 	}
@@ -446,9 +470,11 @@ endbfrange`), 0, nil)
 	if cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	for i := 1; i < len(cm.bf); i++ {
-		if prev, cur := cm.bf[i-1], cm.bf[i]; cur.lo <= prev.hi {
-			t.Fatalf("bf ranges not sorted and disjoint: %+v then %+v", prev, cur)
+	for _, entries := range cm.bf {
+		for i := 1; i < len(entries); i++ {
+			if prev, cur := entries[i-1], entries[i]; cur.lo <= prev.hi {
+				t.Fatalf("bf ranges not sorted and disjoint: %+v then %+v", prev, cur)
+			}
 		}
 	}
 	for code, want := range map[uint32]string{
@@ -460,7 +486,7 @@ endbfrange`), 0, nil)
 		0x0050: "a", 0x0055: "f", // [0050, 0055] starts lower than the array entry [0053, 0056].
 		0x0056: "D", // The tail of [0053, 0056] survives, re-based onto the array's fourth element.
 	} {
-		if got := cm.bfString(code); got != want {
+		if got := cm.bfString(code, 2); got != want {
 			t.Errorf("bfString(%#04x) = %q, want %q", code, got, want)
 		}
 	}
@@ -476,18 +502,18 @@ endbfrange`), 0, nil)
 	if cm = parseCMap([]byte(sb.String()), 0, nil); cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	if len(cm.cids) != n {
-		t.Fatalf("kept %d of %d cid ranges", len(cm.cids), n)
+	if cidCount(cm) != n {
+		t.Fatalf("kept %d of %d cid ranges", cidCount(cm), n)
 	}
 	for i := range uint32(n) {
 		want := 1000 + i
-		if got := cm.cid(4 * i); got != want {
+		if got := cm.cid(4*i, 2); got != want {
 			t.Errorf("cid(%d) = %d, want %d", 4*i, got, want)
 		}
-		if got := cm.cid(4*i + 1); got != want+1 { // The range's second code takes the next CID.
+		if got := cm.cid(4*i+1, 2); got != want+1 { // The range's second code takes the next CID.
 			t.Errorf("cid(%d) = %d, want %d", 4*i+1, got, want+1)
 		}
-		if got := cm.cid(4*i + 2); got != 0 { // In the gap, so unmapped.
+		if got := cm.cid(4*i+2, 2); got != 0 { // In the gap, so unmapped.
 			t.Errorf("gap cid(%d) = %d, want 0", 4*i+2, got)
 		}
 	}
@@ -512,8 +538,8 @@ endcidchar`), 0, nil)
 	if cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	if len(cm.cids) != 2 {
-		t.Fatalf("kept %d cid ranges (%+v), want only the two in-range entries", len(cm.cids), cm.cids)
+	if cidCount(cm) != 2 {
+		t.Fatalf("kept %d cid ranges (%+v), want only the two in-range entries", cidCount(cm), cm.cids)
 	}
 	for code, want := range map[uint32]uint32{
 		0x0010: 0, 0x0013: 0, // 2^32 + 1 would wrap to CID 1.
@@ -524,7 +550,7 @@ endcidchar`), 0, nil)
 		0x0030: 300, 0x0033: 303, // In range, so unaffected.
 		0x0051: 65535, // The largest addressable CID still maps.
 	} {
-		if got := cm.cid(code); got != want {
+		if got := cm.cid(code, 2); got != want {
 			t.Errorf("cid(%#04x) = %d, want %d", code, got, want)
 		}
 	}
@@ -631,5 +657,106 @@ endcmap`
 	}
 	if len(cm.byLen[1]) != 1 || len(cm.byLen[2]) != 1 || len(cm.byLen[3]) != 0 {
 		t.Errorf("per-length buckets = %d/%d/%d, want 1/1/0", len(cm.byLen[1]), len(cm.byLen[2]), len(cm.byLen[3]))
+	}
+}
+
+// TestCMapEntriesAreScopedToTheirCodeLength covers ISO 32000-2 9.7.6.2: a cidrange (or bfrange) applies only to codes
+// of the length it was written with. A CMap declaring both a 1-byte and a 2-byte codespace can therefore carry two
+// entries whose code values coincide, and merging them into one value-keyed list let the wider entry shadow the
+// narrower one away entirely: 1-byte code 0x41 resolved through the 2-byte range and selected a glyph — and a ToUnicode
+// string — belonging to an unrelated code.
+func TestCMapEntriesAreScopedToTheirCodeLength(t *testing.T) {
+	cm := parseCMap([]byte(`2 begincodespacerange
+<20> <7f>
+<0000> <00ff>
+endcodespacerange
+2 begincidrange
+<20> <7f> 1
+<0000> <00ff> 1000
+endcidrange
+2 beginbfrange
+<20> <7f> <0041>
+<0000> <00ff> <0061>
+endbfrange`), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if len(cm.cids[0]) != 1 || len(cm.cids[1]) != 1 || len(cm.bf[0]) != 1 || len(cm.bf[1]) != 1 {
+		t.Fatalf("buckets = cids %d/%d, bf %d/%d; want one entry of each length in each",
+			len(cm.cids[0]), len(cm.cids[1]), len(cm.bf[0]), len(cm.bf[1]))
+	}
+	// Both lengths really are reachable: 0x41 alone decodes as a 1-byte code, 0x00 0x41 as a 2-byte one.
+	if code, n := cm.nextCode([]byte{0x41}); code != 0x41 || n != 1 {
+		t.Fatalf("nextCode(41) = %x, %d; want 41, 1", code, n)
+	}
+	if code, n := cm.nextCode([]byte{0x00, 0x41}); code != 0x41 || n != 2 {
+		t.Fatalf("nextCode(00 41) = %x, %d; want 41, 2", code, n)
+	}
+	if got := cm.cid(0x41, 1); got != 1+0x21 {
+		t.Errorf("cid(41, 1 byte) = %d, want %d from the 1-byte range", got, 1+0x21)
+	}
+	if got := cm.cid(0x41, 2); got != 1000+0x41 {
+		t.Errorf("cid(41, 2 bytes) = %d, want %d from the 2-byte range", got, 1000+0x41)
+	}
+	if got, want := cm.bfString(0x41, 1), string(rune(0x41+0x21)); got != want {
+		t.Errorf("bfString(41, 1 byte) = %q, want %q from the 1-byte range", got, want)
+	}
+	if got, want := cm.bfString(0x41, 2), string(rune(0x61+0x41)); got != want {
+		t.Errorf("bfString(41, 2 bytes) = %q, want %q from the 2-byte range", got, want)
+	}
+}
+
+// TestCMapLengthMismatchStillResolves covers the lenient half of the length rule: an entry of the code's own length
+// always wins, but a code no entry of its length maps still falls back to an entry of another length rather than
+// resolving to .notdef or to no Unicode at all. Producers routinely write a 1-byte-coded simple font's /ToUnicode with
+// 2-byte codes (and vice versa), and every deployed viewer maps those.
+func TestCMapLengthMismatchStillResolves(t *testing.T) {
+	cm := parseCMap([]byte(`1 begincodespacerange <00> <ff> endcodespacerange
+1 beginbfrange
+<0041> <0043> <0061>
+endbfrange
+1 begincidrange
+<0041> <0043> 7
+endcidrange`), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if got := cm.bfString(0x42, 1); got != "b" {
+		t.Errorf("bfString(42, 1 byte) = %q, want %q through the 2-byte entry", got, "b")
+	}
+	if got := cm.cid(0x42, 1); got != 8 {
+		t.Errorf("cid(42, 1 byte) = %d, want 8 through the 2-byte entry", got)
+	}
+	// The order is own-length-first, then shortest-first among the rest.
+	if got, want := lengthOrder(3), [4]int{2, 0, 1, 3}; got != want {
+		t.Errorf("lengthOrder(3) = %v, want %v", got, want)
+	}
+	if got, want := lengthOrder(0), [4]int{0, 1, 2, 3}; got != want {
+		t.Errorf("lengthOrder(0) = %v, want %v", got, want)
+	}
+}
+
+// TestCMapRangeCapCountsEveryLength keeps the maxCMapRanges cap on the total across the per-length buckets: bucketing
+// must not multiply the accepted entry count by four.
+func TestCMapRangeCapCountsEveryLength(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("1 begincodespacerange <0000> <ffff> endcodespacerange\n")
+	sb.WriteString("100000 begincidchar\n")
+	for i := range maxCMapRanges + 100 {
+		fmt.Fprintf(&sb, "<%04x> 1\n", i%0x10000)
+	}
+	sb.WriteString("endcidchar")
+	cm := parseCMap([]byte(sb.String()), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if cm.nCIDs > maxCMapRanges {
+		t.Errorf("accepted %d cid entries, want at most %d", cm.nCIDs, maxCMapRanges)
+	}
+	if cidCount(cm) > maxCMapRanges {
+		t.Errorf("kept %d cid entries, want at most %d", cidCount(cm), maxCMapRanges)
+	}
+	if bfCount(cm) != 0 {
+		t.Errorf("kept %d bf entries, want none", bfCount(cm))
 	}
 }

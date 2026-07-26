@@ -45,32 +45,40 @@ type codespaceRange struct {
 	nBytes uint8
 }
 
-// cidRangeEntry maps the code range [lo, hi] (of nBytes-length codes) to CIDs starting at cid.
+// cidRangeEntry maps the code range [lo, hi] to CIDs starting at cid. The length of the codes it applies to is the
+// bucket it sits in (cmapPDF.cids), not a field.
 type cidRangeEntry struct {
 	lo, hi, cid uint32
-	nBytes      uint8
 }
 
 // bfEntry maps the code range [lo, hi] to target strings: dst for a contiguous mapping (the last UTF-16 code unit
 // increments across the range), dstArray for an explicit per-code list. trimmed carries the increment the codes clipped
-// off a contiguous entry's front by sortRanges already consumed, so dst stays the string the CMap wrote for lo.
+// off a contiguous entry's front by sortRanges already consumed, so dst stays the string the CMap wrote for lo. Like
+// cidRangeEntry, the code length it applies to is its bucket in cmapPDF.bf.
 type bfEntry struct {
 	dst      []byte
 	dstArray [][]byte
 	lo, hi   uint32
 	trimmed  uint16
-	nBytes   uint8
 }
 
 // cmapPDF is one parsed CMap. codespaces is the declaration order the longest-prefix rule in nextCode walks; byLen is
 // the same set bucketed by code length and merged into sorted, disjoint ranges, which is what the per-code membership
 // test binary searches.
+//
+// The cid and bf lists are bucketed by code length for the same reason ISO 32000-2 9.7.6.2 scopes a cidrange to codes
+// of its own length: a CMap may declare both a 1-byte and a 2-byte codespace, and entries of the two lengths address
+// unrelated codes even where their numeric values coincide. Merging them into one value-keyed list let the wider entry
+// shadow the narrower one away in sortRanges, so a 1-byte code resolved through the 2-byte entry and selected the wrong
+// glyph (and the wrong ToUnicode string).
 type cmapPDF struct {
 	base       *cmapPDF // usecmap target, consulted when this map has no entry
 	codespaces []codespaceRange
 	byLen      [4][]codespaceRange // index n holds the merged ranges of (n+1)-byte codes
-	cids       []cidRangeEntry
-	bf         []bfEntry
+	cids       [4][]cidRangeEntry  // index n holds the ranges mapping (n+1)-byte codes
+	bf         [4][]bfEntry        // index n holds the entries mapping (n+1)-byte codes
+	nCIDs      int                 // total cid entries accepted, across the buckets, against maxCMapRanges
+	nBF        int                 // total bf entries accepted, across the buckets, against maxCMapRanges
 	wmode      uint8
 	hasWMode   bool
 	identity   bool // Identity mapping: CID = code (Identity-H/V)
@@ -201,24 +209,39 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 //
 // Overlap is malformed: ISO 32000-2 9.7.5.3 maps a code through one entry. It resolves as it does for /W — the
 // contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie — which
-// matches what the former linear scan returned for every case except a later entry that also starts lower.
+// matches what the former linear scan returned for every case except a later entry that also starts lower. Entries of
+// different code lengths never contest anything: they address different codes, so each bucket is made disjoint alone.
 func (cm *cmapPDF) sortRanges() {
 	cm.indexCodespaces()
-	cm.cids = disjointCIDRanges(cm.cids, func(r *cidRangeEntry) (uint32, uint32) { return r.lo, r.hi },
-		func(r *cidRangeEntry, lo uint32) {
-			r.cid += lo - r.lo
-			r.lo = lo
-		})
-	cm.bf = disjointCIDRanges(cm.bf, func(e *bfEntry) (uint32, uint32) { return e.lo, e.hi },
-		func(e *bfEntry, lo uint32) {
-			off := lo - e.lo
-			if e.dstArray != nil {
-				e.dstArray = e.dstArray[off:] // hi is bounded by the array's length, so the clipped codes are its front.
-			} else {
-				e.trimmed += uint16(off)
-			}
-			e.lo = lo
-		})
+	for n := range cm.cids {
+		cm.cids[n] = disjointCIDRanges(cm.cids[n], func(r *cidRangeEntry) (uint32, uint32) { return r.lo, r.hi },
+			func(r *cidRangeEntry, lo uint32) {
+				r.cid += lo - r.lo
+				r.lo = lo
+			})
+	}
+	for n := range cm.bf {
+		cm.bf[n] = disjointCIDRanges(cm.bf[n], func(e *bfEntry) (uint32, uint32) { return e.lo, e.hi },
+			func(e *bfEntry, lo uint32) {
+				off := lo - e.lo
+				if e.dstArray != nil {
+					e.dstArray = e.dstArray[off:] // hi is bounded by the array's length, so the clipped codes are its front.
+				} else {
+					e.trimmed += uint16(off)
+				}
+				e.lo = lo
+			})
+	}
+}
+
+// hasBF reports whether any bf entry survived parsing (of any code length).
+func (cm *cmapPDF) hasBF() bool {
+	for _, entries := range cm.bf {
+		if len(entries) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // codeToken converts a hex-string token to (value, byte length); code strings longer than 4 bytes are invalid.
@@ -294,14 +317,17 @@ func (cm *cmapPDF) parseCIDRanges(lex *cos.Lexer, budget *int, char bool) {
 		// CIDs are 16-bit (ISO 32000-2 9.7.4), so an entry naming a larger starting CID is malformed and is dropped
 		// rather than narrowed — the same guard the /W and /W2 parsers apply. Without the upper bound the uint32
 		// conversion below wraps a value at or above 2^32 into an unrelated CID, silently selecting an arbitrary glyph.
-		if last.Kind == cos.TokenInt && last.Int >= 0 && last.Int <= maxCID && len(cm.cids) < maxCMapRanges {
+		if last.Kind == cos.TokenInt && last.Int >= 0 && last.Int <= maxCID && cm.nCIDs < maxCMapRanges {
 			lo, nLo, okLo := codeToken(pending[0])
 			hi, nHi, okHi := lo, nLo, okLo
 			if !char {
 				hi, nHi, okHi = codeToken(pending[1])
 			}
+			// The entry lands in the bucket of its own code length (codeToken guarantees 1-4): a cidrange applies only
+			// to codes of the length it was written with (ISO 32000-2 9.7.6.2).
 			if okLo && okHi && nLo == nHi && lo <= hi {
-				cm.cids = append(cm.cids, cidRangeEntry{lo: lo, hi: hi, cid: uint32(last.Int), nBytes: nLo})
+				cm.cids[nLo-1] = append(cm.cids[nLo-1], cidRangeEntry{lo: lo, hi: hi, cid: uint32(last.Int)})
+				cm.nCIDs++
 			}
 		}
 		pending = pending[:0]
@@ -319,7 +345,7 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 	}
 	flush := func() {
 		defer func() { pending = pending[:0]; arrayDst = nil }()
-		if len(pending) < need-1 || len(cm.bf) >= maxCMapRanges {
+		if len(pending) < need-1 || cm.nBF >= maxCMapRanges {
 			return
 		}
 		lo, nLo, okLo := codeToken(pending[0])
@@ -330,7 +356,7 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 		if !okLo || !okHi || nLo != nHi || lo > hi || hi-lo >= maxCMapRanges {
 			return
 		}
-		e := bfEntry{lo: lo, hi: hi, nBytes: nLo}
+		e := bfEntry{lo: lo, hi: hi}
 		switch {
 		case arrayDst != nil:
 			// The array supplies one target per code, so its length — not hi — bounds what the entry can map. Clamping
@@ -348,7 +374,8 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 		default:
 			return
 		}
-		cm.bf = append(cm.bf, e)
+		cm.bf[nLo-1] = append(cm.bf[nLo-1], e) // Bucketed by the length of the codes the entry maps, like the cid ranges.
+		cm.nBF++
 	}
 	for *budget > 0 {
 		*budget--
@@ -451,37 +478,71 @@ func (cm *cmapPDF) inCodespace(v uint32, nBytes uint8) bool {
 	return false
 }
 
-// cid maps a decoded code to a CID (0 when unmapped).
-func (cm *cmapPDF) cid(code uint32) uint32 {
+// lengthOrder returns the bucket indexes a code decoded at nBytes bytes consults, in order: its own length first, then
+// the remaining lengths shortest-first (nBytes outside 1-4 — an unknown length — consults them all shortest-first).
+//
+// The trailing lengths are the lenient half of the rule ISO 32000-2 9.7.6.2 states strictly. An entry written with the
+// code's own length always wins, which is what the specification requires and what the wrong-glyph case needs, but a
+// code no entry of its length maps still falls back to one of another length rather than resolving to .notdef (or to no
+// Unicode at all): producers routinely write a simple font's /ToUnicode with 2-byte codes, or a 2-byte CMap's
+// begincidchar with 1-byte ones, and every deployed viewer — which key their tables on the value alone — maps those.
+func lengthOrder(nBytes uint8) [4]int {
+	var out [4]int
+	n := 0
+	if nBytes >= 1 && nBytes <= 4 {
+		out[0] = int(nBytes) - 1
+		n = 1
+	}
+	for i := range 4 {
+		if n > 0 && i == out[0] {
+			continue
+		}
+		out[n] = i
+		n++
+	}
+	return out
+}
+
+// cid maps a code decoded at nBytes bytes to a CID (0 when unmapped).
+func (cm *cmapPDF) cid(code uint32, nBytes uint8) uint32 {
+	order := lengthOrder(nBytes)
 	for c := cm; c != nil; c = c.base {
 		if c.identity {
 			return code & 0xFFFF
 		}
-		if i := findCIDRange(c.cids, func(r *cidRangeEntry) uint32 { return r.lo }, code); i >= 0 {
-			if r := &c.cids[i]; code <= r.hi {
-				return r.cid + (code - r.lo)
+		for _, n := range order {
+			ranges := c.cids[n]
+			if i := findCIDRange(ranges, func(r *cidRangeEntry) uint32 { return r.lo }, code); i >= 0 {
+				if r := &ranges[i]; code <= r.hi {
+					return r.cid + (code - r.lo)
+				}
 			}
 		}
 	}
 	return 0
 }
 
-// bfString maps a code to its bf target string (ToUnicode), decoding UTF-16BE; "" when unmapped.
-func (cm *cmapPDF) bfString(code uint32) string {
+// bfString maps a code decoded at nBytes bytes to its bf target string (ToUnicode), decoding UTF-16BE; "" when
+// unmapped.
+func (cm *cmapPDF) bfString(code uint32, nBytes uint8) string {
+	order := lengthOrder(nBytes)
 	for c := cm; c != nil; c = c.base {
-		i := findCIDRange(c.bf, func(e *bfEntry) uint32 { return e.lo }, code)
-		if i < 0 {
-			continue
+		for _, n := range order {
+			entries := c.bf[n]
+			i := findCIDRange(entries, func(e *bfEntry) uint32 { return e.lo }, code)
+			if i < 0 {
+				continue
+			}
+			e := &entries[i]
+			if code > e.hi {
+				continue
+			}
+			idx := code - e.lo
+			if e.dstArray != nil {
+				return utf16BEToString(e.dstArray[idx], 0)
+			}
+			return utf16BEToString(e.dst, uint16(idx)+e.trimmed)
 		}
-		e := &c.bf[i]
-		if code > e.hi {
-			continue
-		}
-		idx := code - e.lo
-		if e.dstArray != nil {
-			return utf16BEToString(e.dstArray[idx], 0)
-		}
-		return utf16BEToString(e.dst, uint16(idx)+e.trimmed)
 	}
 	return ""
 }

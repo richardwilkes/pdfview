@@ -40,10 +40,10 @@ func wantFiniteMetrics(t *testing.T, f *Font, codes ...uint32) {
 		t.Errorf("metrics = %v/%v, want finite", f.Ascender(), f.Descender())
 	}
 	for _, code := range codes {
-		if w := f.Width(code); !isFiniteF(w) {
+		if w := f.Width(code, 1); !isFiniteF(w) {
 			t.Errorf("Width(%d) = %v, want finite", code, w)
 		}
-		if w1, vx, vy := f.VMetrics(code); !isFiniteF(w1) || !isFiniteF(vx) || !isFiniteF(vy) {
+		if w1, vx, vy := f.VMetrics(code, 1); !isFiniteF(w1) || !isFiniteF(vx) || !isFiniteF(vy) {
 			t.Errorf("VMetrics(%d) = %v/%v/%v, want finite", code, w1, vx, vy)
 		}
 	}
@@ -76,11 +76,11 @@ func TestDescriptorNonFiniteMetricsIgnored(t *testing.T) {
 				t.Errorf("metrics = %v/%v, want the 0.8/-0.2 defaults", f.Ascender(), f.Descender())
 			}
 			// Code 66 has no /Widths entry, so it lands on the (now zero) /MissingWidth.
-			if got := f.Width(66); got != 0 {
+			if got := f.Width(66, 1); got != 0 {
 				t.Errorf("Width(66) = %v, want 0 (the unusable /MissingWidth was dropped)", got)
 			}
 			// The well-formed entry is untouched.
-			if got := f.Width(65); got != 0.5 {
+			if got := f.Width(65, 1); got != 0.5 {
 				t.Errorf("Width(65) = %v, want 0.5", got)
 			}
 		})
@@ -103,10 +103,10 @@ func TestSimpleWidthsNonFiniteEntryIgnored(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantFiniteMetrics(t, f, 65, 66, 67)
-			if got := f.Width(65); got != 0.321 {
+			if got := f.Width(65, 1); got != 0.321 {
 				t.Errorf("Width(65) = %v, want MissingWidth 0.321 (the unusable entry must be a gap)", got)
 			}
-			if got := f.Width(66); got != 0.456 {
+			if got := f.Width(66, 1); got != 0.456 {
 				t.Errorf("Width(66) = %v, want 0.456: the guard must not drop the valid neighbor", got)
 			}
 		})
@@ -223,11 +223,11 @@ func TestType3NonFiniteWidthProductIgnored(t *testing.T) {
 	}
 	wantFiniteMetrics(t, f, 65, 66, 67)
 	// Code 65's own product overflows, so it falls through to /MissingWidth — whose product overflows too, leaving 0.
-	if got := f.Width(65); got != 0 {
+	if got := f.Width(65, 1); got != 0 {
 		t.Errorf("Width(65) = %v, want 0 (both the entry and /MissingWidth overflowed)", got)
 	}
 	// Code 66's 500 glyph units scale by 1e30 to 5e32, which is finite: the guard must not drop it.
-	if got := f.Width(66); got != 5e32 {
+	if got := f.Width(66, 1); got != 5e32 {
 		t.Errorf("Width(66) = %v, want 5e32", got)
 	}
 }

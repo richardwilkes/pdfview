@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -194,19 +195,19 @@ func TestLoadSimpleFont(t *testing.T) {
 	if f.BaseFont != "Whatever-Bold" {
 		t.Errorf("BaseFont = %q", f.BaseFont)
 	}
-	if got := f.Width(65); got != 0.123 {
+	if got := f.Width(65, 1); got != 0.123 {
 		t.Errorf("Width(65) = %v, want 0.123", got)
 	}
-	if got := f.Width(66); got != 0.456 {
+	if got := f.Width(66, 1); got != 0.456 {
 		t.Errorf("Width(66) = %v", got)
 	}
-	if got := f.Width(67); got != 0.321 {
+	if got := f.Width(67, 1); got != 0.321 {
 		t.Errorf("Width(67) = %v, want MissingWidth 0.321", got)
 	}
-	if got := f.Unicode(65); got != 'α' {
+	if got := f.Unicode(65, 1); got != 'α' {
 		t.Errorf("Unicode(65) = %q, want alpha via Differences", got)
 	}
-	if got := f.Unicode(66); got != 'B' {
+	if got := f.Unicode(66, 1); got != 'B' {
 		t.Errorf("Unicode(66) = %q, want B via WinAnsi", got)
 	}
 	if f.Ascender() != 0.7 || f.Descender() != -0.15 {
@@ -218,10 +219,10 @@ func TestLoadSimpleFont(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Width('T'); got != 0.611 {
+	if got := f.Width('T', 1); got != 0.611 {
 		t.Errorf("Helvetica T width = %v, want 0.611 (AFM)", got)
 	}
-	if got := f.Width(' '); got != 0.278 {
+	if got := f.Width(' ', 1); got != 0.278 {
 		t.Errorf("Helvetica space width = %v, want 0.278", got)
 	}
 	if f.Ascender() != 1.075 || f.Descender() != -0.299 {
@@ -233,10 +234,10 @@ func TestLoadSimpleFont(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Unicode('a'); got != 'α' {
+	if got := f.Unicode('a', 1); got != 'α' {
 		t.Errorf("Symbol Unicode('a') = %q, want alpha", got)
 	}
-	if got := f.Width('a'); got != 0.631 {
+	if got := f.Width('a', 1); got != 0.631 {
 		t.Errorf("Symbol width('a') = %v, want 0.631", got)
 	}
 
@@ -255,8 +256,8 @@ func TestForEachCodeStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
-	f.ForEachCode([]byte("abcdef"), func(_ uint32, oneByte bool) bool {
-		if !oneByte {
+	f.ForEachCode([]byte("abcdef"), func(_ uint32, nBytes uint8) bool {
+		if nBytes != 1 {
 			t.Error("simple fonts are one byte per code")
 		}
 		count++
@@ -383,14 +384,16 @@ func TestCFFTopDict(t *testing.T) {
 // mislabeled "CIDFontType2" whose program really lives in FontFile3 (a CFF) must be parsed from FontFile3 and embedded,
 // not routed into the SFNT arm with a nil stream and then substituted away.
 func TestType0DispatchByFontFile(t *testing.T) {
-	// A CFF carrying FontBBox [-166 -214 1076 952] so top.metrics() resolves and the font counts as embedded.
-	cff := buildCFF([]byte{
+	// A CFF carrying FontBBox [-166 -214 1076 952] (so top.metrics() resolves and the font counts as embedded) plus
+	// loadable charstrings, so it is the glyph source too and no substitute belongs anywhere near it.
+	endchar := []byte{139, 14} // "0 endchar": a valid, empty charstring.
+	cff := buildGlyphCFF([]byte{
 		28, 0xFF, 0x5A, // -166
 		28, 0xFF, 0x2A, // -214
 		28, 0x04, 0x34, // 1076
 		28, 0x03, 0xB8, // 952
 		5, // FontBBox
-	})
+	}, endchar, endchar, endchar)
 	f, err := loadFromDict(
 		t,
 		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R] >>",
@@ -451,7 +454,7 @@ func TestType0FallsThroughToNextFontFile(t *testing.T) {
 	if f.type0.cidToGID != nil {
 		t.Error("the CIDFontType2 /CIDToGIDMap was kept for a font whose glyphs came from the CFF")
 	}
-	if got := f.GID(1); got != 1 {
+	if got := f.GID(1, 2); got != 1 {
 		t.Errorf("GID(1) = %d, want 1 through the embedded CFF (identity CID→GID)", got)
 	}
 }
@@ -536,7 +539,7 @@ func TestType0CFFWithoutFontBBoxKeepsItsGlyphs(t *testing.T) {
 	if f.sub != nil {
 		t.Fatal("a substitute was loaded alongside the embedded CFF, so GID and GlyphPath disagree")
 	}
-	if got := f.GID(2); got != 2 {
+	if got := f.GID(2, 1); got != 2 {
 		t.Errorf("GID(2) = %d, want 2 through the embedded program (identity CID→GID)", got)
 	}
 	if f.ascender <= 0 || f.descender >= 0 {
@@ -591,11 +594,100 @@ func TestType3NonStandardFontMatrixWidths(t *testing.T) {
 		t.Fatal("font did not load as Type 3")
 	}
 	// A raw glyph-space width of 500 scaled by matrix[0]=0.01 yields a text-space advance of 5.
-	if got := f.Width(65); got != 5 {
+	if got := f.Width(65, 1); got != 5 {
 		t.Errorf("Width(65) = %v, want 5 (/Widths through the FontMatrix)", got)
 	}
 	// A raw /MissingWidth of 321 scaled by matrix[0]=0.01 yields 3.21; before the fix this returned the raw 0.321.
-	if got := f.Width(66); got < 3.209 || got > 3.211 {
+	if got := f.Width(66, 1); got < 3.209 || got > 3.211 {
 		t.Errorf("Width(66) = %v, want ≈3.21 (/MissingWidth through the FontMatrix)", got)
+	}
+}
+
+// TestType0SubstitutesWhenTheEmbeddedProgramHasNoGlyphs covers the composite-font substitution gate. A FontFile3 whose
+// header and Top DICT parse — yielding a usable /FontBBox — but whose program go-text's cff.Parse rejects (there are no
+// charstrings here at all) leaves the font with metrics and no glyph source whatsoever. Deciding substitution on
+// "metrics were recovered" rather than "a glyph source exists" left every glyph of such a font invisible while its
+// widths still advanced; loadSimple substitutes in the identical situation.
+func TestType0SubstitutesWhenTheEmbeddedProgramHasNoGlyphs(t *testing.T) {
+	// FontBBox [-166 -214 1076 952] and nothing else: top.metrics() resolves, parseCFFGlyphs finds no CharStrings.
+	cff := buildCFF([]byte{
+		28, 0xFF, 0x5A, // -166
+		28, 0xFF, 0x2A, // -214
+		28, 0x04, 0x34, // 1076
+		28, 0x03, 0xB8, // 952
+		5, // FontBBox
+	})
+	toUni := "/CIDInit /ProcSet findresource begin\nbegincmap\n1 begincodespacerange\n<0000> <ffff>\n" +
+		"endcodespacerange\n1 beginbfchar\n<0001> <0041>\nendbfchar\nendcmap\nend"
+	f, err := loadFromDict(
+		t,
+		"<< /Type /Font /Subtype /Type0 /BaseFont /TestCID /Encoding /Identity-H /DescendantFonts [2 0 R]"+
+			" /ToUnicode 5 0 R >>",
+		"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /TestCID /FontDescriptor 3 0 R >>",
+		"<< /Type /FontDescriptor /FontName /TestCID /Flags 4 /FontFile3 4 0 R >>",
+		fmt.Sprintf("<< /Length %d /Subtype /Type1C >>\nstream\n%s\nendstream", len(cff), cff),
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(toUni), toUni),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.cff != nil || f.type0.sfnt != nil {
+		t.Fatal("the fixture is meant to carry no glyph source at all")
+	}
+	if f.sub == nil {
+		t.Fatal("no substitute for a composite font with no glyph source: every glyph would render blank")
+	}
+	// The metrics still come from the embedded FontBBox — only the shapes fall back.
+	if f.ascender < 0.951 || f.ascender > 0.953 {
+		t.Errorf("ascender = %v, want ≈0.952 from the embedded CFF FontBBox", f.ascender)
+	}
+	gid := f.GID(1, 2)
+	if gid == 0 {
+		t.Fatal("code 1 mapped to no substitute glyph despite a /ToUnicode giving it 'A'")
+	}
+	if p := f.GlyphPath(gid); p == nil || p.IsEmpty() {
+		t.Error("the substitute drew no outline for 'A'")
+	}
+}
+
+// TestCFFIndexBoundsAreWidthIndependent covers the INDEX bounds of a package whose contract is that a hostile program
+// never panics. An offSize-4 entry offset spans the full uint32 range and a DICT offset reaches MaxInt32, neither of
+// which fits a 32-bit int: computed in int, dataStart+hi and pos+2 wrap negative on a 32-bit build, the guards pass and
+// the indexing panics (escaping to DrawPage's blanket recover, which fails the whole page instead of degrading the
+// font). The comparisons are done in int64 so these all reject identically on every architecture.
+func TestCFFIndexBoundsAreWidthIndependent(t *testing.T) {
+	// count 1, offSize 4, offsets {1, 0x7FFFFFFF}: hi passes "hi < lo" and, in 32-bit int arithmetic, "dataStart+hi >
+	// len(data)" too.
+	for name, data := range map[string][]byte{
+		"offset at int32 max":  {0, 1, 4, 0, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0x41},
+		"offset at uint32 max": {0, 1, 4, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0x41},
+		"first offset huge":    {0, 1, 4, 0x7F, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0xFF, 0x41},
+		"two entries, second huge": {
+			0, 2, 4, 0, 0, 0, 1, 0, 0, 0, 2, 0x7F, 0xFF, 0xFF, 0xFF, 0x41, 0x42,
+		},
+	} {
+		if _, _, err := cffIndex(data, 0, 4); err == nil {
+			t.Errorf("cffIndex(%s) accepted an out-of-bounds offset", name)
+		}
+		if _, err := cffSkipIndex(data, 0); err == nil {
+			t.Errorf("cffSkipIndex(%s) accepted an out-of-bounds offset", name)
+		}
+	}
+	// A DICT offset clampDictOffset admits, against a short buffer: both readers must reject rather than index.
+	small := make([]byte, 64)
+	for _, pos := range []int{math.MaxInt32, math.MaxInt32 - 1, len(small), len(small) - 1} {
+		if got := cffIndexCount(small, pos); got != -1 {
+			t.Errorf("cffIndexCount(pos=%d) = %d, want -1", pos, got)
+		}
+		if _, _, err := cffIndex(small, pos, 1); err == nil {
+			t.Errorf("cffIndex(pos=%d) accepted an offset past the data", pos)
+		}
+	}
+	// And through the callers the hostile data actually arrives by.
+	if _, err := parseCFFTopDict([]byte{1, 0, 4, 1, 0, 1, 4, 0, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0x41}); err == nil {
+		t.Error("parseCFFTopDict accepted an INDEX with an out-of-bounds offset")
+	}
+	if got := parseCFFCharsetCID(small, &cffTop{isCID: true, charStringsOff: math.MaxInt32, charsetOff: 32}); got != nil {
+		t.Error("parseCFFCharsetCID accepted a CharStrings offset past the data")
 	}
 }

@@ -288,13 +288,13 @@ func helveticaFont(t testing.TB) *font.Font {
 // glyphRun builds a one-glyph run for code, with the glyph-space em box mapped to device space by trm.
 func glyphRun(t testing.TB, f *font.Font, code uint32, trm, ctm gfx.Matrix) *device.TextRun {
 	t.Helper()
-	gid := f.GID(code)
+	gid := f.GID(code, 1)
 	if gid == 0 {
 		t.Fatalf("code %d unmapped", code)
 	}
 	return &device.TextRun{
 		Font:   f,
-		Glyphs: []device.Glyph{{Trm: trm, GID: gid, Code: code, Advance: f.Width(code)}},
+		Glyphs: []device.Glyph{{Trm: trm, GID: gid, Code: code, Advance: f.Width(code, 1)}},
 		CTM:    ctm,
 	}
 }
@@ -479,7 +479,7 @@ func TestEmptyTextClipClipsEverything(t *testing.T) {
 func TestGlyphPathCacheReuse(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 8, 8)
-	gid := f.GID('A')
+	gid := f.GID('A', 1)
 	p1 := d.glyphPath(f, gid)
 	p2 := d.glyphPath(f, gid)
 	if p1 == nil || p1 != p2 {
@@ -494,7 +494,7 @@ func TestGlyphPathStoreSharedAcrossRenders(t *testing.T) {
 	d1.SetStore(st)
 	d2 := newDevice(t, 8, 8)
 	d2.SetStore(st)
-	gid := f.GID('A')
+	gid := f.GID('A', 1)
 	p1 := d1.glyphPath(f, gid)
 	p2 := d2.glyphPath(f, gid) // A different render (device) hits the same document store.
 	if p1 == nil || p1 != p2 {
@@ -664,7 +664,7 @@ func TestGlyphMaskMissAllocationsBounded(t *testing.T) {
 	n := 0
 	draw := func() {
 		for i, code := range codes {
-			gid := f.GID(code)
+			gid := f.GID(code, 1)
 			if gid == 0 {
 				t.Fatalf("code %d unmapped", code)
 			}
@@ -693,7 +693,7 @@ func BenchmarkGlyphMaskMiss(b *testing.B) {
 	codes := []uint32{'H', 'e', 'l', 'o', 'W', 'r', 'd', 'A'}
 	gids := make([]uint32, len(codes))
 	for i, code := range codes {
-		if gids[i] = f.GID(code); gids[i] == 0 {
+		if gids[i] = f.GID(code, 1); gids[i] == 0 {
 			b.Fatalf("code %d unmapped", code)
 		}
 	}
@@ -717,7 +717,7 @@ func BenchmarkGlyphMaskMiss(b *testing.B) {
 func TestRenderGlyphMaskRejectsHugeFiniteBounds(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 32, 32)
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	if gid == 0 {
 		t.Fatal("'H' unmapped")
 	}
@@ -750,9 +750,9 @@ func TestBlitGlyphHugeOriginDoesNotCorruptSibling(t *testing.T) {
 		}
 		return pix
 	}
-	normal := device.Glyph{Trm: trm, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	normal := device.Glyph{Trm: trm, GID: f.GID('H', 1), Code: 'H', Advance: f.Width('H', 1)}
 	// Same glyph, but translated far off any real surface: int(floor(3e30)) would overflow the blit's origin math.
-	huge := device.Glyph{Trm: gfx.Matrix{A: 24, D: -24, E: 3e30, F: 3e30}, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	huge := device.Glyph{Trm: gfx.Matrix{A: 24, D: -24, E: 3e30, F: 3e30}, GID: f.GID('H', 1), Code: 'H', Advance: f.Width('H', 1)}
 	alone := render([]device.Glyph{normal})
 	withHuge := render([]device.Glyph{normal, huge})
 	if len(alone) != len(withHuge) {
@@ -774,7 +774,7 @@ func TestBlitGlyphHugeOriginDoesNotCorruptSibling(t *testing.T) {
 func TestBlitGlyphHugeOriginBlankNoPanic(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 16, 16)
-	huge := device.Glyph{Trm: gfx.Matrix{A: 8, D: -8, E: -3e30, F: 3e30}, GID: f.GID('H'), Code: 'H', Advance: f.Width('H')}
+	huge := device.Glyph{Trm: gfx.Matrix{A: 8, D: -8, E: -3e30, F: 3e30}, GID: f.GID('H', 1), Code: 'H', Advance: f.Width('H', 1)}
 	d.FillText(&device.TextRun{Font: f, Glyphs: []device.Glyph{huge}, CTM: gfx.Identity()}, redPaint())
 	pix, _, err := d.Pixels()
 	if err != nil {
@@ -1529,12 +1529,12 @@ func textRun(t *testing.T, f *font.Font, text string, size, x, y, step float32) 
 	run := &device.TextRun{Font: f, CTM: gfx.Identity()}
 	for i, r := range text {
 		code := uint32(r)
-		gid := f.GID(code)
+		gid := f.GID(code, 1)
 		if gid == 0 {
 			t.Fatalf("code %d unmapped", code)
 		}
 		trm := gfx.Matrix{A: size, D: -size}.Mul(gfx.Translate(x+float32(i)*step, y))
-		run.Glyphs = append(run.Glyphs, device.Glyph{Trm: trm, GID: gid, Code: code, Advance: f.Width(code)})
+		run.Glyphs = append(run.Glyphs, device.Glyph{Trm: trm, GID: gid, Code: code, Advance: f.Width(code, 1)})
 	}
 	return run
 }
@@ -1556,7 +1556,7 @@ func TestGlyphMaskCacheKeepsCachingWhenMapFull(t *testing.T) {
 	if d.glyphMaskBytes <= maxGlyphMaskBytes {
 		t.Fatalf("the prefill (%d bytes) did not reach the %d-byte cap", d.glyphMaskBytes, maxGlyphMaskBytes)
 	}
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	gp := d.glyphPath(f, gid)
 	if gp == nil {
 		t.Fatal("no glyph path")
@@ -1581,7 +1581,7 @@ func TestGlyphMaskCacheKeepsCachingWhenMapFull(t *testing.T) {
 func TestGlyphMaskImageBuiltLazily(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 32, 32)
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	gp := d.glyphPath(f, gid)
 	if gp == nil {
 		t.Fatal("no glyph path")
@@ -2082,7 +2082,7 @@ func TestTilingReplayCellCTMStaysFinite(t *testing.T) {
 func TestTextOutlineDropsOverflowingGlyph(t *testing.T) {
 	f := helveticaFont(t)
 	d := newDevice(t, 32, 32)
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	if gid == 0 {
 		t.Fatal("'H' unmapped")
 	}
@@ -2320,7 +2320,7 @@ func TestFillPathMeshOverRangeTransformStillPaints(t *testing.T) {
 // outline must be unaffected.
 func TestBlitLeftoverDropsOverflowingGlyph(t *testing.T) {
 	f := helveticaFont(t)
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	if gid == 0 {
 		t.Fatal("'H' unmapped")
 	}
@@ -2361,7 +2361,7 @@ func TestGlyphPathCacheKeepsCachingWhenMapFull(t *testing.T) {
 	for i := range maxCachedGlyphPaths {
 		d.glyphPaths[glyphKey{gid: uint32(i) + 1}] = nil
 	}
-	gid := f.GID('H')
+	gid := f.GID('H', 1)
 	if gid == 0 {
 		t.Fatal("'H' unmapped")
 	}

@@ -246,7 +246,19 @@ func (h *handler) Apply(state *psi.Machine, op psi.Operator) error {
 		h.needClose = false
 		h.justClosed = true
 	case opCallsubr:
-		return psi.LocalSubr(state) // No stack clear: the subroutine consumes the remaining arguments.
+		// No stack clear: the subroutine consumes the remaining arguments. The index is popped here rather than through
+		// psi.LocalSubr, which narrows it with a raw int32() conversion — implementation-defined for a value that does
+		// not fit, and the platforms disagree: a NaN built by div (Inf/Inf) becomes 0 on arm64 (subr 0 runs and the
+		// glyph draws) but -2^31 on amd64 (the call errors and the glyph is dropped). csIndex makes the rejection
+		// identical everywhere, the way every other addressing operand in this file is validated.
+		if state.ArgStack.Top < 1 {
+			return ErrBadCharstring
+		}
+		idx := csIndex(state.ArgStack.Pop(), len(h.font.Subrs)-1)
+		if idx < 0 {
+			return ErrBadCharstring
+		}
+		return state.CallSubroutine(int32(idx), true)
 	case opReturn:
 		return state.Return()
 	case opHsbw:

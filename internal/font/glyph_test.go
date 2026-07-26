@@ -26,11 +26,11 @@ func TestSubstitutedGlyphMapping(t *testing.T) {
 	if f.sub == nil {
 		t.Fatal("standard-14 font did not load a substitute face")
 	}
-	gidA := f.GID('A')
+	gidA := f.GID('A', 1)
 	if gidA == 0 {
 		t.Fatal("code 'A' mapped to .notdef in the substitute")
 	}
-	if gidB := f.GID('B'); gidB == 0 || gidB == gidA {
+	if gidB := f.GID('B', 1); gidB == 0 || gidB == gidA {
 		t.Errorf("code 'B' → %d, want nonzero and distinct from 'A' → %d", gidB, gidA)
 	}
 	p := f.GlyphPath(gidA)
@@ -43,10 +43,10 @@ func TestSubstitutedGlyphMapping(t *testing.T) {
 			t.Fatalf("outline point %v far outside the em box; not em-normalized?", pt)
 		}
 	}
-	if w := f.Width('A'); w != 0.667 {
+	if w := f.Width('A', 1); w != 0.667 {
 		t.Errorf("Width('A') = %v, want the AFM 667/1000", w)
 	}
-	if f.GID(300) != 0 {
+	if f.GID(300, 1) != 0 {
 		t.Error("out-of-range code mapped")
 	}
 }
@@ -62,7 +62,7 @@ func TestZapfDingbatsSubstituteDrawsNothing(t *testing.T) {
 	// Code 97 is /a9 in the built-in encoding: the AGL cannot resolve it, so it must map to .notdef and render nothing
 	// (drawing a Latin 'a' — the extraction fallback — would be the wrong glyph, and the substitute's .notdef box would
 	// be ink the oracle never shows).
-	if gid := f.GID(97); gid != 0 {
+	if gid := f.GID(97, 1); gid != 0 {
 		t.Fatalf("ZapfDingbats code 97 mapped to %d, want .notdef", gid)
 	}
 	if p := f.GlyphPath(0); p != nil {
@@ -75,7 +75,7 @@ func TestZapfDingbatsSubstituteDrawsNothing(t *testing.T) {
 	if name == "" || want == 0 {
 		t.Fatalf("built-in encoding/AFM missing code 97 (name %q)", name)
 	}
-	if w := f.Width(97); w != want {
+	if w := f.Width(97, 1); w != want {
 		t.Errorf("Width(97) = %v, want the AFM %v for %q", w, want, name)
 	}
 }
@@ -107,7 +107,7 @@ func TestEmbeddedSFNTGlyphs(t *testing.T) {
 	if f.sub != nil {
 		t.Fatal("embedded font must not carry a substitute")
 	}
-	gidA := f.GID('A')
+	gidA := f.GID('A', 1)
 	if gidA == 0 {
 		t.Fatal("'A' unmapped through the (3,1) cmap chain")
 	}
@@ -116,7 +116,7 @@ func TestEmbeddedSFNTGlyphs(t *testing.T) {
 	}
 	// No /Widths: the advance must come from the program's hmtx (Liberation Sans 'A' is 1366/2048 em units), not from
 	// the AFM table (which is reserved for substituted fonts).
-	if w := f.Width('A'); w < 0.666 || w > 0.668 {
+	if w := f.Width('A', 1); w < 0.666 || w > 0.668 {
 		t.Errorf("hmtx fallback width = %v, want ≈0.667", w)
 	}
 	if f.afm != nil {
@@ -140,7 +140,7 @@ func TestEmbeddedJunkFallsBackToSubstitute(t *testing.T) {
 	if f.sub == nil {
 		t.Fatal("junk embedded program did not fall back to the Liberation substitute")
 	}
-	gid := f.GID('A')
+	gid := f.GID('A', 1)
 	if gid == 0 {
 		t.Fatal("'A' unmapped through the substitute")
 	}
