@@ -12,7 +12,9 @@ package crypt
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -192,6 +194,121 @@ func TestPadPassword(t *testing.T) {
 	got := padPassword(long)
 	if len(got) != 32 || !bytes.Equal(got, long[:32]) {
 		t.Errorf("padPassword of a 40-byte password = %x, want its first 32 bytes", got)
+	}
+}
+
+// buildO produces the /O entry for a pair of passwords exactly as ISO 32000-1 Algorithm 3 specifies, independently of
+// the derivation under test. Step (c) hashes the whole 16-byte digest each round; only the first keyLen bytes of the
+// final digest become the RC4 key in step (d).
+func buildO(r, keyLen int, ownerPw, userPw []byte) []byte {
+	key := md5.Sum(padPassword(ownerPw))
+	if r >= 3 {
+		for range 50 {
+			key = md5.Sum(key[:])
+		}
+	}
+	rc4Key := key[:keyLen]
+	out, _ := rc4Apply(rc4Key, padPassword(userPw))
+	if r >= 3 {
+		for i := 1; i <= 19; i++ {
+			out, _ = rc4Apply(xorByte(rc4Key, byte(i)), out)
+		}
+	}
+	return out
+}
+
+// buildFileKey is ISO 32000-1 Algorithm 2, written out here so the round trip does not lean on the package's own
+// derivation. Unlike Algorithm 3, step (f) re-hashes only the first keyLen bytes.
+func buildFileKey(r, keyLen int, userPw, o, id0 []byte, perm uint32) []byte {
+	sum := md5.New()
+	sum.Write(padPassword(userPw))
+	sum.Write(o)
+	var p [4]byte
+	binary.LittleEndian.PutUint32(p[:], perm)
+	sum.Write(p[:])
+	sum.Write(id0)
+	key := sum.Sum(nil)
+	if r >= 3 {
+		for range 50 {
+			s := md5.Sum(key[:keyLen])
+			key = s[:]
+		}
+	}
+	return key[:keyLen]
+}
+
+// buildU produces the /U entry for a file encryption key (Algorithm 4 for R2, Algorithm 5 for R3+).
+func buildU(r int, fileKey, id0 []byte) []byte {
+	if r == 2 {
+		out, _ := rc4Apply(fileKey, padding)
+		return out
+	}
+	sum := md5.New()
+	sum.Write(padding)
+	sum.Write(id0)
+	x, _ := rc4Apply(fileKey, sum.Sum(nil))
+	for i := 1; i <= 19; i++ {
+		x, _ = rc4Apply(xorByte(fileKey, byte(i)), x)
+	}
+	// The trailing 16 bytes of /U are arbitrary padding for R3+.
+	return append(x, make([]byte, 32-len(x))...)
+}
+
+// TestDeriveRC4OwnerRoundTrip builds R2-R4 documents at several key lengths from the spec's own encryption-side
+// algorithms, then confirms both passwords authenticate. The owner-key loop of Algorithm 3 step (c) re-hashes the
+// entire 16-byte digest, unlike Algorithm 2 step (f); truncating it to keyLen agrees only at the 128-bit key length
+// every corpus document happens to use, and at any other length the correct owner password was rejected — leaving
+// OwnerAuthenticatedMask unset and a document whose owner password is the only one known permanently locked.
+func TestDeriveRC4OwnerRoundTrip(t *testing.T) {
+	ownerPw := []byte("owner-secret")
+	userPw := []byte("user-secret")
+	id0 := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22, 0x33}
+	const perm = 0xFFFFFFFC
+	for _, tc := range []struct {
+		name   string
+		r      int
+		keyLen int
+	}{
+		{name: "R2/40-bit", r: 2, keyLen: 5},
+		{name: "R3/40-bit", r: 3, keyLen: 5},
+		{name: "R3/64-bit", r: 3, keyLen: 8},
+		{name: "R3/128-bit", r: 3, keyLen: 16},
+		{name: "R4/40-bit", r: 4, keyLen: 5},
+		{name: "R4/128-bit", r: 4, keyLen: 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := buildO(tc.r, tc.keyLen, ownerPw, userPw)
+			fileKey := buildFileKey(tc.r, tc.keyLen, userPw, o, id0, perm)
+			h := &Handler{
+				r:       tc.r,
+				keyLen:  tc.keyLen,
+				metaEnc: true,
+				perm:    perm,
+				id0:     id0,
+				o:       o,
+				u:       buildU(tc.r, fileKey, id0),
+			}
+
+			key, user, owner := h.deriveRC4(userPw)
+			if !user || owner {
+				t.Errorf("deriveRC4(user) user=%v owner=%v, want user=true owner=false", user, owner)
+			}
+			if !bytes.Equal(key, fileKey) {
+				t.Errorf("deriveRC4(user) key = %x, want %x", key, fileKey)
+			}
+
+			key, user, owner = h.deriveRC4(ownerPw)
+			if !owner || user {
+				t.Errorf("deriveRC4(owner) user=%v owner=%v, want user=false owner=true", user, owner)
+			}
+			if !bytes.Equal(key, fileKey) {
+				t.Errorf("deriveRC4(owner) key = %x, want %x", key, fileKey)
+			}
+
+			if key, user, owner = h.deriveRC4([]byte("neither")); user || owner || key != nil {
+				t.Errorf("deriveRC4(wrong) user=%v owner=%v key=%x, want no authentication", user, owner, key)
+			}
+		})
 	}
 }
 

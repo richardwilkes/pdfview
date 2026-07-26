@@ -100,12 +100,13 @@ func (h *Handler) computeU(key []byte) []byte {
 // userPasswordFromOwner recovers the padded user password from /O using the owner password (Algorithm 7, reversing the
 // RC4 rounds Algorithm 3 applied).
 func (h *Handler) userPasswordFromOwner(ownerPw []byte) []byte {
-	sum := md5.Sum(padPassword(ownerPw))
-	key := sum[:]
+	key := md5.Sum(padPassword(ownerPw))
 	if h.r >= 3 {
+		// Algorithm 3 step (c) feeds the *entire* 16-byte digest into each new MD5. Only Algorithm 2 step (f) — the
+		// user-key derivation in keyFromUserPassword — re-hashes just the first keyLen bytes. Truncating here matches
+		// the real answer only at keyLen 16, and locks out the correct owner password at every other key length.
 		for range 50 {
-			s := md5.Sum(key[:h.keyLen])
-			key = s[:]
+			key = md5.Sum(key[:])
 		}
 	}
 	rc4Key := key[:h.keyLen]
