@@ -50,7 +50,7 @@ func (Null) EndTextClip() {}
 func (Null) IgnoreText(*TextRun) {}
 
 // FillImage implements Device.
-func (Null) FillImage(*imaging.Image, gfx.Matrix, float64) {}
+func (Null) FillImage(*imaging.Image, gfx.Matrix, Paint) {}
 
 // FillImageMask implements Device.
 func (Null) FillImageMask(*imaging.Image, gfx.Matrix, Paint) {}

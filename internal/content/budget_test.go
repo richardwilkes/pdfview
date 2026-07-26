@@ -354,7 +354,7 @@ type imageCounter struct {
 	images int
 }
 
-func (c *imageCounter) FillImage(*imaging.Image, gfx.Matrix, float64)          { c.images++ }
+func (c *imageCounter) FillImage(*imaging.Image, gfx.Matrix, device.Paint)     { c.images++ }
 func (c *imageCounter) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) { c.images++ }
 
 // TestInlineImageDecodeChargedPerSample verifies a stream of inline images drains the work budget in proportion to the

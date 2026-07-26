@@ -306,7 +306,8 @@ func TestImageCacheRetainsAfterCapReached(t *testing.T) {
 		// A distinct 1x1 DeviceGray image per slot; the sample byte varies so the streams differ.
 		bodies[i] = fmt.Sprintf(
 			"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray /Length 1 >>\nstream\n%c\nendstream",
-			byte(i+1))
+			byte(i+1),
+		)
 		name := cos.Name(fmt.Sprintf("Im%d", i))
 		xobjects[name] = cos.Ref{Num: i + 1}
 		fmt.Fprintf(&content, "/%s Do ", name)
@@ -502,7 +503,8 @@ func TestFormGroupBBoxNonFiniteGuarded(t *testing.T) {
 		`<< /Type /XObject /Subtype /Form /BBox [0 0 50 50] /Group << /S /Transparency >> /Length %d >>
 stream
 %s
-endstream`, len(body), body))))
+endstream`, len(body), body,
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +615,8 @@ func TestFormBBoxClipSurvivesOverRangeBox(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := cos.Open([]byte(minimalPDF(fmt.Sprintf(
 				"<< /Type /XObject /Subtype /Form /BBox %s /Length %d >>\nstream\n%s\nendstream",
-				tc.bbox, len(body), body))))
+				tc.bbox, len(body), body,
+			))))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -645,7 +648,8 @@ func TestSoftMaskBBoxClipSurvivesOverRangeBox(t *testing.T) {
 stream
 %s
 endstream`, tc.bbox, len(maskBody), maskBody),
-				`<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R >> >>`)))
+				`<< /Type /ExtGState /SMask << /S /Luminosity /G 1 0 R >> >>`,
+			)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -673,7 +677,8 @@ func TestTilingStepFallbackFinite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := cos.Open([]byte(minimalPDF(fmt.Sprintf(
 				"<< /PatternType 1 /PaintType 1 /BBox %s /Resources << >> /Length %d >>\nstream\n%s\nendstream",
-				tc.bbox, len(cell), cell))))
+				tc.bbox, len(cell), cell,
+			))))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -916,7 +921,8 @@ func TestSoftMaskBackdropNarrowingGuarded(t *testing.T) {
 func TestFormCycleGuardIgnoresGeneration(t *testing.T) {
 	body := "0 0 1 1 re f /Fm1 Do"
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
-		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /XObject << /Fm1 1 1 R >> >>", body))))
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /XObject << /Fm1 1 1 R >> >>", body,
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1040,4 +1046,52 @@ func TestInlineDictElementBudget(t *testing.T) {
 	// The tokenizer stayed in sync: the whole page still executes, image and trailing fill included.
 	rec := run(t, nil, nil, sb.String())
 	wantOps(t, rec, opFillImage, opFill)
+}
+
+// TestImageCarriesBlendMode verifies an ordinary (non-stencil) image composites under the current blend mode. drawImage
+// hands the device a paint carrying /BM and the constant fill alpha; before the fix it passed the alpha alone, and
+// FillImage — the one marking call that could not carry a blend — built its paint with the default Normal, so
+// `/GS0 gs /Im0 Do` with /BM /Multiply composited Src-over while the identical construct on a path or an image MASK
+// multiplied. With a soft mask in scope the enclosing composite group carries the blend instead, so the image's own
+// paint must stay Normal/1 there — the blend must not apply twice.
+func TestImageCarriesBlendMode(t *testing.T) {
+	pdf := minimalPDF(
+		"<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Length 6 >>\nstream\n\x10\x20\x30\x40\x50\x60\nendstream",
+		"<< /Type /XObject /Subtype /Image /Width 4 /Height 1 /ImageMask true /Length 2 >>\nstream\n\x50\x00\nendstream",
+		"<< /Type /ExtGState /ca 0.5 /BM /Multiply >>",
+		maskFormBody,
+		"<< /Type /ExtGState /ca 0.5 /BM /Multiply /SMask << /S /Luminosity /G 4 0 R /BC [1] >> >>",
+	)
+	d, err := cos.Open([]byte(pdf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{
+		catXObject:   cos.Dict{"ImC": cos.Ref{Num: 1}, "ImM": cos.Ref{Num: 2}},
+		catExtGState: cos.Dict{resGSName: cos.Ref{Num: 3}, "GSM": cos.Ref{Num: 5}},
+	}
+
+	// The image, the stencil and the path fill all pick up /BM /Multiply and ca 0.5 from the same graphics state.
+	rec := run(t, d, res, "/GS0 gs /ImC Do /ImM Do 0 0 1 1 re f")
+	wantOps(t, rec, opFillImage, opFillMask, opFill)
+	for _, c := range rec.calls {
+		if c.paint.Blend != device.BlendMultiply {
+			t.Errorf("%s blend = %v, want %v", c.op, c.paint.Blend, device.BlendMultiply)
+		}
+		if c.paint.Alpha != 0.5 {
+			t.Errorf("%s alpha = %v, want 0.5", c.op, c.paint.Alpha)
+		}
+	}
+
+	// Under a soft mask the composite group carries the blend and alpha; the image inside it draws Normal at alpha 1.
+	rec = run(t, d, res, "/GSM gs /ImC Do")
+	wantOps(t, rec, "begingroup", "beginmask", opClip, opFill, opPopClip, "endmask", opFillImage, "popmask", "endgroup")
+	bg := rec.calls[0]
+	if bg.alpha != 0.5 || bg.paint.Blend != device.BlendMultiply {
+		t.Errorf("composite group alpha/blend = %v/%v, want 0.5/%v", bg.alpha, bg.paint.Blend, device.BlendMultiply)
+	}
+	img := rec.calls[6]
+	if img.paint.Alpha != 1 || img.paint.Blend != device.BlendNormal {
+		t.Errorf("masked image paint not reset: %+v", img.paint)
+	}
 }

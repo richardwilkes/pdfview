@@ -121,8 +121,8 @@ func (r *recorder) EndTextClip() {
 
 func (r *recorder) IgnoreText(run *device.TextRun) { r.addText("ignoretext", run) }
 
-func (r *recorder) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
-	r.add(&call{op: opFillImage, img: img, ctm: ctm, alpha: alpha})
+func (r *recorder) FillImage(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {
+	r.add(&call{op: opFillImage, img: img, ctm: ctm, alpha: paint.Alpha, paint: paint})
 }
 
 func (r *recorder) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {

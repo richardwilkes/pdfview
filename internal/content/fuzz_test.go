@@ -73,7 +73,7 @@ func walkGlyphs(run *device.TextRun) {
 		run.Font.GlyphPath(run.Glyphs[i].GID)
 	}
 }
-func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, float64)          {}
+func (b *balanceDevice) FillImage(*imaging.Image, gfx.Matrix, device.Paint)     {}
 func (b *balanceDevice) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) {}
 func (b *balanceDevice) ClipImageMask(*imaging.Image, gfx.Matrix)               { b.depth++ }
 

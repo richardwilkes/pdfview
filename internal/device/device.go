@@ -135,8 +135,10 @@ type Device interface {
 	// IgnoreText reports glyphs that paint nothing (text render mode 3): the structured-text device records them, the
 	// raster device ignores them.
 	IgnoreText(run *TextRun)
-	// FillImage draws img under ctm (the unit square of image space maps to ctm's parallelogram).
-	FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64)
+	// FillImage draws img under ctm (the unit square of image space maps to ctm's parallelogram). paint supplies the
+	// folded constant alpha and the blend mode (its color/pattern payloads are ignored — the image is the color
+	// source).
+	FillImage(img *imaging.Image, ctm gfx.Matrix, paint Paint)
 	// FillImageMask stencils paint through img's mask bits.
 	FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint Paint)
 	// ClipImageMask pushes a clip restricted to img's mask bits.

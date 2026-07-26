@@ -11,6 +11,7 @@ package content
 
 import (
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/device"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 )
 
@@ -87,7 +88,9 @@ func (in *interp) decodeInline(dict cos.Dict, payload []byte) (*imaging.Image, e
 }
 
 // drawImage emits one decoded image to the device under the current CTM: stencils tint with the fill paint (skipped
-// entirely when the fill space never marks), ordinary images carry the constant fill alpha.
+// entirely when the fill space never marks), ordinary images carry the constant fill alpha and the current blend mode.
+// An ordinary image has no color source but its own samples, so its paint carries only that alpha and blend — a fill
+// pattern in scope is irrelevant to it, unlike the stencil case, where the pattern tints the mask bits.
 func (in *interp) drawImage(img *imaging.Image) {
 	if img == nil || !in.gs.ctm.IsFinite() {
 		return
@@ -102,6 +105,6 @@ func (in *interp) drawImage(img *imaging.Image) {
 		return
 	}
 	in.masked(in.gs.fillAlpha, func() {
-		in.dev.FillImage(img, in.gs.ctm, in.gs.fillAlpha)
+		in.dev.FillImage(img, in.gs.ctm, device.Paint{Alpha: in.gs.fillAlpha, Blend: in.gs.blend})
 	})
 }

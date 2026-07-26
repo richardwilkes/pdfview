@@ -808,13 +808,15 @@ func snapSpan(extent, off float32) (newExtent, newOff float32) {
 	return newExtent, newOff
 }
 
-// FillImage implements device.Device. alpha is the folded constant fill alpha; it modulates the image through the
-// paint's alpha channel.
-func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
+// FillImage implements device.Device. p's folded constant fill alpha modulates the image through the canvas paint's
+// alpha channel, and its blend mode composites the result; the color and pattern payloads are ignored, since the image
+// itself is the color source.
+func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, p device.Paint) {
 	ci := rasterImage(img)
 	if ci == nil {
 		return
 	}
+	alpha := p.Alpha
 	if alpha < 0 {
 		alpha = 0
 	} else if alpha > 1 {
@@ -823,6 +825,7 @@ func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, alpha float64) {
 	paint := canvas.NewPaint()
 	paint.AntiAlias = true
 	paint.Color = colorcore.ARGB(uint8(alpha*255+0.5), 255, 255, 255)
+	paint.BlendMode = blendModes[p.Blend]
 	d.applyKnockout(paint)
 	d.drawImage(ci, img, ctm, paint)
 }

@@ -1332,7 +1332,7 @@ func TestImageWithLargeCTMDoesNotPoisonSurface(t *testing.T) {
 		draw func(d *Device)
 		name string
 	}{
-		{name: "image", draw: func(d *Device) { d.FillImage(img, huge, 1) }},
+		{name: "image", draw: func(d *Device) { d.FillImage(img, huge, device.Paint{Alpha: 1}) }},
 		{name: "stencil", draw: func(d *Device) { d.FillImageMask(stencil, huge, redPaint()) }},
 	} {
 		d := newDevice(t, 16, 16)
@@ -2427,5 +2427,36 @@ func TestGlyphMasksBypassUnlimitedStore(t *testing.T) {
 	bounded.FillText(textRun(t, f, "Hello", 12, 2, 40, 7.3), redPaint())
 	if len(bounded.glyphMasks) != 0 {
 		t.Error("planes were cached per device alongside a budgeted store that already holds them")
+	}
+}
+
+// TestFillImageBlends verifies FillImage composites under the paint's blend mode. The device call carries a full Paint
+// for exactly this reason: an image's color source is its own samples, but the blend the graphics state selected still
+// applies to it, the way it applies to a path fill or an image mask. A mid-gray image multiplied over a red backdrop
+// must darken the red; before the fix the call took only an alpha and the paint defaulted to Src-over, leaving the
+// image opaque over the backdrop.
+func TestFillImageBlends(t *testing.T) {
+	gray := &imaging.Image{Pix: []byte{128, 128, 128, 255}, Width: 1, Height: 1}
+	square := gfx.Matrix{A: 20, D: 20}
+	draw := func(blend device.Blend) [4]uint8 {
+		t.Helper()
+		d := newDevice(t, 20, 20)
+		var p gfx.Path
+		p.Rect(0, 0, 20, 20)
+		d.FillPath(&p, false, gfx.Identity(), redPaint())
+		d.FillImage(gray, square, device.Paint{Alpha: 1, Blend: blend})
+		pix, stride, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pixelAt(t, pix, stride, 10, 10)
+	}
+	if got := draw(device.BlendNormal); got != [4]uint8{128, 128, 128, 255} {
+		t.Errorf("Normal = %v, want the image replacing the backdrop", got)
+	}
+	// Multiply of gray 128 over red (255, 0, 0): the red channel halves, the others stay at zero.
+	got := draw(device.BlendMultiply)
+	if got[0] < 126 || got[0] > 130 || got[1] != 0 || got[2] != 0 || got[3] != 255 {
+		t.Errorf("Multiply = %v, want ~{128, 0, 0, 255}", got)
 	}
 }
