@@ -10,6 +10,9 @@
 package font
 
 import (
+	"cmp"
+	"math"
+	"slices"
 	"unicode/utf16"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -21,9 +24,16 @@ import (
 // begincidrange/begincidchar, beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the CIDSystemInfo
 // boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the content interpreter uses.
 
-// CMap resource caps.
+// CMap resource caps. maxCodespaces is far tighter than maxCMapRanges because codespaces are consulted per DECODED
+// CHARACTER CODE, not per lookup that a sorted list can binary search: nextCode probes the list at each of the four
+// code lengths and, for a code in none of them, walks it again to find the longest matching prefix. Every real CMap
+// declares a handful (the predefined Adobe ones top out well under ten, and the PostScript convention caps one
+// begincodespacerange block at 100 entries), while parsing accepted 65536 of them — enough to make a multi-megabyte
+// show operator cost hundreds of thousands of comparisons per byte, minutes of CPU for one page. Entries past the cap
+// are dropped.
 const (
 	maxCMapRanges  = 65536
+	maxCodespaces  = 128
 	maxCMapDepth   = 4       // usecmap chains
 	maxCMapOps     = 1 << 20 // token budget per CMap stream
 	maxCMapOperand = 64      // sliding operand window
@@ -52,10 +62,13 @@ type bfEntry struct {
 	nBytes   uint8
 }
 
-// cmapPDF is one parsed CMap.
+// cmapPDF is one parsed CMap. codespaces is the declaration order the longest-prefix rule in nextCode walks; byLen is
+// the same set bucketed by code length and merged into sorted, disjoint ranges, which is what the per-code membership
+// test binary searches.
 type cmapPDF struct {
 	base       *cmapPDF // usecmap target, consulted when this map has no entry
 	codespaces []codespaceRange
+	byLen      [4][]codespaceRange // index n holds the merged ranges of (n+1)-byte codes
 	cids       []cidRangeEntry
 	bf         []bfEntry
 	wmode      uint8
@@ -63,14 +76,48 @@ type cmapPDF struct {
 	identity   bool // Identity mapping: CID = code (Identity-H/V)
 }
 
+// indexCodespaces builds byLen from codespaces: bucketed by code length, sorted by starting code, and with overlapping
+// or adjacent ranges merged. Merging preserves the covered set exactly — the membership test asks only whether a code
+// lies in some range of its length — so nothing the declaration order carries is lost here; nextCode's longest-prefix
+// fallback keeps using codespaces itself, where each entry's own byte-position ranges still matter.
+func (cm *cmapPDF) indexCodespaces() {
+	for i := range cm.byLen {
+		cm.byLen[i] = nil
+	}
+	for _, cs := range cm.codespaces {
+		if cs.nBytes >= 1 && cs.nBytes <= 4 {
+			cm.byLen[cs.nBytes-1] = append(cm.byLen[cs.nBytes-1], cs)
+		}
+	}
+	for i := range cm.byLen {
+		ranges := cm.byLen[i]
+		if len(ranges) < 2 {
+			continue
+		}
+		slices.SortFunc(ranges, func(a, b codespaceRange) int { return cmp.Compare(a.lo, b.lo) })
+		merged := ranges[:1]
+		for _, cs := range ranges[1:] {
+			last := &merged[len(merged)-1]
+			// last.hi+1 would wrap for a range ending at 2^32-1, which can only be the last range of a 4-byte bucket.
+			if cs.lo <= last.hi || (last.hi != math.MaxUint32 && cs.lo == last.hi+1) {
+				last.hi = max(last.hi, cs.hi)
+				continue
+			}
+			merged = append(merged, cs)
+		}
+		cm.byLen[i] = merged
+	}
+}
+
 // predefinedCMap returns the built-in CMaps: Identity-H and Identity-V (ISO 32000-2 9.7.5.2). Every other predefined
 // name returns nil (bundling the Adobe cmap-resources corpus is deferred until real files need it).
 func predefinedCMap(name cos.Name) *cmapPDF {
+	var cm *cmapPDF
 	switch name {
 	case "Identity-H":
-		return &cmapPDF{identity: true, codespaces: []codespaceRange{{lo: 0, hi: 0xFFFF, nBytes: 2}}}
+		cm = &cmapPDF{identity: true, codespaces: []codespaceRange{{lo: 0, hi: 0xFFFF, nBytes: 2}}}
 	case "Identity-V":
-		return &cmapPDF{
+		cm = &cmapPDF{
 			identity:   true,
 			codespaces: []codespaceRange{{lo: 0, hi: 0xFFFF, nBytes: 2}},
 			wmode:      1,
@@ -79,6 +126,8 @@ func predefinedCMap(name cos.Name) *cmapPDF {
 	default:
 		return nil
 	}
+	cm.indexCodespaces() // These are built rather than parsed, so nothing else populates the membership index.
+	return cm
 }
 
 // parseCMap parses CMap content. resolveUse maps a usecmap name to its CMap (predefined or, for embedded /UseCMap
@@ -154,6 +203,7 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 // contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie — which
 // matches what the former linear scan returned for every case except a later entry that also starts lower.
 func (cm *cmapPDF) sortRanges() {
+	cm.indexCodespaces()
 	cm.cids = disjointCIDRanges(cm.cids, func(r *cidRangeEntry) (uint32, uint32) { return r.lo, r.hi },
 		func(r *cidRangeEntry, lo uint32) {
 			r.cid += lo - r.lo
@@ -201,7 +251,7 @@ func (cm *cmapPDF) parseCodespaces(lex *cos.Lexer, budget *int) {
 		if len(pending) == 2 {
 			lo, nLo, okLo := codeToken(pending[0])
 			hi, nHi, okHi := codeToken(pending[1])
-			if okLo && okHi && nLo == nHi && lo <= hi && len(cm.codespaces) < maxCMapRanges {
+			if okLo && okHi && nLo == nHi && lo <= hi && len(cm.codespaces) < maxCodespaces {
 				cm.codespaces = append(cm.codespaces, codespaceRange{lo: lo, hi: hi, nBytes: nLo})
 			}
 			pending = pending[:0]
@@ -380,13 +430,22 @@ func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
 	return 0, n
 }
 
-// inCodespace reports whether an nBytes-length code value lies in any codespace (own or base).
+// inCodespace reports whether an nBytes-length code value lies in any codespace (own or base). It binary searches the
+// merged per-length index rather than walking the declaration order: nextCode calls this up to four times for every
+// character code a show operator decodes, so a linear walk cost O(codes × codespaces).
 func (cm *cmapPDF) inCodespace(v uint32, nBytes uint8) bool {
+	if nBytes < 1 || nBytes > 4 {
+		return false
+	}
 	for c := cm; c != nil; c = c.base {
-		for _, cs := range c.codespaces {
-			if cs.nBytes == nBytes && v >= cs.lo && v <= cs.hi {
-				return true
-			}
+		ranges := c.byLen[nBytes-1]
+		i, exact := slices.BinarySearchFunc(ranges, v, func(cs codespaceRange, v uint32) int {
+			return cmp.Compare(cs.lo, v)
+		})
+		// exact means a range starts at v; otherwise the only range that can hold v is the one before the insertion
+		// point, since the merged ranges are sorted and disjoint.
+		if exact || (i > 0 && v <= ranges[i-1].hi) {
+			return true
 		}
 	}
 	return false

@@ -118,7 +118,11 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 		return nil, err
 	}
 	// Each header pair needs at least three bytes (a digit, a separator, and a digit), so /N values beyond that are
-	// lies; clamping keeps the slice allocations proportional to real data.
+	// lies; clamping keeps the header loop proportional to real data. The clamp bounds the LOOP only, never the
+	// allocation: it is proportional to the DECODED payload, which internal/filter lets reach max(64 MB, 256x input),
+	// so preallocating from it let a 61 KB file declaring /N 99999999 over a 60 MB payload of non-numeric bytes break
+	// out of the loop on the very first entry yet still retain two 21M-element slices (~380 MB) for the document's
+	// lifetime. The slices grow from the entries that actually parse instead.
 	n = min(n, int64(len(data))/3)
 	// /First and the header offsets are file-supplied and otherwise unbounded, and objFromStm adds them together. Any
 	// magnitude past the payload length can only ever name a position outside it, so clamping both here preserves every
@@ -128,8 +132,6 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	limit := int64(len(data))
 	stm := &objStm{
 		data:  data,
-		nums:  make([]int, 0, n),
-		offs:  make([]int, 0, n),
 		first: int(min(first, limit)),
 	}
 	p := newParser(data, 0)

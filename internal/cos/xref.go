@@ -91,6 +91,7 @@ func (d *Document) loadXref() error {
 		return err
 	}
 	visited := make(map[int64]bool)
+	hybrids := make(map[int64]bool)
 	var trailers []Dict
 	offset := start
 	for {
@@ -101,7 +102,7 @@ func (d *Document) loadXref() error {
 			break // A cycle in the /Prev chain; keep what has been read so far.
 		}
 		visited[offset] = true
-		trailer, serr := d.readXrefSection(offset)
+		trailer, serr := d.readXrefSection(offset, hybrids)
 		if serr != nil {
 			return serr
 		}
@@ -144,7 +145,12 @@ func mergeTrailers(trailers []Dict) Dict {
 // readXrefSection reads the classic table or cross-reference stream at offset, adds its entries (first seen wins), and
 // returns its trailer dictionary. For a classic section in a hybrid file, the /XRefStm stream is processed after the
 // table itself, giving the table precedence over the stream and both precedence over /Prev, per ISO 32000-2 7.5.8.4.
-func (d *Document) readXrefSection(offset int64) (Dict, error) {
+// hybrids records the /XRefStm offsets already read, so that N ~60-byte classic sections all naming the SAME
+// cross-reference stream read (and fully decode) that stream once rather than N times. loadXref's own visited set does
+// not cover them — it tracks the /Prev chain's offsets — and d.xrefStreamRows short-circuits only the row loop, which
+// runs after StreamData has already inflated the whole payload, so neither bounds the repeat. It is a companion set
+// rather than the visited map itself so that a /Prev link to such an offset still walks the chain beyond it.
+func (d *Document) readXrefSection(offset int64, hybrids map[int64]bool) (Dict, error) {
 	p := newParser(d.data, int(offset))
 	tok, err := p.next()
 	if err != nil {
@@ -155,7 +161,8 @@ func (d *Document) readXrefSection(offset int64) (Dict, error) {
 		if terr != nil {
 			return nil, terr
 		}
-		if stmOff, ok := AsInt(trailer["XRefStm"]); ok {
+		if stmOff, ok := AsInt(trailer["XRefStm"]); ok && !hybrids[stmOff] {
+			hybrids[stmOff] = true
 			// Failure to read the hybrid stream is not fatal: the classic table is complete for pre-1.5 readers.
 			d.readXrefStream(stmOff) //nolint:errcheck // See above.
 		}

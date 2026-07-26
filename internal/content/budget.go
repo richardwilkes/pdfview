@@ -71,6 +71,13 @@ const (
 	// Run — the budget charge, not the cache, is what bounds re-decoding it.
 	maxCachedBodies    = 16
 	maxCachedBodyBytes = 1 << 20
+	// maxCachedResources bounds each of the per-Run parse caches — color spaces, shadings, patterns. A parsed resource
+	// can retain far more than the dictionary it came from (a /Separation tint transform holds its type 0 function's
+	// whole decoded sample table, a mesh pattern its tessellation), and the maps were unbounded, so a page naming a few
+	// thousand distinct references to one fat stream pinned every realization of it for the Run. The cap sits well
+	// above the handful of distinct spaces, shadings and patterns real pages use; past it the least recently used entry
+	// is dropped and re-parses on demand, charged again like any other parse.
+	maxCachedResources = 64
 )
 
 // cachedBody is one decoded stream body plus whether its decode succeeded, so a failed decode caches too (a broken
@@ -87,18 +94,18 @@ type cachedBody struct {
 // name-keyed layer: names are scoped to a resource frame, references are not.
 type runCaches struct {
 	bodies   *lruCache[cos.RefKey, cachedBody]
-	spaces   map[cos.RefKey]pdfcolor.Space
-	shadings map[cos.RefKey]*shading.Shading
-	patterns map[cos.RefKey]*patternRes
+	spaces   *lruCache[cos.RefKey, pdfcolor.Space]
+	shadings *lruCache[cos.RefKey, *shading.Shading]
+	patterns *lruCache[cos.RefKey, *patternRes]
 }
 
 // newRunCaches returns the empty cache set for one Run.
 func newRunCaches() *runCaches {
 	return &runCaches{
 		bodies:   newLRUCache[cos.RefKey, cachedBody](maxCachedBodies),
-		spaces:   make(map[cos.RefKey]pdfcolor.Space),
-		shadings: make(map[cos.RefKey]*shading.Shading),
-		patterns: make(map[cos.RefKey]*patternRes),
+		spaces:   newLRUCache[cos.RefKey, pdfcolor.Space](maxCachedResources),
+		shadings: newLRUCache[cos.RefKey, *shading.Shading](maxCachedResources),
+		patterns: newLRUCache[cos.RefKey, *patternRes](maxCachedResources),
 	}
 }
 
@@ -207,22 +214,38 @@ func (in *interp) streamBody(raw cos.Object, stream *cos.Stream) ([]byte, bool) 
 	return body, err == nil
 }
 
+// chargeParse charges the work budget for one resource parse: the flat cost the resource's kind carries, plus whatever
+// the parse itself decoded (cos.Document.DecodeWork's delta across it). before is the DecodeWork reading taken just
+// before the parse ran. The flat charge alone is not a bound, for the reason streamBody gives: one /Separation space
+// naming a type 0 tint transform, or one mesh shading, inflates a stream internal/filter allows to reach 64 MB, and the
+// parse RETAINS what it decoded — so a few thousand distinct references to that one stream fit a flat 1024-unit charge
+// while costing gigabytes of inflation. Priced by what they decode, the whole budget buys a bounded total of it.
+// A parse that decoded nothing costs the flat charge alone, so the common resource — a bare space or a function-less
+// shading dictionary — is priced exactly as it was.
+func (in *interp) chargeParse(flat int, before uint64) {
+	in.charge(flat)
+	if decoded := in.doc.DecodeWork() - before; decoded != 0 {
+		in.charge(decodeCost(decoded))
+	}
+}
+
 // parseSpace parses one /ColorSpace resource entry, charging the budget and caching the result for the whole Run when
 // the entry is a reference. Failures cache as nil.
 func (in *interp) parseSpace(obj cos.Object) pdfcolor.Space {
 	ref, isRef := obj.(cos.Ref)
 	if isRef {
-		if space, hit := in.caches.spaces[ref.Key()]; hit {
+		if space, hit := in.caches.spaces.get(ref.Key()); hit {
 			return space
 		}
 	}
-	in.charge(resourceParseCost)
+	before := in.doc.DecodeWork()
 	space, err := pdfcolor.Parse(in.doc, obj)
 	if err != nil {
 		space = nil
 	}
+	in.chargeParse(resourceParseCost, before)
 	if isRef {
-		in.caches.spaces[ref.Key()] = space
+		in.caches.spaces.put(ref.Key(), space)
 	}
 	return space
 }
@@ -232,17 +255,18 @@ func (in *interp) parseSpace(obj cos.Object) pdfcolor.Space {
 func (in *interp) parseShading(obj cos.Object) *shading.Shading {
 	ref, isRef := obj.(cos.Ref)
 	if isRef {
-		if sh, hit := in.caches.shadings[ref.Key()]; hit {
+		if sh, hit := in.caches.shadings.get(ref.Key()); hit {
 			return sh
 		}
 	}
-	in.charge(shadingParseCost)
+	before := in.doc.DecodeWork()
 	sh, err := shading.Parse(in.doc, obj)
 	if err != nil {
 		sh = nil
 	}
+	in.chargeParse(shadingParseCost, before)
 	if isRef {
-		in.caches.shadings[ref.Key()] = sh
+		in.caches.shadings.put(ref.Key(), sh)
 	}
 	return sh
 }

@@ -41,15 +41,19 @@ const (
 // Limits. maxStops is the ramp resolution for axial/radial shadings (a function is sampled to at most 256 stops).
 // maxTriangles caps the tessellation output of one mesh shading; subdivision stops refining (emitting flat triangles at
 // the reached level) once the budget is hit, so hostile meshes degrade to banding, never to unbounded memory.
-// maxMeshVertices caps how many vertices or patches a mesh stream may declare through its payload. maxSubdivDepth caps
-// the recursive triangle split (4^8 = 65536 triangles from one input triangle is beyond ΔRGB<1 for any color pair).
-// maxPatchGrid caps the per-patch tessellation grid.
+// maxMeshVertices caps how many vertices or patches a mesh stream may declare through its payload. maxMeshInputTris
+// caps the input triangles those vertices form, before tessellation: a free-form (type 4) stream yields at most one
+// triangle per vertex, but a lattice (type 5) of rows x perRow vertices legitimately yields 2*(rows-1)*(perRow-1) of
+// them — just under twice the vertex budget — so sizing the triangle cap at the vertex cap would silently drop the
+// second half of a wholly legal lattice. maxSubdivDepth caps the recursive triangle split (4^8 = 65536 triangles from
+// one input triangle is beyond ΔRGB<1 for any color pair). maxPatchGrid caps the per-patch tessellation grid.
 const (
-	maxStops        = 256
-	maxTriangles    = 1 << 19
-	maxMeshVertices = 1 << 16
-	maxSubdivDepth  = 8
-	maxPatchGrid    = 96
+	maxStops         = 256
+	maxTriangles     = 1 << 19
+	maxMeshVertices  = 1 << 16
+	maxMeshInputTris = 2 * maxMeshVertices
+	maxSubdivDepth   = 8
+	maxPatchGrid     = 96
 )
 
 var (

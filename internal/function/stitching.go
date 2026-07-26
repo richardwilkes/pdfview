@@ -26,7 +26,7 @@ type stitching struct {
 	encode []float32
 }
 
-func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int, budget *int) (Func, error) {
+func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int, st *parseState) (Func, error) {
 	if c.NInputs() != 1 {
 		return nil, errBadStitching
 	}
@@ -37,7 +37,7 @@ func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int, budget 
 	}
 	nOut := -1
 	for _, entry := range arr {
-		sub, err := parse(d, entry, depth+1, budget)
+		sub, err := parse(d, entry, depth+1, st)
 		if err != nil {
 			return nil, err
 		}

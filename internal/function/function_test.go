@@ -10,6 +10,8 @@
 package function
 
 import (
+	"bytes"
+	"compress/zlib"
 	"errors"
 	"fmt"
 	"math"
@@ -146,11 +148,12 @@ func TestStitchingRangeMustMatchSubfunctions(t *testing.T) {
 	near(t, got, 0.5) // 0.25 encodes to 0.5 in the first subfunction, within the declared range
 }
 
-// TestStitchingGraphBudget pins the aggregate parse-node budget. A chain of stitching functions whose /Functions arrays
-// each reference the next object twice fans out multiplicatively: object k would be parsed 2^(k-1) times, so 16 levels
-// force >2^16 parse calls from a tiny file. maxNesting caps depth alone (the leaf sits at depth 16, within the limit),
-// so the shared budget is what must reject the branching^depth blowup.
-func TestStitchingGraphBudget(t *testing.T) {
+// TestStitchingGraphMemoized pins the per-reference memo. A chain of stitching functions whose /Functions arrays each
+// reference the next object twice fans out multiplicatively: object k would be parsed 2^(k-1) times, so 16 levels force
+// >2^16 parse calls from a tiny file. maxNesting caps depth alone (the leaf sits at depth 16, within the limit), so the
+// memo is what must collapse the branching^depth blowup — to one parse per distinct object, which the node budget then
+// bounds. The graph is legal, so it must parse rather than being rejected as too complex.
+func TestStitchingGraphMemoized(t *testing.T) {
 	const levels = 16
 	var sb strings.Builder
 	sb.WriteString("%PDF-1.7\n")
@@ -167,9 +170,106 @@ func TestStitchingGraphBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Parse(d, cos.Ref{Num: 1}); !errors.Is(err, errTooComplex) {
+	st := &parseState{seen: make(map[cos.RefKey]Func), budget: maxProgramOps}
+	if _, err = parse(d, cos.Ref{Num: 1}, 0, st); err != nil {
+		t.Fatalf("the shared-reference graph did not parse: %v", err)
+	}
+	// One node per distinct object, plus the two the doubling references at the last level would have added.
+	if spent := maxProgramOps - st.budget; spent > levels+2 {
+		t.Fatalf("parsed %d nodes for %d distinct functions: the memo did not collapse the fan-out", spent, levels+1)
+	}
+}
+
+// TestFunctionNodeBudget pins the node budget itself, which the memo does not replace: a graph of DISTINCT nodes is
+// still capped, so a document that fans out to more of them than the budget allows is rejected rather than parsed.
+func TestFunctionNodeBudget(t *testing.T) {
+	d := docWith(t, "<< /FunctionType 2 /Domain [0 1] /C0 [0] /C1 [1] /N 1 >>")
+	st := &parseState{seen: make(map[cos.RefKey]Func), budget: 0}
+	if _, err := parse(d, cos.Ref{Num: 1}, 0, st); !errors.Is(err, errTooComplex) {
 		t.Fatalf("expected errTooComplex, got %v", err)
 	}
+}
+
+// TestSampledStreamDecodedOnce pins that a graph naming the same type 0 function repeatedly inflates its stream once.
+// Counting nodes alone did not bound that work: cos.Document caches parsed objects but not decoded stream data, so a
+// stitching function repeating one reference re-inflated the stream per entry — up to maxProgramOps times, from a
+// single cs or sh operator charged for one resource parse.
+func TestSampledStreamDecodedOnce(t *testing.T) {
+	const repeats = 64
+	const samples = 1 << 12
+	payload := flateOf(t, bytes.Repeat([]byte{0x00, 0xff}, samples/2))
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n1 0 obj\n<< /FunctionType 3 /Domain [0 1] /Bounds [")
+	for i := 1; i < repeats; i++ {
+		fmt.Fprintf(&sb, "%f ", float64(i)/repeats)
+	}
+	sb.WriteString("] /Functions [")
+	for range repeats {
+		sb.WriteString("2 0 R ")
+	}
+	sb.WriteString("] /Encode [")
+	for range repeats {
+		sb.WriteString("0 1 ")
+	}
+	sb.WriteString("] >>\nendobj\n")
+	fmt.Fprintf(&sb, "2 0 obj\n<< /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [%d] /BitsPerSample 8 "+
+		"/Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream\nendobj\n", samples, len(payload), payload)
+	sb.WriteString("3 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 3 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n")
+	d, err := cos.Open([]byte(sb.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := d.DecodeWork()
+	if _, err = Parse(d, cos.Ref{Num: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if decoded := d.DecodeWork() - before; decoded > samples {
+		t.Fatalf("inflated %d bytes for one %d-byte stream named %d times", decoded, samples, repeats)
+	}
+	st := &parseState{seen: make(map[cos.RefKey]Func), budget: maxProgramOps}
+	if _, err = parse(d, cos.Ref{Num: 1}, 0, st); err != nil {
+		t.Fatal(err)
+	}
+	// Two nodes (the stitching function and the one sampled function it repeats), plus the single inflate's charge.
+	if want, spent := 2+samples>>decodeCostShift, maxProgramOps-st.budget; spent > want {
+		t.Fatalf("the graph cost %d budget units, want at most %d: the repeated stream function was not memoized",
+			spent, want)
+	}
+}
+
+// TestSampledStreamChargedForDecodedBytes pins the other half of that bound: a node budget counting only nodes let each
+// distinct stream-backed node inflate internal/filter's whole max(64 MB, 256x input) allowance for one unit, so the
+// budget is charged for the bytes a decode produces and a graph whose streams inflate past the allowance is rejected.
+func TestSampledStreamChargedForDecodedBytes(t *testing.T) {
+	payload := flateOf(t, make([]byte, 1<<20))
+	d := docWithStream(t, fmt.Sprintf("/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [%d] /BitsPerSample 8 "+
+		"/Filter /FlateDecode", 1<<20), payload)
+	st := &parseState{seen: make(map[cos.RefKey]Func), budget: maxProgramOps}
+	if _, err := parse(d, cos.Ref{Num: 1}, 0, st); err != nil {
+		t.Fatal(err)
+	}
+	if spent := maxProgramOps - st.budget; spent < (1<<20)>>decodeCostShift {
+		t.Fatalf("a 1 MB inflate charged %d units, want at least %d", spent, (1<<20)>>decodeCostShift)
+	}
+	// A budget with no room for the inflate rejects the node instead of decoding for free.
+	st = &parseState{seen: make(map[cos.RefKey]Func), budget: 16}
+	if _, err := parse(d, cos.Ref{Num: 1}, 0, st); !errors.Is(err, errTooComplex) {
+		t.Fatalf("expected errTooComplex, got %v", err)
+	}
+}
+
+// flateOf returns data as a flate-compressed PDF stream payload.
+func flateOf(t *testing.T, data []byte) string {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zlib.NewWriter(&buf)
+	if _, err := w.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
 }
 
 // TestStitchingLinearChainParses guards against the budget over-rejecting: a straight (non-branching) chain of stitching

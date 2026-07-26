@@ -1012,3 +1012,32 @@ func TestAnnotRunSharesBodyCacheAcrossAppearances(t *testing.T) {
 		t.Errorf("the appearances drew %d fills, want 2", got)
 	}
 }
+
+// TestInlineDictElementBudget covers the inline-image dictionary's element cap. Every other container the interpreter
+// parses shares the maxOperandElements allowance, but the BI dictionary had none: a page stream may inflate to 64 MB,
+// so one BI followed by millions of distinct "/aN <</b 0>>" pairs — a few hundred kilobytes of flate — built a
+// cos.Dict of millions of entries, each holding its own Go map, for the single budget unit the BI operator costs.
+// Entries past the allowance are dropped, but parsing must still reach ID so the payload and the operators after it
+// stay in sync.
+func TestInlineDictElementBudget(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("BI /W 2 /H 2 /BPC 8 /CS /G ")
+	for i := range maxOperandElements {
+		fmt.Fprintf(&sb, "/k%d << /a %d >> ", i, i)
+	}
+	sb.WriteString("ID \x00\x01\x02\x03 EI 0 0 1 1 re f")
+	lex := cos.NewLexer([]byte(sb.String()), 0)
+	if tok, ok := lex.Next(); !ok || string(tok.Bytes) != "BI" {
+		t.Fatal("the BI keyword did not lex")
+	}
+	dict, ok := parseInlineDict(lex)
+	if !ok {
+		t.Fatal("the dictionary did not terminate at ID")
+	}
+	if got := countElements(dict); got > maxOperandElements {
+		t.Fatalf("kept %d elements, want at most the shared allowance of %d", got, maxOperandElements)
+	}
+	// The tokenizer stayed in sync: the whole page still executes, image and trailing fill included.
+	rec := run(t, nil, nil, sb.String())
+	wantOps(t, rec, opFillImage, opFill)
+}

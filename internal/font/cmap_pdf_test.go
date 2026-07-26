@@ -555,3 +555,81 @@ func TestCFFCIDCharset(t *testing.T) {
 		t.Errorf("predefined charset not identity: %+v", cid2)
 	}
 }
+
+// TestCodespaceCountCapped covers the per-character cost of a CMap's codespace list. Codespaces are consulted for
+// every character code a show operator decodes — nextCode probes the list at each of the four code lengths and, for a
+// code inside none of them, walks it again for the longest prefix match — so accepting maxCMapRanges (65536) of them
+// made a hostile CMap cost hundreds of thousands of comparisons per byte, minutes of CPU for a page whose text is a
+// multi-megabyte Tj string. Real CMaps declare a handful.
+func TestCodespaceCountCapped(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("begincmap\n")
+	fmt.Fprintf(&sb, "%d begincodespacerange\n", 4*maxCodespaces)
+	// Non-overlapping two-byte ranges, none of which brackets 0x00 or 0x01: decoding stays in the invalid-code path.
+	for i := range 4 * maxCodespaces {
+		fmt.Fprintf(&sb, "<%04x> <%04x>\n", 0x4000+2*i, 0x4000+2*i+1)
+	}
+	sb.WriteString("endcodespacerange\nendcmap")
+	cm := parseCMap([]byte(sb.String()), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	if len(cm.codespaces) != maxCodespaces {
+		t.Fatalf("kept %d codespaces, want the cap of %d", len(cm.codespaces), maxCodespaces)
+	}
+	// Decoding a string that matches nothing still terminates, consuming a byte at a time.
+	text := make([]byte, 1<<16)
+	consumed := 0
+	for consumed < len(text) {
+		_, n := cm.nextCode(text[consumed:])
+		if n <= 0 {
+			t.Fatalf("nextCode consumed %d bytes at offset %d", n, consumed)
+		}
+		consumed += n
+	}
+}
+
+// TestCodespaceIndexMatchesLinearScan pins the merged per-length membership index against the list it replaced:
+// overlapping, adjacent, and disjoint ranges of assorted lengths must report exactly the codes the declaration order
+// covers, and no others.
+func TestCodespaceIndexMatchesLinearScan(t *testing.T) {
+	content := `begincmap
+5 begincodespacerange
+<20> <40>
+<30> <50>
+<51> <60>
+<8140> <9ffc>
+<a0a0a0> <bfbfbf>
+endcodespacerange
+endcmap`
+	cm := parseCMap([]byte(content), 0, nil)
+	if cm == nil {
+		t.Fatal("parseCMap returned nil")
+	}
+	linear := func(v uint32, nBytes uint8) bool {
+		for _, cs := range cm.codespaces {
+			if cs.nBytes == nBytes && v >= cs.lo && v <= cs.hi {
+				return true
+			}
+		}
+		return false
+	}
+	for _, nBytes := range []uint8{1, 2, 3} {
+		for v := range uint32(1 << 12) {
+			probe := v
+			if nBytes == 3 {
+				probe = 0xa0a000 | v // Keep the 3-byte probes near the range that exists.
+			}
+			if got, want := cm.inCodespace(probe, nBytes), linear(probe, nBytes); got != want {
+				t.Fatalf("inCodespace(%0*x, %d) = %v, want %v", 2*int(nBytes), probe, nBytes, got, want)
+			}
+		}
+	}
+	// The merge joined the overlapping and adjacent one-byte ranges into one, and left the others alone.
+	if got := len(cm.byLen[0]); got != 1 {
+		t.Errorf("the one-byte bucket holds %d ranges, want the 3 declared ones merged into 1", got)
+	}
+	if len(cm.byLen[1]) != 1 || len(cm.byLen[2]) != 1 || len(cm.byLen[3]) != 0 {
+		t.Errorf("per-length buckets = %d/%d/%d, want 1/1/0", len(cm.byLen[1]), len(cm.byLen[2]), len(cm.byLen[3]))
+	}
+}

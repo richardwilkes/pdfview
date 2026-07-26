@@ -10,7 +10,6 @@
 package doc
 
 import (
-	"bytes"
 	"math"
 	"strconv"
 	"strings"
@@ -18,12 +17,18 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped and
-// reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting (name → dictionary
-// → name ...) is cut off after maxDestChain steps.
+// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped, node
+// count-capped, and reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting
+// (name → dictionary → name ...) is cut off after maxDestChain steps.
 const (
 	maxNameTreeDepth = 64
 	maxDestChain     = 8
+	// maxNameTreeNodes and maxNamedDests bound the flattened /Names → /Dests index: how many tree nodes one build
+	// visits, and how many name → destination pairs it retains. Both sit far above any real document (deployed files
+	// carry thousands of named destinations, not hundreds of thousands); past them the remaining names simply do not
+	// resolve, which is what an unknown name already does.
+	maxNameTreeNodes = 1 << 16
+	maxNamedDests    = 1 << 18
 )
 
 // Dest is a resolved internal destination: a 0-based target page plus the explicit point on it, already mapped into the
@@ -131,6 +136,14 @@ func (d *Document) destCoord(arr cos.Array, index int) float32 {
 // catalog (PDF 1.1) first and the /Names → /Dests name tree (PDF 1.2+) second. Both stores accept both key flavors — a
 // name's text and a byte string's bytes compare identically — since real files mix them. It returns nil (null) when the
 // name is unknown.
+//
+// The name tree is flattened into a map once per document rather than searched per lookup. A per-lookup search made
+// every MISS cost a full tree scan, and the callers are per-node: walkOutline resolves a destination for each of up to
+// maxOutlineNodes items and Links for each of up to maxPageLinks annotations, none of which shares work with the next.
+// A file pairing a few hundred thousand leaf pairs with 65536 outline items naming destinations that do not exist
+// therefore bought ~10^10 resolve-and-compare steps — minutes to hours — from one TableOfContents call, and the public
+// OverallMaxTOCEntries/OverallMaxLinks caps do not help because the engine-side walk finishes before they truncate.
+// Flattened, the whole document's lookups cost one bounded walk plus a map probe each, and a miss costs nothing.
 func (d *Document) lookupNamedDest(key []byte) cos.Object {
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
@@ -141,34 +154,56 @@ func (d *Document) lookupNamedDest(key []byte) cos.Object {
 			return obj
 		}
 	}
-	if names, namesOK := d.cos.GetDict(root, "Names"); namesOK {
-		if tree, treeOK := d.cos.GetDict(names, "Dests"); treeOK {
-			if obj, found := d.lookupNameTree(tree, key, 0, make(map[cos.RefKey]bool)); found {
-				return obj
-			}
-		}
+	if d.destIndex == nil {
+		d.destIndex = d.buildDestIndex(root)
 	}
-	return nil
+	return d.destIndex[string(key)]
 }
 
-// lookupNameTree searches a name tree (ISO 32000-2 7.9.6) for key. Leaf /Names arrays are scanned linearly — robust
-// against the unsorted arrays repaired files exhibit — and /Kids are pruned by their /Limits only when the limits are
-// well-formed, so a node with broken limits is still descended into rather than silently skipped. Depth is capped and
-// reference cycles are skipped.
-func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited map[cos.RefKey]bool) (cos.Object, bool) {
-	if depth > maxNameTreeDepth {
-		return nil, false
+// buildDestIndex flattens the catalog's /Names → /Dests name tree into name → destination pairs. It always returns a
+// non-nil map, so a document without a name tree builds the (empty) index once and never walks again.
+func (d *Document) buildDestIndex(root cos.Dict) map[string]cos.Object {
+	index := make(map[string]cos.Object)
+	names, ok := d.cos.GetDict(root, "Names")
+	if !ok {
+		return index
 	}
+	tree, ok := d.cos.GetDict(names, "Dests")
+	if !ok {
+		return index
+	}
+	nodes := maxNameTreeNodes
+	d.indexNameTree(tree, index, 0, &nodes, make(map[cos.RefKey]bool))
+	return index
+}
+
+// indexNameTree adds one name-tree node's entries (ISO 32000-2 7.9.6) to index and descends into its /Kids. Leaf
+// /Names arrays are taken in order and the first entry for a key wins, which is what the former linear search returned;
+// /Limits are not consulted, since collecting every kid's names finds exactly what a limit-pruned search would plus the
+// entries a mis-stated limit would have hidden — the same leniency that already descends into a kid whose /Limits are
+// broken. Depth, node count, and entry count are capped, and reference cycles are skipped.
+func (d *Document) indexNameTree(node cos.Dict, index map[string]cos.Object, depth int, nodes *int,
+	visited map[cos.RefKey]bool,
+) {
+	if depth > maxNameTreeDepth || *nodes <= 0 {
+		return
+	}
+	*nodes--
 	if names, ok := d.cos.GetArray(node, "Names"); ok {
 		for i := 0; i+1 < len(names); i += 2 {
-			if k, kOK := cos.AsString(d.cos.Resolve(names[i])); kOK && bytes.Equal(k, key) {
-				return names[i+1], true
+			if len(index) >= maxNamedDests {
+				break
+			}
+			if k, kOK := cos.AsString(d.cos.Resolve(names[i])); kOK {
+				if _, dup := index[string(k)]; !dup {
+					index[string(k)] = names[i+1]
+				}
 			}
 		}
 	}
 	kids, ok := d.cos.GetArray(node, "Kids")
 	if !ok {
-		return nil, false
+		return
 	}
 	for _, kid := range kids {
 		if ref, isRef := kid.(cos.Ref); isRef {
@@ -177,22 +212,10 @@ func (d *Document) lookupNameTree(node cos.Dict, key []byte, depth int, visited 
 			}
 			visited[ref.Key()] = true
 		}
-		kidDict, kidOK := cos.AsDict(d.cos.Resolve(kid))
-		if !kidOK {
-			continue
-		}
-		if limits, limOK := d.cos.GetArray(kidDict, "Limits"); limOK && len(limits) >= 2 {
-			lo, loOK := cos.AsString(d.cos.Resolve(limits[0]))
-			hi, hiOK := cos.AsString(d.cos.Resolve(limits[1]))
-			if loOK && hiOK && (bytes.Compare(key, lo) < 0 || bytes.Compare(key, hi) > 0) {
-				continue
-			}
-		}
-		if obj, found := d.lookupNameTree(kidDict, key, depth+1, visited); found {
-			return obj, true
+		if kidDict, kidOK := cos.AsDict(d.cos.Resolve(kid)); kidOK {
+			d.indexNameTree(kidDict, index, depth+1, nodes, visited)
 		}
 	}
-	return nil, false
 }
 
 // hasURIScheme reports whether uri begins with a URI scheme (RFC 3986: a letter followed by letters, digits, "+", "-",

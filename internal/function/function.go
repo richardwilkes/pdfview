@@ -114,22 +114,74 @@ func interpolate(x, xmin, xmax, ymin, ymax float32) float32 {
 	return ymin + (x-xmin)*(ymax-ymin)/(xmax-xmin)
 }
 
-// Parse parses obj (resolving references) as a function.
-func Parse(d *cos.Document, obj cos.Object) (Func, error) {
-	// budget caps the total number of function nodes parsed across the whole graph, not just its depth. maxNesting
-	// bounds depth alone, so a chain of stitching functions whose /Functions arrays fan out to shared references could
-	// otherwise force exponential (branching^depth) parse work from a tiny file. The shared budget makes total work
-	// linear in the file's declared node count.
-	budget := maxProgramOps
-	return parse(d, obj, 0, &budget)
+// decodeCostShift scales a stream-backed node's decoded bytes into node-budget units. Counting nodes alone is not a
+// bound on the work a graph forces: each type 0 and type 4 node decodes a stream, internal/filter lets one stream reach
+// max(64 MB, 256x input), and cos.Document caches parsed objects but not decoded stream data. At >>10 the whole budget
+// buys 64 MB of inflation across a Parse, which one legitimate sample table is nowhere near.
+const decodeCostShift = 10
+
+// parseState is what one Parse shares across the whole function graph it walks: the node budget, and the functions
+// already parsed from an indirect reference.
+type parseState struct {
+	// seen memoizes by reference so a graph naming the SAME function repeatedly parses it once. A type 3 stitching
+	// function whose /Functions array repeats one reference otherwise re-inflated that node's stream on every entry —
+	// thousands of times over from a single cs or sh operator, which is charged for one resource parse.
+	seen map[cos.RefKey]Func
+	// budget caps the total number of function nodes parsed across the whole graph, not just its depth, plus the bytes
+	// their streams decode (see decodeCostShift). maxNesting bounds depth alone, so a chain of stitching functions whose
+	// /Functions arrays fan out to shared references could otherwise force exponential (branching^depth) parse work from
+	// a tiny file. The shared budget makes total work linear in the file's declared node count.
+	budget int
 }
 
-func parse(d *cos.Document, obj cos.Object, depth int, budget *int) (Func, error) {
+// spend debits n budget units, saturating at -1 so no sequence of charges can wrap the counter.
+func (st *parseState) spend(n int) {
+	if n > st.budget {
+		st.budget = -1
+		return
+	}
+	st.budget -= n
+}
+
+// spendDecoded debits the budget for the bytes a stream-backed node's decode produced (cos.Document.DecodeWork's delta
+// across it). The shift is applied in uint64 and the result capped at the whole budget rather than narrowed first,
+// which would overflow the int counter on GOARCH=386/arm.
+func (st *parseState) spendDecoded(n uint64) {
+	st.spend(int(min(n>>decodeCostShift, uint64(maxProgramOps))))
+}
+
+// Parse parses obj (resolving references) as a function.
+func Parse(d *cos.Document, obj cos.Object) (Func, error) {
+	return parse(d, obj, 0, &parseState{seen: make(map[cos.RefKey]Func), budget: maxProgramOps})
+}
+
+// parse parses one node of a function graph, returning the memoized result when the same reference has already been
+// parsed under this Parse. Only successes are memoized: a failure may be the shared budget running out, which says
+// nothing about the node itself.
+func parse(d *cos.Document, obj cos.Object, depth int, st *parseState) (Func, error) {
 	if depth > maxNesting {
 		return nil, errTooDeep
 	}
-	*budget--
-	if *budget < 0 {
+	ref, isRef := obj.(cos.Ref)
+	if isRef {
+		if fn, hit := st.seen[ref.Key()]; hit {
+			return fn, nil
+		}
+	}
+	fn, err := parseNode(d, obj, depth, st)
+	if err != nil {
+		return nil, err
+	}
+	if isRef {
+		st.seen[ref.Key()] = fn
+	}
+	return fn, nil
+}
+
+// parseNode parses one node that the memo did not already hold.
+func parseNode(d *cos.Document, obj cos.Object, depth int, st *parseState) (Func, error) {
+	st.spend(1)
+	if st.budget < 0 {
 		return nil, errTooComplex
 	}
 	resolved := d.Resolve(obj)
@@ -152,20 +204,34 @@ func parse(d *cos.Document, obj cos.Object, depth int, budget *int) (Func, error
 		if !isStream {
 			return nil, errNotFunction
 		}
-		return parseSampled(d, stream, c)
+		return parseStream(d, st, func() (Func, error) { return parseSampled(d, stream, c) })
 	case 2:
 		return parseExponential(d, dict, c)
 	case 3:
-		return parseStitching(d, dict, c, depth, budget)
+		return parseStitching(d, dict, c, depth, st)
 	case 4:
 		stream, isStream := cos.AsStream(resolved)
 		if !isStream {
 			return nil, errNotFunction
 		}
-		return parseCalculator(d, stream, c)
+		return parseStream(d, st, func() (Func, error) { return parseCalculator(d, stream, c) })
 	default:
 		return nil, errUnsupported
 	}
+}
+
+// parseStream runs one stream-backed node's parse and charges the shared budget for what its decode produced, whether
+// or not the parse itself succeeded — a failed parse may have inflated the whole allowance before reporting. Once the
+// budget is gone the node is reported as too complex, which stops the surrounding graph the way any other exhaustion
+// does.
+func parseStream(d *cos.Document, st *parseState, parseIt func() (Func, error)) (Func, error) {
+	before := d.DecodeWork()
+	fn, err := parseIt()
+	st.spendDecoded(d.DecodeWork() - before)
+	if st.budget < 0 {
+		return nil, errTooComplex
+	}
+	return fn, err
 }
 
 // numberPairs reads dict[key] as an even-length array of finite numbers, returning at most maxPairs pairs.

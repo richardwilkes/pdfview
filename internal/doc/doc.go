@@ -53,6 +53,10 @@ type Document struct {
 	// page by reference, and this is how those references resolve to page numbers. It keys on the reference's
 	// resolution identity (cos.RefKey), so a destination naming the page with a different generation still finds it.
 	pageIndex map[cos.RefKey]int
+	// destIndex is the catalog's /Names → /Dests name tree flattened to name → destination pairs, built on the first
+	// named-destination lookup and reused by every later one (see lookupNamedDest). It is nil until then; an empty
+	// non-nil map means the document has no name tree and none will be walked again.
+	destIndex map[string]cos.Object
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
 	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref otherwise);

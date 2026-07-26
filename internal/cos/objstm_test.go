@@ -10,6 +10,7 @@
 package cos
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"reflect"
@@ -179,5 +180,44 @@ func TestObjStmIndexBuiltOnce(t *testing.T) {
 		if again := reflect.ValueOf(stm.index).Pointer(); again != first {
 			t.Fatalf("lookup for %d rebuilt the map (%#x, was %#x)", num, again, first)
 		}
+	}
+}
+
+// TestParseObjStmAllocatesFromEntriesRead covers the other half of the /N clamp. Clamping /N to len(data)/3 bounds the
+// header LOOP, but using it as the slice capacity made the allocation proportional to the DECODED payload, which
+// internal/filter lets reach max(64 MB, 256x input): a small file declaring a huge /N over a large payload of
+// non-numeric bytes broke out of the loop on the very first entry yet still retained two slices sized for the whole
+// payload, for the document's lifetime (repair() loads every object stream it finds). The slices must grow from the
+// entries that actually parse.
+func TestParseObjStmAllocatesFromEntriesRead(t *testing.T) {
+	payload := bytes.Repeat([]byte("zz "), 1<<16) // Nothing here parses as a header integer.
+	d := &Document{}
+	stm, err := d.parseObjStm(&Stream{
+		Dict: Dict{"N": Integer(math.MaxInt32), firstKey: Integer(0)},
+		Raw:  payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stm.nums) != 0 || len(stm.offs) != 0 {
+		t.Fatalf("read %d entries from a payload with no header integers", len(stm.nums))
+	}
+	if cap(stm.nums) != 0 || cap(stm.offs) != 0 {
+		t.Errorf("allocated capacities %d/%d for zero parsed entries from a %d byte payload", cap(stm.nums),
+			cap(stm.offs), len(payload))
+	}
+	// A header that does parse still fills the slices, and their capacity tracks the entries rather than the payload.
+	stm, err = d.parseObjStm(&Stream{
+		Dict: Dict{"N": Integer(math.MaxInt32), firstKey: Integer(8)},
+		Raw:  append([]byte("7 0 9 4\n(a)\n(b)"), payload...),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(stm.nums, []int{7, 9}) || !reflect.DeepEqual(stm.offs, []int{0, 4}) {
+		t.Fatalf("entries = %v / %v, want [7 9] and [0 4]", stm.nums, stm.offs)
+	}
+	if cap(stm.nums) > 8 || cap(stm.offs) > 8 {
+		t.Errorf("allocated capacities %d/%d for two parsed entries", cap(stm.nums), cap(stm.offs))
 	}
 }

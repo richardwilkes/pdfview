@@ -580,3 +580,103 @@ func TestLexicalGarbageChargedToBudget(t *testing.T) {
 			maxTotalOps+1)
 	}
 }
+
+// separationPDF builds a document whose objects 1..spaces are distinct /Separation color spaces, every one of them
+// naming the SAME type 0 tint transform (object spaces+1) whose flate payload inflates to samples bytes.
+func separationPDF(t *testing.T, spaces, samples int) *cos.Document {
+	t.Helper()
+	var z bytes.Buffer
+	zw, err := zlib.NewWriterLevel(&z, zlib.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = zw.Write(make([]byte, samples)); err != nil {
+		t.Fatal(err)
+	}
+	if err = zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bodies := make([]string, 0, spaces+1)
+	for i := range spaces {
+		bodies = append(bodies, fmt.Sprintf("[ /Separation /S%d /DeviceGray %d 0 R ]", i, spaces+1))
+	}
+	bodies = append(bodies, streamObj(fmt.Sprintf("/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [%d] "+
+		"/BitsPerSample 8 /Filter /FlateDecode", samples), z.String()))
+	d, err := cos.Open([]byte(minimalPDF(bodies...)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// TestResourceParseChargedForWhatItDecodes covers the cost of a color-space or shading parse. Both charged a flat cost
+// no matter what they decoded and RETAINED — a /Separation space holds its tint transform's whole sample table, a mesh
+// shading its tessellation — so at 1025 units per cs operator, four thousand distinct spaces all naming one stream that
+// inflates to tens of megabytes fit the budget while forcing gigabytes of inflation. The charge follows the bytes.
+func TestResourceParseChargedForWhatItDecodes(t *testing.T) {
+	const samples = 1 << 20
+	d := separationPDF(t, 1, samples)
+	in := newInterp(d, nil, gfx.Identity(), device.Null{}, nil)
+	before := in.budget
+	if space := in.parseSpace(cos.Ref{Num: 1}); space == nil {
+		t.Fatal("the separation space did not parse")
+	}
+	spent := before - in.budget
+	if want := resourceParseCost + samples>>bodyCostShift; spent < want {
+		t.Fatalf("a parse that inflated %d bytes charged %d units, want at least %d", samples, spent, want)
+	}
+	// A parse that decodes nothing still costs exactly the flat charge, so ordinary resources are priced as before.
+	in = newInterp(d, nil, gfx.Identity(), device.Null{}, nil)
+	before = in.budget
+	in.parseSpace(cos.Name("DeviceGray"))
+	if spent = before - in.budget; spent != resourceParseCost {
+		t.Fatalf("a parse that decoded nothing charged %d units, want %d", spent, resourceParseCost)
+	}
+}
+
+// TestManyDistinctSpacesBounded verifies the same charge bounds a whole Run: a content stream naming thousands of
+// distinct color spaces that all re-inflate one stream cannot exceed the budget's worth of decoding.
+func TestManyDistinctSpacesBounded(t *testing.T) {
+	const spaces = 512
+	const samples = 1 << 19
+	d := separationPDF(t, spaces, samples)
+	res := cos.Dict{}
+	names := cos.Dict{}
+	for i := range spaces {
+		names[cos.Name(fmt.Sprintf("CS%d", i))] = cos.Ref{Num: i + 1}
+	}
+	res[catColorSpc] = names
+	var content strings.Builder
+	for i := range spaces {
+		fmt.Fprintf(&content, "/CS%d cs 0.5 scn 0 0 1 1 re f ", i)
+	}
+	before := d.DecodeWork()
+	Run(d, res, []byte(content.String()), gfx.Identity(), device.Null{}, nil)
+	// Every unit of budget buys 1<<bodyCostShift bytes of decoding at most, plus one stream's worth of slack.
+	if limit, got := uint64(maxTotalOps)<<bodyCostShift+samples, d.DecodeWork()-before; got > limit {
+		t.Fatalf("%d distinct color spaces inflated %d bytes, want at most %d", spaces, got, limit)
+	}
+}
+
+// TestResourceCachesAreBounded verifies the per-Run parse caches no longer grow without limit. A parsed resource can
+// retain far more than the dictionary it came from, and the maps kept every one of them for the whole Run.
+func TestResourceCachesAreBounded(t *testing.T) {
+	const spaces = maxCachedResources * 4
+	d := separationPDF(t, spaces, 16)
+	in := newInterp(d, nil, gfx.Identity(), device.Null{}, nil)
+	for i := range spaces {
+		in.parseSpace(cos.Ref{Num: i + 1})
+	}
+	if got := len(in.caches.spaces.entries); got > maxCachedResources {
+		t.Fatalf("the color-space cache holds %d entries after %d distinct parses, want at most %d", got, spaces,
+			maxCachedResources)
+	}
+	// The most recent parses are the ones retained, so a repeat of the newest costs nothing.
+	before := in.budget
+	if in.parseSpace(cos.Ref{Num: spaces}) == nil {
+		t.Fatal("the most recently parsed space did not resolve")
+	}
+	if in.budget != before {
+		t.Errorf("re-parsing the most recent space charged %d units, want 0", before-in.budget)
+	}
+}

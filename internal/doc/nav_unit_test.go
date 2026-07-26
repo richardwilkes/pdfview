@@ -10,9 +10,12 @@
 package doc_test
 
 import (
+	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/richardwilkes/pdfview/internal/doc"
 )
@@ -376,5 +379,75 @@ func TestLinksPageRange(t *testing.T) {
 	}
 	if d.Outline() != nil {
 		t.Error("expected nil outline for a document without /Outlines")
+	}
+}
+
+// bigNameTreePDF builds a document with a flat /Names → /Dests tree of pairs entries, plus one page carrying a link
+// annotation for each name in dests. The tree's own names are "inTree0".."inTree<pairs-1>".
+func bigNameTreePDF(pairs int, dests []string) []byte {
+	var sb strings.Builder
+	sb.WriteString("%PDF-1.7\n")
+	sb.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Names << /Dests 4 0 R >> >>\nendobj\n")
+	sb.WriteString("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+	sb.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [")
+	for i := range dests {
+		fmt.Fprintf(&sb, "%d 0 R ", 5+i)
+	}
+	sb.WriteString("] >>\nendobj\n")
+	sb.WriteString("4 0 obj\n<< /Names [")
+	for i := range pairs {
+		fmt.Fprintf(&sb, "(inTree%d) [3 0 R /XYZ %d 190 0] ", i, i%100)
+	}
+	sb.WriteString("] >>\nendobj\n")
+	for i, name := range dests {
+		fmt.Fprintf(&sb, "%d 0 obj\n<< /Type /Annot /Subtype /Link /Rect [10 10 20 20] /Dest (%s) >>\nendobj\n",
+			5+i, name)
+	}
+	sb.WriteString("%%EOF\n")
+	return []byte(sb.String())
+}
+
+// TestNamedDestLookupsDoNotRescanTheTree covers the cost of resolving named destinations. Every lookup used to rescan
+// the whole /Names → /Dests tree, and a MISS scanned all of it, while the callers are per-node: Links resolves a
+// destination for each of up to maxPageLinks annotations and the outline walk for each of up to maxOutlineNodes items.
+// A file pairing a large flat name tree with that many missing names therefore bought a quadratic number of resolve-
+// and-compare steps — minutes to hours — from a single Links or TableOfContents call, and the public
+// OverallMaxLinks/OverallMaxTOCEntries caps cannot help because the engine-side walk finishes before they truncate.
+// The tree is flattened once per document now, so the same shape is linear.
+func TestNamedDestLookupsDoNotRescanTheTree(t *testing.T) {
+	const pairs = 20000
+	const misses = 20000
+	absent := make([]string, misses)
+	for i := range absent {
+		absent[i] = fmt.Sprintf("absent%d", i)
+	}
+	d := mustOpen(t, bigNameTreePDF(pairs, absent))
+	start := time.Now()
+	links := d.Links(0)
+	elapsed := time.Since(start)
+	if len(links) != misses {
+		t.Fatalf("got %d links, want %d", len(links), misses)
+	}
+	for i, l := range links {
+		if l.Page != -1 {
+			t.Fatalf("link %d resolved to page %d, want -1 (its name is not in the tree)", i, l.Page)
+		}
+	}
+	// One flatten plus a map probe per link takes milliseconds; a rescan per miss is pairs x misses comparisons, which
+	// ran for minutes. The bound is loose enough that only the quadratic behavior can trip it.
+	if limit := 10 * time.Second; elapsed > limit {
+		t.Fatalf("resolving %d missing names against a %d entry tree took %v, want under %v", misses, pairs, elapsed,
+			limit)
+	}
+	// Flattening must not lose entries: names that ARE in the tree still resolve, wherever they sit in it.
+	present := mustOpen(t, bigNameTreePDF(pairs, []string{"inTree0", fmt.Sprintf("inTree%d", pairs-1)}))
+	found := present.Links(0)
+	if len(found) != 2 {
+		t.Fatalf("got %d links for in-tree names, want 2", len(found))
+	}
+	for i, l := range found {
+		if l.Page != 0 {
+			t.Errorf("in-tree link %d resolved to page %d, want 0", i, l.Page)
+		}
 	}
 }

@@ -455,9 +455,10 @@ type gouraudTri struct {
 	v [3]vert
 }
 
-// triangle records one input Gouraud triangle for tessellation.
+// triangle records one input Gouraud triangle for tessellation. The cap is the input-triangle budget rather than the
+// vertex budget, since a lattice within the vertex budget forms nearly two triangles per vertex.
 func (b *meshBuilder) triangle(v0, v1, v2 vert) {
-	if len(b.input) < maxMeshVertices {
+	if len(b.input) < maxMeshInputTris {
 		b.input = append(b.input, gouraudTri{v: [3]vert{v0, v1, v2}})
 	}
 }

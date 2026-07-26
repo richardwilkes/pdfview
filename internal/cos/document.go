@@ -32,6 +32,8 @@ var (
 	errNotObjStm     = errors.New("object is not an object stream")
 	errCryptFilter   = errors.New("a /Crypt filter naming a crypt filter other than /Identity is not supported")
 	errBadFilterName = errors.New("filter name is not a name object")
+
+	errFilterChainTooLong = fmt.Errorf("filter chain is longer than the %d filters allowed", filter.MaxChainLength)
 )
 
 // Document is one open PDF file at the COS level. It is not safe for concurrent use; the public API package serializes
@@ -363,13 +365,20 @@ func (d *Document) filterSpecs(dict Dict) ([]filter.Spec, error) {
 }
 
 // filterNamesAndParms normalizes /Filter (name or array of names) and /DecodeParms (dictionary or array, possibly
-// containing nulls) into parallel slices.
+// containing nulls) into parallel slices. A chain longer than filter.MaxChainLength is rejected HERE, before the names
+// are resolved and collected, rather than being left to filter.DecodeChain: the array's length is file-supplied and an
+// object stream can carry a million-element one in a few megabytes, so building the []Name and []filter.Spec first cost
+// tens of milliseconds and tens of megabytes of allocation per call — and PageContents calls StreamData once per
+// /Contents entry, up to maxContentStreams of them, all able to name that one stream.
 func (d *Document) filterNamesAndParms(dict Dict) (names []Name, parms Array, err error) {
 	switch f := d.Resolve(dict["Filter"]).(type) {
 	case nil, Null:
 	case Name:
 		names = []Name{f}
 	case Array:
+		if len(f) > filter.MaxChainLength {
+			return nil, nil, errFilterChainTooLong
+		}
 		names = make([]Name, 0, len(f))
 		for _, entry := range f {
 			name, ok := AsName(d.Resolve(entry))

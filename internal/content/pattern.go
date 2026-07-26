@@ -99,14 +99,15 @@ func (in *interp) resolvePattern(name cos.Name) *patternRes {
 func (in *interp) parsePatternEntry(raw cos.Object) *patternRes {
 	ref, isRef := raw.(cos.Ref)
 	if isRef {
-		if pat, hit := in.caches.patterns[ref.Key()]; hit {
+		if pat, hit := in.caches.patterns.get(ref.Key()); hit {
 			return pat
 		}
 	}
-	in.charge(resourceParseCost)
+	before := in.doc.DecodeWork()
 	pat := in.parsePattern(raw)
+	in.chargeParse(resourceParseCost, before)
 	if isRef {
-		in.caches.patterns[ref.Key()] = pat
+		in.caches.patterns.put(ref.Key(), pat)
 	}
 	return pat
 }

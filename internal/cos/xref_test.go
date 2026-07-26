@@ -311,3 +311,66 @@ func TestXrefStreamRowBudget(t *testing.T) {
 		}
 	})
 }
+
+// repeatedXRefStmPDF builds a hybrid-reference file with the given number of minimal classic sections, chained by
+// /Prev and every one of them naming the SAME cross-reference stream through /XRefStm. Each section is about sixty
+// bytes; the shared stream's payload inflates to rows three-byte entries.
+func repeatedXRefStmPDF(sections, rows int) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	off1 := buf.Len()
+	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	off2 := buf.Len()
+	buf.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	payload := make([]byte, 0, 3*rows)
+	payload = append(payload, 0, 0, 0xff, 1, byte(off1), 0, 1, byte(off2), 0)
+	for range rows - 3 {
+		payload = append(payload, 1, 0, 0)
+	}
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	zw.Write(payload) //nolint:errcheck // Writing to a bytes.Buffer cannot fail.
+	zw.Close()        //nolint:errcheck // See above.
+	stmOff := buf.Len()
+	fmt.Fprintf(&buf, "3 0 obj\n<< /Type /XRef /Size %d /W [1 1 1] /Index [0 %d] /Root 1 0 R /Filter /FlateDecode "+
+		"/Length %d >>\nstream\n", rows, rows, compressed.Len())
+	buf.Write(compressed.Bytes())
+	buf.WriteString("\nendstream\nendobj\n")
+	sectionOff := -1
+	for range sections {
+		prev := ""
+		if sectionOff >= 0 {
+			prev = fmt.Sprintf(" /Prev %d", sectionOff)
+		}
+		sectionOff = buf.Len()
+		fmt.Fprintf(&buf, "xref\n0 0\ntrailer\n<< /Size %d /Root 1 0 R /XRefStm %d%s >>\n", rows, stmOff, prev)
+	}
+	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", sectionOff)
+	return buf.Bytes()
+}
+
+// TestHybridXRefStmReadOnce covers the work a hybrid file's /XRefStm can force. loadXref's visited set tracks the
+// /Prev chain's own offsets, so a file chaining N sixty-byte classic sections that all name one cross-reference stream
+// made readXrefStream re-parse and fully re-inflate that stream N times — the d.xrefStreamRows budget short-circuits
+// only the row loop, which runs after StreamData has already produced the whole payload. Measured before the fix: a
+// 133 KB file with 2000 sections and an 8 MB-decoding stream took about 6.5 seconds, scaling linearly.
+func TestHybridXRefStmReadOnce(t *testing.T) {
+	const sections = 64
+	const rows = 1 << 14
+	d, err := Open(repeatedXRefStmPDF(sections, rows))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.repaired {
+		t.Fatal("the repair scan ran; the hybrid stream covers the whole document")
+	}
+	// The entries the shared stream carries are still registered: reading it once is not skipping it.
+	if _, ok := AsDict(d.Resolve(d.trailer[rootKey])); !ok {
+		t.Fatal("the root is not resolvable; the /XRefStm section was not read at all")
+	}
+	// One inflate of the payload, not one per section. The allowance covers the stream's own dictionary work.
+	if decoded, want := d.DecodeWork(), uint64(2*3*rows); decoded > want {
+		t.Errorf("%d sections naming one cross-reference stream inflated %d bytes, want at most %d (one decode)",
+			sections, decoded, want)
+	}
+}

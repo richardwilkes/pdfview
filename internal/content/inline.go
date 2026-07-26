@@ -36,9 +36,16 @@ func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 }
 
 // parseInlineDict parses the key/value entries between BI and ID. It reports false when the stream ends before ID
-// arrives (nothing to draw, nothing left to position past).
+// arrives (nothing to draw, nothing left to position past). The entries share one maxOperandElements allowance — the
+// same one objects.go gives an ordinary array or dictionary operand — spent across the keys stored here and everything
+// their values nest. Without it the dictionary was the one unbounded container the interpreter parsed: a page stream
+// may inflate to 64 MB, so a single BI followed by millions of distinct "/aN <</b 0>>" pairs (a few hundred kilobytes
+// of flate) built a cos.Dict of millions of entries, each holding its own Go map, for the one budget unit the BI
+// operator costs. Entries past the allowance are parsed and dropped rather than abandoning the dictionary: the
+// tokenizer must still reach ID to stay in sync with the payload that follows.
 func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 	dict := cos.Dict{}
+	budget := maxOperandElements
 	for {
 		tok, ok := lex.Next()
 		if !ok {
@@ -65,7 +72,8 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 			if valTok.Kind == cos.TokenKeyword && string(valTok.Bytes) == "ID" {
 				return dict, true
 			}
-			if obj, objOK := parseTopOperand(lex, valTok); objOK {
+			if obj, objOK := parseOperand(lex, valTok, 0, &budget); objOK && budget > 0 {
+				budget--
 				dict[key] = obj
 			}
 		}

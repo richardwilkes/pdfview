@@ -510,3 +510,35 @@ func TestLatticeRowWidthBound(t *testing.T) {
 			r.pos, r.pos/bitsPerVertex, want, 2*perRow)
 	}
 }
+
+// TestLatticeKeepsEveryTriangle pins the input-triangle budget against the shape a lattice actually produces. A
+// rows x perRow lattice within the vertex budget forms 2*(rows-1)*(perRow-1) triangles — nearly two per vertex — so
+// capping the builder's input at maxMeshVertices silently discarded the second half of a wholly legal type 5 stream:
+// a 256x256 lattice recorded 65536 of its 130050 triangles and the bottom of the shading was never painted.
+func TestLatticeKeepsEveryTriangle(t *testing.T) {
+	const perRow = 256
+	const rows = maxMeshVertices / perRow
+	m := meshDecode{
+		space:  pdfcolor.DeviceGray,
+		nComps: 1,
+		nColor: 1,
+		bpc:    1,
+		bpcomp: 1,
+		decode: []float32{0, 1, 0, 1, 0, 1},
+	}
+	const bitsPerVertex = 3
+	b := &meshBuilder{}
+	parseLattice(&bitReader{data: make([]byte, rows*perRow*bitsPerVertex/8)}, &m, b, perRow)
+	if want := 2 * (rows - 1) * (perRow - 1); len(b.input) != want {
+		t.Fatalf("the lattice recorded %d input triangles, want all %d of them", len(b.input), want)
+	}
+	if len(b.input) > maxMeshInputTris {
+		t.Fatalf("a lattice inside the vertex budget formed %d triangles, past the %d-triangle input cap",
+			len(b.input), maxMeshInputTris)
+	}
+	// Tessellation still honors the output budget.
+	b.finish()
+	if len(b.tris) > maxTriangles {
+		t.Fatalf("tessellated to %d triangles, past the %d cap", len(b.tris), maxTriangles)
+	}
+}

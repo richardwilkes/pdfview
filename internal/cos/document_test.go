@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -573,5 +574,51 @@ func TestDecodeWorkMetersWhatChainsProduce(t *testing.T) {
 	// The bomb hands back nothing, having inflated the whole allowance to discover it was too large.
 	if got, want := work(t, 5, true), uint64(filter.MaxDecodedSize(0)); got < want {
 		t.Errorf("a failed decode metered %d bytes of decode work, want at least the %d it inflated", got, want)
+	}
+}
+
+// TestFilterChainLengthRejectedBeforeAllocating covers the cost of a /Filter array longer than a chain may be.
+// filter.DecodeChain rejects anything past filter.MaxChainLength, but only after filterNamesAndParms has resolved every
+// entry into a []Name and imageFilterSplit/filterSpecs have built the parallel []filter.Spec: a million-element name
+// array — three megabytes of object-stream payload — cost tens of milliseconds and tens of megabytes of allocation on
+// EVERY StreamData call, and doc.PageContents calls StreamData once per /Contents entry (up to maxContentStreams of
+// them), all able to name that one stream. The length is checked before anything is built.
+func TestFilterChainLengthRejectedBeforeAllocating(t *testing.T) {
+	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
+	d := mustOpen(t, []byte(pdf))
+	longChain := make(cos.Array, filter.MaxChainLength+1)
+	for i := range longChain {
+		longChain[i] = cos.Name("FlateDecode")
+	}
+	if _, _, _, err := d.ImageFilterSplit(cos.Dict{filterKey: longChain}, nil); err == nil {
+		t.Error("an over-long /Filter array split without error")
+	}
+	stream := &cos.Stream{Dict: cos.Dict{filterKey: longChain}, Raw: []byte("junk")}
+	if _, err := d.StreamData(stream); err == nil {
+		t.Error("an over-long /Filter array decoded without error")
+	}
+	// The rejection is on length alone, so it costs nothing to reach: a huge array is refused without the []Name and
+	// []filter.Spec that used to be built first (16 bytes per name and more per spec, per call).
+	huge := make(cos.Array, 1<<20)
+	for i := range huge {
+		huge[i] = cos.Name("FlateDecode")
+	}
+	const calls = 10
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range calls {
+		d.StreamData(&cos.Stream{Dict: cos.Dict{filterKey: huge}, Raw: []byte("junk")}) //nolint:errcheck // Errors here.
+	}
+	runtime.ReadMemStats(&after)
+	if perCall := (after.TotalAlloc - before.TotalAlloc) / calls; perCall > 1<<16 {
+		t.Errorf("rejecting a %d-element /Filter array allocated %d bytes per call", len(huge), perCall)
+	}
+	// A chain at the limit is still accepted (the decode itself fails on the junk payload, not on the chain length).
+	atLimit := make(cos.Array, filter.MaxChainLength)
+	for i := range atLimit {
+		atLimit[i] = cos.Name("ASCIIHexDecode")
+	}
+	if _, _, _, err := d.ImageFilterSplit(cos.Dict{filterKey: atLimit}, []byte(">")); err != nil {
+		t.Errorf("a chain of exactly %d filters was rejected: %v", filter.MaxChainLength, err)
 	}
 }
