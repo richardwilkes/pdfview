@@ -38,8 +38,9 @@ func (in *interp) drawImageXObject(raw cos.Object, stream *cos.Stream) {
 // distinct images must not turn a few bytes of content apiece into unbounded sample production (see budget.go).
 // Failures draw nothing.
 func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging.Image {
+	before := in.doc.DecodeWork()
 	img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
-	in.charge(imageDecodeCost(img, len(stream.Raw)))
+	in.charge(imageDecodeCost(img, in.doc.DecodeWork()-before, len(stream.Raw)))
 	return img
 }
 
@@ -79,8 +80,9 @@ func imageSize(img *imaging.Image) uint64 {
 // charging the work budget for it. Inline images have no cache — the payload is the content stream itself — so every BI
 // pays, which is what bounds a stream of tiny BI operators each claiming huge dimensions.
 func (in *interp) decodeInline(dict cos.Dict, payload []byte) (*imaging.Image, error) {
+	before := in.doc.DecodeWork()
 	img, err := imaging.DecodeInline(in.doc, dict, payload, in.res[len(in.res)-1])
-	in.charge(imageDecodeCost(img, len(payload)))
+	in.charge(imageDecodeCost(img, in.doc.DecodeWork()-before, len(payload)))
 	return img, err
 }
 

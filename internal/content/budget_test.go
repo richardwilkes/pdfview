@@ -10,14 +10,18 @@
 package content
 
 import (
+	"bytes"
+	"compress/zlib"
 	"fmt"
 	"image/color"
 	"strings"
+	"sync"
 	"testing"
 
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
 	"github.com/richardwilkes/pdfview/internal/device"
+	"github.com/richardwilkes/pdfview/internal/filter"
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/imaging"
 	"github.com/richardwilkes/pdfview/internal/shading"
@@ -144,6 +148,152 @@ func TestStreamBodyCachedAndChargedPerCall(t *testing.T) {
 	}
 }
 
+// zipBomb returns flate-compressed data that inflates to one byte past internal/filter's 64 MB output allowance, so
+// every decode of it fails with ErrTooLarge — but only after inflating that whole allowance. It is built once for the
+// whole package: the tests below are deliberately the only ones here that touch 64 MB of anything.
+var zipBombOnce = sync.OnceValues(func() (string, error) {
+	var buf bytes.Buffer
+	zw, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+	if err != nil {
+		return "", err
+	}
+	if _, err = zw.Write(make([]byte, filter.MaxDecodedSize(0)+1)); err != nil {
+		return "", err
+	}
+	if err = zw.Close(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+})
+
+func zipBomb(t *testing.T) string {
+	t.Helper()
+	bomb, err := zipBombOnce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bomb
+}
+
+// TestFailedBodyDecodeChargedForTheInflationItForced verifies that a body whose decode fails is charged for the bytes
+// the decode PRODUCED, not for the input it was handed. internal/filter inflates the whole max(64 MB, 256x input)
+// allowance before reporting ErrTooLarge, so a 64 KB zip-bombed body priced at its input length cost ~4 thousand of the
+// 4 million-unit budget for 64 MB of decompression.
+func TestFailedBodyDecodeChargedForTheInflationItForced(t *testing.T) {
+	bomb := zipBomb(t)
+	d, err := cos.Open([]byte(minimalPDF(streamObj(
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /FlateDecode", bomb))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	in := newInterp(d, nil, gfx.Identity(), device.Device(nil), nil)
+	before := d.DecodeWork()
+	body, ok := in.streamBody(ref, stream)
+	if ok || body != nil {
+		t.Fatalf("the bombed body decoded: ok=%v len=%d", ok, len(body))
+	}
+	inflated := d.DecodeWork() - before
+	if inflated < uint64(filter.MaxDecodedSize(len(stream.Raw))) {
+		t.Fatalf("the failed decode inflated only %d bytes: the test's payload is not a zip bomb", inflated)
+	}
+	if in.budget >= 0 {
+		t.Fatalf("a failed decode that inflated %d MB left %d of %d budget units: it was charged for its %d-byte "+
+			"input rather than for the inflation it forced", inflated>>20, in.budget, maxTotalOps, len(stream.Raw))
+	}
+}
+
+// TestFailedBodyDecodeThatProducedNothingStaysCheap is the other half of the charge: a decode that fails without
+// producing anything did no such work, and must not exhaust a page's budget. Corrupt-but-otherwise-readable files are
+// rendered as far as they go, so one unusable form body cannot be allowed to stop the rest of the page.
+func TestFailedBodyDecodeThatProducedNothingStaysCheap(t *testing.T) {
+	body := paddedBody("0 0 1 1 re f") // Never decoded: the filter is one internal/filter rejects outright.
+	d, err := cos.Open([]byte(minimalPDF(streamObj(
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /JPXDecode", body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	in := newInterp(d, nil, gfx.Identity(), device.Device(nil), nil)
+	before := in.budget
+	if _, ok = in.streamBody(ref, stream); ok {
+		t.Fatal("the body decoded, so the test is not exercising a failed decode")
+	}
+	if got, want := before-in.budget, bodyCost(len(stream.Raw)); got > want {
+		t.Fatalf("a failed decode that produced nothing charged %d, want at most %d", got, want)
+	}
+}
+
+// TestZipBombedFormBodiesBoundedAcrossTheFailureCache verifies the charge bounds the attack the failure cache alone
+// cannot: one more zip-bombed form than the cache holds, cycled by Do, misses on every invocation, and each miss
+// inflates 64 MB. The budget must stop that within a couple of decodes rather than the ~1000 invocations a
+// one-unit-per-Do page affords.
+func TestZipBombedFormBodiesBoundedAcrossTheFailureCache(t *testing.T) {
+	const forms = maxCachedBodies + 1
+	const invocations = 20
+	bomb := zipBomb(t)
+	bodies := make([]string, forms)
+	xobjects := cos.Dict{}
+	for i := range forms {
+		bodies[i] = streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /FlateDecode", bomb)
+		xobjects[cos.Name(fmt.Sprintf("F%d", i))] = cos.Ref{Num: i + 1}
+	}
+	d, err := cos.Open([]byte(minimalPDF(bodies...)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content strings.Builder
+	for i := range invocations {
+		fmt.Fprintf(&content, "/F%d Do ", i%forms)
+	}
+	before := d.DecodeWork()
+	Run(d, cos.Dict{catXObject: xobjects}, []byte(content.String()), gfx.Identity(), device.Null{}, nil)
+	limit := uint64(2 * filter.MaxDecodedSize(0))
+	if got := d.DecodeWork() - before; got > limit {
+		t.Fatalf("%d Do operators over %d distinct zip-bombed forms inflated %d MB, want at most %d MB",
+			invocations, forms, got>>20, limit>>20)
+	}
+}
+
+// TestZipBombedImageDecodeChargedForItsInflation verifies the same for an image XObject, whose payload is inflated by
+// the filter chain before the image codec ever sees it: a failed decode is charged for that inflation, so the same
+// cache-cycling attack cannot be mounted through Do on images either.
+func TestZipBombedImageDecodeChargedForItsInflation(t *testing.T) {
+	bomb := zipBomb(t)
+	d, err := cos.Open([]byte(minimalPDF(streamObj(
+		"/Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 8 /ColorSpace /DeviceGray "+
+			"/Filter /FlateDecode", bomb))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cos.Ref{Num: 1}
+	stream, ok := cos.AsStream(d.Resolve(ref))
+	if !ok {
+		t.Fatal("object 1 is not a stream")
+	}
+	in := newInterp(d, nil, gfx.Identity(), device.Null{}, nil)
+	before := d.DecodeWork()
+	if img := in.cachedImage(ref, stream, nil); img != nil {
+		t.Fatal("the bombed image decoded")
+	}
+	inflated := d.DecodeWork() - before
+	if inflated < uint64(filter.MaxDecodedSize(len(stream.Raw))) {
+		t.Fatalf("the failed decode inflated only %d bytes: the test's payload is not a zip bomb", inflated)
+	}
+	if in.budget >= 0 {
+		t.Fatalf("a failed image decode that inflated %d MB left %d of %d budget units", inflated>>20, in.budget,
+			maxTotalOps)
+	}
+}
+
 // TestShadingParsedOnceAcrossResourceFrames verifies the reference-keyed per-Run cache survives the fresh resource frame
 // every form invocation pushes, so a shading named from N frames is parsed — and charged — once rather than N times.
 func TestShadingParsedOnceAcrossResourceFrames(t *testing.T) {
@@ -223,7 +373,7 @@ func TestInlineImageDecodeChargedPerSample(t *testing.T) {
 	var dev imageCounter
 	Run(d, nil, []byte(strings.Repeat(one, images)), gfx.Identity(), &dev, nil)
 	// One more than the budget divides by: the decode that exhausts the budget still completes before exec stops.
-	limit := 1 + maxTotalOps/imageDecodeCost(&imaging.Image{Width: 2048, Height: 2048}, 1)
+	limit := 1 + maxTotalOps/imageDecodeCost(&imaging.Image{Width: 2048, Height: 2048}, 0, 1)
 	switch {
 	case dev.images == 0:
 		t.Fatal("no inline image decoded at all: the decode charge is too aggressive")
@@ -257,7 +407,7 @@ func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
 		t.Fatal("the image did not decode")
 	}
 	afterFirst := in.budget
-	want := imageDecodeCost(img, len(stream.Raw))
+	want := imageDecodeCost(img, 0, len(stream.Raw))
 	if got := before - afterFirst; got != want {
 		t.Fatalf("the decode charged %d, want %d", got, want)
 	}

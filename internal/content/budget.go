@@ -117,12 +117,21 @@ func bodyCost(n int) int {
 	return 1 + n>>bodyCostShift
 }
 
-// imageDecodeCost is the budget charge for one image decode: the encoded payload it scanned plus the samples it
-// produced. img is nil for a failed decode, which still scanned its payload. The product is computed in int64 because
-// int is 32 bits on GOARCH=386/arm; the decoder caps it at imaging's maxImagePixels (2^26), so the shifted result is
-// always small enough for the budget counter.
-func imageDecodeCost(img *imaging.Image, payload int) int {
-	cost := bodyCost(payload)
+// decodeCost is bodyCost for a byte count a decode reported through cos.Document.DecodeWork: one stage's allowance
+// alone reaches 64 MB, and a chain's total is unbounded above that, so the shift is applied in uint64 and the result
+// capped at the whole budget rather than narrowed first, which would overflow the int counter on GOARCH=386/arm.
+func decodeCost(n uint64) int {
+	return 1 + int(min(n>>bodyCostShift, uint64(maxTotalOps)))
+}
+
+// imageDecodeCost is the budget charge for one image decode: the payload it scanned plus the samples it produced.
+// decoded is what the decode's filter chains produced (cos.Document.DecodeWork), floored at the encoded payload the
+// decoder was handed, since an unfiltered image produces no decoded bytes yet is scanned in full. img is nil for a
+// failed decode, which still did the scanning and inflating that got it there. The sample product is computed in int64
+// because int is 32 bits on GOARCH=386/arm; the decoder caps it at imaging's maxImagePixels (2^26), so the shifted
+// result is always small enough for the budget counter.
+func imageDecodeCost(img *imaging.Image, decoded uint64, payload int) int {
+	cost := decodeCost(max(decoded, uint64(payload)))
 	if img != nil {
 		cost += int(int64(img.Width) * int64(img.Height) >> imagePixelCostShift)
 	}
@@ -180,13 +189,17 @@ func (in *interp) streamBody(raw cos.Object, stream *cos.Stream) ([]byte, bool) 
 			return cached.data, cached.ok
 		}
 	}
+	before := in.doc.DecodeWork()
 	body, err := in.doc.StreamData(stream)
+	// The charge is for what the decode PRODUCED, not for the input it was handed. A failure produces no bytes yet may
+	// have inflated internal/filter's whole max(64 MB, 256x input) allowance before reporting ErrTooLarge: priced at its
+	// input length, a 64 KB zip-bombed body cost ~4 thousand of the 4 million-unit budget for ~64 MB of inflation, so 17
+	// distinct such bodies — one more than the failure cache holds — cycled by Do bought tens of gigabytes of
+	// decompression from a one-megabyte file. An unfiltered body decodes nothing, so its own length floors the charge:
+	// exec scans it either way.
+	in.charge(decodeCost(max(in.doc.DecodeWork()-before, uint64(len(body)))))
 	if err != nil {
-		// A failed decode still did work proportional to the input it consumed before failing.
-		in.charge(bodyCost(len(stream.Raw)))
 		body = nil
-	} else {
-		in.charge(bodyCost(len(body)))
 	}
 	if isRef && len(body) <= maxCachedBodyBytes {
 		in.caches.bodies.put(key, cachedBody{data: body, ok: err == nil})

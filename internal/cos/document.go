@@ -55,6 +55,9 @@ type Document struct {
 	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted; it is
 	// meaningful only once decryptor is non-nil.
 	encryptNum int
+	// decodeWork accumulates the bytes every filter chain this document has run has produced, including those produced
+	// by a chain that ultimately failed (see DecodeWork).
+	decodeWork uint64
 	// xrefStreamRows counts the cross-reference stream rows processed so far, across every section of the chain (see
 	// maxXrefStreamRows).
 	xrefStreamRows int
@@ -242,7 +245,24 @@ func (d *Document) StreamData(s *Stream) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return filter.DecodeChain(specs, s.Raw)
+	return d.decodeChain(specs, s.Raw)
+}
+
+// decodeChain runs specs over raw and meters the bytes the chain produced, including those a chain that ultimately
+// failed had already produced (see DecodeWork).
+func (d *Document) decodeChain(specs []filter.Spec, raw []byte) ([]byte, error) {
+	out, decoded, err := filter.DecodeChain(specs, raw)
+	d.decodeWork += uint64(decoded)
+	return out, err
+}
+
+// DecodeWork returns the running total of bytes every filter chain this document has run has produced. It is the one
+// measurement a caller charging a work budget cannot take for itself: a decode that fails returns no bytes at all, yet
+// internal/filter lets one stage inflate to max(64 MB, 256x input) before reporting ErrTooLarge, so pricing a failure
+// by the input it was handed values a 64 KB zip bomb at a thousandth of the work it forced. Bracket a call with two
+// reads and charge the difference. The counter only grows, and cannot wrap within a document's lifetime.
+func (d *Document) DecodeWork() uint64 {
+	return d.decodeWork
 }
 
 // imageFilterName reports whether name is one of the image-codec filters that internal/filter rejects and
@@ -294,7 +314,7 @@ func (d *Document) imageFilterSplit(lookup Dict, raw []byte) (data []byte, codec
 			parmDict, _ = AsDict(d.Resolve(parmsArr[i]))
 		}
 		if imageFilterName(name) {
-			data, err = filter.DecodeChain(specs, raw)
+			data, err = d.decodeChain(specs, raw)
 			if err != nil {
 				return nil, "", nil, err
 			}
@@ -309,7 +329,7 @@ func (d *Document) imageFilterSplit(lookup Dict, raw []byte) (data []byte, codec
 		}
 		specs = append(specs, filter.Spec{Name: string(name), Params: d.filterParams(parmDict)})
 	}
-	data, err = filter.DecodeChain(specs, raw)
+	data, err = d.decodeChain(specs, raw)
 	if err != nil {
 		return nil, "", nil, err
 	}

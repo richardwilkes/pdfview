@@ -114,20 +114,42 @@ func MaxDecodedSize(inputLen int) int {
 }
 
 // DecodeChain applies each filter in specs to data in order, enforcing MaxChainLength and capping every stage's output
-// at MaxDecodedSize(len(data)) bytes. It returns the fully decoded bytes. data is never modified; the result may alias
-// it only when specs is empty.
-func DecodeChain(specs []Spec, data []byte) ([]byte, error) {
+// at MaxDecodedSize(len(data)) bytes. It returns the fully decoded bytes and the number of bytes the chain PRODUCED —
+// the work it performed, summed over its stages. A caller charging a work budget cannot infer that from the result: a
+// chain that fails returns no bytes at all, yet a stage that reports ErrTooLarge inflated the entire MaxDecodedSize
+// allowance before saying so, so a 64 KB zip bomb reports ~64 MB of work alongside its error. data is never modified;
+// the result may alias it only when specs is empty.
+func DecodeChain(specs []Spec, data []byte) (out []byte, decoded int, err error) {
 	if len(specs) > MaxChainLength {
-		return nil, ErrChainTooLong
+		return nil, 0, ErrChainTooLong
 	}
 	budget := MaxDecodedSize(len(data))
 	for i := range specs {
-		var err error
-		if data, err = Decode(specs[i], data, budget); err != nil {
-			return nil, fmt.Errorf("filter %s: %w", specs[i].Name, err)
+		if out, err = Decode(specs[i], data, budget); err != nil {
+			// The failing stage produced bytes even though it returns none: ErrTooLarge means it produced the whole
+			// allowance (readCapped reads one byte past the cap to detect the overrun), and every other failure stopped
+			// after producing at most as much as it was handed.
+			if errors.Is(err, ErrTooLarge) {
+				decoded = addDecoded(decoded, budget)
+			} else {
+				decoded = addDecoded(decoded, len(data))
+			}
+			return nil, decoded, fmt.Errorf("filter %s: %w", specs[i].Name, err)
 		}
+		data = out
+		decoded = addDecoded(decoded, len(data))
 	}
-	return data, nil
+	return data, decoded, nil
+}
+
+// addDecoded adds n to a running production total, saturating at math.MaxInt. A single stage's allowance reaches
+// math.MaxInt for a large input on GOARCH=386/arm, and a wrapped total would report the most expensive decode there is
+// as no work at all.
+func addDecoded(total, n int) int {
+	if n > math.MaxInt-total {
+		return math.MaxInt
+	}
+	return total + n
 }
 
 // Decode applies a single filter to data, capping the output at maxSize bytes. The returned slice never aliases data.

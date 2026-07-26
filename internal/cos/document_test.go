@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/filter"
 )
 
 // builder assembles small PDF files with correct offsets for the classic-xref tests.
@@ -512,5 +513,65 @@ func TestCryptFilterInChain(t *testing.T) {
 	}
 	if !strings.Contains(msg, "/Crypt") || !strings.Contains(msg, "/Identity") {
 		t.Errorf("error is %q, want it to name the /Crypt filter and the /Identity it accepts instead", msg)
+	}
+}
+
+// TestDecodeWorkMetersWhatChainsProduce verifies the decode-work meter counts the bytes a filter chain produced,
+// whether or not it succeeded. That is the one measurement a caller charging a work budget cannot take for itself: a
+// failed decode hands back nothing, yet internal/filter inflates the whole max(64 MB, 256x input) allowance before
+// reporting ErrTooLarge, so pricing such a stream by its input alone values a zip bomb at a thousandth of the work it
+// forced.
+func TestDecodeWorkMetersWhatChainsProduce(t *testing.T) {
+	const decoded = "BT ET"
+	var z bytes.Buffer
+	zw, err := zlib.NewWriterLevel(&z, zlib.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = zw.Write([]byte(decoded)); err != nil {
+		t.Fatal(err)
+	}
+	if err = zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var bomb bytes.Buffer
+	if zw, err = zlib.NewWriterLevel(&bomb, zlib.BestCompression); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = zw.Write(make([]byte, filter.MaxDecodedSize(0)+1)); err != nil {
+		t.Fatal(err)
+	}
+	if err = zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b := newBuilder()
+	b.add(1, catalogBody)
+	b.add(2, pagesBody)
+	b.addStream(3, "", []byte(decoded))
+	b.addStream(4, "/Filter /FlateDecode", z.Bytes())
+	b.addStream(5, "/Filter /FlateDecode", bomb.Bytes())
+	d := mustOpen(t, b.finishClassic(""))
+	work := func(t *testing.T, num int, wantErr bool) uint64 {
+		t.Helper()
+		stream, ok := cos.AsStream(d.LoadObject(num))
+		if !ok {
+			t.Fatalf("object %d is not a stream", num)
+		}
+		before := d.DecodeWork()
+		if _, err = d.StreamData(stream); (err != nil) != wantErr {
+			t.Fatalf("object %d: err = %v, wantErr = %v", num, err, wantErr)
+		}
+		return d.DecodeWork() - before
+	}
+	// An unfiltered stream runs no chain at all, so it produces nothing to meter; a flate stream produces its output.
+	if got := work(t, 3, false); got != 0 {
+		t.Errorf("an unfiltered stream metered %d bytes of decode work, want 0", got)
+	}
+	if got := work(t, 4, false); got != uint64(len(decoded)) {
+		t.Errorf("a flate stream metered %d bytes of decode work, want %d", got, len(decoded))
+	}
+	// The bomb hands back nothing, having inflated the whole allowance to discover it was too large.
+	if got, want := work(t, 5, true), uint64(filter.MaxDecodedSize(0)); got < want {
+		t.Errorf("a failed decode metered %d bytes of decode work, want at least the %d it inflated", got, want)
 	}
 }

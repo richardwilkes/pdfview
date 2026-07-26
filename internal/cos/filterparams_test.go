@@ -107,7 +107,7 @@ func TestFilterParamsRejectsTruncatingValues(t *testing.T) {
 			if tc.key == earlyChangeKey {
 				return
 			}
-			if _, err := filter.DecodeChain([]filter.Spec{{Name: "FlateDecode", Params: params}},
+			if _, _, err := filter.DecodeChain([]filter.Spec{{Name: "FlateDecode", Params: params}},
 				deflated(t, make([]byte, 64))); !errors.Is(err, filter.ErrUnsupportedFilter) {
 				t.Errorf("decoding with a saturated /%s = %v, want %v", tc.key, err, filter.ErrUnsupportedFilter)
 			}

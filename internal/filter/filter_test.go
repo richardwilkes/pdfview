@@ -529,12 +529,44 @@ func TestDecodeChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf.WriteString("~>")
-	got, err := filter.DecodeChain([]filter.Spec{spec(a85Name), spec(flateName)}, buf.Bytes())
+	got, decoded, err := filter.DecodeChain([]filter.Spec{spec(a85Name), spec(flateName)}, buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Error("ASCII85 + Flate chain mismatch")
+	}
+	// Every stage's output counts: the chain's work is the ASCII85 stage's output plus the inflated result, not just
+	// the bytes it handed back.
+	if decoded <= len(want) {
+		t.Errorf("the chain reported %d bytes of work, want more than the %d it returned (the ASCII85 stage's output "+
+			"is work too)", decoded, len(want))
+	}
+}
+
+// TestDecodeChainWorkOnFailure verifies that a chain reports the work a FAILED decode performed. A stage that reports
+// ErrTooLarge inflated the whole MaxDecodedSize allowance before saying so, so a caller charging a work budget must be
+// told about those bytes: the input length says nothing about them (a 64 KB zip bomb inflates 64 MB), while a failure
+// that never produced anything must stay cheap so a merely corrupt stream does not exhaust the caller's budget.
+func TestDecodeChainWorkOnFailure(t *testing.T) {
+	bomb := zlibCompress(t, make([]byte, filter.MaxDecodedSize(0)+1))
+	_, decoded, err := filter.DecodeChain([]filter.Spec{spec(flateName)}, bomb)
+	if !errors.Is(err, filter.ErrTooLarge) {
+		t.Fatalf("decoding the bomb: err = %v, want ErrTooLarge", err)
+	}
+	if want := filter.MaxDecodedSize(len(bomb)); decoded < want {
+		t.Errorf("the bomb reported %d bytes of work, want at least the %d it was allowed to inflate", decoded, want)
+	}
+	// A chain rejected before it runs, and one whose stage fails without producing anything, did no such work.
+	if _, decoded, err = filter.DecodeChain(make([]filter.Spec, filter.MaxChainLength+1), nil); decoded != 0 {
+		t.Errorf("an over-long chain reported %d bytes of work (err %v), want 0", decoded, err)
+	}
+	garbage := []byte("not a flate stream at all")
+	if _, decoded, err = filter.DecodeChain([]filter.Spec{spec(flateName)}, garbage); err == nil {
+		t.Fatal("expected the garbage stream to fail")
+	} else if decoded > len(garbage) {
+		t.Errorf("a failure that produced nothing reported %d bytes of work, want at most the %d bytes of input",
+			decoded, len(garbage))
 	}
 }
 
@@ -543,7 +575,7 @@ func TestDecodeChainTooLong(t *testing.T) {
 	for i := range specs {
 		specs[i] = spec(hexName)
 	}
-	if _, err := filter.DecodeChain(specs, []byte("00>")); !errors.Is(err, filter.ErrChainTooLong) {
+	if _, _, err := filter.DecodeChain(specs, []byte("00>")); !errors.Is(err, filter.ErrChainTooLong) {
 		t.Errorf("expected ErrChainTooLong, got %v", err)
 	}
 }
