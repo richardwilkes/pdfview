@@ -210,7 +210,10 @@ func matchAt(chars []Char, start int, needle []rune) (quads []gfx.Quad, end int,
 				pos++
 				consumed = true
 			}
-			if pos > start && pos < len(chars) {
+			// pos > 0, not pos > start: a needle whose first rune is whitespace consumes no characters here, so the
+			// synthesized alternatives must still be consulted against the predecessor of the match's own starting
+			// character. Only a match starting at the very first recorded character has no predecessor.
+			if pos > 0 && pos < len(chars) {
 				prev, cur := chars[pos-1], chars[pos]
 				switch {
 				case lineBreakBetween(prev, cur):

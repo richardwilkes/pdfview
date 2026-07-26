@@ -102,6 +102,52 @@ func TestSearchGapAsWordSpace(t *testing.T) {
 	}
 }
 
+// TestSearchLeadingSpaceNeedle pins a needle whose FIRST rune is whitespace: at the match's starting position the
+// whitespace branch consumes no characters, so the synthesized alternatives must be tested against the predecessor of
+// that starting character. Without it, " Text" found nothing where "Kerned Text" matched.
+func TestSearchLeadingSpaceNeedle(t *testing.T) {
+	// A ≥ gapSpaceEm em TJ gap with no space character in the stream satisfies the leading needle space.
+	first, endX := mkWord("Kerned", 100, 200, 10, 20)
+	wide, wideEndX := mkWord("Text", endX+gapSpaceEm*20, 200, 10, 20)
+	got := searchChars(append(append([]Char(nil), first...), wide...), " Text", 100)
+	if len(got) != 1 {
+		t.Fatalf("gap >= threshold: expected 1 quad, got %d", len(got))
+	}
+	// The quad covers only the matched characters; the gap itself contributes nothing.
+	want := gfx.Quad{
+		UL: gfx.Point{X: endX + gapSpaceEm*20, Y: 200 - 0.8*20},
+		UR: gfx.Point{X: wideEndX, Y: 200 - 0.8*20},
+		LL: gfx.Point{X: endX + gapSpaceEm*20, Y: 200 + 0.2*20},
+		LR: gfx.Point{X: wideEndX, Y: 200 + 0.2*20},
+	}
+	if got[0] != want {
+		t.Fatalf("quad = %+v, want %+v", got[0], want)
+	}
+	// A sub-threshold gap still must not satisfy it.
+	narrow, _ := mkWord("Text", endX+gapSpaceEm*20*0.9, 200, 10, 20)
+	if got = searchChars(append(append([]Char(nil), first...), narrow...), " Text", 100); len(got) != 0 {
+		t.Fatalf("gap < threshold: expected 0 quads, got %d", len(got))
+	}
+	// A line break satisfies it too, and the empty leading segment yields no quad of its own.
+	line1, _ := mkWord("brown", 100, 200, 10, 12)
+	line2, line2EndX := mkWord("fox", 40, 214, 10, 12)
+	if got = searchChars(append(append([]Char(nil), line1...), line2...), " fox", 100); len(got) != 1 {
+		t.Fatalf("line break: expected 1 quad, got %d: %+v", len(got), got)
+	}
+	if got[0].UL.X != 40 || got[0].UR.X != line2EndX {
+		t.Fatalf("line-break quad spans %v..%v, want 40..%v", got[0].UL.X, got[0].UR.X, line2EndX)
+	}
+	// An actual space character before the word satisfies it as well.
+	spaced, _ := mkWord("a b", 100, 200, 10, 12)
+	if got = searchChars(spaced, " b", 100); len(got) != 1 {
+		t.Fatalf("space character: expected 1 quad, got %d", len(got))
+	}
+	// With no predecessor at all, a leading-space needle must still fail at the very start of the stream.
+	if got = searchChars(wide, " Text", 100); len(got) != 0 {
+		t.Fatalf("stream start: expected 0 quads, got %d", len(got))
+	}
+}
+
 func TestSearchWrappedMatch(t *testing.T) {
 	// "brown" ends line 1 and "fox" starts line 2: the needle space matches the line break and the match yields one
 	// quad per line, first line first.
