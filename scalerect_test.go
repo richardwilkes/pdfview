@@ -53,7 +53,7 @@ func TestQuadToRectExtremeCoords(t *testing.T) {
 		llX: 0, llY: 0,
 		lrX: 0, lrY: 0,
 	}
-	got := quadToRect(q, 1)
+	got := quadToRect(q, pixelSpace{scale: 1, bounds: image.Rect(0, 0, 200, 200)})
 	// minX/minY are 0; maxX/maxY are +Inf, which must clamp to 0.
 	if got != image.Rect(0, 0, 0, 0) {
 		t.Errorf("quadToRect with +Inf corners = %v, want %v", got, image.Rect(0, 0, 0, 0))

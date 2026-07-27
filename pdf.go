@@ -40,7 +40,11 @@ import (
 
 // Possible error values
 var (
-	ErrNotPDFData               = errors.New("only PDF documents are supported")
+	ErrNotPDFData = errors.New("only PDF documents are supported")
+	// ErrUnableToCreatePDFContext is retained only for source compatibility with the MuPDF-based
+	// github.com/richardwilkes/pdf binding this package succeeds, where it reported a failure to create the library's
+	// fz_context. The pure-Go engine has no such context to establish, so nothing in this package ever returns it: an
+	// open failure is always ErrNotPDFData or ErrUnableToOpenPDF. A branch testing for it can never be taken.
 	ErrUnableToCreatePDFContext = errors.New("unable to create PDF context")
 	ErrInternal                 = errors.New("internal error")
 	ErrUnableToOpenPDF          = errors.New("unable to open PDF")
@@ -114,9 +118,11 @@ type PageLink struct {
 	PageNumber int
 	// Bounds is the clickable hot-zone of the link on the page it appears on, in rendered-image pixel space.
 	Bounds image.Rectangle
-	// DestPoint is the point on the destination page (PageNumber) that an internal link targets, in rendered-image
-	// pixel space. It is the zero value (0,0) for external links and for internal links whose destination has no
-	// explicit coordinate (such as a /Fit destination).
+	// DestPoint is the point on the destination page (PageNumber) that an internal link targets, in the pixel space of
+	// that page's rendered image — the destination page's own, which under RenderPageForSize is scaled from that
+	// page's bounds and so differs from this page's whenever the two pages differ in size. It is the zero value (0,0)
+	// for external links and for internal links whose destination has no explicit coordinate (such as a /Fit
+	// destination).
 	DestPoint image.Point
 }
 
@@ -148,8 +154,20 @@ func (d *document) released() bool {
 	return d.eng == nil
 }
 
+// usable reports whether the wrapper carries state a method can act on. Document embeds an unexported pointer, so the
+// zero value of the exported type — and a nil *Document — would dereference nil on the very first statement of every
+// method (the mutex lives behind that pointer), contradicting the package's promise that panics never escape the
+// public API. Every entry point checks this first and then returns the same value it documents for a released
+// document, which is the state a wrapper with no engine behind it is indistinguishable from.
+func (d *Document) usable() bool {
+	return d != nil && d.document != nil
+}
+
 // RequiresAuthentication returns true if a password is required. Returns false if the document has been released.
 func (d *Document) RequiresAuthentication() bool {
+	if !d.usable() {
+		return false
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -160,6 +178,9 @@ func (d *Document) RequiresAuthentication() bool {
 
 // Authenticate with either the user or owner password. Returns a zero status if the document has been released.
 func (d *Document) Authenticate(password string) AuthenticationStatus {
+	if !d.usable() {
+		return 0
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -170,6 +191,9 @@ func (d *Document) Authenticate(password string) AuthenticationStatus {
 
 // TableOfContents returns the table of contents for this document, if any.
 func (d *Document) TableOfContents(dpi int) []*TOCEntry {
+	if !d.usable() {
+		return nil
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -220,6 +244,9 @@ func sanitizeString(in string) string {
 
 // PageCount returns total number of pages in the document.
 func (d *Document) PageCount() int {
+	if !d.usable() {
+		return 0
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -236,20 +263,49 @@ func dpiToScale(dpi int) float64 {
 	return min(float64(max(dpi, 1))/72, 10)
 }
 
+// renderSpec describes how one render sizes its output: scale converts page space to pixels, and maxWidth/maxHeight,
+// when positive, cap the resulting pixel extents. RenderPage leaves the caps zero — its scale places no bound on the
+// image beyond the page's own size. RenderPageForSize sets them because it promises the image fits within them, and
+// its fit scale is computed in float64 while renderExtent redoes the multiply in float32 before ceiling with a fixed
+// 0.001 epsilon: once a target extent exceeds roughly 17,000 px the float32 rounding error outgrows that epsilon and
+// the unclamped extent can land one pixel past the box the caller asked to fit within.
+type renderSpec struct {
+	scale               float64
+	maxWidth, maxHeight int
+}
+
+// extents returns the pixel dimensions the page renders to under this spec. It is the single authority for those
+// dimensions: rasterize sizes the surface from it, and the search-hit and link coordinates are bounded to it so they
+// honor their documented "pixel space of the rendered image" even though the extent multiply happens in float32 (the
+// engine's geometry precision, which the MuPDF dimension goldens are pinned to) while the coordinate multiply happens
+// in float64 (which the MuPDF coordinate goldens are pinned to). The two scales differ in the last bits, so without
+// this bound a full-page link on a US Letter page at 150 dpi reports a bottom edge one row below the 1650-row image.
+func (s renderSpec) extents(pg *page) (width, height int) {
+	width = renderExtent(pg.width, s.scale)
+	height = renderExtent(pg.height, s.scale)
+	if s.maxWidth > 0 {
+		width = min(width, s.maxWidth)
+	}
+	if s.maxHeight > 0 {
+		height = min(height, s.maxHeight)
+	}
+	return width, height
+}
+
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
 // maxHits matching text on the page will be returned.
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
-	return d.render(pageNumber, maxHits, search, func(*page) (float64, error) {
-		return dpiToScale(dpi), nil
+	return d.render(pageNumber, maxHits, search, func(*page) (renderSpec, error) {
+		return renderSpec{scale: dpiToScale(dpi)}, nil
 	})
 }
 
 // RenderPageForSize renders the specified page to fit within the requested size. If search is not empty, then the
 // bounding boxes of up to maxHits matching text on the page will be returned.
 func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
-	return d.render(pageNumber, maxHits, search, func(pg *page) (float64, error) {
+	return d.render(pageNumber, maxHits, search, func(pg *page) (renderSpec, error) {
 		if maxWidth <= 0 || maxHeight <= 0 {
-			return 0, ErrInvalidPageSize
+			return renderSpec{}, ErrInvalidPageSize
 		}
 		// The page extents are computed in float32 (the precision the engine's geometry pipeline carries) before being
 		// widened, matching the C float precision the MuPDF-based implementation exposed.
@@ -257,7 +313,7 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		w := float64(bw)
 		h := float64(bh)
 		if w <= 0 || h <= 0 {
-			return 0, ErrInvalidPageSize
+			return renderSpec{}, ErrInvalidPageSize
 		}
 		scale := float64(maxWidth) / w
 		if ratio := float64(maxHeight) / h; ratio < scale {
@@ -266,16 +322,20 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
 		// box. Reject an over-large request here, before doing any rendering work or allocating the pixel buffer.
 		if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
-			return 0, ErrImageTooLarge
+			return renderSpec{}, ErrImageTooLarge
 		}
-		return scale, nil
+		return renderSpec{scale: scale, maxWidth: maxWidth, maxHeight: maxHeight}, nil
 	})
 }
 
 // render is the shared body of RenderPage and RenderPageForSize. It validates the page number, loads the page, asks
-// scaleFor to compute the render scale (which may inspect the page bounds and reject the request), renders, and
-// assembles the result. The document lock is held throughout so all engine work is serialized.
-func (d *Document) render(pageNumber, maxHits int, search string, scaleFor func(pg *page) (float64, error)) (*RenderedPage, error) {
+// specFor to compute the render spec (which may inspect the page bounds and reject the request), renders, and
+// assembles the result. The document lock is held throughout so all engine work is serialized. specFor is carried into
+// loadLinks as well, which needs it to size the destination page of an internal link.
+func (d *Document) render(pageNumber, maxHits int, search string, specFor func(pg *page) (renderSpec, error)) (*RenderedPage, error) {
+	if !d.usable() {
+		return nil, ErrDocumentReleased
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -288,23 +348,26 @@ func (d *Document) render(pageNumber, maxHits int, search string, scaleFor func(
 	if err != nil {
 		return nil, err
 	}
-	scale, err := scaleFor(pg)
+	spec, err := specFor(pg)
 	if err != nil {
 		return nil, err
 	}
-	img, err := d.renderPage(pg, scale)
+	img, err := d.renderPage(pg, spec)
 	if err != nil {
 		return nil, err
 	}
+	// The image that came back is the pixel space every coordinate below is documented to be in, so it — not a
+	// recomputed extent — is what those coordinates are bounded to.
+	self := pixelSpace{scale: spec.scale, bounds: img.Rect}
 	return &RenderedPage{
 		Image:      img,
-		SearchHits: d.searchPage(pg, scale, search, maxHits),
-		Links:      d.loadLinks(pg, scale),
+		SearchHits: d.searchPage(pg, self, search, maxHits),
+		Links:      d.loadLinks(pg, self, specFor),
 	}, nil
 }
 
-func (d *Document) renderPage(pg *page, scale float64) (*image.NRGBA, error) {
-	pix, width, height, stride, err := d.eng.rasterize(pg, scale)
+func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
+	pix, width, height, stride, err := d.eng.rasterize(pg, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -352,14 +415,35 @@ func unpremultiply(c, a uint8) uint8 {
 	return uint8(v)
 }
 
-func (d *Document) searchPage(pg *page, scale float64, search string, maxHits int) []image.Rectangle {
+// pixelSpace is the rendered-image pixel space of one page: the scale page-space coordinates are multiplied by and the
+// image rectangle the results are bounded to. Every coordinate the public API returns is documented to live in one of
+// these — the rendered page's own for search hits and link bounds, the destination page's for a link's DestPoint.
+type pixelSpace struct {
+	bounds image.Rectangle
+	scale  float64
+}
+
+// rect maps a page-space rectangle into this space, expanded outward to whole pixels and bounded to the image.
+func (s pixelSpace) rect(x0, y0, x1, y1 float64) image.Rectangle {
+	return scaleRect(x0, y0, x1, y1, s.scale).Intersect(s.bounds)
+}
+
+// point maps a page-space point into this space, floored and bounded to the image.
+func (s pixelSpace) point(x, y float64) image.Point {
+	return image.Pt(
+		min(max(scaledFloor(x, s.scale), s.bounds.Min.X), s.bounds.Max.X),
+		min(max(scaledFloor(y, s.scale), s.bounds.Min.Y), s.bounds.Max.Y),
+	)
+}
+
+func (d *Document) searchPage(pg *page, self pixelSpace, search string, maxHits int) []image.Rectangle {
 	var boxes []image.Rectangle
 	if search != "" && maxHits > 0 && OverallMaxHits > 0 {
 		hits := d.eng.search(pg, search, min(maxHits, OverallMaxHits))
 		if len(hits) > 0 {
 			boxes = make([]image.Rectangle, len(hits))
 			for i, q := range hits {
-				boxes[i] = quadToRect(q, scale)
+				boxes[i] = quadToRect(q, self)
 			}
 		}
 	}
@@ -369,12 +453,12 @@ func (d *Document) searchPage(pg *page, scale float64, search string, maxHits in
 // quadToRect computes the scaled, axis-aligned bounding rectangle that encloses all four corners of a search-hit quad.
 // Considering every corner (rather than assuming an axis-aligned quad) keeps the box correct for rotated or skewed
 // text.
-func quadToRect(q quad, scale float64) image.Rectangle {
+func quadToRect(q quad, self pixelSpace) image.Rectangle {
 	minX := math.Min(math.Min(float64(q.ulX), float64(q.urX)), math.Min(float64(q.llX), float64(q.lrX)))
 	minY := math.Min(math.Min(float64(q.ulY), float64(q.urY)), math.Min(float64(q.llY), float64(q.lrY)))
 	maxX := math.Max(math.Max(float64(q.ulX), float64(q.urX)), math.Max(float64(q.llX), float64(q.lrX)))
 	maxY := math.Max(math.Max(float64(q.ulY), float64(q.urY)), math.Max(float64(q.llY), float64(q.lrY)))
-	return scaleRect(minX, minY, maxX, maxY, scale)
+	return self.rect(minX, minY, maxX, maxY)
 }
 
 // scaleRect scales an axis-aligned rectangle by scale and converts it to integer pixel space, expanding outward so the
@@ -410,15 +494,19 @@ func clampFloatToInt(r float64) int {
 	return int(r)
 }
 
-func (d *Document) loadLinks(pg *page, scale float64) []*PageLink {
+func (d *Document) loadLinks(pg *page, self pixelSpace, specFor func(pg *page) (renderSpec, error)) []*PageLink {
 	if OverallMaxLinks < 1 {
 		return nil
 	}
+	// DestPoint is documented to be in the pixel space of the destination page's rendered image, which is not this
+	// page's whenever the two pages differ in size: RenderPageForSize derives its scale per page from that page's own
+	// bounds. The spaces are memoized because a page can carry thousands of links into a handful of pages.
+	destSpaces := make(map[int]pixelSpace)
 	var links []*PageLink
 	for _, link := range d.eng.links(pg) {
 		pageLink := &PageLink{
 			PageNumber: -1,
-			Bounds:     scaleRect(float64(link.x0), float64(link.y0), float64(link.x1), float64(link.y1), scale),
+			Bounds:     self.rect(float64(link.x0), float64(link.y0), float64(link.x1), float64(link.y1)),
 		}
 		// External links keep their URI; internal links carry the engine-resolved 0-based target page — the same
 		// numbering this package's API uses — plus the destination point on that page. Internal links that cannot be
@@ -427,10 +515,8 @@ func (d *Document) loadLinks(pg *page, scale float64) []*PageLink {
 			pageLink.URI = sanitizeString(link.uri)
 		} else {
 			pageLink.PageNumber = link.page
-			pageLink.DestPoint = image.Pt(
-				scaledFloor(float64(link.destX), scale),
-				scaledFloor(float64(link.destY), scale),
-			)
+			dest := d.destSpace(link.page, self, specFor, destSpaces)
+			pageLink.DestPoint = dest.point(float64(link.destX), float64(link.destY))
 		}
 		if pageLink.PageNumber >= 0 || pageLink.URI != "" {
 			if links = append(links, pageLink); len(links) >= OverallMaxLinks {
@@ -441,10 +527,35 @@ func (d *Document) loadLinks(pg *page, scale float64) []*PageLink {
 	return links
 }
 
+// destSpace returns the pixel space the given destination page renders into under the same sizing policy this render
+// used, memoizing the answer. A page that cannot be loaded or sized (a target past the end of the document, or one
+// whose fit scale the spec rejects) falls back to the rendered page's own space, which is where the point was reported
+// before and is the best available answer. Under RenderPage every page shares one scale, so this always returns self
+// there.
+func (d *Document) destSpace(pageNumber int, self pixelSpace, specFor func(pg *page) (renderSpec, error),
+	cache map[int]pixelSpace,
+) pixelSpace {
+	if space, ok := cache[pageNumber]; ok {
+		return space
+	}
+	space := self
+	if destPage, err := d.eng.loadPage(pageNumber); err == nil {
+		if spec, specErr := specFor(destPage); specErr == nil {
+			width, height := spec.extents(destPage)
+			space = pixelSpace{scale: spec.scale, bounds: image.Rect(0, 0, width, height)}
+		}
+	}
+	cache[pageNumber] = space
+	return space
+}
+
 // Release the underlying PDF document, releasing any resources. It is not necessary to call this, as garbage collection
 // will eventually reclaim the memory once the Document is unreachable, however, doing so explicitly drops the engine
 // state (parsed objects, caches, and the copy of the document bytes) immediately.
 func (d *Document) Release() {
+	if !d.usable() {
+		return
+	}
 	d.release()
 }
 
@@ -654,7 +765,7 @@ func (e *engineDocument) links(pg *page) (infos []pageLinkInfo) {
 // page extent is scaled in float32, then the max corner is ceiled with a small epsilon so float slop just above a whole
 // number does not spill into an extra pixel row (pinned against all recorded corpus dimensions). A panic provoked by
 // hostile content anywhere under the render surfaces as ErrInternal rather than escaping the public API.
-func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, height, stride int, err error) {
+func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width, height, stride int, err error) {
 	defer func() {
 		if recover() != nil {
 			pix = nil
@@ -662,8 +773,7 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 			e.dev = nil // The device may hold half-unwound canvas state; never reuse it.
 		}
 	}()
-	width = renderExtent(pg.width, scale)
-	height = renderExtent(pg.height, scale)
+	width, height = spec.extents(pg)
 	if width <= 0 || height <= 0 {
 		return nil, 0, 0, 0, ErrUnableToCreateImage
 	}
@@ -679,10 +789,19 @@ func (e *engineDocument) rasterize(pg *page, scale float64) (pix []byte, width, 
 		if dev, err = render.New(width, height); err != nil {
 			return nil, 0, 0, 0, ErrUnableToCreateImage
 		}
+	}
+	// The reused surface is engine state maxCacheSize does not cover, so it is only carried across renders when it
+	// fits inside that budget: a document rendered once at high dpi would otherwise hold width*height*4 bytes (33 MB
+	// for US Letter at 300 dpi) for its whole lifetime no matter how small a cache the caller asked for. An unlimited
+	// budget keeps the surface unconditionally, as before. Retention is decided before the render so a panic mid-run
+	// still finds the device in e.dev to clear.
+	if budget := e.store.Max(); budget == 0 || surfaceBytes(width, height) <= budget {
 		e.dev = dev
+	} else {
+		e.dev = nil
 	}
 	dev.SetStore(e.store)
-	ctm, err := e.doc.PageCTM(pg.number, float32(scale))
+	ctm, err := e.doc.PageCTM(pg.number, float32(spec.scale))
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToLoadPage
 	}
@@ -726,6 +845,12 @@ func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) 
 	for _, a := range annots {
 		run.Annot(e.doc.COS(), res, a.Raw, a.Stream, a.Transform.Mul(ctm), dev)
 	}
+}
+
+// surfaceBytes is the byte size of a width×height raster surface — 4 bytes per pixel, the premultiplied N32 layout the
+// device allocates — which is what retaining the reused device between renders costs.
+func surfaceBytes(width, height int) uint64 {
+	return uint64(width) * uint64(height) * 4
 }
 
 // renderExtent converts one page-space extent to rendered pixels: float32 multiply (the engine's geometry precision),

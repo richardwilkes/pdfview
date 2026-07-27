@@ -13,7 +13,6 @@ import (
 	"github.com/richardwilkes/canvas/canvas"
 	"github.com/richardwilkes/canvas/geom"
 
-	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/render"
 )
 
@@ -27,6 +26,12 @@ import (
 // geom.ScaleMatrix(dpi/72, dpi/72) reproduces RenderPage's layout at that dpi. Only the affine components of ctm are
 // used (PDF content is affine; any perspective entries are ignored).
 //
+// Drawing is confined to the page box (the effective MediaBox∩CropBox, after rotation) mapped through ctm, so content
+// a page paints outside its own box — bleed, printer's marks, or simply a stream that runs past the box — never
+// reaches the rest of the caller's canvas. RenderPage bounds the same content implicitly, by rasterizing into a
+// page-sized surface; that surface rounds its extent up to whole pixels, so edge-touching content can differ from this
+// clip by a fraction of a pixel at the page boundary.
+//
 // ctm must be finite, and its composition with the page CTM must not overflow; a matrix that fails either test is
 // rejected with ErrInvalidMatrix before anything is drawn.
 //
@@ -38,6 +43,9 @@ import (
 // DrawPage serializes with all other methods on the Document (one call into the engine at a time), but the canvas
 // itself is not otherwise protected: the caller must not use it concurrently from other goroutines.
 func (d *Document) DrawPage(c *canvas.Canvas, pageNumber int, ctm geom.Matrix) error {
+	if !d.usable() {
+		return ErrDocumentReleased
+	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.released() {
@@ -67,8 +75,12 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 		if recover() != nil {
 			err = ErrInternal
 		}
-		if save >= 0 {
-			c.RestoreToCount(save)
+		// The restore carries its own guard rather than running bare after the recover above: RestoreToCount pops
+		// device clip stacks and composites any open SaveLayer — exactly the state a panic mid-transparency-group
+		// leaves behind — so the restore that matters most is also the one most able to panic, and a panic raised
+		// there would otherwise escape DrawPage instead of becoming ErrInternal.
+		if save >= 0 && !restoreToCount(c, save) {
+			err = ErrInternal
 		}
 	}()
 	dev, derr := render.Wrap(c)
@@ -82,20 +94,31 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 	// Every other entry point derives its CTM from validated geometry, and the interpreter relies on that: cm and a
 	// form's /Matrix only check the product they compute, assuming the incoming CTM is already finite. The caller's
 	// matrix is the one unvalidated source, so reject it here rather than letting a NaN/Inf reach the device.
-	full := base.Mul(gfxFromGeom(ctm))
+	full := base.Mul(render.FromGeom(ctm))
 	if !full.IsFinite() {
 		return ErrInvalidMatrix
 	}
 	save = c.Save()
+	// RenderPage bounds a page's content by construction — it rasterizes into a page-sized surface, so nothing outside
+	// the page box survives. The caller's canvas carries no such bound, so push the page box explicitly; without it a
+	// page whose stream paints past its own box repaints whatever else the caller has on the canvas, and the
+	// documented equivalence with RenderPage's layout holds only for a canvas no larger than the page. pg.width and
+	// pg.height are the box's extent in the same top-left, y-down page space ctm maps from.
+	dev.ClipPageBox(pg.width, pg.height, render.FromGeom(ctm))
 	dev.SetStore(e.store)
 	e.runPage(pg, full, dev)
 	return nil
 }
 
-// gfxFromGeom extracts the affine part of a canvas geom.Matrix (Skia layout: scaleX, skewX, transX, skewY, scaleY,
-// transY, perspective row) into the engine's PDF-style row-vector matrix. This is the exact inverse of
-// internal/render's gfx→geom conversion; perspective entries have no PDF counterpart and are dropped.
-func gfxFromGeom(m geom.Matrix) gfx.Matrix {
-	a9 := m.As9()
-	return gfx.Matrix{A: a9[0], B: a9[3], C: a9[1], D: a9[4], E: a9[2], F: a9[5]}
+// restoreToCount pops the canvas back to the given save depth, reporting whether it completed. It is a function of its
+// own so the restore runs under a recover that is not the one drawPage's deferred cleanup already consumed; see the
+// comment at that call.
+func restoreToCount(c *canvas.Canvas, save int) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	c.RestoreToCount(save)
+	return true
 }

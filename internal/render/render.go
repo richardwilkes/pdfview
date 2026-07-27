@@ -206,6 +206,14 @@ func matrix(m gfx.Matrix) geom.Matrix {
 	return out
 }
 
+// FromGeom extracts the affine part of a canvas geom.Matrix (Skia layout: scaleX, skewX, transX, skewY, scaleY,
+// transY, perspective row) into the engine's PDF-style row-vector matrix. It is the exact inverse of matrix above;
+// perspective entries have no PDF counterpart and are dropped (PDF content is affine).
+func FromGeom(m geom.Matrix) gfx.Matrix {
+	a9 := m.As9()
+	return gfx.Matrix{A: a9[0], B: a9[3], C: a9[1], D: a9[4], E: a9[2], F: a9[5]}
+}
+
 // buildPath converts a gfx.Path to a canvas path with the given fill rule. It is the single seam every gfx.Path crosses
 // into canvas through — fills, strokes, clips, glyph outlines and mesh triangles all funnel here — so it is also where
 // non-finite geometry stops: producers validate their own coordinates, but a value derived from validated ones (a
@@ -465,6 +473,77 @@ func (d *Device) ClipPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) {
 func (d *Device) ClipStrokePath(p *gfx.Path, _ *gfx.StrokeParams, ctm gfx.Matrix) {
 	d.ClipPath(p, false, ctm)
 }
+
+// pageBoxEpsilon is the slack the page box is snapped with, the same value the surface extent is sized with: float slop
+// just above a whole number must not claim an extra pixel row or column.
+const pageBoxEpsilon = 0.001
+
+// ClipPageBox confines drawing to a page's box — the width×height rectangle at the origin of the space ctm maps from —
+// so a page that paints past its own box cannot reach the rest of the surface. A device rendering into its own surface
+// gets that bound for free, because the surface is exactly the page's size; a device wrapping a caller's canvas (Wrap)
+// does not, and no other clip covers it: the interpreter pushes /BBox clips for forms and patterns but nothing for the
+// page itself.
+//
+// Whenever the composed page-to-device map keeps the box on the pixel axes, the bound is snapped outward to whole
+// device pixels with the same epsilon-ceiling the surface extent uses, so the clipped region is exactly the pixels a
+// page-sized surface would have covered. That matters twice over: the edge composites identically instead of picking
+// up a partial-coverage fringe where the page's extent falls mid-pixel, and a whole-pixel rectangle stays in the
+// rasterizer's black-and-white clip representation, where an antialiased one would convert every later draw onto the
+// AA-clip blitter and shift interior pixels by a unit. A rotated or skewed map has no pixel-aligned answer; there the
+// exact transformed box is pushed as an ordinary antialiased clip path.
+//
+// The clip is deliberately not recorded on the tracked clip stack: it is an outer bound established before the
+// interpreter runs, and the interpreter's balanced PopClip calls must never be able to reach it. The caller unwinds it
+// through the canvas save it took before calling.
+func (d *Device) ClipPageBox(width, height float32, ctm gfx.Matrix) {
+	total := d.c.TotalMatrix()
+	if box, ok := snapPageBox(width, height, ctm.Mul(FromGeom(total))); ok {
+		d.untrackedState++ // Clip state outside the tracked stacks; disables the direct blit path.
+		d.c.ResetMatrix()  // The snapped box is in device pixels, so it must not be mapped again.
+		d.c.ClipRect(box, raster.ClipIntersect, false)
+		d.c.SetMatrix(&total)
+		return
+	}
+	var page gfx.Path
+	page.Rect(0, 0, width, height)
+	cp, ok := buildPathIn(&page, false, ctm)
+	if !ok {
+		// The box does not fit float32 once transformed, which means it covers the whole surface; pushing the
+		// ±Inf-cornered path instead would empty the clip and everything drawn under it would vanish.
+		return
+	}
+	d.untrackedState++
+	d.c.ClipPath(cp, raster.ClipIntersect, true)
+}
+
+// snapPageBox maps the width×height page box through toDevice and returns it as a device-pixel rectangle snapped
+// outward to whole pixels. It reports false when the map rotates or skews the box off the pixel axes — there is no
+// pixel-aligned answer then — or when the result is not a rectangle a rasterizer can act on.
+func snapPageBox(width, height float32, toDevice gfx.Matrix) (geom.Rect, bool) {
+	// Both forms map an axis-aligned rectangle to an axis-aligned rectangle: no rotation, or a quarter turn.
+	onAxes := (toDevice.B == 0 && toDevice.C == 0) || (toDevice.A == 0 && toDevice.D == 0)
+	if !onAxes || !toDevice.IsFinite() {
+		return geom.Rect{}, false
+	}
+	// Under either form these two corners span the mapped box; the other two only repeat their coordinates.
+	x0, y0 := toDevice.ApplyXY(0, 0)
+	x1, y1 := toDevice.ApplyXY(width, height)
+	if x1 < x0 {
+		x0, x1 = x1, x0
+	}
+	if y1 < y0 {
+		y0, y1 = y1, y0
+	}
+	box := geom.RectLTRB(snapDown(x0), snapDown(y0), snapUp(x1), snapUp(y1))
+	if !box.IsFinite() {
+		return geom.Rect{}, false
+	}
+	return box, true
+}
+
+// snapDown and snapUp round a device coordinate outward to a whole pixel, ignoring slop below pageBoxEpsilon.
+func snapDown(v float32) float32 { return float32(math.Floor(float64(v) + pageBoxEpsilon)) }
+func snapUp(v float32) float32   { return float32(math.Ceil(float64(v) - pageBoxEpsilon)) }
 
 // PopClip implements device.Device.
 func (d *Device) PopClip() {

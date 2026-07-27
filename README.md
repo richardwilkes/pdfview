@@ -81,7 +81,8 @@ content are transparent rather than white; composite onto your desired backgroun
 interpreter and device path onto a caller-owned canvas, without touching the caller's surface lifecycle. Unlike the
 rest of the API it exposes [canvas](https://github.com/richardwilkes/canvas) types — using it deliberately couples
 you to that module. `ctm` maps the page's top-left, y-down space in PDF points onto the canvas:
-`geom.ScaleMatrix(dpi/72, dpi/72)` reproduces `RenderPage`'s layout at that dpi.
+`geom.ScaleMatrix(dpi/72, dpi/72)` reproduces `RenderPage`'s layout at that dpi. Drawing is confined to the page box,
+so content a page paints outside its own box never reaches the rest of your canvas.
 
 ### Concurrency
 

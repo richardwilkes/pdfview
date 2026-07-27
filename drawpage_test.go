@@ -35,6 +35,11 @@ const glaiveName = "glaive"
 // — so pages with text compare on the fraction of diverging pixels (measured worst across these arms: 0.004% of pixels
 // over Δ24, 0.032% over Δ8, all of it isolated fringe pixels further amplified by the straight-alpha comparison at
 // near-zero alpha).
+//
+// The comparison covers every pixel including the page edge, which is what pins DrawPage's page-box clip to the same
+// bound RenderPage's page-sized surface imposes: an unsnapped clip on a page whose scaled extent is not a whole number
+// of pixels (glaive's 595.2 pt width fills 595.2 of 596 columns) leaves that last band partly covered, and an
+// antialiased one shifts interior pixels as well. TestDrawPageClipsToPageBox pins that the clip is really there.
 func TestDrawPage(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -152,6 +157,78 @@ func readSurfaceNRGBA(t *testing.T, surf *surface.Surface, width, height int) []
 		}
 	}
 	return pix
+}
+
+// overflowingPagePDF is a one-page document whose 100×100 pt page paints an opaque red rectangle covering
+// [-100, 300]² — every corner of a canvas twice the page's size. RenderPage cannot show the overflow (its surface is
+// the page's size), so only DrawPage exercises it. No xref is supplied (startxref 0) so the engine rebuilds it.
+const overflowingPagePDF = `%PDF-1.7
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 32 >>
+stream
+1 0 0 rg
+-100 -100 400 400 re
+f
+endstream
+endobj
+trailer
+<< /Root 1 0 R /Size 5 >>
+startxref
+0
+%%EOF
+`
+
+// TestDrawPageClipsToPageBox pins that DrawPage confines a page's content to its page box. RenderPage bounds the same
+// content implicitly by rasterizing into a page-sized surface; DrawPage draws onto a canvas the caller sized, so
+// without an explicit clip a page painting past its own box — bleed, printer's marks, or a stream like this one —
+// repaints whatever else the caller has on the canvas.
+func TestDrawPageClipsToPageBox(t *testing.T) {
+	d, err := pdfview.New([]byte(overflowingPagePDF), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Release()
+	const canvasSize = 200
+	surf := surface.NewRasterN32Premul(canvasSize, canvasSize, nil)
+	if surf == nil {
+		t.Fatal("unable to create surface")
+	}
+	// The identity matrix draws the page at 72 dpi with its top-left at the canvas origin, so the page box covers
+	// exactly [0, 100)² of the 200×200 canvas and lands on whole pixel boundaries.
+	if err = d.DrawPage(surf.Canvas(), 0, geom.IdentityMatrix()); err != nil {
+		t.Fatal(err)
+	}
+	pix := readSurfaceNRGBA(t, surf, canvasSize, canvasSize)
+	const pageSize = 100
+	inside := 0
+	for y := range canvasSize {
+		for x := range canvasSize {
+			p := (y*canvasSize + x) * 4
+			r, g, b, a := pix[p], pix[p+1], pix[p+2], pix[p+3]
+			if x < pageSize && y < pageSize {
+				if r != 0xff || g != 0 || b != 0 || a != 0xff {
+					t.Fatalf("pixel (%d, %d) inside the page box is (%d, %d, %d, %d), want opaque red", x, y, r, g, b, a)
+				}
+				inside++
+				continue
+			}
+			if a != 0 {
+				t.Fatalf("pixel (%d, %d) outside the page box was painted: alpha %d", x, y, a)
+			}
+		}
+	}
+	if inside != pageSize*pageSize {
+		t.Fatalf("painted %d pixels inside the page box, want %d", inside, pageSize*pageSize)
+	}
 }
 
 // TestDrawPageErrors pins DrawPage's error contract: page-number validation, nil canvas rejection, and the
