@@ -114,8 +114,15 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 	switch {
 	case h.r <= 4:
 		length := 40
-		if l, ok := c.GetInt(encDict, "Length"); ok && l >= 40 && l <= 256 && l%8 == 0 {
-			length = int(l)
+		// /Length exists only for V >= 2 (ISO 32000-1 Table 20); V 0 and V 1 fix the key at 40 bits, and MuPDF likewise
+		// reads /Length only when v == 2 || v == 4. Honoring it regardless of /V means an out-of-spec but real
+		// `/V 1 /R 2 /Length 128` dictionary derives a 16-byte key where the writer used 5, so no derived key ever
+		// matches /U: the empty-password probe and both correct passwords fail and the document is reported permanently
+		// locked while other readers open it.
+		if v >= 2 {
+			if l, ok := c.GetInt(encDict, "Length"); ok && l >= 40 && l <= 256 && l%8 == 0 {
+				length = int(l)
+			}
 		}
 		// The RC4/AESV2 file key derives from a 16-byte MD5 digest, so a hostile /Length up to 256 (keyLen 32) would
 		// slice that digest out of range and panic. Cap at 16 (ISO 32000-2 keys never exceed 128 bits for R<=4).
@@ -160,8 +167,13 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 		if len(h.oe) < 32 || len(h.ue) < 32 {
 			return errBadKeyEntry
 		}
-		h.strM = methodAESV3
-		h.stmM = methodAESV3
+		// /StmF, /StrF, and /CF apply to V5 exactly as they do to V4 (ISO 32000-2 7.6.5), both defaulting to /Identity,
+		// and MuPDF parses crypt filters for v == 4 || v == 5 alike. Hardcoding AESV3 here corrupted every legal
+		// document that leaves its content in the clear — `/StmF /Identity /StrF /Identity /EFF /StdCF` is what
+		// Acrobat's "encrypt only file attachments" writes — because aesCBCDecrypt succeeds on any payload of at least
+		// 32 bytes, so the cleartext streams came back as noise and every page rendered blank or garbled.
+		h.strM, _ = h.cryptFilterMethod(c, encDict, "StrF")
+		h.stmM, _ = h.cryptFilterMethod(c, encDict, "StmF")
 	}
 	return nil
 }

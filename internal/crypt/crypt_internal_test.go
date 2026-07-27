@@ -21,13 +21,23 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
+// Encryption dictionary keys and crypt filter names used throughout these tests.
+const (
+	filterKey = "Filter"
+	lengthKey = "Length"
+	cfmKey    = "CFM"
+	stdCFName = "StdCF"
+	stmFKey   = "StmF"
+	strFKey   = "StrF"
+)
+
 // TestConfigureCapsKeyLen checks that a hostile /Length beyond 128 bits is clamped to a 16-byte key for R<=4. The
 // RC4/AESV2 file key derives from a 16-byte MD5 digest, so an uncapped keyLen (up to 32 for /Length 256) would slice
 // that digest out of range and panic during the empty-password probe at document open.
 func TestConfigureCapsKeyLen(t *testing.T) {
 	for _, length := range []int64{256, 192, 136} {
 		h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
-		encDict := cos.Dict{"Length": cos.Integer(length)}
+		encDict := cos.Dict{lengthKey: cos.Integer(length)}
 		if err := h.configure(&cos.Document{}, encDict, 2); err != nil {
 			t.Fatalf("configure(/Length %d): %v", length, err)
 		}
@@ -40,7 +50,7 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 
 	// A normal /Length 128 still maps to a 16-byte key, and the R2 default of 40 bits to 5 bytes.
 	h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
-	if err := h.configure(&cos.Document{}, cos.Dict{"Length": cos.Integer(128)}, 2); err != nil {
+	if err := h.configure(&cos.Document{}, cos.Dict{lengthKey: cos.Integer(128)}, 2); err != nil {
 		t.Fatalf("configure(/Length 128): %v", err)
 	}
 	if h.keyLen != 16 {
@@ -62,11 +72,11 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 // failing — and with /CFM /V2 the streams decrypt with 40-bit RC4 rather than the declared length.
 func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
 	cf := func(cfm string, length cos.Object) cos.Dict {
-		filter := cos.Dict{"CFM": cos.Name(cfm)}
+		filter := cos.Dict{cfmKey: cos.Name(cfm)}
 		if length != nil {
-			filter["Length"] = length
+			filter[lengthKey] = length
 		}
-		return cos.Dict{"CF": cos.Dict{"StdCF": filter}, "StmF": cos.Name("StdCF"), "StrF": cos.Name("StdCF")}
+		return cos.Dict{"CF": cos.Dict{stdCFName: filter}, stmFKey: cos.Name(stdCFName), strFKey: cos.Name(stdCFName)}
 	}
 	for _, tc := range []struct {
 		encDict cos.Dict
@@ -85,7 +95,7 @@ func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
 			if tc.topLen != nil {
-				tc.encDict["Length"] = tc.topLen
+				tc.encDict[lengthKey] = tc.topLen
 			}
 			if err := h.configure(&cos.Document{}, tc.encDict, 4); err != nil {
 				t.Fatalf("configure: %v", err)
@@ -101,6 +111,190 @@ func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestConfigureLengthNeedsV2 checks that /Length is consulted only for V >= 2, the only versions that define it (ISO
+// 32000-1 Table 20); V 0 and V 1 fix the key at 40 bits. Honoring it regardless of /V gave an out-of-spec but real
+// `/V 1 /R 2 /Length 128` dictionary a 16-byte key where the writer used 5.
+func TestConfigureLengthNeedsV2(t *testing.T) {
+	for _, tc := range []struct {
+		v       int
+		wantLen int
+	}{
+		{v: 0, wantLen: 5},
+		{v: 1, wantLen: 5},
+		{v: 2, wantLen: 16},
+		{v: 3, wantLen: 16},
+		{v: 4, wantLen: 16},
+	} {
+		h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
+		if err := h.configure(&cos.Document{}, cos.Dict{lengthKey: cos.Integer(128)}, tc.v); err != nil {
+			t.Fatalf("configure(/V %d): %v", tc.v, err)
+		}
+		if h.keyLen != tc.wantLen {
+			t.Errorf("/V %d with /Length 128 yields keyLen %d, want %d", tc.v, h.keyLen, tc.wantLen)
+		}
+	}
+}
+
+// TestNewV1IgnoresLength builds a genuine V1/R2 document — 40-bit key, per the version — that also carries a bogus
+// `/Length 128`, then checks the empty user password still unlocks it. Deriving a 16-byte key from that /Length makes
+// every candidate key mismatch /U, so the empty-password probe and both correct passwords fail and the document is
+// reported permanently locked.
+func TestNewV1IgnoresLength(t *testing.T) {
+	const perm uint32 = 0xFFFFFFFC
+	o := buildO(2, 5, []byte("owner-secret"), nil)
+	fileKey := buildFileKey(2, 5, nil, o, nil, perm)
+	h, err := New(&cos.Document{}, cos.Dict{
+		filterKey: cos.Name("Standard"),
+		"V":       cos.Integer(1),
+		"R":       cos.Integer(2),
+		lengthKey: cos.Integer(128),
+		"P":       cos.Integer(-4),
+		"O":       cos.String(o),
+		"U":       cos.String(buildU(2, fileKey, nil)),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if h.keyLen != 5 {
+		t.Errorf("keyLen = %d, want 5 (V1 is fixed at 40 bits)", h.keyLen)
+	}
+	if h.NeedsPassword() {
+		t.Error("the empty user password did not unlock the document")
+	}
+	if !bytes.Equal(h.fileKey, fileKey) {
+		t.Errorf("file key = %x, want %x", h.fileKey, fileKey)
+	}
+}
+
+// TestConfigureV5CryptFilters checks that /StmF, /StrF, and /CF drive the V5 methods the way they drive the V4 ones
+// (ISO 32000-2 7.6.5 applies them to both versions, and both default to /Identity). The handler used to hardcode AESV3
+// for R5/R6, so a document that encrypts only its embedded files had its cleartext content decrypted anyway.
+func TestConfigureV5CryptFilters(t *testing.T) {
+	aesCF := cos.Dict{stdCFName: cos.Dict{cfmKey: cos.Name("AESV3")}}
+	for _, tc := range []struct {
+		extra   cos.Dict
+		name    string
+		wantStr method
+		wantStm method
+	}{
+		{
+			name:    "everything encrypted",
+			extra:   cos.Dict{"CF": aesCF, stmFKey: cos.Name(stdCFName), strFKey: cos.Name(stdCFName)},
+			wantStr: methodAESV3,
+			wantStm: methodAESV3,
+		},
+		{
+			name: "only file attachments encrypted",
+			extra: cos.Dict{
+				"CF": aesCF, stmFKey: cos.Name("Identity"), strFKey: cos.Name("Identity"),
+				"EFF": cos.Name(stdCFName),
+			},
+			wantStr: methodIdentity,
+			wantStm: methodIdentity,
+		},
+		{
+			name:    "no filters named at all",
+			extra:   cos.Dict{},
+			wantStr: methodIdentity,
+			wantStm: methodIdentity,
+		},
+		{
+			name:    "streams encrypted but strings not",
+			extra:   cos.Dict{"CF": aesCF, stmFKey: cos.Name(stdCFName), strFKey: cos.Name("Identity")},
+			wantStr: methodIdentity,
+			wantStm: methodAESV3,
+		},
+		{
+			name:    "named filter missing from /CF",
+			extra:   cos.Dict{"CF": aesCF, stmFKey: cos.Name("Absent"), strFKey: cos.Name("Absent")},
+			wantStr: methodIdentity,
+			wantStm: methodIdentity,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encDict := cos.Dict{"OE": cos.String(make([]byte, 32)), "UE": cos.String(make([]byte, 32))}
+			for k, v := range tc.extra {
+				encDict[k] = v
+			}
+			h := &Handler{r: 6, o: make([]byte, 48), u: make([]byte, 48)}
+			if err := h.configure(&cos.Document{}, encDict, 5); err != nil {
+				t.Fatalf("configure: %v", err)
+			}
+			if h.strM != tc.wantStr {
+				t.Errorf("strM = %d, want %d", h.strM, tc.wantStr)
+			}
+			if h.stmM != tc.wantStm {
+				t.Errorf("stmM = %d, want %d", h.stmM, tc.wantStm)
+			}
+			if h.keyLen != 32 {
+				t.Errorf("keyLen = %d, want 32 (the V5 file key is always 256 bits)", h.keyLen)
+			}
+		})
+	}
+}
+
+// TestV5IdentityStreamsPassThrough builds a real R5 document that authenticates with the empty password, then checks
+// that `/StmF /Identity` leaves stream and string payloads alone while `/StmF /StdCF` with an AESV3 crypt filter does
+// not. aesCBCDecrypt succeeds on any payload of at least 32 bytes, so hardcoding AESV3 turned the cleartext content of
+// an "encrypt only file attachments" document into noise — every page blank or garbled — rather than failing loudly.
+func TestV5IdentityStreamsPassThrough(t *testing.T) {
+	fileKey := make([]byte, 32)
+	for i := range fileKey {
+		fileKey[i] = byte(i * 7)
+	}
+	validationSalt := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	keySalt := []byte{9, 10, 11, 12, 13, 14, 15, 16}
+	uHash := sha256.Sum256(validationSalt) // The empty password contributes nothing ahead of the salt.
+	u := append(append(append([]byte(nil), uHash[:]...), validationSalt...), keySalt...)
+	ik := sha256.Sum256(keySalt)
+	ue, ok := aesCBCEncryptNoPad(ik[:], make([]byte, 16), fileKey)
+	if !ok {
+		t.Fatal("failed to build test /UE")
+	}
+	newHandler := func(t *testing.T, stmF, strF cos.Name) *Handler {
+		t.Helper()
+		h, err := New(&cos.Document{}, cos.Dict{
+			filterKey: cos.Name("Standard"),
+			"V":       cos.Integer(5),
+			"R":       cos.Integer(5),
+			"O":       cos.String(make([]byte, 48)),
+			"U":       cos.String(u),
+			"OE":      cos.String(make([]byte, 32)),
+			"UE":      cos.String(ue),
+			"CF":      cos.Dict{stdCFName: cos.Dict{cfmKey: cos.Name("AESV3")}},
+			stmFKey:   stmF,
+			strFKey:   strF,
+			"EFF":     cos.Name(stdCFName),
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if h.NeedsPassword() {
+			t.Fatal("the empty user password did not unlock the document")
+		}
+		if !bytes.Equal(h.fileKey, fileKey) {
+			t.Fatalf("file key = %x, want %x", h.fileKey, fileKey)
+		}
+		return h
+	}
+	payload := bytes.Repeat([]byte("cleartext page content "), 4)
+
+	// Attachments-only encryption: the content is not encrypted, so it must come back byte for byte.
+	h := newHandler(t, "Identity", "Identity")
+	if got := h.DecryptStream(4, 0, payload); !bytes.Equal(got, payload) {
+		t.Errorf("an /Identity stream filter altered the payload: got %x, want %x", got, payload)
+	}
+	if got := h.DecryptString(4, 0, payload); !bytes.Equal(got, payload) {
+		t.Errorf("an /Identity string filter altered the payload: got %x, want %x", got, payload)
+	}
+
+	// The same payload under /StdCF must be run through AESV3, confirming the check above is not vacuous.
+	h = newHandler(t, stdCFName, stdCFName)
+	if got := h.DecryptStream(4, 0, payload); bytes.Equal(got, payload) {
+		t.Error("an /AESV3 stream filter left the payload unchanged")
 	}
 }
 
@@ -129,12 +323,12 @@ func TestNewRevisionRange(t *testing.T) {
 		// Sized for both branches of configure: R<=4 needs 32-byte /O and /U, R5/R6 need 48-byte /O and /U plus
 		// 32-byte /OE and /UE, so the revision is the only thing under test.
 		encDict := cos.Dict{
-			"Filter": cos.Name("Standard"),
-			"V":      cos.Integer(2),
-			"O":      cos.String(make([]byte, 48)),
-			"U":      cos.String(make([]byte, 48)),
-			"OE":     cos.String(make([]byte, 32)),
-			"UE":     cos.String(make([]byte, 32)),
+			filterKey: cos.Name("Standard"),
+			"V":       cos.Integer(2),
+			"O":       cos.String(make([]byte, 48)),
+			"U":       cos.String(make([]byte, 48)),
+			"OE":      cos.String(make([]byte, 32)),
+			"UE":      cos.String(make([]byte, 32)),
 		}
 		if tc.entry != nil {
 			encDict["R"] = tc.entry
@@ -165,11 +359,11 @@ func TestEncryptsMetadata(t *testing.T) {
 		{name: "not a boolean", entry: cos.Integer(0), want: true},
 	} {
 		encDict := cos.Dict{
-			"Filter": cos.Name("Standard"),
-			"V":      cos.Integer(2),
-			"R":      cos.Integer(4),
-			"O":      cos.String(make([]byte, 32)),
-			"U":      cos.String(make([]byte, 32)),
+			filterKey: cos.Name("Standard"),
+			"V":       cos.Integer(2),
+			"R":       cos.Integer(4),
+			"O":       cos.String(make([]byte, 32)),
+			"U":       cos.String(make([]byte, 32)),
 		}
 		if tc.entry != nil {
 			encDict["EncryptMetadata"] = tc.entry
