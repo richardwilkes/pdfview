@@ -20,9 +20,10 @@ import (
 
 // decodeDCT handles DCTDecode payloads through the standard library's JPEG decoder, which performs the YCbCr→RGB and
 // Adobe APP14 CMYK/YCCK handling internally. The decoded component bytes then follow the same path as raw samples:
-// /Decode mapping, then conversion through the captured device-colorspace behavior in internal/color (a CMYK JPEG pixel
-// converts exactly like a k operator's operands). The JPEG's own dimensions are authoritative for the raster (the
-// dictionary's /Width and /Height only position the unit square, which the CTM maps regardless of resolution).
+// /Decode mapping, then conversion through the image's own color space (dctSpace), which for the device spaces is the
+// captured behavior in internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands). The JPEG's own
+// dimensions are authoritative for the raster (the dictionary's /Width and /Height only position the unit square, which
+// the CTM maps regardless of resolution).
 func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {
 	decoded, w, h, err := dec.dctImage()
 	if err != nil {
@@ -35,10 +36,15 @@ func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {
 		dec.dctGray(pix, src, w, h, &hasAlpha)
 	case *image.YCbCr:
 		dec.dctYCbCr(pix, src, w, h, &hasAlpha)
+	case *image.RGBA:
+		// image/jpeg returns this form for every 3-component JPEG whose components it decides are already RGB: an Adobe
+		// APP14 marker with transform 0, or component IDs 'R','G','B' with no JFIF marker. Neither is exotic in PDF
+		// payloads, so it carries the same /Decode and color-key support as the YCbCr form.
+		dec.dctRGBA(pix, src, w, h, &hasAlpha)
 	case *image.CMYK:
 		dec.dctCMYK(pix, src, w, h, &hasAlpha)
 	default:
-		// Any other decoded form (none today) converts generically, without /Decode or color-key support.
+		// image/jpeg returns no other form; any future one converts generically, without /Decode or color-key support.
 		for y := range h {
 			for x := range w {
 				if c, ok := stdcolor.NRGBAModel.Convert(decoded.At(x, y)).(stdcolor.NRGBA); ok {
@@ -73,18 +79,33 @@ func (dec *decoder) dctImage() (img image.Image, w, h int, err error) {
 	return decoded, bounds.Dx(), bounds.Dy(), nil
 }
 
-// dctByteMapping precomputes the /Decode interpolation for every 8-bit sample value of ncomp components: out[c][s] is
-// the mapped component value for sample byte s.
-func (dec *decoder) dctByteMapping(ncomp int) [][]float32 {
-	m := decodeMapping{dmin: make([]float32, ncomp), dscale: make([]float32, ncomp)}
-	arr := dec.decodeArray(ncomp)
-	for c := range ncomp {
-		lo, hi := float32(0), float32(1)
-		if arr != nil {
-			lo, hi = arr[2*c], arr[2*c+1]
-		}
-		m.dmin[c], m.dscale[c] = lo, (hi-lo)/255
+// dctSpace returns the color space the JPEG's ncomp decoded component bytes convert through: the image's own
+// /ColorSpace, falling back to the device space for ncomp components when the dictionary names none, names one this
+// package cannot resolve, or names one whose component count disagrees with what the payload actually carries (the
+// payload wins — a space of a different arity would consume the bytes at the wrong rate). Inferring the space from the
+// decoded Go type alone renders every DCT image in a non-device space with wrong colors: an all-zero 1-component JPEG
+// under /Separation with a subtractive tint transform paints black where tint 0 must paint white, a fully inverted
+// image, and /Indexed, /DeviceN, and /ICCBased whose /N disagrees with the component count fare no better.
+func (dec *decoder) dctSpace(ncomp int) pdfcolor.Space {
+	if space, err := dec.colorSpace(); err == nil && space.NComponents() == ncomp {
+		return space
 	}
+	switch ncomp {
+	case 1:
+		return pdfcolor.DeviceGray
+	case 4:
+		return pdfcolor.DeviceCMYK
+	default:
+		return pdfcolor.DeviceRGB
+	}
+}
+
+// dctByteMapping precomputes the /Decode interpolation for every 8-bit sample value of space's components: out[c][s] is
+// the mapped component value for sample byte s. The mapping is the same one the raw-sample path builds, so an /Indexed
+// space's default of [0 2^bpc−1] passes the sample through as a palette index rather than scaling it into [0 1].
+func (dec *decoder) dctByteMapping(space pdfcolor.Space) [][]float32 {
+	m := dec.decodeMapping(space, 8)
+	ncomp := space.NComponents()
 	out := make([][]float32, ncomp)
 	for c := range ncomp {
 		out[c] = make([]float32, 256)
@@ -97,12 +118,13 @@ func (dec *decoder) dctByteMapping(ncomp int) [][]float32 {
 
 func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(1, 8)
-	mapping := dec.dctByteMapping(1)
+	space := dec.dctSpace(1)
+	mapping := dec.dctByteMapping(space)
 	var lut [256]stdcolor.NRGBA
 	comps := make([]float32, 1)
 	for s := range 256 {
 		comps[0] = mapping[0][s]
-		lut[s] = pdfcolor.DeviceGray.ToNRGBA(comps)
+		lut[s] = space.ToNRGBA(comps)
 	}
 	samples := make([]uint32, 1)
 	for y := range h {
@@ -114,8 +136,12 @@ func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *boo
 				samples[0] = uint32(s)
 				if inColorKey(samples, colorKey) {
 					out.A = 0
-					*hasAlpha = true
 				}
+			}
+			// As on the raw-sample path, HasAlpha tracks the emitted alpha rather than only the color-key path: a
+			// 1-component space can produce a transparent color on its own (/Separation /None's ToNRGBA does).
+			if out.A != 255 {
+				*hasAlpha = true
 			}
 			off := (y*w + x) * 4
 			pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
@@ -124,31 +150,82 @@ func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *boo
 }
 
 func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *bool) {
-	colorKey := dec.colorKeyRanges(3, 8)
-	mapping := dec.dctByteMapping(3)
-	// With the default (or absent) /Decode, DeviceRGB conversion is byte-identity — trunc(float32(s)/255×255) equals s
-	// for every byte — so the mapped bytes pass through exactly like the oracle's untransformed copy.
-	var lut [3][256]uint8
-	for c := range 3 {
-		for s := range 256 {
-			lut[c][s] = rgbByteFor(mapping[c][s])
-		}
-	}
-	samples := make([]uint32, 3)
+	conv := dec.newDCT3()
 	for y := range h {
 		for x := range w {
 			r, g, b := stdcolor.YCbCrToRGB(src.Y[src.YOffset(x, y)], src.Cb[src.COffset(x, y)], src.Cr[src.COffset(x, y)])
-			off := (y*w + x) * 4
-			pix[off], pix[off+1], pix[off+2] = lut[0][r], lut[1][g], lut[2][b]
-			pix[off+3] = 255
-			if colorKey != nil {
-				samples[0], samples[1], samples[2] = uint32(r), uint32(g), uint32(b)
-				if inColorKey(samples, colorKey) {
-					pix[off+3] = 0
-					*hasAlpha = true
-				}
+			conv.put(pix, (y*w+x)*4, r, g, b, hasAlpha)
+		}
+	}
+}
+
+// dctRGBA converts a 3-component JPEG image/jpeg handed back untransformed. Its alpha is 255 for every pixel (the
+// decoder fills the channel), so only the mask paths can make a pixel non-opaque.
+func (dec *decoder) dctRGBA(pix []byte, src *image.RGBA, w, h int, hasAlpha *bool) {
+	conv := dec.newDCT3()
+	for y := range h {
+		row := src.Pix[y*src.Stride:]
+		for x := range w {
+			off4 := x * 4
+			conv.put(pix, (y*w+x)*4, row[off4], row[off4+1], row[off4+2], hasAlpha)
+		}
+	}
+}
+
+// dct3 is the shared per-pixel conversion for a 3-component DCT image: the /Decode mapping, the color-key ranges, and
+// the space the component bytes convert through. DeviceRGB — the overwhelmingly common case — reduces to one byte LUT
+// per channel; any other 3-component space (a /DeviceN with three colorants) converts through its ToNRGBA per pixel, as
+// the raw-sample path does for multi-component spaces.
+type dct3 struct {
+	space    pdfcolor.Space
+	mapping  [][]float32
+	colorKey []uint32
+	comps    []float32
+	samples  []uint32
+	lut      [3][256]uint8
+	device   bool
+}
+
+func (dec *decoder) newDCT3() *dct3 {
+	c := &dct3{space: dec.dctSpace(3), colorKey: dec.colorKeyRanges(3, 8)}
+	mapping := dec.dctByteMapping(c.space)
+	if c.device = c.space == pdfcolor.DeviceRGB; c.device {
+		// With the default (or absent) /Decode, DeviceRGB conversion is byte-identity — trunc(float32(s)/255×255) equals
+		// s for every byte — so the mapped bytes pass through exactly like the oracle's untransformed copy.
+		for ch := range 3 {
+			for s := range 256 {
+				c.lut[ch][s] = rgbByteFor(mapping[ch][s])
 			}
 		}
+	} else {
+		c.mapping = mapping
+		c.comps = make([]float32, 3)
+	}
+	if c.colorKey != nil {
+		c.samples = make([]uint32, 3)
+	}
+	return c
+}
+
+// put converts one pixel's three component bytes into pix at off.
+func (c *dct3) put(pix []byte, off int, b0, b1, b2 byte, hasAlpha *bool) {
+	a := uint8(255)
+	if c.device {
+		pix[off], pix[off+1], pix[off+2] = c.lut[0][b0], c.lut[1][b1], c.lut[2][b2]
+	} else {
+		c.comps[0], c.comps[1], c.comps[2] = c.mapping[0][b0], c.mapping[1][b1], c.mapping[2][b2]
+		out := c.space.ToNRGBA(c.comps)
+		pix[off], pix[off+1], pix[off+2], a = out.R, out.G, out.B, out.A
+	}
+	if c.colorKey != nil {
+		c.samples[0], c.samples[1], c.samples[2] = uint32(b0), uint32(b1), uint32(b2)
+		if inColorKey(c.samples, c.colorKey) {
+			a = 0
+		}
+	}
+	pix[off+3] = a
+	if a != 255 {
+		*hasAlpha = true
 	}
 }
 
@@ -161,7 +238,8 @@ func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *b
 // they intend true ink values, which then flows through mapping below exactly as in MuPDF.
 func (dec *decoder) dctCMYK(pix []byte, src *image.CMYK, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(4, 8)
-	mapping := dec.dctByteMapping(4)
+	space := dec.dctSpace(4)
+	mapping := dec.dctByteMapping(space)
 	comps := make([]float32, 4)
 	samples := make([]uint32, 4)
 	for y := range h {
@@ -173,9 +251,11 @@ func (dec *decoder) dctCMYK(pix []byte, src *image.CMYK, w, h int, hasAlpha *boo
 				samples[c] = uint32(stored)
 				comps[c] = mapping[c][stored]
 			}
-			out := pdfcolor.DeviceCMYK.ToNRGBA(comps)
+			out := space.ToNRGBA(comps)
 			if colorKey != nil && inColorKey(samples, colorKey) {
 				out.A = 0
+			}
+			if out.A != 255 {
 				*hasAlpha = true
 			}
 			off := (y*w + x) * 4

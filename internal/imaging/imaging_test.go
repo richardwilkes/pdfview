@@ -339,6 +339,152 @@ func TestDCTGrayAndRGB(t *testing.T) {
 	}
 }
 
+// TestDCTNonDeviceColorSpace pins the DCT path to the image's own /ColorSpace rather than the space inferred from the Go
+// type image/jpeg hands back. An all-zero 1-component JPEG in a /Separation space over DeviceCMYK must render white —
+// tint 0 lays down no ink — where inferring DeviceGray from *image.Gray renders it black, a fully inverted image. An
+// /Indexed space over the same payload has to reach the palette, which additionally requires the DCT /Decode default to
+// be that space's [0 2^bpc−1] rather than [0 1].
+func TestDCTNonDeviceColorSpace(t *testing.T) {
+	d := testDoc(t)
+	// A constant block quantized at quality 100 (every quantization value is 1) reconstructs its samples exactly.
+	flatGrayJPEG := func(v byte) []byte {
+		t.Helper()
+		gray := image.NewGray(image.Rect(0, 0, 8, 8))
+		for i := range gray.Pix {
+			gray.Pix[i] = v
+		}
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, gray, &jpeg.Options{Quality: 100}); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	tint := cos.Dict{
+		"FunctionType": cos.Integer(2), "Domain": cos.Array{cos.Integer(0), cos.Integer(1)},
+		"C0": cos.Array{cos.Integer(0), cos.Integer(0), cos.Integer(0), cos.Integer(0)},
+		"C1": cos.Array{cos.Integer(0), cos.Integer(0), cos.Integer(0), cos.Integer(1)},
+		"N":  cos.Integer(1),
+	}
+	payload := flatGrayJPEG(0)
+	dict := cos.Dict{
+		"W": cos.Integer(8), "H": cos.Integer(8), keyBPC: cos.Integer(8), "F": cos.Name("DCT"),
+		"CS": cos.Array{cos.Name("Separation"), cos.Name("Spot"), cos.Name("DeviceCMYK"), tint},
+	}
+	img, err := DecodeInline(d, dict, payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 64 {
+		for c := range 3 {
+			if got := img.Pix[i*4+c]; got < 250 {
+				t.Fatalf("separation pixel %d chan %d = %d, want ~255: tint 0 lays down no ink", i, c, got)
+			}
+		}
+	}
+	// An /Indexed space makes the samples palette indices: entry 200 is green, and every other entry black.
+	lookup := make([]byte, 768)
+	lookup[200*3+1] = 0xff
+	dict["CS"] = cos.Array{cos.Name("Indexed"), cos.Name("DeviceRGB"), cos.Integer(255), cos.String(lookup)}
+	if img, err = DecodeInline(d, dict, flatGrayJPEG(200), nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 64 {
+		if got := [3]byte{img.Pix[i*4], img.Pix[i*4+1], img.Pix[i*4+2]}; got != [3]byte{0, 255, 0} {
+			t.Fatalf("indexed pixel %d = %v, want the palette entry for index 200", i, got)
+		}
+	}
+	// A declared space whose component count disagrees with the payload's cannot consume the samples, so the device
+	// space for the JPEG's own count still applies: the all-zero 1-component payload renders black.
+	dict["CS"] = cos.Name("RGB")
+	if img, err = DecodeInline(d, dict, payload, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 64 {
+		for c := range 3 {
+			if got := img.Pix[i*4+c]; got != 0 {
+				t.Fatalf("mismatched-arity pixel %d chan %d = %d, want the DeviceGray fallback's 0", i, c, got)
+			}
+		}
+	}
+}
+
+// rgbFormJPEG encodes img as a JPEG carrying an Adobe APP14 marker with transform 0, which is one of the two ways
+// image/jpeg decides a 3-component payload is already RGB (component IDs 'R','G','B' with no JFIF marker is the other).
+// Such a payload decodes to *image.RGBA rather than *image.YCbCr.
+func rgbFormJPEG(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 100}); err != nil {
+		t.Fatal(err)
+	}
+	// Marker, segment length (2 + 12), "Adobe", version, two flag words, and the color transform (0 = none).
+	app14 := []byte{0xff, 0xee, 0x00, 0x0e, 'A', 'd', 'o', 'b', 'e', 0x00, 0x64, 0, 0, 0, 0, 0x00}
+	encoded := buf.Bytes()
+	out := make([]byte, 0, len(encoded)+len(app14))
+	out = append(out, encoded[:2]...) // The SOI marker; application segments follow it.
+	out = append(out, app14...)
+	return append(out, encoded[2:]...)
+}
+
+// TestDCTRGBForm covers the *image.RGBA form image/jpeg returns for a 3-component payload it decides is already RGB.
+// That form used to land in decodeDCT's generic branch, which silently dropped both the /Decode array and color-key
+// /Mask support: a transform-0 JPEG decoded to identical pixels with and without /Decode [1 0 1 0 1 0], and a full-range
+// color key left every pixel opaque.
+func TestDCTRGBForm(t *testing.T) {
+	d := testDoc(t)
+	// Flat 2×2 blocks: the encoder's 4:2:0 subsampling of the second and third components is then lossless.
+	src := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := range 8 {
+		for x := range 8 {
+			src.Set(x, y, color.RGBA{R: uint8(x / 2 * 60), G: uint8(y / 2 * 60), B: 128, A: 255})
+		}
+	}
+	payload := rgbFormJPEG(t, src)
+	// The premise: this payload really does decode to the untransformed form, not to *image.YCbCr.
+	decoded, err := jpeg.Decode(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded.(*image.RGBA); !ok {
+		t.Fatalf("payload decoded as %T; the test needs the untransformed RGB form", decoded)
+	}
+	dict := cos.Dict{"W": cos.Integer(8), "H": cos.Integer(8), keyBPC: cos.Integer(8), "CS": cos.Name("RGB"), "F": cos.Name("DCT")}
+	ref, err := DecodeInline(d, dict, payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// /Decode [1 0 …] inverts every component; the mapping is float32 interpolation, so allow a unit of rounding.
+	one, zero := cos.Integer(1), cos.Integer(0)
+	dict["D"] = cos.Array{one, zero, one, zero, one, zero}
+	img, err := DecodeInline(d, dict, payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 64 {
+		for c := range 3 {
+			want := 255 - int(ref.Pix[i*4+c])
+			if got := int(img.Pix[i*4+c]); got-want > 1 || want-got > 1 {
+				t.Fatalf("inverted /Decode pixel %d chan %d: got %d want ~%d", i, c, got, want)
+			}
+		}
+	}
+	delete(dict, "D")
+	// A color key spanning the full range masks out every pixel.
+	full := cos.Array{zero, cos.Integer(255), zero, cos.Integer(255), zero, cos.Integer(255)}
+	dict[keyMask] = full
+	if img, err = DecodeInline(d, dict, payload, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !img.HasAlpha {
+		t.Fatal("a full-range color key left the image declared opaque")
+	}
+	for i := range 64 {
+		if got := img.Pix[i*4+3]; got != 0 {
+			t.Fatalf("color-keyed pixel %d alpha = %d, want 0", i, got)
+		}
+	}
+}
+
 func TestSMaskComposite(t *testing.T) {
 	d := testDoc(t)
 	smask := &cos.Stream{
@@ -400,6 +546,51 @@ func TestStencilMaskEntry(t *testing.T) {
 	// Mask sample 0 → painted (opaque), 1 → masked out.
 	if img.Pix[3] != 255 || img.Pix[7] != 0 {
 		t.Fatalf("stencil mask polarity: %v", img.Pix)
+	}
+}
+
+// TestStencilMaskUnsupportedCodec covers a stencil /Mask stream coded with one of the codecs this package does not
+// implement. The still-compressed payload used to be unpacked as 1-bpc stencil samples, punching pseudo-random holes in
+// an otherwise correctly decoded base image — the single byte 0x5a below produced the alpha row [255 0 255 0 0 255 0
+// 255], the raw byte's own bits. Both the /SMask path and run() decline these codecs, so the mask must simply be ignored.
+func TestStencilMaskUnsupportedCodec(t *testing.T) {
+	d := testDoc(t)
+	for _, codec := range []cos.Name{"JBIG2Decode", "JPXDecode"} {
+		mask := &cos.Stream{
+			Dict: cos.Dict{
+				keyWidth: cos.Integer(8), keyHeight: cos.Integer(1), keyImageMask: cos.Boolean(true),
+				keyFilter: codec,
+			},
+			Raw: []byte{0x5a},
+		}
+		dict := cos.Dict{
+			"W": cos.Integer(8), "H": cos.Integer(1), keyBPC: cos.Integer(8), "CS": cos.Name("G"),
+			keyMask: mask,
+		}
+		payload := bytes.Repeat([]byte{128}, 8)
+		img, err := DecodeInline(d, dict, payload, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if img.HasAlpha {
+			t.Errorf("%s stencil /Mask must be ignored, leaving the image opaque", codec)
+		}
+		for x := range 8 {
+			if got := img.Pix[x*4+3]; got != 255 {
+				t.Fatalf("%s stencil /Mask pixel %d alpha = %d, want 255", codec, x, got)
+			}
+		}
+		// The same mask stream without the unsupported codec does apply, so the guard above is what spares the image
+		// rather than the mask machinery being inert.
+		delete(mask.Dict, keyFilter)
+		if img, err = DecodeInline(d, dict, payload, nil); err != nil {
+			t.Fatal(err)
+		}
+		for x, want := range []byte{255, 0, 255, 0, 0, 255, 0, 255} {
+			if got := img.Pix[x*4+3]; got != want {
+				t.Fatalf("raw stencil /Mask pixel %d alpha = %d, want %d", x, got, want)
+			}
+		}
 	}
 }
 

@@ -224,8 +224,14 @@ func inColorKey(samples, ranges []uint32) bool {
 
 // stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current paint. A
 // decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT payloads
-// decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half.
+// decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half. The unsupported codecs are
+// declined here rather than only in run(): applyStencilMask reaches this for a /Mask stencil stream too, and unpacking a
+// still-compressed JBIG2 or JPX payload as 1-bpc samples punches pseudo-random holes in an otherwise correct base image
+// — alphaPlane and run() both decline those codecs, so accepting them here was an omission, not a policy.
 func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
+	if dec.codec == codecJBIG2Names || dec.codec == codecJPXNames {
+		return nil, ErrUnsupportedCodec
+	}
 	invert := false
 	if arr, ok := dec.entry("Decode", "D").(cos.Array); ok && len(arr) >= 2 {
 		if v, numOK := cos.AsReal(dec.d.Resolve(arr[0])); numOK && v == 1 {
