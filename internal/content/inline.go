@@ -84,10 +84,7 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 // /Length) delimits the payload without inspection when the claimed extent lands at an EI; otherwise the payload ends
 // at the first plausible EI keyword, with the single separating whitespace byte before it excluded.
 func isolatePayload(dict cos.Dict, data []byte, pos int) (payload []byte, end int) {
-	// length can be up to 1<<31-1, so pos+length is computed as length <= len(data)-pos to avoid an int overflow on
-	// 32-bit builds (GOARCH=386/arm) that would wrap negative, slip past the bound, and index data[pos:pos+length] out
-	// of range. pos <= len(data) always holds (it is a lexer offset), so len(data)-pos is non-negative.
-	if length := inlineLength(dict); length >= 0 && pos <= len(data) && length <= len(data)-pos {
+	if length := inlineLength(dict); length >= 0 && pos+length <= len(data) {
 		if eiEnd, ok := eiAt(data, pos+length); ok {
 			return data[pos : pos+length], eiEnd
 		}

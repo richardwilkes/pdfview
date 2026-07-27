@@ -470,9 +470,8 @@ func TestTIFFPredictorSixteenBit(t *testing.T) {
 }
 
 // TestPredictorMaximumLayout drives both predictors with the largest layout the parameter validation accepts. The
-// untruncated row length is 2^34 bytes (2^31 for the 16-bit TIFF stride), so an int row-length computation wraps
-// negative on a 32-bit build and panics in make() or walks the row loops backwards; the decoded bytes are simply the
-// single truncated row the data actually contains.
+// untruncated row length is 2^34 bytes (2^31 for the 16-bit TIFF stride), far more than the payload supplies, so the
+// decoded bytes are simply the single truncated row the data actually contains.
 func TestPredictorMaximumLayout(t *testing.T) {
 	const colors = 64
 	const columns = 1 << 24

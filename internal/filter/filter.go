@@ -142,9 +142,9 @@ func DecodeChain(specs []Spec, data []byte) (out []byte, decoded int, err error)
 	return data, decoded, nil
 }
 
-// addDecoded adds n to a running production total, saturating at math.MaxInt. A single stage's allowance reaches
-// math.MaxInt for a large input on GOARCH=386/arm, and a wrapped total would report the most expensive decode there is
-// as no work at all.
+// addDecoded adds n to a running production total, saturating at math.MaxInt. MaxDecodedSize hands back math.MaxInt
+// itself for a large enough input, and a wrapped total would report the most expensive decode there is as no work at
+// all.
 func addDecoded(total, n int) int {
 	if n > math.MaxInt-total {
 		return math.MaxInt

@@ -651,15 +651,14 @@ func TestSingleFunctionArray(t *testing.T) {
 }
 
 // TestMeshBitWidthsCheckedAsInt64 pins /BitsPerCoordinate, /BitsPerComponent and /BitsPerFlag to the value the file
-// declared rather than to its narrowing. Go leaves int(v) implementation-defined once the value does not fit, so
-// checking the narrowed value let a /BitsPerCoordinate of 2^32+32 pass as 32 on a 32-bit build (GOARCH=386/arm, which
-// this package's budget comments explicitly target) while a 64-bit build rejected it — the same mesh stream decoded
-// differently on the two architectures. /VerticesPerRow, /ShadingType and /hival are all checked as int64 already.
+// declared rather than to its narrowing: only the widths the standard lists are legal, and a declared width far outside
+// int range (where Go leaves int(v) implementation-defined) has to be rejected before it is narrowed or decoded from.
+// /VerticesPerRow, /ShadingType and /hival are all checked as int64 already.
 func TestMeshBitWidthsCheckedAsInt64(t *testing.T) {
 	// validBits sees the declared int64: a value whose low 32 bits are legal is not.
 	for _, v := range []int64{1<<32 + 16, 1<<32 + 8, 1<<32 + 2} {
 		if validBits(v, 1, 2, 4, 8, 12, 16, 24, 32) {
-			t.Errorf("validBits(%d) accepted a width that is only legal once truncated to 32 bits", v)
+			t.Errorf("validBits(%d) accepted a width that is legal only in its low 32 bits", v)
 		}
 	}
 
@@ -678,7 +677,7 @@ func TestMeshBitWidthsCheckedAsInt64(t *testing.T) {
 	} {
 		stream := meshStream(4, cos.Dict{keyBitsPerFlag: cos.Integer(8), tc.key: cos.Integer(tc.bad)}, data)
 		if _, err := Parse(d, stream); err == nil {
-			t.Errorf("/%s %d was accepted; it is only a legal width once truncated to 32 bits", tc.key, tc.bad)
+			t.Errorf("/%s %d was accepted; it is a legal width only in its low 32 bits", tc.key, tc.bad)
 		}
 	}
 }

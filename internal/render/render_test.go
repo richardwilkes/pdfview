@@ -90,7 +90,7 @@ func TestNewRejectsAbovePixelCap(t *testing.T) {
 				int64(size[0])*int64(size[1]), MaxSurfacePixels)
 		}
 	}
-	// The cap must keep the surface's byte size inside a 32-bit int, which the root package's renderPage relies on.
+	// The cap is stated as a byte budget, so pin the pixel count to it at 4 bytes per pixel.
 	if MaxSurfacePixels*4 != 1<<30 {
 		t.Errorf("expected a 1 GiB cap at 4 bytes per pixel, got %d bytes", MaxSurfacePixels*4)
 	}

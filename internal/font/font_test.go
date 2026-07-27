@@ -650,14 +650,13 @@ func TestType0SubstitutesWhenTheEmbeddedProgramHasNoGlyphs(t *testing.T) {
 	}
 }
 
-// TestCFFIndexBoundsAreWidthIndependent covers the INDEX bounds of a package whose contract is that a hostile program
-// never panics. An offSize-4 entry offset spans the full uint32 range and a DICT offset reaches MaxInt32, neither of
-// which fits a 32-bit int: computed in int, dataStart+hi and pos+2 wrap negative on a 32-bit build, the guards pass and
-// the indexing panics (escaping to DrawPage's blanket recover, which fails the whole page instead of degrading the
-// font). The comparisons are done in int64 so these all reject identically on every architecture.
-func TestCFFIndexBoundsAreWidthIndependent(t *testing.T) {
-	// count 1, offSize 4, offsets {1, 0x7FFFFFFF}: hi passes "hi < lo" and, in 32-bit int arithmetic, "dataStart+hi >
-	// len(data)" too.
+// TestCFFIndexBoundsRejectOutOfRangeOffsets covers the INDEX bounds of a package whose contract is that a hostile
+// program never panics. An offSize-4 entry offset spans the full uint32 range and a DICT offset reaches MaxInt32; every
+// one of them past the data must be rejected rather than indexed, since the panic would escape to DrawPage's blanket
+// recover and fail the whole page instead of degrading the font.
+func TestCFFIndexBoundsRejectOutOfRangeOffsets(t *testing.T) {
+	// count 1, offSize 4, offsets {1, 0x7FFFFFFF}: hi passes "hi < lo", so only the "dataStart+hi > len(data)" bound
+	// stands between it and an out-of-range slice.
 	for name, data := range map[string][]byte{
 		"offset at int32 max":  {0, 1, 4, 0, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0x41},
 		"offset at uint32 max": {0, 1, 4, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0x41},

@@ -26,8 +26,7 @@ const maxObjectNumber = 1 << 24
 // maxGenerationNumber is the largest generation ISO 32000-2 7.3.10 defines. A "N G R" lookahead whose G exceeds it is
 // still taken as a reference (leniency: the generation takes no part in resolution, so rejecting the reference would
 // lose the object over a field nothing reads), but the recorded generation is clamped to 0 — the same treatment
-// parseIndirectAtBounded gives a nonsensical header generation, and what keeps int(second.i) from wrapping negative on
-// GOARCH=386/arm, where int is 32 bits.
+// parseIndirectAtBounded gives a nonsensical header generation.
 const maxGenerationNumber = 0xffff
 
 // maxContainerElements caps how many array elements and dictionary entries one parsed object may hold, in total across

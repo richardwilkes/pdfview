@@ -30,8 +30,8 @@ func applyPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	}
 }
 
-// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow an int64 and
-// hostile parameters cannot force absurd allocations.
+// validatePredictorParams bounds the sample-layout parameters so row-length arithmetic cannot overflow and hostile
+// parameters cannot force absurd allocations.
 func validatePredictorParams(p Params) error {
 	if p.Colors < 1 || p.Colors > 64 {
 		return fmt.Errorf("%w: predictor with %d colors", ErrUnsupportedFilter, p.Colors)
@@ -47,14 +47,12 @@ func validatePredictorParams(p Params) error {
 	return nil
 }
 
-// predictorRowLen returns the number of bytes in one predictor row, clamped to dataLen. The product of the validated
-// parameters reaches 2^34 (64 colors * 16 bits * 2^24 columns), which wraps a 32-bit int (GOARCH=386/arm) and would
-// yield a negative row length that slips past both the clamp and the callers' zero checks, so it is computed in int64;
-// the clamp then brings the result back into int range on every platform. A row cannot be longer than the data itself,
-// and clamping also keeps hostile Columns values from forcing large allocations for a file that does not actually
-// contain such rows. The result is zero only when dataLen is zero.
+// predictorRowLen returns the number of bytes in one predictor row, clamped to dataLen. A row cannot be longer than the
+// data itself, and clamping also keeps hostile Columns values from forcing large allocations for a file that does not
+// actually contain such rows. The product of the validated parameters tops out at 2^34 (64 colors * 16 bits * 2^24
+// columns), well inside the 64-bit int this engine requires. The result is zero only when dataLen is zero.
 func predictorRowLen(p Params, dataLen int) int {
-	return int(min((int64(p.Colors)*int64(p.BitsPerComponent)*int64(p.Columns)+7)/8, int64(dataLen)))
+	return min((p.Colors*p.BitsPerComponent*p.Columns+7)/8, dataLen)
 }
 
 // pngPredictor reverses the PNG row filters (RFC 2083 section 6): every row is one filter-type byte followed by the

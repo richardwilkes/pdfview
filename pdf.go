@@ -18,6 +18,13 @@
 // MuPDF-compatible hit rectangles; and DrawPage draws a page's content onto a caller-owned canvas. The engine's
 // behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates exactly,
 // pixels within committed perceptual thresholds. See README.md for the architecture.
+//
+// # Platform requirements
+//
+// 64-bit platforms only (amd64, arm64, and the other 64-bit GOARCH values). The engine's size, offset, and work-budget
+// arithmetic is written against a 64-bit int, and the documented caps are chosen to sit inside it — a 2^26 pixel image
+// decodes through row strides and sample bit positions that reach 2^35, and a predictor row length reaches 2^34, none
+// of which a 32-bit int can hold. A 32-bit build is rejected at compile time rather than left to wrap silently.
 package pdfview
 
 import (
@@ -37,6 +44,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/stext"
 	"github.com/richardwilkes/pdfview/internal/store"
 )
+
+// This package supports 64-bit platforms only; see the package documentation for why. The constant below is 0 where int
+// is 64 bits and an unrepresentable -1 where it is 32, so a 32-bit build fails to compile ("constant -1 overflows
+// uint") rather than silently producing an engine whose sizing arithmetic can wrap.
+const _ uint = ^uint(0)>>63 - 1
 
 // Possible error values
 var (
@@ -380,12 +392,6 @@ func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
 	size := stride * height
 	if size <= 0 || len(pix) < size {
 		return nil, ErrUnableToCreateImage
-	}
-	// Belt and braces: unreachable while the surface caps itself at render.MaxSurfacePixels (a 1 GiB buffer), since
-	// that bounds size well under 32 bits. It is kept so a future, larger surface cap cannot silently hand back a
-	// buffer whose byte size overflows a 32-bit int.
-	if int64(size) > math.MaxInt32 {
-		return nil, ErrImageTooLarge
 	}
 	// The engine rasterizes with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so
 	// undo the premultiplication. Fully opaque (a == 255) and fully transparent (a == 0) pixels need no adjustment.

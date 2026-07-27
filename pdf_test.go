@@ -225,11 +225,6 @@ func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
 		t.Fatalf("OverallMaxPixels default %d does not match the surface cap %d", pdfview.OverallMaxPixels,
 			render.MaxSurfacePixels)
 	}
-	// The renderPage guard on the buffer's byte size is only belt and braces while this holds.
-	if int64(render.MaxSurfacePixels)*4 > math.MaxInt32 {
-		t.Errorf("a %d pixel surface no longer fits a 32-bit byte size", render.MaxSurfacePixels)
-	}
-
 	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
 		t.Fatal(err)

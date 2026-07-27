@@ -239,11 +239,10 @@ func TestGlyfCompositeCycleSkipped(t *testing.T) {
 	}
 }
 
-// TestGlyfLocaBoundIsWidthIndependent covers the loca range guard glyphData and path share. The bound was computed as
-// int(gid)+1 >= len(g.loca), which on a 32-bit build (GOARCH=386/arm) narrows every gid at or above 2^31 to a negative
-// int, passes the guard, and panics indexing loca. The uint64 form must reject those gids on every architecture, and
-// must still accept the last real glyph — loca carries one more entry than there are glyphs.
-func TestGlyfLocaBoundIsWidthIndependent(t *testing.T) {
+// TestGlyfLocaBoundRejectsOutOfRangeGIDs covers the loca range guard glyphData and path share: every gid past the table
+// must be turned away rather than indexed (this package's contract is that a hostile program never panics), and the
+// last real glyph must still be accepted — loca carries one more entry than there are glyphs.
+func TestGlyfLocaBoundRejectsOutOfRangeGIDs(t *testing.T) {
 	g := buildGlyf([][]byte{triangleGlyph(), triangleGlyph()}) // GIDs 0 and 1; loca has three entries.
 	for _, gid := range []uint32{0, 1} {
 		if !g.inRange(gid) {
@@ -256,12 +255,8 @@ func TestGlyfLocaBoundIsWidthIndependent(t *testing.T) {
 			t.Errorf("path(%d) = nil for a glyph the loca table covers", gid)
 		}
 	}
-	// 2 indexes loca's terminating entry (no glyph follows it); the rest are the values whose int narrowing differs by
-	// architecture.
+	// 2 indexes loca's terminating entry (no glyph follows it); the rest run out to the top of the uint32 GID range.
 	for _, gid := range []uint32{2, 3, 1 << 31, 1<<31 + 7, 0xFFFFFFFF} {
-		if gid >= 1<<31 && int32(gid)+1 >= int32(len(g.loca)) {
-			t.Errorf("gid %d no longer exercises the 32-bit narrowing this test guards", gid)
-		}
 		if g.inRange(gid) {
 			t.Errorf("inRange(%d) = true for a gid past the loca table", gid)
 		}
@@ -291,23 +286,17 @@ func TestGlyfSimpleGlyphRenders(t *testing.T) {
 	}
 }
 
-// TestGlyfRecordBoundIsWidthIndependent covers the other half of the loca guard: the record slice bound. It was written
-// as int(end) > len(g.glyfData), and on a 32-bit build (GOARCH=386/arm, which this package's comments explicitly care
-// about) int(end) is negative for any long-format loca offset at or above 2^31 — the guard passes and the slice
-// expression panics, costing the glyph its outline behind Font.GlyphPath's recover. Like inRange, the comparison must be
-// done in uint64 so it holds on every architecture.
-func TestGlyfRecordBoundIsWidthIndependent(t *testing.T) {
+// TestGlyfRecordBoundRejectsOutOfRangeEnds covers the other half of the loca guard: the record slice bound. A record
+// whose end lies past the glyf table must yield no glyph rather than panicking the slice expression, which would cost
+// the glyph its outline behind Font.GlyphPath's recover.
+func TestGlyfRecordBoundRejectsOutOfRangeEnds(t *testing.T) {
 	record := triangleGlyph()
 	g := buildGlyf([][]byte{record})
 	if g.glyphData(0) == nil {
 		t.Fatal("glyphData(0) = nil for the one real glyph")
 	}
-	// A long-format loca whose terminator lies past the glyf table. Every value here narrows to a negative int32, so a
-	// 32-bit build would take the out-of-range end for an in-range one.
+	// A long-format loca whose terminator lies past the glyf table, out to the top of the uint32 offset range.
 	for _, end := range []uint32{1 << 31, 1<<31 + uint32(len(record)), 0xFFFFFFFF} {
-		if int32(end) > int32(len(g.glyfData)) {
-			t.Errorf("end %d no longer exercises the 32-bit narrowing this test guards", end)
-		}
 		wide := &glyfInfo{glyfData: g.glyfData, loca: []uint32{0, end}, upem: 1000}
 		if wide.glyphData(0) != nil {
 			t.Errorf("glyphData(0) returned a record for a loca end of %d, past the %d byte glyf table",

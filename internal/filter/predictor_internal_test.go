@@ -10,7 +10,6 @@
 package filter
 
 import (
-	"math"
 	"testing"
 )
 
@@ -26,11 +25,10 @@ func TestPredictorRowLen(t *testing.T) {
 		{name: "sub-byte rounds up", p: Params{Colors: 5, BitsPerComponent: 2, Columns: 4}, dataLen: 1 << 20, want: 5},
 		{name: "clamped to data", p: Params{Colors: 3, BitsPerComponent: 8, Columns: 16}, dataLen: 7, want: 7},
 		{name: "empty data", p: Params{Colors: 3, BitsPerComponent: 8, Columns: 16}, dataLen: 0, want: 0},
-		// The largest layout validatePredictorParams accepts. Its untruncated row length is 2^34 bytes, so computing
-		// the product in int would wrap negative on a 32-bit build and hand a negative length to make() and to the
-		// row loops; the int64 arithmetic plus the clamp keeps it at dataLen on every platform.
+		// The largest layout validatePredictorParams accepts. Its untruncated row length is 2^34 bytes, so only the
+		// clamp keeps make() and the row loops working from a length the data can actually supply.
 		{name: "maximum layout", p: Params{Colors: 64, BitsPerComponent: 16, Columns: 1 << 24}, dataLen: 10, want: 10},
-		// The 16-bit TIFF worst case: 2 * 64 * 2^24 is exactly 2^31, one past the largest 32-bit int.
+		// The 16-bit TIFF worst case: 2 * 64 * 2^24 is exactly 2^31.
 		{
 			name:    "maximum 16-bit TIFF layout",
 			p:       Params{Colors: 64, BitsPerComponent: 16, Columns: 1 << 24},
@@ -46,18 +44,5 @@ func TestPredictorRowLen(t *testing.T) {
 				t.Errorf("predictorRowLen(%+v, %d) = %d, want %d", tc.p, tc.dataLen, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestPredictorRowLenOverflowsInt32 pins the premise of the int64 arithmetic in predictorRowLen: the row length for the
-// largest layout validatePredictorParams accepts does not fit in a 32-bit int.
-func TestPredictorRowLenOverflowsInt32(t *testing.T) {
-	p := Params{Colors: 64, BitsPerComponent: 16, Columns: 1 << 24}
-	if err := validatePredictorParams(p); err != nil {
-		t.Fatalf("params should be valid: %v", err)
-	}
-	product := (int64(p.Colors)*int64(p.BitsPerComponent)*int64(p.Columns) + 7) / 8
-	if product <= math.MaxInt32 {
-		t.Errorf("maximum row length %d fits in an int32; the overflow guard is no longer exercised", product)
 	}
 }

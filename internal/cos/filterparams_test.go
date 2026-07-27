@@ -66,24 +66,24 @@ func TestFilterParamsPassThroughLegalValues(t *testing.T) {
 	}
 }
 
-// TestFilterParamsRejectsTruncatingValues checks that a /DecodeParms value too large for an int on a 32-bit build
-// (GOARCH=386/arm, which this package's row-length and sample-index arithmetic explicitly cares about) is not narrowed
-// by an unchecked conversion. Each value below has a legal low 32 bits, so a plain int(v) would hand internal/filter a
-// plausible-looking parameter — /Columns 4294967297 becomes 1 — and the predictor would then decode with a silently
-// wrong row length. The saturated result must instead stay out of range on every architecture, which is checked here
-// both directly and by driving the real filter chain with it.
-func TestFilterParamsRejectsTruncatingValues(t *testing.T) {
+// TestFilterParamsRejectsOutOfRangeValues checks that a /DecodeParms value far outside what internal/filter accepts
+// reaches it exactly as the file declared it — no clamping, no wrapping — so its own validation rejects the stream
+// rather than decoding with a plausible-looking impostor. Each value below has legal low 32 bits (a /Columns of
+// 4294967297 would look like 1 if anything narrowed it), which is checked here both directly and by driving the real
+// filter chain with it.
+func TestFilterParamsRejectsOutOfRangeValues(t *testing.T) {
 	const wrap = int64(1) << 32
 	for _, tc := range []struct {
-		key       Name
-		value     int64
-		truncated int
+		key   Name
+		value int64
 	}{
-		{key: predictorKey, value: wrap + 12, truncated: 12},
-		{key: colorsKey, value: wrap + 3, truncated: 3},
-		{key: bitsKey, value: wrap + 8, truncated: 8},
-		{key: columnsKey, value: wrap + 1, truncated: 1},
-		{key: earlyChangeKey, value: wrap, truncated: 0},
+		{key: predictorKey, value: wrap + 12},
+		{key: colorsKey, value: wrap + 3},
+		{key: bitsKey, value: wrap + 8},
+		{key: columnsKey, value: wrap + 1},
+		{key: earlyChangeKey, value: wrap},
+		{key: columnsKey, value: math.MaxInt64},
+		{key: colorsKey, value: math.MinInt64},
 	} {
 		t.Run(string(tc.key), func(t *testing.T) {
 			d := &Document{}
@@ -92,15 +92,8 @@ func TestFilterParamsRejectsTruncatingValues(t *testing.T) {
 				parms[predictorKey] = Integer(12) // Engage a PNG predictor so the sample-layout validation runs.
 			}
 			params := d.filterParams(parms)
-			got := paramValue(params, tc.key)
-			if got == tc.truncated {
-				t.Fatalf("/%s %d narrowed to %d, the value a 32-bit truncation produces", tc.key, tc.value, got)
-			}
-			if got != maxFilterParam {
-				t.Fatalf("/%s %d = %d, want it saturated at %d", tc.key, tc.value, got, maxFilterParam)
-			}
-			if int64(int32(got)) != int64(got) {
-				t.Fatalf("/%s saturated to %d, which is not representable in an int on a 32-bit build", tc.key, got)
+			if got := paramValue(params, tc.key); int64(got) != tc.value {
+				t.Fatalf("/%s %d arrived as %d, want it passed through unchanged", tc.key, tc.value, got)
 			}
 			// /EarlyChange only selects between the two LZW code-width conventions, so there is nothing downstream to
 			// reject it; the guarantee is that it does not collapse to the non-default 0.
@@ -109,28 +102,9 @@ func TestFilterParamsRejectsTruncatingValues(t *testing.T) {
 			}
 			if _, _, err := filter.DecodeChain([]filter.Spec{{Name: "FlateDecode", Params: params}},
 				deflated(t, make([]byte, 64))); !errors.Is(err, filter.ErrUnsupportedFilter) {
-				t.Errorf("decoding with a saturated /%s = %v, want %v", tc.key, err, filter.ErrUnsupportedFilter)
+				t.Errorf("decoding with an out-of-range /%s = %v, want %v", tc.key, err, filter.ErrUnsupportedFilter)
 			}
 		})
-	}
-}
-
-// TestClampFilterParamExtremes checks the saturation at both ends of the int64 range.
-func TestClampFilterParamExtremes(t *testing.T) {
-	for _, tc := range []struct {
-		in   int64
-		want int
-	}{
-		{in: math.MaxInt64, want: maxFilterParam},
-		{in: math.MinInt64, want: -maxFilterParam},
-		{in: maxFilterParam, want: maxFilterParam},
-		{in: -maxFilterParam, want: -maxFilterParam},
-		{in: 0, want: 0},
-		{in: -1, want: -1},
-	} {
-		if got := clampFilterParam(tc.in); got != tc.want {
-			t.Errorf("clampFilterParam(%d) = %d, want %d", tc.in, got, tc.want)
-		}
 	}
 }
 

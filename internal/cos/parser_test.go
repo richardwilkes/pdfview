@@ -101,9 +101,8 @@ func TestContainerElementBudget(t *testing.T) {
 // part in a reference's identity: object lookup keys on the number alone, so "4 0 R" and "4 1 R" resolve to the same
 // object and their RefKeys have to be equal — anything keyed by reference (the interpreter's form-cycle set, every
 // reference-keyed cache) would otherwise treat one object as two, letting a form that alternates generations slip past
-// its cycle guard. Second, an absurd generation must not be narrowed into int: the lookahead used to accept exactly
-// 1<<31, which wraps negative where int is 32 bits (GOARCH=386/arm). It is clamped instead of rejected, so the object
-// the reference names is still reachable.
+// its cycle guard. Second, an absurd generation must not reach Ref.Gen: anything past the largest generation ISO
+// 32000-2 defines is clamped rather than rejected, so the object the reference names is still reachable.
 func TestRefGenerationIdentityAndBound(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -114,8 +113,8 @@ func TestRefGenerationIdentityAndBound(t *testing.T) {
 		{name: "ordinary", gen: "1", want: 1},
 		{name: "the largest legal generation", gen: "65535", want: 65535},
 		{name: "past the legal maximum", gen: "65536", want: 0},
-		{name: "the 32-bit wrap point", gen: "2147483648", want: 0},
-		{name: "far past any int32", gen: "99999999999999", want: 0},
+		{name: "far past the legal maximum", gen: "2147483648", want: 0},
+		{name: "absurdly far past it", gen: "99999999999999", want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newParser([]byte("4 "+tc.gen+" R"), 0)

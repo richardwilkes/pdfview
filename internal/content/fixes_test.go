@@ -420,11 +420,10 @@ func TestInlineDictValuelessKeyBeforeID(t *testing.T) {
 	}
 }
 
-// TestInlineLengthOverflowGuarded verifies isolatePayload does not trust a /L whose value, added to pos, would overflow
-// int on a 32-bit build and slip past the pos+length <= len(data) bound into an out-of-range slice. A length beyond the
-// available data is rejected and the payload is delimited by scanning for EI instead. (On 64-bit the sum cannot
-// overflow, but the guard's fall-back-to-scan behavior is identical and testable on any platform.)
-func TestInlineLengthOverflowGuarded(t *testing.T) {
+// TestInlineLengthBeyondDataGuarded verifies isolatePayload does not trust a /L that reaches past the available data:
+// the claimed extent is rejected and the payload is delimited by scanning for EI instead, rather than slicing out of
+// range.
+func TestInlineLengthBeyondDataGuarded(t *testing.T) {
 	data := []byte("\x00\x01\x02 EI trailing")
 	dict := cos.Dict{"L": cos.Integer(1<<31 - 1)} // A length far past len(data); the guard must reject it.
 	payload, end := isolatePayload(dict, data, 0)

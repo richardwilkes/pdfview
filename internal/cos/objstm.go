@@ -126,9 +126,9 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	n = min(n, int64(len(data))/3)
 	// /First and the header offsets are file-supplied and otherwise unbounded, and objFromStm adds them together. Any
 	// magnitude past the payload length can only ever name a position outside it, so clamping both here preserves every
-	// reachable position while keeping that sum from wrapping — either in int on 32-bit builds, or in int64 for a pair
-	// of astronomically large values. Without it a wrap to a small positive value slips past the bounds check there and
-	// parses an object from the wrong offset inside the stream.
+	// reachable position while keeping that sum of two astronomically large values from wrapping. Without it a wrap to
+	// a small positive value slips past the bounds check there and parses an object from the wrong offset inside the
+	// stream.
 	limit := int64(len(data))
 	stm := &objStm{
 		data:  data,
@@ -165,12 +165,12 @@ func (d *Document) objFromStm(stmNum, idx, wantNum int) (Object, error) {
 			return nil, errObjStmEntry
 		}
 	}
-	// Both terms are clamped to len(stm.data) by parseObjStm, so widening to int64 leaves the sum well inside range on
-	// every architecture.
-	pos := int64(stm.first) + int64(stm.offs[idx])
-	if pos < 0 || pos >= int64(len(stm.data)) {
+	// Both terms are non-negative and clamped to len(stm.data) by parseObjStm, so the sum is at most twice the payload
+	// length — nowhere near a wrap.
+	pos := stm.first + stm.offs[idx]
+	if pos < 0 || pos >= len(stm.data) {
 		return nil, errObjStmEntry
 	}
-	p := newParser(stm.data, int(pos))
+	p := newParser(stm.data, pos)
 	return p.parseObject()
 }

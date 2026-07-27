@@ -61,9 +61,8 @@ func parseSampled(d *cos.Document, stream *cos.Stream, c common) (Func, error) {
 	if !ok {
 		return nil, errBadSampled
 	}
-	// Validated as the int64 cos.AsInt returned, BEFORE narrowing: int(bps) on a 32-bit build (GOARCH=386/arm) drops
-	// the high word, so a declared 2^32+8 would truncate to a legal 8 and parse there while the same file is rejected
-	// on a 64-bit build. Testing the int64 keeps the answer identical on every architecture.
+	// Validated as the int64 cos.AsInt returned: only the widths ISO 32000-2 7.10.3 lists are legal, so anything else
+	// — including a value far outside int range — is rejected before it is narrowed.
 	switch bps {
 	case 1, 2, 4, 8, 12, 16, 24, 32:
 	default:

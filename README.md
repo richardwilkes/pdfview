@@ -13,6 +13,14 @@ MuPDF via cgo. The public API is compatible, and the engine was built against th
 the test suite pins page counts, authentication semantics, TOC/link/search-hit coordinates (exactly), and rendered
 pixels (within committed perceptual thresholds) to what MuPDF produces.
 
+## Requirements
+
+**64-bit platforms only** (`amd64`, `arm64`, and the other 64-bit `GOARCH` values). The engine's size, offset, and
+work-budget arithmetic is written against a 64-bit `int`, and the documented caps are chosen to sit inside it: a 2^26
+pixel image decodes through row strides and sample bit positions that reach 2^35, and a predictor row length reaches
+2^34, none of which a 32-bit `int` can hold. A 32-bit build is rejected at compile time rather than left to wrap
+silently.
+
 ## Features
 
 - Render any page to an `*image.NRGBA`, either at a fixed DPI (`RenderPage`) or scaled to fit a maximum width and

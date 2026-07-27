@@ -346,16 +346,16 @@ func TestSampledSizeBoundedBeforeConversion(t *testing.T) {
 	near(t, evalOne(t, fn, 1), 1)
 }
 
-// TestSampledBitsPerSampleValidatedBeforeNarrowing pins the /BitsPerSample check to the int64 cos.AsInt returns. The
-// narrowing int(bps) drops the high word on a 32-bit build (GOARCH=386/arm), so a declared 2^32+8 would truncate to a
-// legal 8 and parse there while the same file is rejected on a 64-bit build — the architecture-dependent divergence
-// psToInt32, clampGridDim, and clampIndex all exist to avoid. Each value below is illegal but has legal low 32 bits.
+// TestSampledBitsPerSampleValidatedBeforeNarrowing pins the /BitsPerSample check to the int64 cos.AsInt returns: only
+// the widths the standard lists are accepted, and a declared width far outside int range is rejected before anything
+// narrows or sizes from it. Each value below is illegal but has legal low 32 bits, so it would look plausible to a
+// check that inspected only part of it.
 func TestSampledBitsPerSampleValidatedBeforeNarrowing(t *testing.T) {
 	for _, bps := range []int64{
-		1<<32 + 1, 1<<32 + 8, 1<<32 + 32, // truncate to 1, 8, 32
+		1<<32 + 1, 1<<32 + 8, 1<<32 + 32, // legal low words
 		-(1 << 32) + 8,        // negative, same low word as 8
 		1<<40 + 16, 1<<62 + 4, // higher bits, still legal low words
-		0, -8, 3, 5, 64, math.MaxInt64, // plain out-of-set values, unaffected by narrowing
+		0, -8, 3, 5, 64, math.MaxInt64, // plain out-of-set values
 	} {
 		t.Run(fmt.Sprintf("bps %d", bps), func(t *testing.T) {
 			d := docWithStream(t, fmt.Sprintf("/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [2] /BitsPerSample %d",

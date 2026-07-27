@@ -72,12 +72,10 @@ func newGlyfInfo(ld *opentype.Loader, upem float32, numGlyphs int) *glyfInfo {
 }
 
 // inRange reports whether gid and its successor both index the loca table (a glyph's record runs from loca[gid] to
-// loca[gid+1], so the last entry is a terminator, not a glyph). The comparison is done in uint64 rather than by
-// converting gid to int: on a 32-bit build int(gid) is negative for any gid at or above 2^31, which would let the guard
-// pass and the loca index panic. Font.GlyphPath rejects gids above 0xFFFF before reaching here, but the bound belongs
-// with the indexing it protects.
+// loca[gid+1], so the last entry is a terminator, not a glyph). Font.GlyphPath rejects gids above 0xFFFF before
+// reaching here, but the bound belongs with the indexing it protects.
 func (g *glyfInfo) inRange(gid uint32) bool {
-	return uint64(gid)+1 < uint64(len(g.loca))
+	return int(gid)+1 < len(g.loca)
 }
 
 // glyphData returns the raw glyf record for a GID (nil for empty glyphs — a valid, blank outcome).
@@ -86,11 +84,7 @@ func (g *glyfInfo) glyphData(gid uint32) []byte {
 		return nil
 	}
 	start, end := g.loca[gid], g.loca[gid+1]
-	// The upper bound is compared in uint64 for the reason inRange gives: on a 32-bit build int(end) is negative for
-	// any long-format loca offset at or above 2^31, which would let the guard pass and the slice expression below
-	// panic (recovered by Font.GlyphPath, but only after the glyph is lost). The bound belongs with the indexing it
-	// protects.
-	if start >= end || uint64(end) > uint64(len(g.glyfData)) {
+	if start >= end || int(end) > len(g.glyfData) {
 		return nil
 	}
 	return g.glyfData[start:end]

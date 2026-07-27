@@ -144,8 +144,8 @@ func (st *parseState) spend(n int) {
 }
 
 // spendDecoded debits the budget for the bytes a stream-backed node's decode produced (cos.Document.DecodeWork's delta
-// across it). The shift is applied in uint64 and the result capped at the whole budget rather than narrowed first,
-// which would overflow the int counter on GOARCH=386/arm.
+// across it). The shift is applied in uint64 and the result capped at the whole budget — no decode, however large, can
+// charge more than the budget itself.
 func (st *parseState) spendDecoded(n uint64) {
 	st.spend(int(min(n>>decodeCostShift, uint64(maxProgramOps))))
 }

@@ -203,10 +203,7 @@ func parseCFFCharsetCID(data []byte, top *cffTop) *cffCID {
 
 // cffIndexCount returns the entry count of the INDEX at pos, or -1 when unreadable.
 func cffIndexCount(data []byte, pos int) int {
-	// pos arrives from clampDictOffset, which admits anything up to MaxInt32, so the bound is compared in int64 for the
-	// reason glyf.go's inRange gives: on a 32-bit build pos+2 wraps negative for a pos near MaxInt32, which would let
-	// the guard pass and the indexing below panic.
-	if pos <= 0 || int64(pos)+2 > int64(len(data)) {
+	if pos <= 0 || pos+2 > len(data) {
 		return -1
 	}
 	return int(data[pos])<<8 | int(data[pos+1])
@@ -244,13 +241,12 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 }
 
 // cffIndex reads an INDEX at pos, returning up to maxEntries entry slices and the offset just past the INDEX. An INDEX
-// is: count (Card16), offSize (Card8, 1-4), count+1 offsets (1-based), then the data.
+// is: count (Card16), offSize (Card8, 1-4), count+1 offsets (1-based), then the data. pos arrives from clampDictOffset
+// (up to MaxInt32) and an offSize-4 entry offset spans the full uint32 range; every sum of them below stays well inside
+// the 64-bit int this engine requires, so no bound here can be slipped past by a wrap. This package's contract is that
+// a hostile program never panics.
 func cffIndex(data []byte, pos, maxEntries int) (entries [][]byte, next int, err error) {
-	// Every bound here is compared in int64: pos arrives from clampDictOffset (up to MaxInt32) and an offSize-4 entry
-	// offset spans the full uint32 range, neither of which fits a 32-bit int. Computing pos+2, the offset-array end or
-	// dataStart+hi in int would wrap negative on a 32-bit build, letting the guards pass and the indexing panic — the
-	// same reason glyf.go's inRange compares in uint64. This package's contract is that a hostile program never panics.
-	if pos < 0 || int64(pos)+2 > int64(len(data)) {
+	if pos < 0 || pos+2 > len(data) {
 		return nil, 0, errBadCFF
 	}
 	count := int(data[pos])<<8 | int(data[pos+1])
@@ -266,34 +262,33 @@ func cffIndex(data []byte, pos, maxEntries int) (entries [][]byte, next int, err
 	if offSize < 1 || offSize > 4 {
 		return nil, 0, errBadCFF
 	}
-	offEnd64 := int64(pos) + int64(count+1)*int64(offSize)
-	if offEnd64 > int64(len(data)) {
+	offEnd := pos + (count+1)*offSize
+	if offEnd > len(data) {
 		return nil, 0, errBadCFF
 	}
-	offEnd := int(offEnd64) // Bounded by len(data) above, so it fits an int on every build.
-	offset := func(i int) int64 {
-		var v int64
+	offset := func(i int) int {
+		v := 0
 		for b := range offSize {
-			v = v<<8 | int64(data[pos+i*offSize+b])
+			v = v<<8 | int(data[pos+i*offSize+b])
 		}
 		return v
 	}
-	dataStart := int64(offEnd - 1) // Offsets are 1-based from the byte before the data.
+	dataStart := offEnd - 1 // Offsets are 1-based from the byte before the data.
 	last := offset(count)
 	end := dataStart + last
-	if last < 1 || end > int64(len(data)) {
+	if last < 1 || end > len(data) {
 		return nil, 0, errBadCFF
 	}
 	n := min(count, maxEntries)
 	entries = make([][]byte, 0, n)
 	for i := range n {
 		lo, hi := offset(i), offset(i+1)
-		if lo < 1 || hi < lo || dataStart+hi > int64(len(data)) {
+		if lo < 1 || hi < lo || dataStart+hi > len(data) {
 			return nil, 0, errBadCFF
 		}
 		entries = append(entries, data[dataStart+lo:dataStart+hi])
 	}
-	return entries, int(end), nil
+	return entries, end, nil
 }
 
 // cffSkipIndex advances past an INDEX without materializing entries.

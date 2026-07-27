@@ -91,17 +91,14 @@ func TestSampleReader(t *testing.T) {
 	}
 }
 
-// TestSampleStrideMaximumLayout pins the row-stride and bit-position arithmetic at the largest layouts run accepts.
-// Every value asserted here exceeds math.MaxInt32, so an int computation would wrap on a 32-bit build (GOARCH=386/arm)
-// and hand the sample reader a zero or negative stride; a negative bit position then makes next()'s pos>>3 index the
-// data slice out of range and panic.
+// TestSampleStrideMaximumLayout pins the row-stride and bit-position arithmetic at the largest layouts run accepts, so
+// the strides and seeks stay exact all the way out to the caps rather than losing precision or reading the wrong row.
 func TestSampleStrideMaximumLayout(t *testing.T) {
-	// 2^26 columns * 32 components * 16 bits = 2^32 bytes per row, four times an int32's range (it wraps to exactly 0).
-	if got, want := rowStrideFor(maxImagePixels, 32, 16), int64(1)<<32; got != want {
+	// 2^26 columns * 32 components * 16 bits = 2^32 bytes per row.
+	if got, want := rowStrideFor(maxImagePixels, 32, 16), 1<<32; got != want {
 		t.Errorf("maximum-layout row stride: got %d, want %d", got, want)
 	}
-	// A width just under the cap wraps negative rather than to zero, the case that panics instead of reading zeros.
-	if got, want := rowStrideFor(6<<21, 32, 16), int64(3)<<28; got != want {
+	if got, want := rowStrideFor(6<<21, 32, 16), 3<<28; got != want {
 		t.Errorf("near-maximum row stride: got %d, want %d", got, want)
 	}
 	// The last row of a 2^20 x 64 image (2^26 pixels, exactly the pixel cap) sits past 2^32 bytes and 2^35 bits in.
@@ -109,13 +106,13 @@ func TestSampleStrideMaximumLayout(t *testing.T) {
 	var r sampleReader
 	r.bpc = 16
 	r.seek(stride * 63)
-	if want := int64(63) << 29; r.pos != want {
+	if want := 63 << 29; r.pos != want {
 		t.Errorf("last-row bit position: got %d, want %d", r.pos, want)
 	}
 	// Reading there is past the end of any real payload, which is the zero-sample truncation case, not a panic.
 	r.data = []byte{0xff, 0xff}
 	if got := r.next(); got != 0 {
-		t.Errorf("read past end at a >32-bit bit position: got %d, want 0", got)
+		t.Errorf("read past the end at a maximum-layout bit position: got %d, want 0", got)
 	}
 }
 
@@ -648,11 +645,9 @@ func TestCCITTColumnsBounded(t *testing.T) {
 	}
 }
 
-// TestDecodeParmDimNarrowing pins the narrowing every /DecodeParms dimension goes through. The bound has to be applied
-// in int64 space: GetInt returns an int64, and on a 32-bit build int(2147483648) is -2147483648 — a value that then
-// passes every downstream guard (it is not greater than maxImagePixels, and the pixel product it forms is negative)
-// until the row-stride arithmetic makes a negative make() size and panics, failing the whole page instead of skipping
-// the image. The bug is unreachable on a 64-bit test host, so the narrowing is pinned at its own boundary here.
+// TestDecodeParmDimNarrowing pins the narrowing every /DecodeParms dimension goes through: GetInt returns an int64, and
+// anything outside (0, maxImagePixels] has to be rejected before it reaches the row-stride and pixel-product arithmetic
+// that would otherwise size an allocation from it.
 func TestDecodeParmDimNarrowing(t *testing.T) {
 	for _, v := range []int64{0, -1, -1 << 31, 1 << 31, 1<<31 + 1728, 1 << 38, math.MaxInt64, maxImagePixels + 1} {
 		if dim, ok := decodeParmDim(v); ok {
@@ -670,8 +665,7 @@ func TestDecodeParmDimNarrowing(t *testing.T) {
 	}
 }
 
-// A /Columns beyond the pixel cap must be rejected outright rather than narrowed. On a 32-bit build the value below
-// truncates to a negative int, which reaches make() as a negative length; on any build it is an image that must be
+// A /Columns beyond the pixel cap must be rejected outright rather than sized from: it is an image that must be
 // skipped, not one that fails the page.
 func TestCCITTColumnsAboveCapRejected(t *testing.T) {
 	d := testDoc(t)
@@ -853,36 +847,6 @@ func TestCCITTSMaskMissingBitsPerComponent(t *testing.T) {
 	for i := range w * h {
 		if got := img.Pix[i*4+3]; got != 0 {
 			t.Fatalf("pixel %d alpha: got %d want 0 (mask should be fully transparent)", i, got)
-		}
-	}
-}
-
-// TestMaskNearestSampleIndex pins compositeAlpha's nearest-sample arithmetic at the extremes the caps allow. The
-// products asserted here exceed math.MaxInt32, so an int computation would wrap on a 32-bit build (GOARCH=386/arm) and
-// index the mask plane out of range — a panic the public API's recover guard turns into a whole failed page render
-// instead of an ignored mask.
-func TestMaskNearestSampleIndex(t *testing.T) {
-	// A 1 x 2^26 /SMask (the tallest single dimension run accepts, a few KB of payload) over a 2^24-row base image: the
-	// last row's y*mh product is just under 2^50, which truncates to 0 in an int32 and picks the mask's first row.
-	if got, want := nearestSampleIndex((1<<24)-1, maxImagePixels, 1<<24), maxImagePixels-4; got != want {
-		t.Errorf("last row of a tall mask: got %d, want %d", got, want)
-	}
-	// The largest product either axis can reach: 2^52 - 2^26, which wraps negative in an int32.
-	if got, want := nearestSampleIndex(maxImagePixels-1, maxImagePixels, maxImagePixels), maxImagePixels-1; got != want {
-		t.Errorf("identity mapping at the pixel cap: got %d, want %d", got, want)
-	}
-	// The ordinary small cases the mapping still has to get right: stretch, shrink, and identity all stay in range.
-	for _, tc := range []struct{ v, src, dst, want int }{
-		{v: 0, src: 2, dst: 4, want: 0},
-		{v: 1, src: 2, dst: 4, want: 0},
-		{v: 2, src: 2, dst: 4, want: 1},
-		{v: 3, src: 2, dst: 4, want: 1},
-		{v: 3, src: 4, dst: 4, want: 3},
-		{v: 3, src: 1, dst: 4, want: 0},
-		{v: 7, src: 4, dst: 8, want: 3},
-	} {
-		if got := nearestSampleIndex(tc.v, tc.src, tc.dst); got != tc.want {
-			t.Errorf("nearestSampleIndex(%d, %d, %d): got %d, want %d", tc.v, tc.src, tc.dst, got, tc.want)
 		}
 	}
 }

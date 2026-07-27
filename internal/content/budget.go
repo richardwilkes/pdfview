@@ -126,7 +126,7 @@ func bodyCost(n int) int {
 
 // decodeCost is bodyCost for a byte count a decode reported through cos.Document.DecodeWork: one stage's allowance
 // alone reaches 64 MB, and a chain's total is unbounded above that, so the shift is applied in uint64 and the result
-// capped at the whole budget rather than narrowed first, which would overflow the int counter on GOARCH=386/arm.
+// capped at the whole budget — no decode, however large, can charge more than the budget itself.
 func decodeCost(n uint64) int {
 	return 1 + int(min(n>>bodyCostShift, uint64(maxTotalOps)))
 }
@@ -134,13 +134,12 @@ func decodeCost(n uint64) int {
 // imageDecodeCost is the budget charge for one image decode: the payload it scanned plus the samples it produced.
 // decoded is what the decode's filter chains produced (cos.Document.DecodeWork), floored at the encoded payload the
 // decoder was handed, since an unfiltered image produces no decoded bytes yet is scanned in full. img is nil for a
-// failed decode, which still did the scanning and inflating that got it there. The sample product is computed in int64
-// because int is 32 bits on GOARCH=386/arm; the decoder caps it at imaging's maxImagePixels (2^26), so the shifted
-// result is always small enough for the budget counter.
+// failed decode, which still did the scanning and inflating that got it there. The decoder caps the sample product at
+// imaging's maxImagePixels (2^26), so the shifted result is always small enough for the budget counter.
 func imageDecodeCost(img *imaging.Image, decoded uint64, payload int) int {
 	cost := decodeCost(max(decoded, uint64(payload)))
 	if img != nil {
-		cost += int(int64(img.Width) * int64(img.Height) >> imagePixelCostShift)
+		cost += img.Width * img.Height >> imagePixelCostShift
 	}
 	return cost
 }
@@ -174,7 +173,7 @@ func shadingPaintCost(sh *shading.Shading, target gfx.Matrix) int {
 
 // fontLoadCost is the budget charge for one font load: the flat parse charge plus the program the load decoded. f is
 // nil for a failed load, which still did the flat work before failing. The footprint is shifted in uint64 and capped at
-// the whole budget so a 64 MB inflated program cannot overflow the int counter on GOARCH=386/arm.
+// the whole budget, so no program, however large, can charge more than the budget itself.
 func fontLoadCost(f *font.Font) int {
 	cost := fontParseCost
 	if f != nil {

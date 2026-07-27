@@ -155,9 +155,7 @@ func cffPrivateRange(dict []byte) (off, size int) {
 // cffLocalSubrs reads the local Subrs INDEX of one Private DICT (operator 19, whose offset is relative to the start of
 // the Private DICT data), charging its entries against the shared budget.
 func cffLocalSubrs(data []byte, privOff, privSize int, budget *int) [][]byte {
-	// Every bound is compared in int64 for the reason cffIndex gives: clampDictOffset admits anything up to MaxInt32,
-	// so the sums below wrap negative on a 32-bit build and would let the slicing panic.
-	if privOff <= 0 || privSize <= 0 || int64(privOff)+int64(privSize) > int64(len(data)) {
+	if privOff <= 0 || privSize <= 0 || privOff+privSize > len(data) {
 		return nil
 	}
 	subrsOff := 0
@@ -168,7 +166,7 @@ func cffLocalSubrs(data []byte, privOff, privSize int, budget *int) [][]byte {
 	}); err != nil {
 		return nil
 	}
-	if subrsOff <= 0 || int64(privOff)+int64(subrsOff) > int64(len(data)) {
+	if subrsOff <= 0 || privOff+subrsOff > len(data) {
 		return nil
 	}
 	// An array trimmed to fit the budget would shift the Type 2 subroutine bias (which is derived from the array's
@@ -193,7 +191,7 @@ func parseCFFFDSelect(data []byte, off, nGlyphs int) []uint8 {
 	}
 	switch data[off] {
 	case 0: // One byte per glyph.
-		if int64(off)+1+int64(nGlyphs) > int64(len(data)) {
+		if off+1+nGlyphs > len(data) {
 			return nil
 		}
 		// Copied rather than aliased: the map outlives the parse, and a subslice would pin the whole container.
@@ -216,20 +214,20 @@ func cffFDSelectRanges(data []byte, pos, nGlyphs, gidSize int) []uint8 {
 		}
 		return v
 	}
-	if int64(pos)+int64(gidSize) > int64(len(data)) {
+	if pos+gidSize > len(data) {
 		return nil
 	}
-	// The count is kept in an int64 until it has been bounded by the data length: format 4 declares it in 32 bits,
-	// which does not fit an int on a 32-bit build.
-	nRanges := int64(be(pos, gidSize))
+	// Format 4 declares the count in 32 bits, so the record-span product below reaches 2^34 — well inside the 64-bit
+	// int this engine requires.
+	nRanges := int(be(pos, gidSize))
 	pos += gidSize
 	// Each record is a GID plus one FD byte, and a sentinel GID follows the last one.
-	if nRanges <= 0 || int64(pos)+nRanges*int64(gidSize+1)+int64(gidSize) > int64(len(data)) {
+	if nRanges <= 0 || pos+nRanges*(gidSize+1)+gidSize > len(data) {
 		return nil
 	}
 	out := make([]uint8, nGlyphs)
 	covered := uint64(0)
-	for i := range int(nRanges) {
+	for i := range nRanges {
 		at := pos + i*(gidSize+1)
 		first := be(at, gidSize)
 		// TN5176 section 19 requires the records to be in increasing GID order, which is also what go-text's binary

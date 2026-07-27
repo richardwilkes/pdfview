@@ -433,40 +433,28 @@ func (d *Document) filterNamesAndParms(dict Dict) (names []Name, parms Array, er
 	return names, parms, nil
 }
 
-// maxFilterParam bounds the magnitude of a /DecodeParms value handed to internal/filter. It sits far above every value
-// that package's validation accepts (64 colors, 16 bits per component, 2^24 columns, predictor 15) and far below
-// math.MaxInt32, so it is representable on every architecture.
-const maxFilterParam = 1 << 30
-
-// clampFilterParam narrows a file-supplied int64 to int. A plain conversion truncates on 32-bit builds (GOARCH=386/arm,
-// which this package's row-length and sample-index arithmetic explicitly cares about), so a /Columns of 4294967297 would
-// arrive as 1, pass validatePredictorParams, and decode with a silently wrong row length; /Colors, /BitsPerComponent,
-// /Predictor, and /EarlyChange truncate the same way. Saturating instead keeps every legal value exact and keeps every
-// illegal one illegal, so internal/filter still rejects it rather than acting on a wrapped-around impostor.
-func clampFilterParam(v int64) int {
-	return int(min(max(v, -maxFilterParam), maxFilterParam))
-}
-
-// filterParams builds filter.Params from one /DecodeParms dictionary (which may be nil).
+// filterParams builds filter.Params from one /DecodeParms dictionary (which may be nil). Every value passes through
+// exactly as the file declared it: internal/filter validates each one against what it accepts (64 colors, 16 bits per
+// component, 2^24 columns, predictor 15), so an out-of-range value is rejected there rather than acted on here.
 func (d *Document) filterParams(parmDict Dict) filter.Params {
 	params := filter.DefaultParams()
 	if parmDict == nil {
 		return params
 	}
 	if v, ok := d.GetInt(parmDict, "Predictor"); ok {
-		params.Predictor = clampFilterParam(v)
+		params.Predictor = int(v)
 	}
 	if v, ok := d.GetInt(parmDict, "Colors"); ok {
-		params.Colors = clampFilterParam(v)
+		params.Colors = int(v)
 	}
 	if v, ok := d.GetInt(parmDict, "BitsPerComponent"); ok {
-		params.BitsPerComponent = clampFilterParam(v)
+		params.BitsPerComponent = int(v)
 	}
 	if v, ok := d.GetInt(parmDict, "Columns"); ok {
-		params.Columns = clampFilterParam(v)
+		params.Columns = int(v)
 	}
 	if v, ok := d.GetInt(parmDict, "EarlyChange"); ok {
-		params.EarlyChange = clampFilterParam(v)
+		params.EarlyChange = int(v)
 	}
 	return params
 }

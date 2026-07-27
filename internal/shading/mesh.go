@@ -152,10 +152,9 @@ func (m *meshDecode) toRGB(comps []float32) [3]float32 {
 func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.Space, fns []function.Func) error {
 	dict := stream.Dict
 	m := meshDecode{space: space, fns: fns, nComps: space.NComponents()}
-	// The three bit widths are range-checked as the int64 the file declared, before any narrowing: int(v) is
-	// implementation-defined once the value does not fit, so validating the narrowed value would let a
-	// /BitsPerCoordinate of 2^32+32 pass as 32 on a 32-bit build and decode the same stream differently there than on a
-	// 64-bit one. /VerticesPerRow, /ShadingType and /hival are all checked the same way.
+	// The three bit widths are range-checked as the int64 the file declared, before any narrowing: only the widths the
+	// standard lists are legal, so anything else — including a value far outside int range, where int(v) is
+	// implementation-defined — is rejected here. /VerticesPerRow, /ShadingType and /hival are all checked the same way.
 	bpc, ok := d.GetInt(dict, "BitsPerCoordinate")
 	if !ok || !validBits(bpc, 1, 2, 4, 8, 12, 16, 24, 32) {
 		return errBadShading

@@ -92,8 +92,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		}
 		return gray, gw, gh, nil
 	}
-	var bpc int
-	var rowStride int64
+	var bpc, rowStride int
 	validCols := w
 	if isCCITT(codec) {
 		// CCITT fixes bpc at 1 and supplies the column count itself, so — like decodeSamples — do not consult (or
@@ -122,7 +121,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 		// 16-bit masks map per sample (no LUT): the high byte carries all the precision alpha keeps.
 		mapping := sub.grayMapping(16)
 		for y := range h {
-			reader.seek(int64(y) * rowStride)
+			reader.seek(y * rowStride)
 			for x := range w {
 				plane[y*w+x] = alphaByte(mapping.apply(reader.next(), 0))
 			}
@@ -131,7 +130,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	}
 	lut := sub.alphaLUT(bpc)
 	for y := range h {
-		reader.seek(int64(y) * rowStride)
+		reader.seek(y * rowStride)
 		for x := range w {
 			// Columns past the decoder's count read as zero samples (see decodeSamples); the 16-bit path above never
 			// applies to CCITT, so only this LUT loop needs the guard.
@@ -176,25 +175,18 @@ func alphaByte(v float32) byte {
 	return byte(v*255 + 0.5)
 }
 
-// nearestSampleIndex maps destination pixel v of a dst-pixel span onto the nearest of src samples covering the same
-// unit square. The product v*src reaches 2^52 (a row index just under the 2^26 pixel cap against a mask dimension at
-// the same cap — say a 1 x 2^26 /SMask, only a few KB of payload, over a tall base image), which wraps a 32-bit int
-// (GOARCH=386/arm) to a truncated or negative index that then reads the mask plane out of range, so it is computed in
-// int64 the way rowStrideFor is.
-func nearestSampleIndex(v, src, dst int) int {
-	return int(int64(v) * int64(src) / int64(dst))
-}
-
 // compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (the mask and
-// the image both span the same unit square).
+// the image both span the same unit square). The nearest-sample products top out at 2^52 (a row index just under the
+// 2^26 pixel cap against a mask dimension at the same cap — say a 1 x 2^26 /SMask, only a few KB of payload, over a
+// tall base image), well inside the 64-bit int this engine requires.
 func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 	if mw <= 0 || mh <= 0 || len(plane) < mw*mh {
 		return
 	}
 	for y := range img.Height {
-		my := nearestSampleIndex(y, mh, img.Height)
+		my := y * mh / img.Height
 		for x := range img.Width {
-			mx := nearestSampleIndex(x, mw, img.Width)
+			mx := x * mw / img.Width
 			a := plane[my*mw+mx]
 			if a == 255 {
 				continue
