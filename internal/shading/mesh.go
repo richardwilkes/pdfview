@@ -59,14 +59,19 @@ func (r *bitReader) align() {
 
 // meshDecode holds the per-value decode parameters of a mesh stream.
 type meshDecode struct {
+	// cache memoizes resolved colors by their raw (pre-/Decode) bit pattern; nil when the tuple is too wide to key or
+	// the conversion is not worth memoizing.
+	cache  map[uint64][3]float32
 	space  pdfcolor.Space
 	fns    []function.Func
 	decode []float32 // pairs: x, y, then one pair per color value
+	evals  int       // remaining function evaluations for this parse; only meaningful when costly
 	bpc    int       // BitsPerCoordinate
 	bpcomp int       // BitsPerComponent
 	bpf    int       // BitsPerFlag
 	nColor int       // color values per vertex (1 when fns is set)
 	nComps int       // color-space component count
+	costly bool      // resolving one color runs a PDF function
 }
 
 // decodeVal maps a raw bit-field value into the decode range for slot i.
@@ -96,40 +101,74 @@ func (m *meshDecode) readVertex(r *bitReader) (vert, bool) {
 	return v, true
 }
 
-// readColor reads one color tuple and resolves it to RGB.
+// readColor reads one color tuple and resolves it to RGB. When resolving runs a PDF function — a /Function of any mesh
+// type, or the tint transform of a /Separation or /DeviceN space — the whole parse shares maxMeshColorEvals of them: a
+// mesh declares its vertex and patch count through its payload, so without a budget here one stream's parse can force
+// up to 2*maxMeshVertices evaluations while internal/content prices the parse at a flat shadingParseCost on the
+// assumption that a shading parse evaluates a function 256 times. Repeated raw tuples are memoized rather than charged,
+// which costs a hostile stream nothing it did not already spend and makes the common case (a mesh whose payload reuses
+// a handful of colors) free. Running out degrades like a truncated stream: the read fails, and the caller keeps the
+// primitives it already has.
 func (m *meshDecode) readColor(r *bitReader) ([3]float32, bool) {
 	comps := make([]float32, m.nColor)
+	var key uint64
 	for i := range comps {
 		raw, ok := r.read(m.bpcomp)
 		if !ok {
 			return [3]float32{}, false
 		}
+		key = key<<uint(m.bpcomp) | uint64(raw)
 		comps[i] = m.decodeVal(raw, m.bpcomp, 2+i)
 	}
+	if !m.costly {
+		return m.toRGB(comps), true
+	}
+	if m.cache != nil {
+		if c, hit := m.cache[key]; hit {
+			return c, true
+		}
+	}
+	if m.evals <= 0 {
+		return [3]float32{}, false
+	}
+	m.evals--
+	c := m.toRGB(comps)
+	if m.cache != nil {
+		m.cache[key] = c
+	}
+	return c, true
+}
+
+// toRGB runs the /Function set, if any, and converts the result through the shading's color space.
+func (m *meshDecode) toRGB(comps []float32) [3]float32 {
 	if m.fns != nil {
 		comps = evalComps(m.fns, comps, m.nComps)
 	}
 	rgba := m.space.ToNRGBA(comps)
-	return [3]float32{float32(rgba.R), float32(rgba.G), float32(rgba.B)}, true
+	return [3]float32{float32(rgba.R), float32(rgba.G), float32(rgba.B)}
 }
 
 // parseMesh parses and tessellates one mesh shading stream (kinds 4-7) into sh.Triangles.
 func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.Space, fns []function.Func) error {
 	dict := stream.Dict
 	m := meshDecode{space: space, fns: fns, nComps: space.NComponents()}
+	// The three bit widths are range-checked as the int64 the file declared, before any narrowing: int(v) is
+	// implementation-defined once the value does not fit, so validating the narrowed value would let a
+	// /BitsPerCoordinate of 2^32+32 pass as 32 on a 32-bit build and decode the same stream differently there than on a
+	// 64-bit one. /VerticesPerRow, /ShadingType and /hival are all checked the same way.
 	bpc, ok := d.GetInt(dict, "BitsPerCoordinate")
-	if !ok || !validBits(int(bpc), 1, 2, 4, 8, 12, 16, 24, 32) {
+	if !ok || !validBits(bpc, 1, 2, 4, 8, 12, 16, 24, 32) {
 		return errBadShading
 	}
 	m.bpc = int(bpc)
 	bpcomp, ok := d.GetInt(dict, "BitsPerComponent")
-	if !ok || !validBits(int(bpcomp), 1, 2, 4, 8, 12, 16) {
+	if !ok || !validBits(bpcomp, 1, 2, 4, 8, 12, 16) {
 		return errBadShading
 	}
 	m.bpcomp = int(bpcomp)
 	if sh.Kind != KindLatticeTriangle {
 		bpf, hasFlag := d.GetInt(dict, "BitsPerFlag")
-		if !hasFlag || !validBits(int(bpf), 2, 4, 8) {
+		if !hasFlag || !validBits(bpf, 2, 4, 8) {
 			return errBadShading
 		}
 		m.bpf = int(bpf)
@@ -137,6 +176,12 @@ func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.
 	m.nColor = m.nComps
 	if fns != nil {
 		m.nColor = 1
+	}
+	if m.costly = fns != nil || pdfcolor.RunsFunction(space); m.costly {
+		m.evals = maxMeshColorEvals
+		if m.nColor*m.bpcomp <= maxMeshColorKeyBits {
+			m.cache = make(map[uint64][3]float32)
+		}
 	}
 	decode, ok := d.GetArray(dict, "Decode")
 	if !ok || len(decode) < 2*(2+m.nColor) {
@@ -176,7 +221,7 @@ func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.
 	return nil
 }
 
-func validBits(v int, allowed ...int) bool {
+func validBits(v int64, allowed ...int64) bool {
 	for _, a := range allowed {
 		if v == a {
 			return true

@@ -54,6 +54,17 @@ const (
 	maxMeshInputTris = 2 * maxMeshVertices
 	maxSubdivDepth   = 8
 	maxPatchGrid     = 96
+	// maxMeshColorEvals bounds the PDF function evaluations ONE mesh parse may force to resolve its colors — its
+	// /Function, or its color space's tint transform when it is a /Separation or /DeviceN. A mesh declares its vertex
+	// and patch count through its payload, and the maxMeshVertices cap allows one evaluation per vertex and two per
+	// patch corner, so the ceiling was ~131,072 of them from a stream that compresses to a couple of hundred kilobytes —
+	// while internal/content charges the whole parse the flat shadingParseCost, priced on the documented assumption that
+	// a shading parse evaluates a function 256 times. At 1<<12 a mesh may still evaluate sixteen times what an
+	// axial/radial ramp does (real function-driven meshes run a few hundred patch corners), and a page naming hundreds
+	// of hostile shadings costs seconds rather than tens of minutes. maxMeshColorKeyBits is the widest raw color tuple
+	// the parse's memo can key on in a uint64; wider tuples still get the budget, just not the memo.
+	maxMeshColorEvals   = 1 << 12
+	maxMeshColorKeyBits = 64
 )
 
 var (
@@ -159,18 +170,29 @@ func parseFunctions(d *cos.Document, obj cos.Object, nComps int) []function.Func
 	}
 	resolved := d.Resolve(obj)
 	if arr, ok := resolved.(cos.Array); ok {
-		if len(arr) < nComps || nComps <= 0 {
+		if nComps <= 0 {
 			return nil
 		}
-		fns := make([]function.Func, 0, nComps)
-		for _, entry := range arr[:nComps] {
-			fn, err := function.Parse(d, entry)
-			if err != nil || fn.NOutputs() < 1 {
+		// A one-element array is non-conforming — Table 78 wants nComps 1-output functions — but it is common enough
+		// that MuPDF and pdf.js both accept it, so the single n-output function it wraps takes the single-function path
+		// below (which evalComps already handles, and which validates NOutputs() >= nComps). Rejecting it on length
+		// alone made an ordinary DeviceRGB gradient carrying one type 2 function with 3-entry /C0 and /C1 fail to parse
+		// and paint nothing at all.
+		if len(arr) != 1 {
+			if len(arr) < nComps {
 				return nil
 			}
-			fns = append(fns, fn)
+			fns := make([]function.Func, 0, nComps)
+			for _, entry := range arr[:nComps] {
+				fn, err := function.Parse(d, entry)
+				if err != nil || fn.NOutputs() < 1 {
+					return nil
+				}
+				fns = append(fns, fn)
+			}
+			return fns
 		}
-		return fns
+		resolved = d.Resolve(arr[0])
 	}
 	fn, err := function.Parse(d, resolved)
 	if err != nil || fn.NOutputs() < nComps {

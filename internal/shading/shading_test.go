@@ -24,6 +24,8 @@ const (
 	keyDomain      cos.Name = "Domain"
 	keyFunction    cos.Name = "Function"
 	keyBitsPerFlag cos.Name = "BitsPerFlag"
+	keyBitsPerCoor cos.Name = "BitsPerCoordinate"
+	keyBitsPerComp cos.Name = "BitsPerComponent"
 	keyCoords      cos.Name = "Coords"
 	keyFuncType    cos.Name = "FunctionType"
 	keyVertsPerRow cos.Name = "VerticesPerRow"
@@ -136,10 +138,10 @@ func TestParseFunctionBased(t *testing.T) {
 // meshStream builds a mesh shading stream with 16-bit coordinates over [0 400] and 8-bit RGB.
 func meshStream(kind int, extra cos.Dict, data []byte) *cos.Stream {
 	dict := cos.Dict{
-		keyShadingType:      cos.Integer(int64(kind)),
-		keyColorSpace:       cos.Name("DeviceRGB"),
-		"BitsPerCoordinate": cos.Integer(16),
-		"BitsPerComponent":  cos.Integer(8),
+		keyShadingType: cos.Integer(int64(kind)),
+		keyColorSpace:  cos.Name("DeviceRGB"),
+		keyBitsPerCoor: cos.Integer(16),
+		keyBitsPerComp: cos.Integer(8),
 		"Decode": cos.Array{
 			cos.Real(0), cos.Real(400), cos.Real(0), cos.Real(400),
 			cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1), cos.Real(0), cos.Real(1),
@@ -508,6 +510,176 @@ func TestLatticeRowWidthBound(t *testing.T) {
 	if want := 2 * perRow * bitsPerVertex; r.pos != want {
 		t.Errorf("lattice consumed %d bits (%d vertices), want %d (%d vertices, the whole budget and no more)",
 			r.pos, r.pos/bitsPerVertex, want, 2*perRow)
+	}
+}
+
+// be16 appends one big-endian 16-bit raw field.
+func be16(v int) []byte { return []byte{byte(v >> 8), byte(v)} }
+
+// uniformTriMesh builds a type 4 free-form mesh of n independent single-component triangles with 16-bit coordinates and
+// 16-bit color values. Every vertex carries the edge flag 0, so each triple is its own triangle, and all three vertices
+// of a triangle share one color value — which makes the tessellation exact: a uniform triangle has zero color spread,
+// so it never subdivides and the output triangle count reports exactly how many the parse managed to read. With
+// distinct set, triangle k carries raw color k (n distinct tuples for the memo to miss on); otherwise every triangle
+// carries the same one.
+func uniformTriMesh(n int, distinct bool, extra cos.Dict) *cos.Stream {
+	dict := cos.Dict{
+		keyShadingType: cos.Integer(4),
+		keyColorSpace:  cos.Name("DeviceGray"),
+		keyBitsPerCoor: cos.Integer(16),
+		keyBitsPerComp: cos.Integer(16),
+		keyBitsPerFlag: cos.Integer(8),
+		"Decode": cos.Array{
+			cos.Real(0), cos.Real(400), cos.Real(0), cos.Real(400), cos.Real(0), cos.Real(1),
+		},
+	}
+	for k, v := range extra {
+		dict[k] = v
+	}
+	data := make([]byte, 0, n*3*7)
+	for k := range n {
+		c := 0
+		if distinct {
+			c = k
+		}
+		for j := range 3 {
+			data = append(data, 0) // Edge flag 0: every triple starts a fresh triangle.
+			data = append(data, be16((k*13+j*137)&0xFFFF)...)
+			data = append(data, be16((k*29+j*211)&0xFFFF)...)
+			data = append(data, be16(c)...)
+		}
+	}
+	dict["Length"] = cos.Integer(int64(len(data)))
+	return &cos.Stream{Dict: dict, Raw: data}
+}
+
+// TestMeshColorEvalBudget pins the per-parse bound on the PDF function evaluations a mesh's colors can force. A mesh
+// declares its own vertex count through its payload, so a shading whose colors run a /Function — or whose space is a
+// /Separation or /DeviceN, whose ToNRGBA runs a tint transform per call — could force up to one evaluation per vertex,
+// ~131,072 of them, while internal/content prices the whole parse at the flat shadingParseCost on the documented
+// assumption that a shading parse evaluates a function 256 times. Pointed at an expensive type 4 function, a few
+// hundred kilobytes bought minutes of CPU.
+func TestMeshColorEvalBudget(t *testing.T) {
+	d := testDoc(t)
+	const n = maxMeshColorEvals + 100
+	gray := expFn(cos.Array{cos.Real(0)}, cos.Array{cos.Real(1)})
+	separation := cos.Array{cos.Name("Separation"), cos.Name("Spot"), cos.Name("DeviceGray"), gray}
+
+	// The budget is shared across the parse and stops it like a truncated stream would: the triangles read before it
+	// ran out are kept, the rest are not.
+	for _, tc := range []struct {
+		extra cos.Dict
+		name  string
+	}{
+		{name: "/Function", extra: cos.Dict{keyFunction: gray}},
+		{name: "/Separation tint transform", extra: cos.Dict{keyColorSpace: separation}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sh, err := Parse(d, uniformTriMesh(n, true, tc.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sh.Triangles) != maxMeshColorEvals {
+				t.Fatalf("the parse resolved %d colors, want the %d-evaluation budget to stop it",
+					len(sh.Triangles), maxMeshColorEvals)
+			}
+		})
+	}
+
+	// A space that converts without a function is not charged at all, so the same stream parses whole: the budget must
+	// not truncate the ordinary device-space mesh it was never aimed at.
+	sh, err := Parse(d, uniformTriMesh(n, true, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sh.Triangles) != n {
+		t.Fatalf("a DeviceGray mesh yielded %d of its %d triangles; only function-driven colors are budgeted",
+			len(sh.Triangles), n)
+	}
+
+	// Repeated raw tuples are memoized rather than charged, so a function-driven mesh that reuses one color — the shape
+	// real content takes — parses whole even though it holds far more vertices than the budget allows evaluations.
+	sh, err = Parse(d, uniformTriMesh(n, false, cos.Dict{keyFunction: gray}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sh.Triangles) != n {
+		t.Fatalf("a single-color mesh yielded %d of its %d triangles; repeated tuples must come from the memo",
+			len(sh.Triangles), n)
+	}
+}
+
+// TestSingleFunctionArray covers the one-element /Function array. Table 78 asks for one 1-output function per color
+// component, but a single n-output function wrapped in a one-element array is common enough that MuPDF and pdf.js both
+// accept it; rejecting it on array length alone made an ordinary DeviceRGB gradient parse to nothing and paint nothing.
+func TestSingleFunctionArray(t *testing.T) {
+	d := testDoc(t)
+	rgb := expFn(cos.Array{cos.Real(1), cos.Real(0), cos.Real(0)}, cos.Array{cos.Real(0), cos.Real(0), cos.Real(1)})
+	axial := func(fn cos.Object) cos.Dict {
+		return cos.Dict{
+			keyShadingType: cos.Integer(2),
+			keyColorSpace:  cos.Name("DeviceRGB"),
+			keyCoords:      cos.Array{cos.Real(0), cos.Real(0), cos.Real(100), cos.Real(0)},
+			keyFunction:    fn,
+		}
+	}
+
+	// [ f ] with one 3-output function is the same red-to-blue ramp as the bare f.
+	sh, err := Parse(d, axial(cos.Array{rgb}))
+	if err != nil {
+		t.Fatalf("/Function [ f ] with a 3-output f: %v", err)
+	}
+	first, last := sh.Stops[0], sh.Stops[len(sh.Stops)-1]
+	if first.Color.R != 255 || first.Color.B != 0 || last.Color.R != 0 || last.Color.B != 255 {
+		t.Fatalf("end colors %v %v, want the same ramp the bare function yields", first.Color, last.Color)
+	}
+
+	// A one-element array is still held to the single-function contract: one output cannot fill DeviceRGB.
+	gray := expFn(cos.Array{cos.Real(0)}, cos.Array{cos.Real(1)})
+	if _, err = Parse(d, axial(cos.Array{gray})); err == nil {
+		t.Fatal("/Function [ f ] with a 1-output f fills only one of DeviceRGB's three components; expected an error")
+	}
+
+	// The conforming form — one 1-output function per component — still takes the per-component path.
+	sh, err = Parse(d, axial(cos.Array{gray, gray, gray}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sh.Stops[len(sh.Stops)-1].Color.R != 255 {
+		t.Fatalf("three 1-output functions should ramp every component to white, got %v", sh.Stops[len(sh.Stops)-1].Color)
+	}
+}
+
+// TestMeshBitWidthsCheckedAsInt64 pins /BitsPerCoordinate, /BitsPerComponent and /BitsPerFlag to the value the file
+// declared rather than to its narrowing. Go leaves int(v) implementation-defined once the value does not fit, so
+// checking the narrowed value let a /BitsPerCoordinate of 2^32+32 pass as 32 on a 32-bit build (GOARCH=386/arm, which
+// this package's budget comments explicitly target) while a 64-bit build rejected it — the same mesh stream decoded
+// differently on the two architectures. /VerticesPerRow, /ShadingType and /hival are all checked as int64 already.
+func TestMeshBitWidthsCheckedAsInt64(t *testing.T) {
+	// validBits sees the declared int64: a value whose low 32 bits are legal is not.
+	for _, v := range []int64{1<<32 + 16, 1<<32 + 8, 1<<32 + 2} {
+		if validBits(v, 1, 2, 4, 8, 12, 16, 24, 32) {
+			t.Errorf("validBits(%d) accepted a width that is only legal once truncated to 32 bits", v)
+		}
+	}
+
+	d := testDoc(t)
+	data := make([]byte, 0, 24)
+	data = append(data, v4(0, 0, 0, 10, 20, 30)...)
+	data = append(data, v4(0, 100, 0, 10, 20, 30)...)
+	data = append(data, v4(0, 0, 100, 10, 20, 30)...)
+	for _, tc := range []struct {
+		key cos.Name
+		bad int64
+	}{
+		{key: keyBitsPerCoor, bad: 1<<32 + 16},
+		{key: keyBitsPerComp, bad: 1<<32 + 8},
+		{key: keyBitsPerFlag, bad: 1<<32 + 8},
+	} {
+		stream := meshStream(4, cos.Dict{keyBitsPerFlag: cos.Integer(8), tc.key: cos.Integer(tc.bad)}, data)
+		if _, err := Parse(d, stream); err == nil {
+			t.Errorf("/%s %d was accepted; it is only a legal width once truncated to 32 bits", tc.key, tc.bad)
+		}
 	}
 }
 

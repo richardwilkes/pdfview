@@ -176,6 +176,17 @@ func (s *Separation) ToNRGBA(comps []float32) color.NRGBA {
 	return s.alt.ToNRGBA(s.tint.Eval(comps))
 }
 
+// RunsFunction reports whether converting a single color through s evaluates a PDF function. Only /Separation and
+// /DeviceN do: their ToNRGBA runs the tint transform on every call. Every other space this package builds converts with
+// fixed arithmetic (the device families) or a table resolved once at parse time (/Indexed, whose palette already folded
+// any tint transform away), and a /Separation /None never converts at all. Callers that convert colors in bulk — a mesh
+// shading resolves one per vertex or patch corner, from a count the stream itself declares — use this to decide whether
+// that loop needs a budget of its own rather than pricing every space as if it were free.
+func RunsFunction(s Space) bool {
+	sep, ok := s.(*Separation)
+	return ok && !sep.none
+}
+
 // Pattern is the /Pattern color space. Painting with it selects a pattern resource rather than component values; the
 // interpreter (internal/content) resolves the scn-selected pattern and skips paint operations while no pattern is
 // selected.
