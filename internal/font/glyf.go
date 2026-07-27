@@ -33,10 +33,14 @@ type glyfInfo struct {
 // glyfCompositeDepth caps composite-glyph recursion (matching go-text's own cap).
 const glyfCompositeDepth = 8
 
-// glyfWorkBudget caps the total work one path() call may spend: one unit per component visited plus one per contour
-// emitted. The depth cap alone bounds recursion depth but not branching, so a chain where glyph i is N components of
-// glyph i+1 costs N^depth appendGlyph calls (and a path that grows just as fast) without this ceiling. Sized like
-// maxSegments in the Type 1 interpreter; real glyphs stay in the low hundreds.
+// glyfWorkBudget caps the total work one path() call may spend: one unit per component visited, one per contour
+// emitted, and one per contour point converted. The depth cap alone bounds recursion depth but not branching, so a
+// chain where glyph i is N components of glyph i+1 costs N^depth appendGlyph calls (and a path that grows just as fast)
+// without this ceiling. Points must be charged too, or the same amplification runs through a fat leaf instead: a simple
+// glyph can declare 65536 points in a few hundred bytes (repeat-flag runs whose X_SAME/Y_SAME deltas cost no coordinate
+// bytes at all), so a budget that only counts glyphs and contours still lets thousands of leaf visits emit hundreds of
+// millions of verbs — gigabytes of gfx.Path, an allocation failure no recover() can catch. Sized like maxSegments in
+// the Type 1 interpreter; real glyphs stay in the low hundreds.
 const glyfWorkBudget = 1 << 14
 
 // newGlyfInfo builds the walker from an sfnt loader; nil when the program has no usable glyf/loca pair.
@@ -106,9 +110,9 @@ func (g *glyfInfo) path(gid uint32) *gfx.Path {
 }
 
 // appendGlyph appends one glyph's contours under m, recursing into composite components. budget is decremented once per
-// visited glyph and once per emitted contour and stops the walk when exhausted; onPath holds the composite GIDs on the
-// current recursion path, so a component that references any ancestor (a self-reference or a longer A->B->A cycle) is
-// skipped rather than followed.
+// visited glyph, once per emitted contour and once per converted point, and stops the walk when exhausted; onPath holds
+// the composite GIDs on the current recursion path, so a component that references any ancestor (a self-reference or a
+// longer A->B->A cycle) is skipped rather than followed.
 func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int, budget *int, onPath map[uint32]bool) {
 	if depth > glyfCompositeDepth || *budget <= 0 {
 		return
@@ -174,7 +178,7 @@ func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix, budg
 		if end < start || end >= len(pts) {
 			return // Malformed contour indices: stop appending, keep what is valid so far.
 		}
-		appendContour(p, pts[start:end+1], m)
+		appendContour(p, pts[start:end+1], m, budget)
 		start = end + 1
 	}
 }
@@ -182,8 +186,9 @@ func appendSimpleContours(p *gfx.Path, sg tables.SimpleGlyph, m gfx.Matrix, budg
 // appendContour emits one closed quadratic contour. Start-point selection follows the convention every TrueType
 // rasterizer shares: the first point when it is on-curve, else the last point when that is on-curve, else the midpoint
 // of the two (a fully off-curve contour) — with every unconsumed point then processed once in order and the contour
-// closed back to the start.
-func appendContour(p *gfx.Path, pts []tables.GlyphContourPoint, m gfx.Matrix) {
+// closed back to the start. Each processed point costs one budget unit and emits at most one verb, so the walk stops
+// mid-contour once the budget runs out; the contour is still closed, leaving a well-formed (if truncated) path.
+func appendContour(p *gfx.Path, pts []tables.GlyphContourPoint, m gfx.Matrix, budget *int) {
 	const flagOnCurve = 1
 	n := len(pts)
 	if n == 0 {
@@ -210,6 +215,10 @@ func appendContour(p *gfx.Path, pts []tables.GlyphContourPoint, m gfx.Matrix) {
 	var ctrl gfx.Point
 	haveCtrl := false
 	for i := lo; i <= hi; i++ {
+		if *budget <= 0 {
+			break
+		}
+		*budget--
 		pt, on := at(i)
 		switch {
 		case on && haveCtrl:
