@@ -120,7 +120,7 @@ func (d *Document) loadXref() error {
 // mergeTrailers combines the trailer dictionaries of a cross-reference chain, newest first: the newest trailer wins,
 // with the document-level keys filled in from older trailers when the newer ones lack them. The result is always a
 // fresh dictionary: the inputs are parsed objects — for a cross-reference stream, trailers[0] is the stream's own
-// dictionary — and neither this merge nor the caller's later edits (installRepairedTrailer supplies a fallback /Root)
+// dictionary — and neither this merge nor the caller's later edits (installRepairedRoot supplies a fallback /Root)
 // may alter what another consumer of that object sees.
 func mergeTrailers(trailers []Dict) Dict {
 	if len(trailers) == 0 {
@@ -157,26 +157,30 @@ func (d *Document) readXrefSection(offset int64, hybrids map[int64]bool) (Dict, 
 		return nil, fmt.Errorf("%w: %w", errBadXref, err)
 	}
 	if tok.kind == tkKeyword && bytes.Equal(tok.s, []byte("xref")) {
-		trailer, terr := d.readClassicXref(p)
+		// A pre-1.5 reader must see every object this section defines, but the classic table can only express objects
+		// stored directly in the file, so a hybrid producer writes a free entry for each object it can express solely in
+		// the /XRefStm. Those entries are collected here and handed to the stream, which is entitled to replace them.
+		freeInTable := make(map[int]bool)
+		trailer, terr := d.readClassicXref(p, freeInTable)
 		if terr != nil {
 			return nil, terr
 		}
 		if stmOff, ok := AsInt(trailer["XRefStm"]); ok && !hybrids[stmOff] {
 			hybrids[stmOff] = true
 			// Failure to read the hybrid stream is not fatal: the classic table is complete for pre-1.5 readers.
-			d.readXrefStream(stmOff) //nolint:errcheck // See above.
+			d.readXrefStream(stmOff, freeInTable) //nolint:errcheck // See above.
 		}
 		return trailer, nil
 	}
 	if tok.kind == tkInt {
-		return d.readXrefStream(offset)
+		return d.readXrefStream(offset, nil)
 	}
 	return nil, fmt.Errorf("%w: neither xref table nor xref stream at offset %d", errBadXref, offset)
 }
 
 // readClassicXref reads the subsections of a classic xref table (the "xref" keyword has been consumed) and the trailer
-// dictionary that follows.
-func (d *Document) readClassicXref(p *parser) (Dict, error) {
+// dictionary that follows, recording in freeInTable every object number this table marks free.
+func (d *Document) readClassicXref(p *parser, freeInTable map[int]bool) (Dict, error) {
 	for {
 		tok, err := p.next()
 		if err != nil {
@@ -194,7 +198,7 @@ func (d *Document) readClassicXref(p *parser) (Dict, error) {
 			}
 			return trailer, nil
 		case tok.kind == tkInt:
-			if err = d.readClassicSubsection(p, tok.i); err != nil {
+			if err = d.readClassicSubsection(p, tok.i, freeInTable); err != nil {
 				return nil, err
 			}
 		default:
@@ -203,8 +207,9 @@ func (d *Document) readClassicXref(p *parser) (Dict, error) {
 	}
 }
 
-// readClassicSubsection reads one "start count" subsection whose start value has been consumed.
-func (d *Document) readClassicSubsection(p *parser, start int64) error {
+// readClassicSubsection reads one "start count" subsection whose start value has been consumed, noting in freeInTable
+// the free entries it installs (see readXrefSection).
+func (d *Document) readClassicSubsection(p *parser, start int64, freeInTable map[int]bool) error {
 	count, err := p.expectInt()
 	if err != nil {
 		return fmt.Errorf("%w: %w", errBadXref, err)
@@ -230,7 +235,11 @@ func (d *Document) readClassicSubsection(p *parser, start int64) error {
 		case 'n':
 			d.setEntry(num, xrefEntry{kind: xrefInFile, offset: offset})
 		case 'f':
-			d.setEntry(num, xrefEntry{kind: xrefFree})
+			// Only an entry this table actually installed is recorded: one shadowed by a newer section must not become
+			// something the /XRefStm alongside this (older) table is allowed to replace.
+			if d.setEntry(num, xrefEntry{kind: xrefFree}) {
+				freeInTable[int(num)] = true
+			}
 		default:
 			return fmt.Errorf("%w: bad entry type %q", errBadXref, tok.s)
 		}
@@ -240,19 +249,37 @@ func (d *Document) readClassicSubsection(p *parser, start int64) error {
 }
 
 // setEntry records an entry for an object number unless one is already present (the first entry seen comes from the
-// newest increment and wins). Object numbers outside the supported range are ignored.
-func (d *Document) setEntry(num int64, entry xrefEntry) {
+// newest increment and wins), reporting whether it was recorded. Object numbers outside the supported range are
+// ignored.
+func (d *Document) setEntry(num int64, entry xrefEntry) bool {
 	if num <= 0 || num > maxObjectNumber {
-		return
+		return false
 	}
-	if _, exists := d.xref[int(num)]; !exists {
-		d.xref[int(num)] = entry
+	if _, exists := d.xref[int(num)]; exists {
+		return false
 	}
+	d.xref[int(num)] = entry
+	return true
+}
+
+// setStreamEntry records an entry read from a cross-reference stream. freeInTable, when non-nil, holds the object
+// numbers the classic table of this same hybrid section marked free; an entry of any other kind replaces one of those,
+// since a free classic entry is exactly the placeholder a hybrid producer writes for an object only the /XRefStm can
+// express (ISO 32000-2 7.5.8.4). Letting the placeholder win instead lost both the object and, when the number named an
+// object stream, everything stored inside it. Precedence over other sections is unchanged: the override applies only to
+// entries this section's own table installed, and each number is overridden at most once.
+func (d *Document) setStreamEntry(num int64, entry xrefEntry, freeInTable map[int]bool) {
+	if entry.kind != xrefFree && num > 0 && num <= maxObjectNumber && freeInTable[int(num)] {
+		delete(freeInTable, int(num))
+		delete(d.xref, int(num))
+	}
+	d.setEntry(num, entry)
 }
 
 // readXrefStream reads the cross-reference stream at offset and returns its dictionary, which doubles as the trailer,
-// per ISO 32000-2 7.5.8.
-func (d *Document) readXrefStream(offset int64) (Dict, error) {
+// per ISO 32000-2 7.5.8. freeInTable is nil for a primary section and carries the companion classic table's free
+// entries for a hybrid file's /XRefStm (see setStreamEntry).
+func (d *Document) readXrefStream(offset int64, freeInTable map[int]bool) (Dict, error) {
 	obj, _, _, err := parseIndirectAt(d.data, offset, -1)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errBadXrefStream, err)
@@ -264,7 +291,7 @@ func (d *Document) readXrefStream(offset int64) (Dict, error) {
 	if typ, _ := AsName(stream.Dict["Type"]); typ != typeXRef {
 		return nil, fmt.Errorf("%w: stream /Type is not /XRef", errBadXrefStream)
 	}
-	if err = d.readXrefStreamEntries(stream); err != nil {
+	if err = d.readXrefStreamEntries(stream, freeInTable); err != nil {
 		return nil, err
 	}
 	return stream.Dict, nil
@@ -289,7 +316,7 @@ func (d *Document) maxXrefStreamRows() int {
 	return max(minXrefStreamRows, len(d.data)/xrefStreamRowBytes)
 }
 
-func (d *Document) readXrefStreamEntries(stream *Stream) error {
+func (d *Document) readXrefStreamEntries(stream *Stream, freeInTable map[int]bool) error {
 	// A cross-reference stream defines the very table a reference from its own dictionary would be resolved against, and
 	// this section's entries are not registered until the loop below, so such a reference reads against data that is at
 	// best incomplete and at worst a stale entry from a newer section pointing at the wrong offset. ISO 32000-2 7.5.8.2
@@ -346,12 +373,12 @@ func (d *Document) readXrefStreamEntries(stream *Stream) error {
 			num := start + j
 			switch f1 {
 			case 0:
-				d.setEntry(num, xrefEntry{kind: xrefFree})
+				d.setStreamEntry(num, xrefEntry{kind: xrefFree}, freeInTable)
 			case 1:
-				d.setEntry(num, xrefEntry{kind: xrefInFile, offset: int64(f2)})
+				d.setStreamEntry(num, xrefEntry{kind: xrefInFile, offset: int64(f2)}, freeInTable)
 			case 2:
 				if f2 <= maxObjectNumber {
-					d.setEntry(num, xrefEntry{kind: xrefInStream, stmNum: int(f2), stmIdx: int(f3)})
+					d.setStreamEntry(num, xrefEntry{kind: xrefInStream, stmNum: int(f2), stmIdx: int(f3)}, freeInTable)
 				}
 			default:
 				// Unknown entry types are ignored, as the spec directs for forward compatibility.

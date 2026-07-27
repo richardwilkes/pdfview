@@ -81,7 +81,7 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if !ok || entry.kind != xrefInFile {
 		return nil, errObjStmSelf
 	}
-	obj, gen, _, err := parseIndirectAt(d.data, entry.offset, num)
+	obj, gen, err := d.parseIndirectObjectAt(entry.offset, num)
 	if err != nil {
 		return nil, err
 	}

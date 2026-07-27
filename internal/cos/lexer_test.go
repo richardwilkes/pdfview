@@ -472,16 +472,16 @@ func TestCaptureRawStreamEndstreamLimit(t *testing.T) {
 	data := []byte("stream\nabcde\nendstream rest")
 	pos := len("stream\n")
 	// With the limit at end of buffer, the fallback scan finds endstream.
-	raw, _, err := captureRawStream(data, pos, len(data), dict)
+	raw, _, err := captureRawStream(data, pos, len(data), dict, nil)
 	if err != nil || !bytes.Equal(raw, []byte("abcde")) {
 		t.Fatalf("full-limit capture: raw=%q err=%v", raw, err)
 	}
 	// A limit before the endstream keyword hides it, so the scan reports the miss without running past the bound.
-	if _, _, err = captureRawStream(data, pos, pos+3, dict); err == nil {
+	if _, _, err = captureRawStream(data, pos, pos+3, dict, nil); err == nil {
 		t.Error("expected errNoEndstream when the keyword is beyond the limit")
 	}
 	// A start offset at or beyond the limit fails immediately.
-	if _, _, err = captureRawStream(data, len(data), 0, dict); err == nil {
+	if _, _, err = captureRawStream(data, len(data), 0, dict, nil); err == nil {
 		t.Error("expected errNoEndstream when pos is beyond the limit")
 	}
 }
@@ -526,7 +526,7 @@ func TestCaptureRawStreamHugeLength(t *testing.T) {
 	dict := Dict{"Length": Integer(9223372036854775800)}
 	data := []byte("stream\nabcde\nendstream rest")
 	pos := len("stream\n")
-	raw, _, err := captureRawStream(data, pos, len(data), dict)
+	raw, _, err := captureRawStream(data, pos, len(data), dict, nil)
 	if err != nil || !bytes.Equal(raw, []byte("abcde")) {
 		t.Fatalf("huge-length capture: raw=%q err=%v", raw, err)
 	}

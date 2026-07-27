@@ -47,7 +47,7 @@ func (d *Document) repair() error {
 			pos = idx + 3
 			continue
 		}
-		obj, _, end, err := parseIndirectAtBounded(d.data, int64(numStart), -1, endstreamLimit)
+		obj, _, end, err := parseIndirectAtBounded(d.data, int64(numStart), -1, endstreamLimit, nil)
 		if err != nil || end <= int64(idx) {
 			// A failed attempt reports how far it read, and the sweep resumes there rather than three bytes past the
 			// keyword. The work a failure already did is otherwise unbounded — an unterminated '(' or '<' scans toward
@@ -82,7 +82,7 @@ func (d *Document) repair() error {
 		return errRepairFoundNothing
 	}
 	d.xref = xref
-	d.installRepairedTrailer(trailers, catalogNum)
+	d.installRepairedTrailer(trailers)
 	// Register the contents of every object stream found by the sweep, without overriding directly swept definitions:
 	// an object written directly in the file is at least as authoritative as a compressed copy.
 	for _, stmNum := range objStmNums {
@@ -99,13 +99,14 @@ func (d *Document) repair() error {
 			}
 		}
 	}
+	d.installRepairedRoot(catalogNum)
 	return nil
 }
 
 // installRepairedTrailer rebuilds d.trailer from the recovered candidates. Newer candidates (later in the file) win;
-// the pre-repair trailer, if any, is the final fallback. When no candidate names a /Root, the last swept /Type /Catalog
-// object stands in.
-func (d *Document) installRepairedTrailer(trailers []Dict, catalogNum int) {
+// the pre-repair trailer, if any, is the final fallback. The /Root the result names is settled afterward by
+// installRepairedRoot.
+func (d *Document) installRepairedTrailer(trailers []Dict) {
 	merged := make([]Dict, 0, len(trailers)+1)
 	for i := len(trailers) - 1; i >= 0; i-- {
 		merged = append(merged, trailers[i])
@@ -114,7 +115,27 @@ func (d *Document) installRepairedTrailer(trailers []Dict, catalogNum int) {
 		merged = append(merged, d.trailer)
 	}
 	d.trailer = mergeTrailers(merged)
-	if _, ok := d.trailer["Root"]; !ok && catalogNum > 0 {
+}
+
+// installRepairedRoot substitutes the last swept /Type /Catalog object for a trailer /Root that is missing or dead. A
+// damaged file's surviving trailer routinely names an object nothing in the file defines any more — precisely the
+// damage this sweep exists to recover from — so treating only an absent key as a miss left such a file unopenable with
+// a good catalog already in hand, and with d.repaired set Open would not retry. It runs after the recovered object
+// streams are registered so that a /Root stored inside one counts as resolvable.
+//
+// For an encrypted document only the absent case applies: object streams are still ciphertext until the security
+// handler is built and authenticated (both of which happen above this layer, after Open returns), so a /Root that does
+// not resolve yet says nothing about the reference — while a substituted catalog would outlive the decryptor's arrival,
+// since the resolvable-but-superseded root it installs never fails a later check.
+func (d *Document) installRepairedRoot(catalogNum int) {
+	if catalogNum <= 0 {
+		return
+	}
+	if _, ok := d.trailer["Root"]; !ok {
+		d.trailer["Root"] = Ref{Num: catalogNum}
+		return
+	}
+	if !d.Encrypted() && !d.rootUsable() {
 		d.trailer["Root"] = Ref{Num: catalogNum}
 	}
 }

@@ -12,6 +12,7 @@ package cos
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -214,6 +215,76 @@ func TestRepairAcceptsZeroPaddedObjectNumbers(t *testing.T) {
 				t.Errorf("object %d = %v, want the catalog", tc.num, dict)
 			}
 		})
+	}
+}
+
+// TestRepairReplacesDeadRoot covers the trailer a damaged file usually leaves behind: one that survived intact but
+// names an object the file no longer defines. Substituting the swept catalog only when the /Root key was absent left
+// such a file unopenable with a good catalog already in hand — and with d.repaired set, Open would not retry. A /Root
+// that does resolve is authoritative and must be kept, even when the sweep found some other (superseded) catalog later
+// in the file.
+func TestRepairReplacesDeadRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trailer string
+		want    int
+	}{
+		{name: "dead reference", trailer: "<< /Size 6 /Root 99 0 R >>", want: 5},
+		{name: "reference to a non-dictionary", trailer: "<< /Size 6 /Root 3 0 R >>", want: 5},
+		{name: "no /Root at all", trailer: "<< /Size 6 >>", want: 5},
+		{name: "live reference is kept", trailer: "<< /Size 6 /Root 1 0 R >>", want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Objects 1 and 5 are both catalogs, and the sweep's fallback is the last one it saw, so the two answers are
+			// distinguishable: a live /Root must beat the swept catalog, and a dead one must give way to it.
+			var b bytes.Buffer
+			b.WriteString(pdfPrefix)
+			b.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Which (first) >>\nendobj\n")
+			b.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+			b.WriteString("3 0 obj\n(not a dictionary)\nendobj\n")
+			b.WriteString("5 0 obj\n<< /Type /Catalog /Pages 2 0 R /Which (last) >>\nendobj\n")
+			// startxref 0 points at the file header, so the cross-reference load fails and the sweep runs.
+			fmt.Fprintf(&b, "trailer\n%s\nstartxref\n0\n%%%%EOF\n", tc.trailer)
+			d, err := Open(b.Bytes())
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if ref, ok := d.trailer[rootKey].(Ref); !ok || ref.Num != tc.want {
+				t.Errorf("repaired /Root = %v, want %d 0 R", d.trailer[rootKey], tc.want)
+			}
+			root, ok := AsDict(d.Resolve(d.trailer[rootKey]))
+			if !ok {
+				t.Fatalf("repaired /Root = %v, which does not resolve to a dictionary", d.trailer[rootKey])
+			}
+			if typ, _ := d.GetName(root, "Type"); typ != typeCatalog {
+				t.Errorf("repaired root = %v, want a catalog", root)
+			}
+		})
+	}
+}
+
+// TestRepairKeepsUnresolvedRootWhenEncrypted checks the one case the resolve test must not judge: an encrypted document
+// whose /Root sits in an object stream. Nothing at this layer can decode that stream until the security handler is
+// built and authenticated above it, so a /Root that does not resolve yet says nothing about the reference — while a
+// substituted catalog would outlive the decryptor's arrival, since a resolvable-but-superseded root never fails a later
+// check.
+func TestRepairKeepsUnresolvedRootWhenEncrypted(t *testing.T) {
+	var b bytes.Buffer
+	b.WriteString(pdfPrefix)
+	b.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Stale true >>\nendobj\n")
+	b.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	b.WriteString("4 0 obj\n<< /Filter /Standard /V 4 /R 4 /Length 128 >>\nendobj\n")
+	b.WriteString("trailer\n<< /Size 5 /Root 9 0 R /Encrypt 4 0 R >>\nstartxref\n0\n%%EOF\n")
+	d, err := Open(b.Bytes())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if !d.Encrypted() {
+		t.Fatal("the document is not reported as encrypted")
+	}
+	if ref, ok := d.trailer[rootKey].(Ref); !ok || ref.Num != 9 {
+		t.Errorf("repaired /Root = %v, want the file's own 9 0 R kept until the document can be decrypted",
+			d.trailer[rootKey])
 	}
 }
 

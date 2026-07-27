@@ -211,7 +211,7 @@ func (d *Document) loadObjectUncached(num int) (Object, error) {
 		return Null{}, nil
 	}
 	if entry.kind == xrefInFile {
-		obj, gen, _, err := parseIndirectAt(d.data, entry.offset, num)
+		obj, gen, err := d.parseIndirectObjectAt(entry.offset, num)
 		if err != nil {
 			return nil, err
 		}

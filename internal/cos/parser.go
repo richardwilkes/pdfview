@@ -254,9 +254,57 @@ func (p *parser) expectInt() (int64, error) {
 // wantNum is non-negative, the header's object number must match it (detecting stale or wrong xref offsets). It returns
 // the object, the object's generation number (which the standard security handler folds into the per-object decryption
 // key), and the offset just past it (past endstream for streams), which the repair scanner uses to skip stream
-// payloads.
+// payloads. An indirect /Length is not resolved (there is no document to resolve it against); see
+// Document.parseIndirectObjectAt for the path that does.
 func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, end int64, err error) {
-	return parseIndirectAtBounded(data, off, wantNum, len(data))
+	return parseIndirectAtBounded(data, off, wantNum, len(data), nil)
+}
+
+// lengthResolver returns the value of an indirect /Length, or ok == false when it cannot be established cheaply and
+// safely. captureRawStream falls back to its "endstream" scan for a false.
+type lengthResolver func(Ref) (length int64, ok bool)
+
+// parseIndirectObjectAt parses the indirect object at off, resolving an indirect /Length against this document's
+// cross-reference data. Every stream reached through the cross-reference table comes through here rather than
+// parseIndirectAt so that a single-pass writer's "/Length 3 0 R" is honored instead of being second-guessed by the
+// fallback scan, which truncates any payload that happens to contain the bytes "endstream".
+func (d *Document) parseIndirectObjectAt(off int64, wantNum int) (obj Object, gen int, err error) {
+	obj, gen, _, err = parseIndirectAtBounded(d.data, off, wantNum, len(d.data), d.resolveStreamLength)
+	return obj, gen, err
+}
+
+// resolveStreamLength returns the value of a stream's indirect /Length. It reads the referenced object directly — the
+// header at its cross-reference offset followed by one integer — rather than going through loadObject, deliberately:
+// this runs in the middle of parsing another object, where the object cache, the failure cache, and the repair scan
+// loadObject drives all either recurse (a /Length reference to the very stream being parsed) or replace state the
+// in-flight parse is standing on. Reading one integer at a known offset does neither and costs a handful of tokens, so
+// no hostile file can turn a page's worth of stream parses into repeated file-sized work.
+//
+// A reference that does not name a plainly stored integer — a free or absent object, one held in an object stream, a
+// stale offset whose header names a different number, a non-integer value — yields ok == false and leaves the caller on
+// the fallback scan, which is where every such stream already was. Integers are never encrypted, so the decryptor
+// (which may not be installed yet) plays no part.
+func (d *Document) resolveStreamLength(ref Ref) (int64, bool) {
+	entry, ok := d.xref[ref.Num]
+	if !ok || entry.kind != xrefInFile || entry.offset < 0 || entry.offset >= int64(len(d.data)) {
+		return 0, false
+	}
+	p := newParser(d.data, int(entry.offset))
+	num, err := p.expectInt()
+	if err != nil || num != int64(ref.Num) {
+		return 0, false
+	}
+	if _, err = p.expectInt(); err != nil { // The generation number, which takes no part in resolution.
+		return 0, false
+	}
+	if err = p.expectKeyword("obj"); err != nil {
+		return 0, false
+	}
+	length, err := p.expectInt()
+	if err != nil {
+		return 0, false
+	}
+	return length, true
 }
 
 // parseIndirectAtBounded is parseIndirectAt with an upper bound (exclusive) on where the fallback "endstream" scan may
@@ -267,7 +315,11 @@ func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, 
 // On failure end is not zero but the offset the attempt stopped reading at (see parser.resumePos), so a caller sweeping
 // the buffer can charge itself for the work already done and continue past it. Every other caller ignores end when err
 // is non-nil.
-func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int) (obj Object, gen int, end int64, err error) {
+//
+// resolveLength, when non-nil, supplies the value of an indirect /Length; a nil one (the repair sweep, which is
+// rebuilding the very table such a reference would be resolved against) leaves those streams on the fallback scan.
+func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int, resolveLength lengthResolver,
+) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
 		return nil, 0, 0, errStreamOutOfRange
 	}
@@ -308,7 +360,7 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int)
 	if !ok {
 		return nil, 0, int64(p.resumePos()), fmt.Errorf("%w: stream keyword after non-dictionary", errUnexpectedToken)
 	}
-	raw, rawEnd, err := captureRawStream(data, p.lex.pos, endstreamLimit, dict)
+	raw, rawEnd, err := captureRawStream(data, p.lex.pos, endstreamLimit, dict, resolveLength)
 	if err != nil {
 		return nil, 0, int64(p.lex.pos), err
 	}
@@ -316,11 +368,12 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int)
 }
 
 // captureRawStream slices the raw stream payload that begins after the stream keyword at pos. When the dictionary
-// carries a direct, plausible /Length — the payload fits and is followed by "endstream" — that length is used;
-// otherwise (indirect, missing, or wrong /Length) the data is scanned for the next "endstream" keyword and any final
+// carries a plausible /Length — the payload fits and is followed by "endstream" — that length is used; otherwise
+// (missing, unresolvable, or wrong /Length) the data is scanned for the next "endstream" keyword and any final
 // end-of-line marker before it is trimmed, mirroring the recovery behavior of deployed readers. The returned end offset
 // is just past the endstream keyword.
-func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict) (raw []byte, end int64, err error) {
+func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict, resolveLength lengthResolver,
+) (raw []byte, end int64, err error) {
 	// Per ISO 32000-2 7.3.8.1 the stream keyword is followed by CRLF or LF; a lone CR and a missing break are
 	// tolerated.
 	if pos < len(data) && data[pos] == '\r' {
@@ -332,7 +385,7 @@ func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict) (raw []by
 	// The bound is written as length <= len(data)-pos rather than pos+length <= len(data): pos is within [0, len(data)]
 	// so len(data)-pos is a non-negative int that cannot overflow, whereas pos+length would wrap negative for a large
 	// but valid Integer /Length (near math.MaxInt64) and slip a bogus, negative dataEnd past the guard.
-	if length, ok := AsInt(dict["Length"]); ok && length >= 0 && length <= int64(len(data)-pos) {
+	if length, ok := streamLength(dict, resolveLength); ok && length >= 0 && length <= int64(len(data)-pos) {
 		dataEnd := pos + int(length)
 		if at, found := endstreamAt(data, dataEnd); found {
 			return data[pos:dataEnd], at, nil
@@ -359,6 +412,21 @@ func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict) (raw []by
 		dataEnd--
 	}
 	return data[pos:dataEnd], end, nil
+}
+
+// streamLength returns the stream's declared /Length. A direct integer is taken as written; an indirect reference —
+// which ISO 32000-2 7.3.8.2 explicitly permits, and which every single-pass writer emits, since the payload's size is
+// unknown when the dictionary is written — is handed to resolveLength when the caller supplied one. Whatever comes back
+// is still only a proposal: captureRawStream requires an "endstream" keyword to follow the payload it describes before
+// using it, so a stale or hostile value costs nothing beyond falling back to the scan.
+func streamLength(dict Dict, resolveLength lengthResolver) (int64, bool) {
+	if length, ok := AsInt(dict["Length"]); ok {
+		return length, true
+	}
+	if ref, ok := dict["Length"].(Ref); ok && resolveLength != nil {
+		return resolveLength(ref)
+	}
+	return 0, false
 }
 
 // endstreamAt reports whether the "endstream" keyword follows pos after optional whitespace, returning the offset just

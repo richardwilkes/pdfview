@@ -49,7 +49,7 @@ func TestMergeTrailersLeavesInputsAlone(t *testing.T) {
 	if len(newest) != 2 || len(older) != 4 {
 		t.Errorf("inputs changed size: newest %v, older %v", newest, older)
 	}
-	// A later edit by the caller (installRepairedTrailer supplies a fallback /Root) must not reach the inputs either.
+	// A later edit by the caller (installRepairedRoot supplies a fallback /Root) must not reach the inputs either.
 	merged[rootKey] = Ref{Num: 42}
 	if got := refNum(newest[rootKey]); got != 1 {
 		t.Errorf("editing the merged trailer changed the input: newest /Root = %v", newest[rootKey])
@@ -310,6 +310,96 @@ func TestXrefStreamRowBudget(t *testing.T) {
 			t.Error("the root is no longer resolvable")
 		}
 	})
+}
+
+// hybridFreeOverridePDF builds a hybrid-reference file whose classic table marks objects 3, 4, and 5 free — the only
+// thing a pre-1.5 table can say about an object it cannot express — while its /XRefStm supplies the real entries: the
+// cross-reference stream itself (3), an object compressed into an object stream (4), and that object stream (5). The
+// stream also claims objects 1 and 2 are free, which the classic table's in-use entries must override in the other
+// direction. When newer is true, an incremental update ahead of this section defines object 4 directly, so the older
+// section's stream entry must not win.
+func hybridFreeOverridePDF(newer bool) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	off1 := buf.Len()
+	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	off2 := buf.Len()
+	buf.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	// Object stream 5 carries object 4.
+	body := "<< /Marker (from-the-object-stream) >>"
+	header := "4 0\n"
+	off5 := buf.Len()
+	fmt.Fprintf(&buf, "5 0 obj\n<< /Type /ObjStm /N 1 /First %d /Length %d >>\nstream\n%s%s\nendstream\nendobj\n",
+		len(header), len(header)+len(body), header, body)
+	off3 := buf.Len()
+	rows := bytes.Join([][]byte{
+		xrefRow(0, 0, 255),  // 0: free
+		xrefRow(0, 0, 0),    // 1: free (decoy; the classic table's in-use entry wins)
+		xrefRow(0, 0, 0),    // 2: free (decoy)
+		xrefRow(1, off3, 0), // 3: this cross-reference stream
+		xrefRow(2, 5, 0),    // 4: index 0 of object stream 5
+		xrefRow(1, off5, 0), // 5: that object stream
+	}, nil)
+	fmt.Fprintf(&buf, "3 0 obj\n<< /Type /XRef /Size 6 /W [1 4 1] /Root 1 0 R /Length %d >>\nstream\n", len(rows))
+	buf.Write(rows)
+	buf.WriteString("\nendstream\nendobj\n")
+	xrefOff := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 6\n0000000000 65535 f \n%010d 00000 n \n%010d 00000 n \n", off1, off2)
+	buf.WriteString("0000000000 65535 f \n0000000000 65535 f \n0000000000 65535 f \n")
+	fmt.Fprintf(&buf, "trailer\n<< /Size 6 /Root 1 0 R /XRefStm %d >>\n", off3)
+	startxref := xrefOff
+	if newer {
+		off4 := buf.Len()
+		buf.WriteString("4 0 obj\n(from-the-update)\nendobj\n")
+		startxref = buf.Len()
+		fmt.Fprintf(&buf, "xref\n4 1\n%010d 00000 n \ntrailer\n<< /Size 6 /Prev %d >>\n", off4, xrefOff)
+	}
+	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", startxref)
+	return buf.Bytes()
+}
+
+// TestHybridXRefStmOverridesFreeEntry covers the precedence a hybrid file actually needs. A free classic entry is what
+// a hybrid producer writes for an object it can only express in the /XRefStm, but the stream is read after the table of
+// the same section and the first entry seen used to win outright, so the placeholder permanently shadowed the real
+// entry: the object read as Null and, when the number named an object stream, everything stored inside it went with it.
+// The override is narrow — only a free entry this section's own table installed, and only for a non-free stream entry —
+// so the table still beats the stream for in-use objects and a newer section still beats both.
+func TestHybridXRefStmOverridesFreeEntry(t *testing.T) {
+	d, err := Open(hybridFreeOverridePDF(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.repaired {
+		t.Fatal("the repair scan ran; the hybrid section covers the whole document")
+	}
+	dict, ok := AsDict(d.LoadObject(4))
+	if !ok {
+		t.Fatalf("object 4 = %v, want the dictionary the /XRefStm places in object stream 5", d.LoadObject(4))
+	}
+	if marker, _ := d.GetString(dict, "Marker"); string(marker) != "from-the-object-stream" {
+		t.Errorf("object 4 /Marker = %q, want %q", marker, "from-the-object-stream")
+	}
+	if _, ok = AsStream(d.LoadObject(5)); !ok {
+		t.Errorf("object 5 = %v, want the object stream itself to be reachable", d.LoadObject(5))
+	}
+	if _, ok = AsStream(d.LoadObject(3)); !ok {
+		t.Errorf("object 3 = %v, want the cross-reference stream to be reachable", d.LoadObject(3))
+	}
+	// The other direction is unchanged: the classic table's in-use entries beat the stream's free claims.
+	for _, num := range []int{1, 2} {
+		if _, ok = AsDict(d.LoadObject(num)); !ok {
+			t.Errorf("object %d = %v, want the classic table's entry to win over the stream's free claim",
+				num, d.LoadObject(num))
+		}
+	}
+	// A newer section's definition of object 4 outranks the older section's stream entry, so nothing about the override
+	// reaches across sections.
+	if d, err = Open(hybridFreeOverridePDF(true)); err != nil {
+		t.Fatal(err)
+	}
+	if s, sok := AsString(d.LoadObject(4)); !sok || string(s) != "from-the-update" {
+		t.Errorf("object 4 = %v, want the newer section's (from-the-update)", d.LoadObject(4))
+	}
 }
 
 // repeatedXRefStmPDF builds a hybrid-reference file with the given number of minimal classic sections, chained by

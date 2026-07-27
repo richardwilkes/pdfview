@@ -10,6 +10,7 @@
 package cos
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -136,6 +137,108 @@ func TestRefGenerationIdentityAndBound(t *testing.T) {
 				t.Errorf("RefKey = %v, want %v: the generation must not split one object's identity", got, want)
 			}
 		})
+	}
+}
+
+// embeddedEndstreamPayload is a stream payload carrying the nine bytes the fallback scan stops at. Nothing about it is
+// exotic: an embedded-file stream holding another PDF (a PDF/A-3 attachment) contains "endstream" within its first few
+// kilobytes.
+const embeddedEndstreamPayload = "HEAD\nendstream\nTAIL"
+
+// indirectLengthPDF builds a well-formed classic-xref file whose object 3 is a stream carrying
+// embeddedEndstreamPayload and declaring its /Length as lengthRef. obj4Body, when non-empty, is written as object 4;
+// otherwise object 4 is marked free, so a reference to it names nothing.
+func indirectLengthPDF(lengthRef, obj4Body string) []byte {
+	var buf bytes.Buffer
+	offsets := make(map[int]int)
+	buf.WriteString("%PDF-1.7\n")
+	write := func(num int, body string) {
+		offsets[num] = buf.Len()
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", num, body)
+	}
+	write(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	write(2, "<< /Type /Pages /Kids [] /Count 0 >>")
+	offsets[3] = buf.Len()
+	fmt.Fprintf(&buf, "3 0 obj\n<< /Length %s >>\nstream\n%s\nendstream\nendobj\n", lengthRef, embeddedEndstreamPayload)
+	if obj4Body != "" {
+		write(4, obj4Body)
+	}
+	xrefOff := buf.Len()
+	buf.WriteString("xref\n0 5\n0000000000 65535 f \n")
+	for num := 1; num <= 4; num++ {
+		if off, ok := offsets[num]; ok {
+			fmt.Fprintf(&buf, "%010d 00000 n \n", off)
+		} else {
+			buf.WriteString("0000000000 65535 f \n")
+		}
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", xrefOff)
+	return buf.Bytes()
+}
+
+// TestIndirectStreamLength covers the /Length form ISO 32000-2 7.3.8.2 permits and every single-pass writer emits: an
+// indirect reference, since the payload's size is unknown when the dictionary is written. Honoring only a direct
+// /Length silently truncated any such stream at the first "endstream" its own bytes contained, with no error reported.
+// The resolution stays a proposal — an "endstream" keyword must follow the payload it describes — so every reference
+// that names something other than a plainly stored integer lands back on the scan, including one pointing at the very
+// stream being parsed, which resolves without recursing at all.
+func TestIndirectStreamLength(t *testing.T) {
+	const (
+		lengthObjRef = "4 0 R" // The stream's own /Length object.
+		streamSelf   = "3 0 R" // The stream itself, whose /Length would have to be known already.
+		truncated    = "HEAD"  // What the fallback scan yields: everything before the embedded keyword.
+	)
+	full := embeddedEndstreamPayload
+	exact := fmt.Sprint(len(embeddedEndstreamPayload))
+	for _, tc := range []struct {
+		name      string
+		lengthRef string
+		obj4      string
+		want      string
+	}{
+		{name: "resolved", lengthRef: lengthObjRef, obj4: exact, want: full},
+		{name: "direct still wins", lengthRef: exact, obj4: "0", want: full},
+		{name: "wrong value falls back", lengthRef: lengthObjRef, obj4: "4", want: truncated},
+		{name: "past end of file falls back", lengthRef: lengthObjRef, obj4: "999999", want: truncated},
+		{name: "absent object falls back", lengthRef: lengthObjRef, obj4: "", want: truncated},
+		{name: "non-integer object falls back", lengthRef: lengthObjRef, obj4: "(nineteen)", want: truncated},
+		{name: "self-reference falls back", lengthRef: streamSelf, obj4: exact, want: truncated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := Open(indirectLengthPDF(tc.lengthRef, tc.obj4))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.repaired {
+				t.Error("the repair scan ran; the classic table is complete and authoritative")
+			}
+			stream, ok := AsStream(d.LoadObject(3))
+			if !ok {
+				t.Fatalf("object 3 = %v, want a stream", d.LoadObject(3))
+			}
+			if string(stream.Raw) != tc.want {
+				t.Errorf("payload = %q, want %q", stream.Raw, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveStreamLengthDeclinesCompressedObject pins the one legal shape the cheap resolver gives up on rather than
+// decoding a whole container mid-parse: a /Length held inside an object stream. Giving up costs only the fallback scan,
+// which is where every indirect /Length already was.
+func TestResolveStreamLengthDeclinesCompressedObject(t *testing.T) {
+	d := &Document{
+		xref: map[int]xrefEntry{
+			4: {kind: xrefInStream, stmNum: 5, stmIdx: 0},
+			5: {kind: xrefInFile, offset: 1 << 40}, // Past end of buffer; nothing must read here.
+			6: {kind: xrefFree},
+		},
+		data: []byte("%PDF-1.7\n4 0 obj\n19\nendobj\n"),
+	}
+	for _, num := range []int{4, 5, 6, 7} {
+		if length, ok := d.resolveStreamLength(Ref{Num: num}); ok {
+			t.Errorf("object %d resolved to length %d, want a decline", num, length)
+		}
 	}
 }
 
