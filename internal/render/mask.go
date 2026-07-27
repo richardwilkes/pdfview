@@ -71,7 +71,7 @@ type maskState struct {
 }
 
 // BeginGroup implements device.Device.
-func (d *Device) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
+func (d *Device) BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
 	trivial := alpha >= 1 && blend == device.BlendNormal && !knockout
 	if !isolated && trivial {
 		// Non-isolated with nothing to composite: drawing inline IS the group semantics (interior blends composite
@@ -82,7 +82,27 @@ func (d *Device) BeginGroup(_ gfx.Rect, isolated, knockout bool, blend device.Bl
 	paint := canvas.NewPaint()
 	paint.Color = colorcore.ARGB(alpha8(alpha), 255, 255, 255)
 	paint.BlendMode = blendModes[blend]
-	count := d.c.SaveLayer(nil, paint)
+	// Size the layer to the group's bbox rather than letting canvas fall back to the whole current clip: the
+	// interpreter pushes the form's /BBox clip only AFTER this call, so without the hint a group nested to
+	// maxFormDepth holds that many page-sized premultiplied layers at once even when every one of them is a small
+	// stamp — hundreds of megabytes at 300 dpi letter, gigabytes at the documented OverallMaxPixels. maskBounds is
+	// exactly the sizing a soft-mask span uses (map through the canvas's matrix, snap outward with a pixel of margin so
+	// the antialiased /BBox clip edge is never cut, intersect with the surface), and it degrades an unusable or
+	// uncomputed bbox to the whole surface, which is what the nil hint meant.
+	base := d.c.TotalMatrix()
+	x0, y0, w, h, onSurface := d.maskBounds(bbox, &base)
+	// A positioned box with no area, or one wholly off the surface, marks nothing: the empty hint makes canvas skip
+	// the layer's content outright, matching the /BBox clip that follows.
+	bounds := geom.Rect{}
+	if onSurface {
+		bounds = geom.RectXYWH(float32(x0), float32(y0), float32(w), float32(h))
+	}
+	count := d.c.Save()
+	// The bounds are device pixels, so they are given with the canvas at identity and the caller's matrix put back for
+	// the group's content (the same two-step EndMask uses for the masked-content layer).
+	d.c.ResetMatrix()
+	d.c.SaveLayer(&bounds, paint)
+	d.c.SetMatrix(&base)
 	d.groupStack = append(d.groupStack, groupState{count: count, layered: true, knockout: knockout})
 }
 
@@ -194,7 +214,8 @@ func maskOutsideValue(luminosity bool, backdrop stdcolor.NRGBA, transfer []byte)
 // maskBounds returns the device-pixel rectangle a mask span's surface must cover: the mask content's bbox mapped
 // through base, snapped outward to whole pixels with a pixel of margin so the antialiased edge of the bbox clip is
 // never cut, and intersected with the surface. The interpreter clips mask content to this bbox, so nothing the mask
-// paints can fall outside it.
+// paints can fall outside it. BeginGroup sizes its layer with the same call, for the same reason: the group's content
+// is clipped to the same box, one step later.
 //
 // The zero rect is the "no usable bbox" signal — the interpreter emits it when the mask's CTM is unusable, and a caller
 // that does not compute one passes it too — so it carries no information and degrades to the whole surface, as do

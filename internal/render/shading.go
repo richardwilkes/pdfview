@@ -63,6 +63,13 @@ func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, b
 		// the ramps and decal boundaries up (see drawMesh, pinned by the goldens).
 		local = local.Mul(gfx.Translate(-0.5, 0.5))
 	}
+	// toDevice is the pattern/shading space → DEVICE map; local is that same map carried back into the space the draw
+	// runs in, which is what canvas needs for the shader (it composes the local matrix with the draw's own CTM). Every
+	// decision about how big something must be to cover the surface — a gradient's extension factor, a function
+	// shading's evaluation grid — belongs to toDevice: the drawing CTM cancels out of the composition, so measuring
+	// against local scales those decisions by its inverse (see coverageCorners and functionShader). tileShader already
+	// works this way, taking its device scale from patCTM.
+	toDevice := local
 	if ctm != nil {
 		inv, ok := ctm.Invert()
 		if !ok {
@@ -72,7 +79,7 @@ func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, b
 	}
 	var shader shaders.Shader
 	if p.Shading != nil {
-		shader = d.shadingShader(p.Shading, local)
+		shader = d.shadingShader(p.Shading, local, toDevice)
 	} else {
 		shader = d.tileShader(p.Tiling, local, p.PatternCTM)
 	}
@@ -102,15 +109,15 @@ func isMesh(p device.Paint) bool {
 }
 
 // shadingShader builds the shader for a non-mesh shading; local maps the shading's target space to the space the draw
-// runs in.
-func (d *Device) shadingShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
+// runs in, toDevice maps it to device pixels (see preparePaint).
+func (d *Device) shadingShader(sh *shading.Shading, local, toDevice gfx.Matrix) shaders.Shader {
 	switch sh.Kind {
 	case shading.KindAxial:
-		return d.axialShader(sh, local)
+		return d.axialShader(sh, local, toDevice)
 	case shading.KindRadial:
-		return d.radialShader(sh, local)
+		return d.radialShader(sh, local, toDevice)
 	case shading.KindFunction:
-		return d.functionShader(sh, local)
+		return d.functionShader(sh, local, toDevice)
 	default:
 		return nil
 	}
@@ -168,10 +175,14 @@ func rampPos(p float64, prev float32) float32 {
 	return min(v, 1)
 }
 
-// coverageCorners maps the device surface's corners into the space local maps FROM (the shading target space), for
-// sizing gradient extensions.
-func (d *Device) coverageCorners(local gfx.Matrix) ([4]gfx.Point, bool) {
-	inv, ok := local.Invert()
+// coverageCorners maps the device surface's corners into the shading's target space, for sizing gradient extensions.
+// toDevice is the shading target space → device map, NOT the shader's local matrix: the extension has to be big enough
+// to cover the surface's own pixels, so the corners must come back through the full map. Inverting local instead would
+// carry the device corners through the drawing CTM first, sizing the extension by ctm(deviceCorners) — too small
+// wherever the drawing CTM shrinks relative to the pattern CTM, which leaves part of the surface unpainted (it is exact
+// only at scale 1, where the y-flip of the usual page CTM is an involution).
+func (d *Device) coverageCorners(toDevice gfx.Matrix) ([4]gfx.Point, bool) {
+	inv, ok := toDevice.Invert()
 	if !ok {
 		return [4]gfx.Point{}, false
 	}
@@ -193,7 +204,7 @@ func isFinite32(v float32) bool {
 }
 
 // axialShader builds the linear-gradient shader for a type 2 shading.
-func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
+func (d *Device) axialShader(sh *shading.Shading, local, toDevice gfx.Matrix) shaders.Shader {
 	if len(sh.Stops) == 0 {
 		return nil
 	}
@@ -213,7 +224,7 @@ func (d *Device) axialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shad
 		if lenSq <= 0 || !isFinite32(lenSq) {
 			return nil
 		}
-		corners, ok := d.coverageCorners(local)
+		corners, ok := d.coverageCorners(toDevice)
 		if !ok {
 			return nil
 		}
@@ -253,7 +264,7 @@ func axialSpan(p0 geom.Point, dx, dy, lenSq float32, corners [4]gfx.Point) (sMin
 }
 
 // radialShader builds the two-point conical shader for a type 3 shading.
-func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
+func (d *Device) radialShader(sh *shading.Shading, local, toDevice gfx.Matrix) shaders.Shader {
 	if len(sh.Stops) == 0 {
 		return nil
 	}
@@ -268,7 +279,7 @@ func (d *Device) radialShader(sh *shading.Shading, local gfx.Matrix) shaders.Sha
 	case sh.Extend[0] && sh.Extend[1]:
 		tile = shaders.TileClamp
 	case sh.Extend[0] || sh.Extend[1]:
-		corners, ok := d.coverageCorners(local)
+		corners, ok := d.coverageCorners(toDevice)
 		if !ok {
 			return nil
 		}
@@ -344,8 +355,15 @@ func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atS
 // functionShader realizes a type 1 shading as an image shader: the function is evaluated over a grid spanning the
 // domain at roughly device resolution (shading.GridSize caps it), and the image is placed by the domain-to-device
 // mapping with decal tiling so points outside the domain stay unpainted.
-func (d *Device) functionShader(sh *shading.Shading, local gfx.Matrix) shaders.Shader {
-	w, h, ok := sh.GridSize(local)
+//
+// The grid is sized from toDevice, not from the shader's local matrix: "device resolution" means device PIXELS, and
+// local carries the drawing CTM's inverse, so sizing from it scales the grid by the inverse of the drawing CTM — a
+// magnifying cm renders the shading blocky, and a shrinking one inflates the grid toward shading.MaxGridArea while
+// internal/content charged the work budget from the pattern CTM (see budget.go's shadingPaintCost). Both packages have
+// to size from the same numbers, which is why the caps live in internal/shading; content uses the pattern CTM, so this
+// does too.
+func (d *Device) functionShader(sh *shading.Shading, local, toDevice gfx.Matrix) shaders.Shader {
+	w, h, ok := sh.GridSize(toDevice)
 	if !ok {
 		return nil
 	}

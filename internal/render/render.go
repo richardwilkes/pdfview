@@ -177,6 +177,13 @@ func (d *Device) Reset() {
 	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) must never unwind or clear that canvas.
 		return
 	}
+	// Put the surface's own canvas back first. A render that ended with a soft-mask span still open left d.c pointing
+	// at that span's offscreen canvas (BeginMask swaps it; EndMask swaps it back), and everything below would then
+	// unwind and clear the MASK surface while the reused device kept drawing into it — Pixels would hand back the
+	// previous page's untouched pixels. The interpreter's balanced Begin/End/Pop pairing and pdf.go's e.dev = nil on a
+	// recovered panic keep that unreachable today; EndMask's ended guard and PopMask's !ended guard already defend the
+	// same invariant from the other side, and this closes it here.
+	d.c = d.surf.Canvas()
 	d.c.RestoreToCount(1)
 	d.c.ResetMatrix()
 	d.c.Clear(colorcore.Transparent)

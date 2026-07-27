@@ -148,7 +148,10 @@ type Device interface {
 	// BeginGroup opens a transparency group; content until the matching EndGroup composites as a unit, with the group's
 	// constant alpha and blend mode applied once at that composite (ISO 32000-2 11.6.6: the producer resets its
 	// alpha/blend/soft-mask state for the group's interior). isolated groups composite their interior against a
-	// transparent backdrop; knockout groups let each interior object knock out the ones before it.
+	// transparent backdrop; knockout groups let each interior object knock out the ones before it. bbox is the
+	// device-space box the group's content is clipped to, read exactly as BeginMask's: a device may size its work to
+	// it, the zero rect means "not computed" (the group can mark anywhere), and a positioned box with no area means the
+	// group cannot mark at all.
 	BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend Blend, alpha float64)
 	// EndGroup closes the innermost group.
 	EndGroup()

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1208,7 +1209,7 @@ func TestOverRangeExtentsKeepFullGridDimensions(t *testing.T) {
 			return color.NRGBA{R: uint8(x * 255), A: 255}
 		},
 	}
-	if s := d.functionShader(sh, gfx.Identity()); s == nil {
+	if s := d.functionShader(sh, gfx.Identity(), gfx.Identity()); s == nil {
 		t.Fatal("function shading with an over-range device extent produced no shader")
 	}
 	if want := shading.MaxGridDim * shading.MaxGridDim; calls != want {
@@ -1513,11 +1514,11 @@ func TestGradientRampPositionsAreAValidRamp(t *testing.T) {
 func TestShaderEmptyStopsNoPanic(t *testing.T) {
 	d := newDevice(t, 8, 8)
 	axial := &shading.Shading{Kind: shading.KindAxial, Coords: [6]float32{0, 0, 8, 8}, Extend: [2]bool{true, true}}
-	if s := d.axialShader(axial, gfx.Identity()); s != nil {
+	if s := d.axialShader(axial, gfx.Identity(), gfx.Identity()); s != nil {
 		t.Error("axialShader with no stops returned a shader")
 	}
 	radial := &shading.Shading{Kind: shading.KindRadial, Coords: [6]float32{0, 0, 1, 8, 8, 4}, Extend: [2]bool{true, true}}
-	if s := d.radialShader(radial, gfx.Identity()); s != nil {
+	if s := d.radialShader(radial, gfx.Identity(), gfx.Identity()); s != nil {
 		t.Error("radialShader with no stops returned a shader")
 	}
 }
@@ -1784,7 +1785,7 @@ func TestAxialShaderMixedExtendOverflowStaysFinite(t *testing.T) {
 			t.Fatalf("test setup: corner %v is not far enough out to overflow the projection", c)
 		}
 	}
-	if s := d.axialShader(sh, local); s == nil {
+	if s := d.axialShader(sh, local, local); s == nil {
 		t.Fatal("axialShader returned no shader")
 	}
 	sMin, _ := axialSpan(geom.Point{X: sh.Coords[0], Y: sh.Coords[1]}, 0, 1, 1, corners)
@@ -1821,7 +1822,7 @@ func TestRadialShaderRejectsNonFiniteExtension(t *testing.T) {
 		Extend: [2]bool{false, true},
 		Stops:  stops,
 	}
-	if s := d.radialShader(huge, gfx.Identity()); s != nil {
+	if s := d.radialShader(huge, gfx.Identity(), gfx.Identity()); s != nil {
 		t.Error("non-finite extended geometry reached canvas")
 	}
 	// An ordinary mixed-extend radial must still build its shader.
@@ -1831,7 +1832,7 @@ func TestRadialShaderRejectsNonFiniteExtension(t *testing.T) {
 		Extend: [2]bool{false, true},
 		Stops:  stops,
 	}
-	if s := d.radialShader(sane, gfx.Identity()); s == nil {
+	if s := d.radialShader(sane, gfx.Identity(), gfx.Identity()); s == nil {
 		t.Error("ordinary mixed-extend radial rejected")
 	}
 }
@@ -2210,7 +2211,7 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 		for range 3 { // Three draws, on three devices: one realization must serve them all.
 			d := newDevice(t, 32, 32)
 			d.SetStore(st)
-			if s := d.functionShader(sh, local); s == nil {
+			if s := d.functionShader(sh, local, local); s == nil {
 				t.Fatal("no function shader")
 			}
 		}
@@ -2221,7 +2222,7 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 		// A different grid size is a different image and must be realized on its own.
 		d := newDevice(t, 32, 32)
 		d.SetStore(st)
-		if s := d.functionShader(sh, gfx.Matrix{A: 2, D: 2}); s == nil {
+		if s := d.functionShader(sh, gfx.Matrix{A: 2, D: 2}, gfx.Matrix{A: 2, D: 2}); s == nil {
 			t.Fatal("no function shader at the second scale")
 		}
 		if evals == w*h {
@@ -2230,7 +2231,7 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 		// A different shading must not read another's cached grid.
 		otherEvals := 0
 		other, otherLocal := funcShadingFor(&otherEvals, 16)
-		if s := d.functionShader(other, otherLocal); s == nil {
+		if s := d.functionShader(other, otherLocal, otherLocal); s == nil {
 			t.Fatal("no function shader for the second shading")
 		}
 		if otherEvals != w*h {
@@ -2243,7 +2244,7 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 		sh, local := funcShadingFor(&evals, 16)
 		d := newDevice(t, 32, 32)
 		for range 3 {
-			if s := d.functionShader(sh, local); s == nil {
+			if s := d.functionShader(sh, local, local); s == nil {
 				t.Fatal("no function shader")
 			}
 		}
@@ -2253,7 +2254,7 @@ func TestFunctionShaderCachesRealizedGrid(t *testing.T) {
 		}
 		// Reset drops the per-render map, since without a store nothing keeps its keyed shading pointers alive.
 		d.Reset()
-		if s := d.functionShader(sh, local); s == nil {
+		if s := d.functionShader(sh, local, local); s == nil {
 			t.Fatal("no function shader after Reset")
 		}
 		if evals != 2*w*h {
@@ -2279,7 +2280,7 @@ func TestFunctionShaderOverflowingDomainExtent(t *testing.T) {
 			},
 		}
 		d := newDevice(t, 32, 32)
-		if s := d.functionShader(sh, gfx.Identity()); s == nil {
+		if s := d.functionShader(sh, gfx.Identity(), gfx.Identity()); s == nil {
 			t.Fatal("function shading with a wide domain produced no shader")
 		}
 		w, h, ok := sh.GridSize(gfx.Identity())
@@ -2316,7 +2317,7 @@ func TestFunctionShaderOverflowingDomainExtent(t *testing.T) {
 			t.Fatal("GridSize refused the shading, so the placement gate is not what is under test here")
 		}
 		d := newDevice(t, 32, 32)
-		if s := d.functionShader(sh, gfx.Identity()); s != nil {
+		if s := d.functionShader(sh, gfx.Identity(), gfx.Identity()); s != nil {
 			t.Error("a shading whose local matrix is non-finite produced a shader")
 		}
 		if evals != 0 {
@@ -2521,5 +2522,204 @@ func TestFillImageBlends(t *testing.T) {
 	got := draw(device.BlendMultiply)
 	if got[0] < 126 || got[0] > 130 || got[1] != 0 || got[2] != 0 || got[3] != 255 {
 		t.Errorf("Multiply = %v, want ~{128, 0, 0, 255}", got)
+	}
+}
+
+// A mixed-/Extend gradient's extension has to reach the surface's own pixels, so coverageCorners must invert the
+// shading→DEVICE map. Inverting the shader's local matrix instead carries the device corners through the drawing CTM
+// first, sizing the extension by ctm(deviceCorners): wherever the drawing CTM is smaller than the pattern CTM — a page
+// rendered below scale 1, or any cm that shrinks the drawing CTM — the extension comes out too small and part of the
+// surface is left unpainted. At scale 1 the usual page CTM's y-flip is an involution and the two agree exactly, which
+// is why the goldens never caught it; the scale-1 rows below pin that agreement.
+func TestMixedExtendCoversSurfaceUnderShrinkingCTM(t *testing.T) {
+	blue := color.NRGBA{B: 255, A: 255}
+	stops := []shading.Stop{{Offset: 0, Color: color.NRGBA{R: 255, A: 255}}, {Offset: 1, Color: blue}}
+	// The device pixels the extended end must reach at each scale, well past where the unextended span ends.
+	probes := [][2]int{{60, 50}, {95, 50}, {99, 99}}
+	for _, tc := range []struct {
+		sh   *shading.Shading
+		name string
+	}{
+		{
+			name: "axial",
+			// The span runs from device x=0 to x=10; /Extend [false true] must carry the end color to x=99.
+			sh: &shading.Shading{
+				Kind:   shading.KindAxial,
+				Coords: [6]float32{0, 0, 10, 0},
+				Extend: [2]bool{false, true},
+				Stops:  stops,
+			},
+		},
+		{
+			// Concentric circles at device (10, 10) growing by 1.5 units per parametric step: covering the far corner
+			// (about 127 units out) needs an extension factor of 128, while the corners the buggy sizing produced at
+			// scale 0.1 reach only about 90 units and settle for 64 — a radius of 97.5, short of the probes below.
+			name: "radial",
+			sh: &shading.Shading{
+				Kind:   shading.KindRadial,
+				Coords: [6]float32{10, 10, 0, 10, 10, 1.5},
+				Extend: [2]bool{false, true},
+				Stops:  stops,
+			},
+		},
+	} {
+		for _, scale := range []float32{1, 0.5, 0.1} {
+			d := newDevice(t, 100, 100)
+			// A page rendered at scale: the drawing CTM flips y and shrinks, while the pattern CTM stays device space.
+			ctm := gfx.Matrix{A: scale, D: -scale, F: 100}
+			var box gfx.Path
+			box.Rect(-1e4, -1e4, 2e4, 2e4) // covers the whole surface at every scale under test
+			d.FillPath(&box, false, ctm, device.Paint{Shading: tc.sh, PatternCTM: gfx.Identity(), Alpha: 1})
+			pix, stride, err := d.Pixels()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range probes {
+				got := pixelAt(t, pix, stride, p[0], p[1])
+				if got[3] != 255 || got[2] < 200 {
+					t.Errorf("%s at scale %v: pixel (%d,%d) = %v, want the extended end color painted opaque",
+						tc.name, scale, p[0], p[1], got)
+				}
+			}
+		}
+	}
+}
+
+// A function-based shading is realized "at device resolution", which means device PIXELS: the grid must be sized from
+// the pattern→device map, not from the shader's local matrix, which carries the drawing CTM's inverse. Sizing from
+// local scales the grid by that inverse in both directions — a magnifying cm renders the shading blocky (the 100-unit
+// /Matrix below drops from 101x101 cells to 6x6 under `cm 20 0 0 20 0 0`), while a shrinking one inflates it toward
+// shading.MaxGridArea even though internal/content charged the work budget from the pattern CTM (budget.go's
+// shadingPaintCost). shading.GridSize exists so both packages size from the same numbers; content passes the pattern
+// CTM, so this asserts against that.
+func TestFunctionShaderGridSizedFromPatternCTM(t *testing.T) {
+	for _, ctm := range []gfx.Matrix{
+		gfx.Identity(),
+		{A: 20, D: 20},     // a magnifying cm: sizing from local would drop the grid to 6x6
+		{A: 0.05, D: 0.05}, // a shrinking one: sizing from local would inflate it to the area cap
+		{A: 4, D: -4, F: 100},
+	} {
+		evals := 0
+		sh := &shading.Shading{
+			Kind:   shading.KindFunction,
+			Domain: [4]float32{0, 1, 0, 1},
+			Matrix: gfx.Matrix{A: 100, D: 100}, // a 100x100 device-unit span under the pattern CTM
+			ColorAt: func(_, _ float32) color.NRGBA {
+				evals++
+				return color.NRGBA{A: 255}
+			},
+		}
+		patCTM := gfx.Identity()
+		d := newDevice(t, 128, 128)
+		if _, ok := d.preparePaint(device.Paint{Shading: sh, PatternCTM: patCTM, Alpha: 1}, &ctm); !ok {
+			t.Fatalf("ctm %v: preparePaint refused the shading", ctm)
+		}
+		// The grid internal/content priced this paint at, from the same matrix. (The half-pixel sample shift
+		// preparePaint folds in is a translation, which leaves the domain's extents — and so the grid — untouched.)
+		w, h, ok := sh.GridSize(patCTM)
+		if !ok {
+			t.Fatalf("ctm %v: GridSize refused the pattern CTM", ctm)
+		}
+		if evals != w*h {
+			t.Errorf("ctm %v: the grid was evaluated %d times, want the %d cells (%dx%d) the pattern CTM implies",
+				ctm, evals, w*h, w, h)
+		}
+	}
+}
+
+// allocatedDuring reports the bytes fn allocated in total, so a transient peak counts even when nothing survives it.
+func allocatedDuring(fn func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	fn()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// A transparency group's layer must be sized to the group's device-space bbox. canvas falls back to the whole current
+// clip when the bounds hint is nil, and internal/content pushes the form's /BBox clip only AFTER BeginGroup, so a file
+// nesting groups to maxFormDepth otherwise holds that many page-sized premultiplied layers at once even when every
+// group is a small stamp — about 400 MB on top of a 300 dpi letter page, and up to 12 GiB at the documented
+// OverallMaxPixels. The soft-mask path bounds exactly this cost with maxMaskPages and bbox-sized surfaces.
+func TestNestedGroupLayersSizedToBBox(t *testing.T) {
+	const (
+		dim    = 1024 // 4 MB per page-sized layer
+		nested = 12   // internal/content's maxFormDepth
+		// Twelve page-sized layers are 48 MB; twelve stamp-sized ones are a few kilobytes. The ceiling leaves plenty of
+		// room for canvas's own per-layer bookkeeping without admitting even one page-sized layer per group.
+		ceiling = 8 << 20
+	)
+	d := newDevice(t, dim, dim)
+	stamp := gfx.Rect{X0: 10, Y0: 10, X1: 30, Y1: 30}
+	allocated := allocatedDuring(func() {
+		for range nested {
+			d.BeginGroup(stamp, true, false, device.BlendMultiply, 1)
+		}
+		for range nested {
+			d.EndGroup()
+		}
+	})
+	if allocated > ceiling {
+		t.Errorf("%d groups nested over a %vx%v stamp on a %dx%d surface allocated %d bytes, want at most %d",
+			nested, stamp.X1-stamp.X0, stamp.Y1-stamp.Y0, dim, dim, allocated, ceiling)
+	}
+}
+
+// The layer bounds are a hard clip on the group's extent, which is the /BBox clip the interpreter pushes one step
+// later — so nothing the group paints outside its box may reach the surface. An uncomputed bbox (the zero rect) still
+// means "the group can mark anywhere", the reading BeginMask gives it.
+func TestGroupLayerHonorsBBox(t *testing.T) {
+	paint := func(bbox gfx.Rect) []byte {
+		t.Helper()
+		d := newDevice(t, 64, 64)
+		d.BeginGroup(bbox, true, false, device.BlendNormal, 1)
+		var full gfx.Path
+		full.Rect(0, 0, 64, 64)
+		d.FillPath(&full, false, gfx.Identity(), redPaint())
+		d.EndGroup()
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	bounded := paint(gfx.Rect{X0: 0, Y0: 0, X1: 16, Y1: 16})
+	if got := pixelAt(t, bounded, 64*4, 8, 8); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("inside the group's bbox = %v, want the fill", got)
+	}
+	if got := pixelAt(t, bounded, 64*4, 40, 40); got != [4]uint8{} {
+		t.Errorf("outside the group's bbox = %v, want nothing painted", got)
+	}
+	if got := pixelAt(t, paint(gfx.Rect{}), 64*4, 40, 40); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("with no computed bbox = %v, want the fill: the group may mark anywhere", got)
+	}
+}
+
+// Reset must put the surface's own canvas back before it unwinds and clears. A render that ended with a soft-mask span
+// still open left d.c on that span's offscreen canvas (BeginMask swaps it, EndMask swaps it back), so without the
+// restore the reused device unwinds and clears the MASK surface, keeps drawing into it, and Pixels hands back the
+// previous page's untouched pixels. The interpreter's balanced Begin/End/Pop pairing keeps that unreachable today, the
+// way EndMask's ended guard and PopMask's !ended guard defend the same invariant from the other side.
+func TestResetRestoresSurfaceCanvas(t *testing.T) {
+	d := newDevice(t, 16, 16)
+	var box gfx.Path
+	box.Rect(0, 0, 16, 16)
+	d.FillPath(&box, false, gfx.Identity(), redPaint()) // the "previous page"
+	d.BeginMask(gfx.Rect{X0: 0, Y0: 0, X1: 8, Y1: 8}, false, color.NRGBA{}, nil)
+	if d.c == d.surf.Canvas() {
+		t.Fatal("test setup: BeginMask did not swap the canvas, so the reset has nothing to put back")
+	}
+	d.Reset()
+	if d.c != d.surf.Canvas() {
+		t.Fatal("Reset left the device drawing into the mask surface")
+	}
+	d.FillPath(&box, false, gfx.Identity(), device.Paint{Color: color.NRGBA{G: 255, A: 255}, Alpha: 1})
+	pix, stride, err := d.Pixels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pixelAt(t, pix, stride, 8, 8); got != [4]uint8{0, 255, 0, 255} {
+		t.Errorf("pixel after the reset = %v, want the green drawn into the surface", got)
 	}
 }
