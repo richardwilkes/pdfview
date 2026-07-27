@@ -77,9 +77,15 @@ func (d *Document) resolveGeom(attrs inheritedAttrs) pageGeom {
 	return geom
 }
 
-// rectFromObj resolves obj as a rectangle: an array of four finite numbers, normalized so x0 <= x1 and y0 <= y1. ok is
-// false when the value is malformed; validity beyond shape (such as a non-empty extent) is the caller's concern. A
-// degenerate rectangle (zero width or height) reports false, since every use here treats such a box as unusable.
+// rectFromObj resolves obj as a rectangle: an array of four finite numbers, normalized so x0 <= x1 and y0 <= y1. ok
+// reports that the rectangle is both well formed and non-empty, which is what the box (resolveGeom) and appearance
+// (annotRect) callers require.
+//
+// The two failure modes differ in what rect carries, and callers rely on the difference: a malformed value (not an
+// array of four, a non-number, or a magnitude that narrows to ±Inf as float32) yields the zero rectangle, while a
+// well-formed but degenerate one (zero width or height) yields its real normalized coordinates alongside ok == false.
+// That is what lets linkRect report a flat /Rect where the annotation actually sits instead of collapsing it to the
+// page corner. Do not zero rect on the degenerate path.
 func (d *Document) rectFromObj(obj cos.Object) (rect [4]float32, ok bool) {
 	arr, ok := cos.AsArray(d.cos.Resolve(obj))
 	if !ok || len(arr) < 4 {

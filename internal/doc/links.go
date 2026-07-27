@@ -65,6 +65,11 @@ func (d *Document) Links(pageNumber int) []Link {
 
 // linkRect extracts the annotation's /Rect normalized in PDF space. A missing or malformed rectangle degrades to the
 // empty rectangle at the origin rather than dropping the link, mirroring MuPDF's lenient pdf_to_rect.
+//
+// rectFromObj's ok is deliberately discarded rather than merely ignored: unlike the box and appearance callers, a link
+// has no use for a non-empty extent, and a degenerate /Rect such as [100 700 300 700] is a hairline link that still
+// belongs where its coordinates put it. rectFromObj returns those coordinates with ok == false, so taking rect
+// unconditionally is what keeps a flat link off the page corner.
 func (d *Document) linkRect(annot cos.Dict) [4]float32 {
 	rect, _ := d.rectFromObj(annot["Rect"])
 	return rect

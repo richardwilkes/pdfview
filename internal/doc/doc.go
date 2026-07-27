@@ -55,7 +55,8 @@ type Document struct {
 	pageIndex map[cos.RefKey]int
 	// destIndex is the catalog's /Names → /Dests name tree flattened to name → destination pairs, built on the first
 	// named-destination lookup and reused by every later one (see lookupNamedDest). It is nil until then; an empty
-	// non-nil map means the document has no name tree and none will be walked again.
+	// non-nil map means the document has no name tree and none will be walked again. A successful Authenticate resets
+	// it to nil: an index flattened before the file key arrived is keyed on ciphertext.
 	destIndex map[string]cos.Object
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
@@ -154,7 +155,14 @@ func (d *Document) Authenticate(password string) byte {
 		// cross-reference table without any of the objects inside it, which no later load failure would notice (an
 		// absent entry resolves to Null, not an error). Its own failure is not fatal: a document left with no usable
 		// root simply reports no pages, exactly as it did before authenticating.
+		//
+		// destIndex is dropped for the same reason the object caches are. Nothing gates named-destination lookups on
+		// authentication (the root package permits TableOfContents and Links on a locked document), and a name tree
+		// flattened before the key arrived keyed itself on the ciphertext DecryptString passed through untouched. Left
+		// in place, every /GoTo and outline destination naming a name would probe the decrypted name against ciphertext
+		// keys, miss, and resolve to page -1 for the life of the document.
 		d.cos.DropCaches()
+		d.destIndex = nil
 		d.cos.ValidateRoot() //nolint:errcheck // A root that is still unusable yields an empty page list below.
 		d.buildPageList()
 	}

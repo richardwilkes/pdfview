@@ -213,7 +213,7 @@ func TestDestinationKinds(t *testing.T) {
 func TestNamedDestinations(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1: "<< /Type /Catalog /Pages 2 0 R /Dests 10 0 R /Names << /Dests 11 0 R >> >>",
-		2: "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+		2: twoKidPages,
 		3: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R 6 0 R 7 0 R] >>",
 		4: pageBox200,
 		// Old-style dictionary, value wrapped in /D.
@@ -270,7 +270,7 @@ func TestNamedDestinationMisses(t *testing.T) {
 func TestURIActionClassification(t *testing.T) {
 	d := mustOpen(t, pdf(map[int]string{
 		1:  "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 11 0 R >> >>",
-		2:  "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+		2:  twoKidPages,
 		3:  "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 12 0 R] >>",
 		4:  pageBox200,
 		11: "<< /Names [(spot) [4 0 R /XYZ 15 185 0]] >>",
@@ -380,6 +380,59 @@ func TestLinksPageRange(t *testing.T) {
 	if d.Outline() != nil {
 		t.Error("expected nil outline for a document without /Outlines")
 	}
+}
+
+// TestDegenerateLinkRectKeepsItsCoordinates pins the split contract linkRect depends on. rectFromObj reports ok ==
+// false for two very different things, and only one of them may collapse to the origin: a malformed /Rect degrades to
+// the empty rectangle there (MuPDF's lenient pdf_to_rect), but a well-formed rectangle with zero width or height is a
+// hairline link that must still be reported where its coordinates put it. Collapsing the degenerate case too would put
+// such links at the page corner — and off the page entirely, at negative coordinates, for an offset MediaBox — while
+// loadLinks still hands them to the caller, since it drops only unresolvable destinations.
+func TestDegenerateLinkRectKeepsItsCoordinates(t *testing.T) {
+	const dest = "/Dest [3 0 R /Fit]"
+	d := mustOpen(t, pdf(map[int]string{
+		1: catalogObj,
+		2: pagesOneKid,
+		3: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 800] /Annots [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >>",
+		4: "<< /Type /Annot /Subtype /Link /Rect [100 700 300 700] " + dest + " >>", // Zero height.
+		5: "<< /Type /Annot /Subtype /Link /Rect [100 500 100 700] " + dest + " >>", // Zero width.
+		6: "<< /Type /Annot /Subtype /Link /Rect [50 600 50 600] " + dest + " >>",   // A point.
+		7: "<< /Type /Annot /Subtype /Link " + dest + " >>",                         // Missing: the origin fallback.
+		8: "<< /Type /Annot /Subtype /Link /Rect [1 2 3] " + dest + " >>",           // Too short: malformed.
+		// A legal PDF integer (1 followed by 39 zeros) that is finite as a float64 but +Inf as the float32 stored.
+		9: "<< /Type /Annot /Subtype /Link /Rect [0 0 1" + strings.Repeat("0", 39) + " 10] " + dest + " >>",
+	}))
+	links := d.Links(0)
+	if len(links) != 6 {
+		t.Fatalf("got %d links, want 6", len(links))
+	}
+	// Rotation is 0 and the box origin is (0, 0), so top-left y is 800 - pdfY.
+	checkLink(t, links[0], [4]float32{100, 100, 300, 100}, 0, nan(), nan())
+	checkLink(t, links[1], [4]float32{100, 100, 100, 300}, 0, nan(), nan())
+	checkLink(t, links[2], [4]float32{50, 200, 50, 200}, 0, nan(), nan())
+	for i := 3; i < 6; i++ {
+		checkLink(t, links[i], [4]float32{0, 800, 0, 800}, 0, nan(), nan())
+	}
+}
+
+// TestDegenerateLinkRectOnOffsetBox is the same split against a MediaBox that does not start at the origin, where the
+// two outcomes are furthest apart: the degenerate link keeps its real position while the malformed one lands off the
+// page at a negative coordinate.
+func TestDegenerateLinkRectOnOffsetBox(t *testing.T) {
+	const dest = "/Dest [3 0 R /Fit]"
+	d := mustOpen(t, pdf(map[int]string{
+		1: catalogObj,
+		2: pagesOneKid,
+		3: "<< /Type /Page /Parent 2 0 R /MediaBox [10 20 310 220] /Annots [4 0 R 5 0 R] >>",
+		4: "<< /Type /Annot /Subtype /Link /Rect [60 120 260 120] " + dest + " >>",
+		5: "<< /Type /Annot /Subtype /Link /Rect [] " + dest + " >>",
+	}))
+	links := d.Links(0)
+	if len(links) != 2 {
+		t.Fatalf("got %d links, want 2", len(links))
+	}
+	checkLink(t, links[0], [4]float32{50, 100, 250, 100}, 0, nan(), nan())
+	checkLink(t, links[1], [4]float32{-10, 220, -10, 220}, 0, nan(), nan())
 }
 
 // bigNameTreePDF builds a document with a flat /Names → /Dests tree of pairs entries, plus one page carrying a link
