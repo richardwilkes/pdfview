@@ -61,12 +61,15 @@ func parseSampled(d *cos.Document, stream *cos.Stream, c common) (Func, error) {
 	if !ok {
 		return nil, errBadSampled
 	}
-	s.bps = int(bps)
-	switch s.bps {
+	// Validated as the int64 cos.AsInt returned, BEFORE narrowing: int(bps) on a 32-bit build (GOARCH=386/arm) drops
+	// the high word, so a declared 2^32+8 would truncate to a legal 8 and parse there while the same file is rejected
+	// on a 64-bit build. Testing the int64 keeps the answer identical on every architecture.
+	switch bps {
 	case 1, 2, 4, 8, 12, 16, 24, 32:
 	default:
 		return nil, errBadSampled
 	}
+	s.bps = int(bps)
 	if s.encode, ok = numbers(d, stream.Dict, "Encode", 2*maxInputs); !ok || len(s.encode) != 2*m {
 		s.encode = make([]float32, 2*m)
 		for i := range m {

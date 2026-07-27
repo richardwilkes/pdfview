@@ -320,9 +320,14 @@ func parseIndexed(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 		return nil, errBadSpace // Pattern cannot be an Indexed base (ISO 32000-2 8.6.6.3).
 	}
 	hival, ok := cos.AsInt(d.Resolve(arr[2]))
-	if !ok || hival < 0 || hival > 255 {
+	if !ok {
 		return nil, errBadSpace
 	}
+	// The spec caps /hival at 255 (ISO 32000-2 8.6.6.3), but a producer that miscounts a 256-entry palette writes 256,
+	// and rejecting the space is far worse than clamping it: the interpreter's fallback for an unresolvable space is
+	// DeviceGray, so every sc/scn operand is then read as a gray level and index 200 paints near-white instead of
+	// palette entry 200. MuPDF clamps here too.
+	hival = min(max(hival, 0), 255)
 	var lookup []byte
 	switch table := d.Resolve(arr[3]).(type) {
 	case cos.String:

@@ -163,6 +163,62 @@ func TestParseIndexed(t *testing.T) {
 	}
 }
 
+// TestIndexedHivalClamped pins the clamp on /hival. The spec caps it at 255, but a producer that miscounts a 256-entry
+// palette emits 256, and rejecting the space is not a neutral outcome: the interpreter's fallback for an unresolvable
+// space is DeviceGray, so every sc/scn operand is reread as a gray level and index 200 paints near-white instead of
+// palette entry 200. MuPDF clamps, so we clamp.
+func TestIndexedHivalClamped(t *testing.T) {
+	var lookup strings.Builder
+	for i := range 256 {
+		fmt.Fprintf(&lookup, "%02X%02X%02X", i, 255-i, 0x40)
+	}
+	table := lookup.String()
+	parse := func(t *testing.T, hival string) *Indexed {
+		t.Helper()
+		space, err := Parse(docWith(t, "[ /Indexed /DeviceRGB "+hival+" <"+table+"> ]"), cos.Ref{Num: 1})
+		if err != nil {
+			t.Fatalf("/hival %s rejected: %v", hival, err)
+		}
+		indexed, ok := space.(*Indexed)
+		if !ok {
+			t.Fatalf("/hival %s gave %T, want *Indexed (a DeviceGray fallback repaints the whole palette)", hival, space)
+		}
+		return indexed
+	}
+	ref := parse(t, "255")
+	for _, hival := range []string{"256", "300", "100000", "256.0"} {
+		t.Run("hival "+hival, func(t *testing.T) {
+			space := parse(t, hival)
+			// Clamped to 255: the full palette survives, and indices past it clamp to the last entry as always.
+			for _, idx := range []float32{0, 200, 255, 300} {
+				want := ref.ToNRGBA([]float32{idx})
+				if got := space.ToNRGBA([]float32{idx}); got != want {
+					t.Errorf("index %v = %v, want %v", idx, got, want)
+				}
+			}
+			if got := space.ToNRGBA([]float32{200}); got == space.ToNRGBA([]float32{0}) {
+				t.Error("index 200 matches index 0; the palette was not built")
+			}
+		})
+	}
+	// A negative /hival clamps the other way, to a one-entry palette, rather than tripping the DeviceGray fallback.
+	for _, hival := range []string{"-1", "-100000"} {
+		t.Run("hival "+hival, func(t *testing.T) {
+			space := parse(t, hival)
+			first := ref.ToNRGBA([]float32{0})
+			for _, idx := range []float32{0, 1, 200} {
+				if got := space.ToNRGBA([]float32{idx}); got != first {
+					t.Errorf("index %v = %v, want %v", idx, got, first)
+				}
+			}
+		})
+	}
+	// A /hival that is not a number is still a broken space, not a clamp.
+	if _, err := Parse(docWith(t, "[ /Indexed /DeviceRGB /Nope <"+table+"> ]"), cos.Ref{Num: 1}); err == nil {
+		t.Error("a non-numeric /hival parsed")
+	}
+}
+
 // TestIndexedNonFiniteIndex pins the float-space clamp. An int-space clamp would be architecture-dependent here: Go
 // leaves an out-of-range float→int conversion implementation-defined, so +Inf becomes math.MaxInt64 on arm64 (clamping
 // up to hival) but math.MinInt64 on amd64 (clamping down to 0) — the same file rendering different pixels per platform.
