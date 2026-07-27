@@ -83,6 +83,16 @@ func Open(data []byte) (*Document, error) {
 	}
 	d := &Document{cos: c}
 	d.setupEncryption()
+	// cos.Open defers its root check for an encrypted document, because nothing below this line could have decrypted a
+	// catalog stored in an object stream. Run it now that the decryptor is installed — but only for a document that is
+	// actually readable: one still waiting for a password cannot resolve that catalog yet and must open locked, exactly
+	// as an encrypted document whose catalog sits directly in the file already does. Authenticate rebuilds the page list
+	// once the key arrives.
+	if c.Encrypted() && !d.NeedsPassword() {
+		if err = c.ValidateRoot(); err != nil {
+			return nil, err
+		}
+	}
 	d.buildPageList()
 	return d, nil
 }
@@ -139,8 +149,13 @@ func (d *Document) Authenticate(password string) byte {
 	}
 	if status != 0 {
 		// The file key is now available: drop objects cached without it and rewalk the page tree so its dictionaries
-		// are recaptured decrypted.
+		// are recaptured decrypted. Re-run the deferred root check first — a catalog stored in an object stream was
+		// unreadable until this moment, and a repair sweep provoked while the payload was still ciphertext rebuilt the
+		// cross-reference table without any of the objects inside it, which no later load failure would notice (an
+		// absent entry resolves to Null, not an error). Its own failure is not fatal: a document left with no usable
+		// root simply reports no pages, exactly as it did before authenticating.
 		d.cos.DropCaches()
+		d.cos.ValidateRoot() //nolint:errcheck // A root that is still unusable yields an empty page list below.
 		d.buildPageList()
 	}
 	return status

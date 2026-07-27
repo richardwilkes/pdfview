@@ -76,6 +76,13 @@ type Document struct {
 // Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and
 // validates that a usable document root exists, running the repair scan when the file's own cross-reference information
 // is broken, inconsistent, or missing. It fails only when even repair cannot produce a root.
+//
+// A trailer naming an /Encrypt dictionary is the exception: the root check is deferred instead of applied here. Nothing
+// at this layer can decrypt anything yet — the security handler is built from that dictionary by the layer above and
+// installed with SetDecryptor only after Open returns — so a catalog stored in an object stream is still ciphertext,
+// which neither Resolve (parseObjStm cannot decode the container) nor the repair sweep (it scans plaintext) can see
+// through. That combination is what every modern producer emits, so failing here would reject a large class of valid
+// files. Call ValidateRoot once the decryptor is installed to run the deferred check.
 func Open(data []byte) (*Document, error) {
 	d := &Document{
 		data:          data,
@@ -90,17 +97,43 @@ func Open(data []byte) (*Document, error) {
 			return nil, fmt.Errorf("cannot read cross-reference data (%w) and repair failed: %w", err, rerr)
 		}
 	}
-	if !d.rootUsable() {
-		if !d.repaired {
-			if err := d.repair(); err != nil {
-				return nil, fmt.Errorf("%w: %w", errNoRoot, err)
-			}
-		}
-		if !d.rootUsable() {
-			return nil, errNoRoot
-		}
+	if d.Encrypted() {
+		return d, nil
+	}
+	if err := d.ValidateRoot(); err != nil {
+		return nil, err
 	}
 	return d, nil
+}
+
+// Encrypted reports whether the trailer names an /Encrypt dictionary, i.e. whether this document's strings and stream
+// payloads are ciphertext until a Decryptor is installed.
+func (d *Document) Encrypted() bool {
+	switch d.trailer["Encrypt"].(type) {
+	case nil, Null:
+		return false
+	default:
+		return true
+	}
+}
+
+// ValidateRoot checks that the trailer names a /Root resolving to a dictionary, running the repair scan once if it does
+// not. Open applies it itself for an unencrypted document; for an encrypted one it is the deferred check the caller
+// runs once a Decryptor is installed, and may run again after authentication supplies the file key. Repeating it costs
+// nothing once the root resolves.
+func (d *Document) ValidateRoot() error {
+	if d.rootUsable() {
+		return nil
+	}
+	if !d.repaired {
+		if err := d.repair(); err != nil {
+			return fmt.Errorf("%w: %w", errNoRoot, err)
+		}
+	}
+	if !d.rootUsable() {
+		return errNoRoot
+	}
+	return nil
 }
 
 // rootUsable reports whether the trailer names a /Root that resolves to a dictionary.

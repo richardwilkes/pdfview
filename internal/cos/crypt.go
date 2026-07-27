@@ -43,12 +43,23 @@ func (d *Document) SetDecryptor(dec Decryptor) {
 		d.encryptNum = ref.Num
 	}
 	d.clearCaches()
+	d.rearmRepair()
 }
 
 // DropCaches drops every parsed-object cache. The security handler calls it after a successful authentication so
 // objects cached under the pre-authentication (keyless) state are reparsed and decrypted with the file encryption key.
 func (d *Document) DropCaches() {
 	d.clearCaches()
+	d.rearmRepair()
+}
+
+// rearmRepair re-enables the once-per-document repair scan. A sweep that ran before the current decryption state was
+// reached could not decode a single object stream — their payloads were still ciphertext — so it recovered neither the
+// objects inside them nor a catalog stored there. Both callers change that state (a decryptor arriving, or a successful
+// authentication supplying the file key), so the document is entitled to one more sweep, which now reads those streams.
+// A document that needs no repair never pays for this: nothing runs until a load actually fails.
+func (d *Document) rearmRepair() {
+	d.repaired = false
 }
 
 // decryptDirect decrypts, in place, the strings and stream payload of an object that was stored directly at a file
