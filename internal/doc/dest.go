@@ -178,10 +178,10 @@ func (d *Document) buildDestIndex(root cos.Dict) map[string]cos.Object {
 }
 
 // indexNameTree adds one name-tree node's entries (ISO 32000-2 7.9.6) to index and descends into its /Kids. Leaf
-// /Names arrays are taken in order and the first entry for a key wins, which is what the former linear search returned;
-// /Limits are not consulted, since collecting every kid's names finds exactly what a limit-pruned search would plus the
-// entries a mis-stated limit would have hidden — the same leniency that already descends into a kid whose /Limits are
-// broken. Depth, node count, and entry count are capped, and reference cycles are skipped.
+// /Names arrays are taken in order and the first entry for a key wins. /Limits are not consulted, since collecting
+// every kid's names finds exactly what a limit-pruned search would plus the entries a mis-stated limit would have
+// hidden — the same leniency that already descends into a kid whose /Limits are broken. Depth, node count, and entry
+// count are capped, and reference cycles are skipped.
 func (d *Document) indexNameTree(node cos.Dict, index map[string]cos.Object, depth int, nodes *int,
 	visited map[cos.RefKey]bool,
 ) {

@@ -79,7 +79,7 @@ func (d *Document) resolveGeom(attrs inheritedAttrs) pageGeom {
 
 // rectFromObj resolves obj as a rectangle: an array of four finite numbers, normalized so x0 <= x1 and y0 <= y1. ok
 // reports that the rectangle is both well formed and non-empty, which is what the box (resolveGeom) and appearance
-// (annotRect) callers require.
+// (annotAppearance) callers require.
 //
 // The two failure modes differ in what rect carries, and callers rely on the difference: a malformed value (not an
 // array of four, a non-number, or a magnitude that narrows to ±Inf as float32) yields the zero rectangle, while a

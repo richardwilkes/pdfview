@@ -17,7 +17,7 @@ import (
 
 var errBadStitching = errors.New("invalid stitching function")
 
-// stitching is a type 3 (stitching) function (ISO 32000-2 7.10.5): a one-input domain partitioned by Bounds into k
+// stitching is a type 3 (stitching) function (ISO 32000-2 7.10.4): a one-input domain partitioned by Bounds into k
 // subdomains, each encoded into a subfunction.
 type stitching struct {
 	common
@@ -60,7 +60,7 @@ func parseStitching(d *cos.Document, dict cos.Dict, c common, depth int, st *par
 	if s.bounds, ok = numbers(d, dict, "Bounds", len(arr)-1); (!ok || len(s.bounds) != len(arr)-1) && len(arr) > 1 {
 		return nil, errBadStitching
 	}
-	// ISO 32000-2 7.10.5 requires Bounds to be in nondecreasing order within Domain:
+	// ISO 32000-2 7.10.4 requires Bounds to be in nondecreasing order within Domain:
 	// Domain[0] <= Bounds[0] <= ... <= Bounds[k-2] <= Domain[1]. Rejecting malformed bounds keeps Eval's subdomain
 	// scan from selecting the wrong subfunction and interpolating over an inverted [lo, hi].
 	prev := c.domain[0]
@@ -86,7 +86,7 @@ func (s *stitching) NOutputs() int {
 func (s *stitching) Eval(in []float32) []float32 {
 	x := s.clampIn(in)[0]
 	// Select the subdomain: subfunction i covers [bounds[i-1], bounds[i]), with the domain edges at the ends and the
-	// final subdomain closed on the right (ISO 32000-2 7.10.5).
+	// final subdomain closed on the right (ISO 32000-2 7.10.4).
 	i := 0
 	for i < len(s.bounds) && x >= s.bounds[i] {
 		i++

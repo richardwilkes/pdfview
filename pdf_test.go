@@ -112,7 +112,7 @@ func TestPDF(t *testing.T) {
 		t.Errorf("expected an image bounds of %v, got %v", expectedBounds, page.Image.Rect)
 	}
 
-	// A negative page number must be rejected rather than crashing in MuPDF
+	// A negative page number must be rejected before it reaches the engine
 	if _, err = doc.RenderPage(-1, 100, 20, ""); !errors.Is(err, pdfview.ErrInvalidPageNumber) {
 		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
 	}
@@ -131,8 +131,8 @@ func TestPDF(t *testing.T) {
 }
 
 func TestMalformedPDF(t *testing.T) {
-	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then causes MuPDF to throw
-	// while opening the document. This must surface as ErrUnableToOpenPDF rather than crashing the process.
+	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then fails in the parser.
+	// This must surface as ErrUnableToOpenPDF rather than escaping as a panic.
 	if _, err := pdfview.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdfview.ErrUnableToOpenPDF) {
 		t.Fatalf("expected ErrUnableToOpenPDF for a malformed document, got %v", err)
 	}
@@ -255,8 +255,8 @@ func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
 
 // internalLinkPDF is a minimal two-page document with two internal links on page 0, both targeting the second page: one
 // via an explicit /XYZ destination ([4 0 R /XYZ 30 150 0]) and one via a named destination (/A /GoTo /D (Chapter2),
-// which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so MuPDF rebuilds it; only the
-// link resolution matters here.
+// which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so the engine rebuilds it;
+// only the link resolution matters here.
 const internalLinkPDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R /Names << /Dests 6 0 R >> >>

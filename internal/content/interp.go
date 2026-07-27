@@ -61,7 +61,7 @@ const (
 	maxCachedFonts = 64
 )
 
-// pendingClip states.
+// interp.pending states: the clip a W/W* operator deferred until the next path-painting operator.
 const (
 	clipNone uint8 = iota
 	clipNonZero

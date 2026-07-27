@@ -206,7 +206,7 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 		if f.sfnt.cff != nil {
 			// CFF-flavored OpenType: go-text's GlyphDataOutline would reach the same charstrings through its own
 			// unbudgeted cff.CFF.LoadGlyph, so the wrapped 'CFF ' table is interpreted here instead (cff_charstring.go).
-			// The scale stays the head table's upem, which is what this arm has always applied to these outlines.
+			// The scale is the head table's upem, not the CFF FontMatrix, since the wrapper's units govern.
 			if f.sfnt.upem <= 0 {
 				return nil
 			}

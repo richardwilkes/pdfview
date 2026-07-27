@@ -21,7 +21,7 @@ import (
 
 // PDF CMaps (ISO 32000-2 9.7.5, 9.10.3): the code→CID maps of Type0 font /Encoding entries and — through the bf
 // operators — ToUnicode maps. CMap content is lexically PDF surface syntax, so the exported cos.Lexer tokenizes it
-// (exactly as content streams do); the operators consulted are begincodespacerange/endcodespace- range,
+// (exactly as content streams do); the operators consulted are begincodespacerange/endcodespacerange,
 // begincidrange/begincidchar, beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the CIDSystemInfo
 // boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the content interpreter uses.
 
@@ -202,16 +202,16 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 	return cm
 }
 
-// sortRanges leaves the code→CID and bf lists sorted by starting code and non-overlapping, so cid and bfString can
+// sortRanges leaves the code→CID and bf lists sorted by starting code and non-overlapping, so cid and bfRune can
 // binary search them instead of walking from the start. Both run once per glyph shown — Font.Width and Font.GID consult
-// cid, Font.Unicode consults bfString — and parsing accepts up to maxCMapRanges entries in each list, so a linear scan
+// cid, Font.Unicode consults bfRune — and parsing accepts up to maxCMapRanges entries in each list, so a linear scan
 // costs O(glyphs × ranges) on a text-heavy page using a large embedded CMap or /ToUnicode. The /W and /W2 lists already
 // get exactly this treatment for the same reason (see disjointCIDRanges).
 //
 // Overlap is malformed: ISO 32000-2 9.7.5.3 maps a code through one entry. It resolves as it does for /W — the
-// contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie — which
-// matches what the former linear scan returned for every case except a later entry that also starts lower. Entries of
-// different code lengths never contest anything: they address different codes, so each bucket is made disjoint alone.
+// contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie. Entries
+// of different code lengths never contest anything: they address different codes, so each bucket is made disjoint
+// alone.
 func (cm *cmapPDF) sortRanges() {
 	cm.indexCodespaces()
 	for n := range cm.cids {
@@ -361,8 +361,8 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 		switch {
 		case arrayDst != nil:
 			// The array supplies one target per code, so its length — not hi — bounds what the entry can map. Clamping
-			// here keeps the codes past the array's end available to a later overlapping entry, which is what the former
-			// linear scan gave them by falling through, and lets bfString index the array without a bounds check.
+			// here keeps the codes past the array's end available to a later overlapping entry, and lets bfRune index
+			// the array without a bounds check.
 			if len(arrayDst) == 0 {
 				return
 			}

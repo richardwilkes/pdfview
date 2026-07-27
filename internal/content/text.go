@@ -354,7 +354,7 @@ func (in *interp) emitRun(run *device.TextRun) {
 	}
 }
 
-// emitType3Run paints a Type 3 run: the glyph procs execute through the interpreter (depth-capped, cycle- guarded),
+// emitType3Run paints a Type 3 run: the glyph procs execute through the interpreter (depth-capped, cycle-guarded),
 // inheriting the caller's graphics state — which is how a d1 (shape) glyph picks up the current fill color, since d1
 // blocks the proc's own color operators. The run itself still reaches the device (FillText draws nothing for a font
 // without outlines) so the structured-text device sees Type 3 text like any other. Type 3 text clipping (modes 4-7) is

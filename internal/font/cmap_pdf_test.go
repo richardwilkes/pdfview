@@ -425,7 +425,7 @@ func TestWArrayIsSearchable(t *testing.T) {
 }
 
 // TestCMapRangesAreSearchable covers the sorted, non-overlapping form parseCMap leaves its code→CID and bf lists in so
-// that cid and bfString can binary search: entries arriving out of code order must still resolve, and overlapping
+// that cid and bfRune can binary search: entries arriving out of code order must still resolve, and overlapping
 // entries must be trimmed — with the surviving tail re-based onto the right CID, bfrange increment or array element —
 // rather than left to shadow one another.
 func TestCMapRangesAreSearchable(t *testing.T) {

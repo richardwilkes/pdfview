@@ -18,7 +18,7 @@ import (
 
 var errBadExponential = errors.New("invalid exponential function")
 
-// exponential is a type 2 (exponential interpolation) function (ISO 32000-2 7.10.4): y_j = C0_j + x^N × (C1_j − C0_j)
+// exponential is a type 2 (exponential interpolation) function (ISO 32000-2 7.10.3): y_j = C0_j + x^N × (C1_j − C0_j)
 // over a one-input domain.
 type exponential struct {
 	common

@@ -46,8 +46,9 @@ panics never escape the public API (enforced by fuzzing).
 - **COS layer**: classic, stream, and hybrid xref; /Prev chains; object streams; repair scan for broken files.
 - **Filters**: Flate, LZW (both EarlyChange modes), ASCIIHex, ASCII85, RunLength, PNG/TIFF predictors, DCT
   (including CMYK/YCCK with Adobe transforms), CCITT Group 3/4.
-- **Color**: DeviceGray/RGB/CMYK (behaviorally matched to MuPDF's ICC-backed conversions), CalGray/CalRGB, Lab,
-  ICCBased (N-component fallback), Indexed, Separation/DeviceN with tint transforms.
+- **Color**: DeviceGray/RGB/CMYK (behaviorally matched to MuPDF's ICC-backed conversions), CalGray/CalRGB
+  (approximated by their device analogs), ICCBased (N-component fallback), Indexed, Separation/DeviceN with tint
+  transforms. Lab is not supported.
 - **Fonts**: embedded TrueType/OpenType, CFF/Type1C, Type 1 (PFA/PFB), Type 0/CID (CIDFontType0 and 2, embedded
   CMaps, Identity-H/V), Type 3; encodings with /Differences and the AGL; ToUnicode; deterministic substitution
   from an embedded Liberation bundle (OFL-1.1) for non-embedded fonts — system fonts are never consulted.

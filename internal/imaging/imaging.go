@@ -8,7 +8,7 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package imaging decodes PDF image XObjects and inline images (ISO 32000-2 8.9) into the two raster forms the raster
-// device (internal/render) consumes: straight-alpha RGBA pixels for ordinary images, and a one-byte-per- pixel coverage
+// device (internal/render) consumes: straight-alpha RGBA pixels for ordinary images, and a one-byte-per-pixel coverage
 // plane for stencil masks (ImageMask true), which the device tints with the current fill paint.
 //
 // The pipeline: the stream's leading non-image filters are applied by internal/cos (ImageFilterSplit), then the

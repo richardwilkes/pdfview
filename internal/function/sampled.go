@@ -22,7 +22,7 @@ var errBadSampled = errors.New("invalid sampled function")
 const maxSampleSize = 1 << 20
 
 // sampled is a type 0 (sampled) function: an m-dimensional table of n-component samples, evaluated with multilinear
-// interpolation (ISO 32000-2 7.10.3). Only linear interpolation is implemented; /Order 3 (cubic spline) is treated as
+// interpolation (ISO 32000-2 7.10.2). Only linear interpolation is implemented; /Order 3 (cubic spline) is treated as
 // linear, the tolerance every deployed reader extends.
 type sampled struct {
 	common

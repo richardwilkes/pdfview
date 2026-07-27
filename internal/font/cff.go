@@ -231,9 +231,9 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 		yMin, yMax = yMax, yMin
 	}
 	asc, desc = yMax/upem, yMin/upem
-	// The bbox gets the same treatment as the upem above: a Type 1 /FontBBox can carry ±Inf (the program's own scanner
-	// accepts over-long literals), and a non-finite ascender/descender reaching stext would place every character quad
-	// at the page origin instead of at the text.
+	// The quotient gets the same treatment as the upem above: both operands are finite (cffNarrow and type1's scanner
+	// reject anything else), but a /FontMatrix implying a tiny upem still divides a large yMax past float32's range,
+	// and a non-finite ascender/descender reaching stext would place every character quad at the page origin.
 	if !isFiniteF(asc) || !isFiniteF(desc) {
 		return 0, 0, false
 	}

@@ -442,8 +442,9 @@ func (d *Document) xrefStreamIndex(dict Dict) []int64 {
 	return []int64{0, size}
 }
 
-// readField reads an n-byte big-endian unsigned value, returning def when n is zero. Values that would exceed 63 bits
-// saturate rather than wrap.
+// readField reads an n-byte big-endian unsigned value, returning def when n is zero. An 8-byte field spans the whole
+// uint64 range, so values above 2^62 saturate there: the callers convert the result to a signed offset or object
+// number, which a wider value would wrap negative.
 func readField(data []byte, n int, def uint64) uint64 {
 	if n == 0 {
 		return def

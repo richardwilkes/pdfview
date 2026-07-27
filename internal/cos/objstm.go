@@ -58,8 +58,8 @@ var (
 const maxObjStmDepth = 64
 
 // loadObjStm parses and caches the object stream with the given object number. The stream object itself must be stored
-// directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2 7.5.7), which also
-// rules out recursion here.
+// directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2 7.5.7). That does not
+// rule out re-entry: parseObjStm resolves the header keys, which can lead back here — see the two guards below.
 func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if stm, ok := d.objStms[num]; ok {
 		return stm, nil

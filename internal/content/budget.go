@@ -73,10 +73,10 @@ const (
 	maxCachedBodyBytes = 1 << 20
 	// maxCachedResources bounds each of the per-Run parse caches — color spaces, shadings, patterns. A parsed resource
 	// can retain far more than the dictionary it came from (a /Separation tint transform holds its type 0 function's
-	// whole decoded sample table, a mesh pattern its tessellation), and the maps were unbounded, so a page naming a few
-	// thousand distinct references to one fat stream pinned every realization of it for the Run. The cap sits well
-	// above the handful of distinct spaces, shadings and patterns real pages use; past it the least recently used entry
-	// is dropped and re-parses on demand, charged again like any other parse.
+	// whole decoded sample table, a mesh pattern its tessellation), so an unbounded map would let a page naming a few
+	// thousand distinct references to one fat stream pin every realization of it for the Run. The cap sits well above
+	// the handful of distinct spaces, shadings and patterns real pages use; past it the least recently used entry is
+	// dropped and re-parses on demand, charged again like any other parse.
 	maxCachedResources = 64
 )
 

@@ -7,8 +7,8 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// This example renders the first page of a PDF to a PNG, highlighting any matches of an optional search term, and
-// prints the document's table of contents and the page's links.
+// This example renders the first page of a PDF to a PNG and prints the document's table of contents, the page's links,
+// and the bounding boxes of any matches of an optional search term.
 //
 // Usage:
 //
@@ -72,7 +72,7 @@ func extract(path, search string) (err error) {
 		return nil
 	}
 
-	// Render the first page at 150 DPI, highlighting up to 10 search matches.
+	// Render the first page at 150 DPI, reporting up to 10 search matches.
 	var page *pdfview.RenderedPage
 	if page, err = doc.RenderPage(0, 150, 10, search); err != nil {
 		return err

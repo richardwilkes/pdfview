@@ -48,7 +48,7 @@ type tilingRes struct {
 }
 
 // patternFor resolves the pattern selected by an scn/SCN operator: the trailing name operand looked up in the current
-// /Pattern resources. It returns the pattern and the composed pattern-space→device matrix. A non- pattern space, a
+// /Pattern resources. It returns the pattern and the composed pattern-space→device matrix. A non-pattern space, a
 // missing name, or an unusable pattern yields nil (the paint will not mark).
 func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	if _, isPattern := space.(*pdfcolor.Pattern); !isPattern {

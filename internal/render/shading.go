@@ -543,7 +543,7 @@ func tileImageSize(w, h int) uint64 { return 4*uint64(w)*uint64(h) + 128 }
 // cell content and that pixel size — window is derived from both, and the pattern's rotation and placement live in the
 // shader's matrix, not in the tile — so with a store wired the image is cached there and shared by every later draw of
 // the pattern at the same scale, across pages. Failures cache too (they are a property of the same inputs). Without a
-// store every call rasterizes, as before.
+// store every call rasterizes.
 func (d *Device) tileImage(t *device.Tiling, window gfx.Matrix, w, h int) *imagecore.Image {
 	key := tileCellKey{pattern: t.Key, w: w, h: h}
 	cacheable := t.Key != nil && d.store != nil

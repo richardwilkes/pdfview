@@ -314,14 +314,13 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 }
 
 // disjointCIDRanges sorts /W, /W2 or CMap entries by starting CID (or character code) and trims away any overlap,
-// leaving a strictly increasing, non-overlapping list that cidWidth, cidVMetrics, cid and bfString can binary search
+// leaving a strictly increasing, non-overlapping list that cidWidth, cidVMetrics, cid and bfRune can binary search
 // rather than walking from the start for every glyph shown — a CJK CIDFont routinely carries thousands of entries, and
 // parsing accepts up to maxCMapRanges. span reports an entry's inclusive bounds and clipTo advances its start (dropping
 // the shadowed leading values).
 //
 // Overlap is malformed: ISO 32000-2 9.7.4.3 assigns each CID a single width. The contested span goes to the entry with
-// the lower starting CID, and the earlier array entry breaks a tie, which matches what the former linear scan returned
-// for every case except a later array entry that also starts lower.
+// the lower starting CID, and the earlier array entry breaks a tie.
 func disjointCIDRanges[T any](in []T, span func(*T) (uint32, uint32), clipTo func(*T, uint32)) []T {
 	slices.SortStableFunc(in, func(a, b T) int {
 		aLo, _ := span(&a)

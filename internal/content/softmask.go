@@ -41,7 +41,7 @@ type softMaskRes struct {
 	luminosity bool
 }
 
-// parseSoftMask resolves an ExtGState /SMask entry: nil for /None (and anything unusable, the viewer- conventional
+// parseSoftMask resolves an ExtGState /SMask entry: nil for /None (and anything unusable, the viewer-conventional
 // degrade — an unusable mask must not silently erase content).
 func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	resolved := in.doc.Resolve(obj)

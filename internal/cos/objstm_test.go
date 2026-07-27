@@ -104,8 +104,7 @@ func newTestObjStmDoc(t *testing.T) (*Document, *objStm) {
 
 // TestObjFromStmRecoversFromWrongIndex checks the leniency path taken when the cross-reference data's index into an
 // object stream does not name the object being asked for: the object must still be found, the first header entry for a
-// repeated object number wins (as the previous linear scan did), and an object the stream does not carry is still an
-// error.
+// repeated object number wins, and an object the stream does not carry is still an error.
 func TestObjFromStmRecoversFromWrongIndex(t *testing.T) {
 	for _, test := range []struct {
 		name string

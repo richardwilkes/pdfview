@@ -1402,7 +1402,7 @@ func TestTileShaderCachesCellInStore(t *testing.T) {
 	if replays != before+2 {
 		t.Errorf("an unkeyed pattern was cached (%d replays, want %d)", replays-before, 2)
 	}
-	// No store wired: every call rasterizes, exactly as before the cache existed.
+	// No store wired: there is nowhere to cache the tile, so every call rasterizes.
 	noStore := 0
 	paint := tilingFor(key, &noStore)
 	for range 2 {
