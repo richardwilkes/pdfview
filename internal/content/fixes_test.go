@@ -10,6 +10,7 @@
 package content
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
 	"strings"
@@ -1093,5 +1094,175 @@ func TestImageCarriesBlendMode(t *testing.T) {
 	img := rec.calls[6]
 	if img.paint.Alpha != 1 || img.paint.Blend != device.BlendNormal {
 		t.Errorf("masked image paint not reset: %+v", img.paint)
+	}
+}
+
+// simpleFontPDF builds a document whose object 1 is a resource dictionary carrying a simple Type 1 font /F1 whose
+// single-byte codes 'A'-'C' are 500 glyph units wide apiece.
+func simpleFontPDF(t *testing.T) *cos.Document {
+	t.Helper()
+	d, err := cos.Open([]byte(minimalPDF(
+		"<< /Font << /F1 2 0 R >> >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 65 /LastChar 67 /Widths [500 500 500] >>",
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// TestRunGlyphCountBounded verifies one show operator's run is capped at maxRunGlyphs. The per-glyph budget charge
+// bounds a Run's total glyph work but not one run's peak heap: a glyph costs a payload byte in the string operand and a
+// ~44-byte device.Glyph in the run, so before the cap a single Tj on a multi-megabyte string (a few kilobytes of flate)
+// built hundreds of megabytes of live entries before the device ever saw the run. A TJ array's strings compose ONE run,
+// so they share the allowance.
+func TestRunGlyphCountBounded(t *testing.T) {
+	d := simpleFontPDF(t)
+	res := resourcesOf(t, d)
+	over := strings.Repeat("A", maxRunGlyphs+64)
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    int
+	}{
+		{"Tj", "BT /F1 1 Tf (" + over + ") Tj ET", maxRunGlyphs},
+		{"TJ", "BT /F1 1 Tf [(" + over + ") -100 (" + over + ")] TJ ET", maxRunGlyphs},
+		{"under the cap", "BT /F1 1 Tf (ABC) Tj ET", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := run(t, d, res, tc.content)
+			if len(rec.texts) != 1 {
+				t.Fatalf("text calls = %d, want 1 (%+v)", len(rec.texts), rec.texts)
+			}
+			if rec.texts[0].glyphs != tc.want {
+				t.Fatalf("run holds %d glyphs, want %d", rec.texts[0].glyphs, tc.want)
+			}
+		})
+	}
+}
+
+// TestFrameResourceCacheBounded verifies the per-frame name-keyed parse caches stop growing at maxFrameCacheEntries.
+// They cache NEGATIVE results, and content may name any number of resources the dictionary does not define, so
+// "/z0 sh /z1 sh ..." — one budget unit per operator — inserted one live map entry apiece with no cap, retained for the
+// frame's lifetime; cs/CS and scn had the identical path. The cap drops the memo, never the lookup: a defined name must
+// still resolve once the cache is full.
+func TestFrameResourceCacheBounded(t *testing.T) {
+	d, err := cos.Open([]byte(minimalPDF(
+		"<< /Shading << /Sh0 2 0 R >> /ColorSpace << /Cs0 3 0 R >> /Pattern << /P0 4 0 R >> >>",
+		`<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 1 0]
+  /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >> >>`,
+		"/DeviceRGB",
+		"<< /PatternType 2 /Shading 2 0 R >>",
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := newInterp(d, resourcesOf(t, d), gfx.Identity(), &recorder{t: t}, nil)
+	for i := range maxFrameCacheEntries + 64 {
+		name := cos.Name(fmt.Sprintf("z%d", i))
+		if sh := in.shadingFor(name); sh != nil {
+			t.Fatalf("undefined shading %s resolved to %+v", name, sh)
+		}
+		if space, ok := in.colorSpace(name); ok {
+			t.Fatalf("undefined color space %s resolved to %+v", name, space)
+		}
+		if pat := in.resolvePattern(name); pat != nil {
+			t.Fatalf("undefined pattern %s resolved to %+v", name, pat)
+		}
+	}
+	frame := &in.frames[len(in.frames)-1]
+	for _, tc := range []struct {
+		name string
+		got  int
+	}{
+		{"shadings", len(frame.shadings)},
+		{"spaces", len(frame.spaces)},
+		{"patterns", len(frame.patterns)},
+	} {
+		if tc.got > maxFrameCacheEntries {
+			t.Errorf("the %s cache holds %d entries, want at most %d", tc.name, tc.got, maxFrameCacheEntries)
+		}
+	}
+	if sh := in.shadingFor("Sh0"); sh == nil {
+		t.Error("a defined shading stopped resolving once the frame cache filled")
+	}
+	if _, ok := in.colorSpace("Cs0"); !ok {
+		t.Error("a defined color space stopped resolving once the frame cache filled")
+	}
+	if pat := in.resolvePattern("P0"); pat == nil {
+		t.Error("a defined pattern stopped resolving once the frame cache filled")
+	}
+}
+
+// TestTextMatrixSurvivesNonFiniteTJKick verifies opTJ leaves the text matrix alone when a TJ number's kick would make
+// it non-finite. The operand is range-checked, but float32(-n)/1000 still overflows against a large Tf size or Tz, and
+// before the guard the ±Inf matrix was stored unconditionally: newRun then returned nil for every later show operator
+// until the next BT/Tm/Td, so the rest of the text object silently disappeared.
+func TestTextMatrixSurvivesNonFiniteTJKick(t *testing.T) {
+	size := "1" + strings.Repeat("0", 20)  // 1e20
+	kick := "-1" + strings.Repeat("0", 38) // -1e38, finite on its own; /1000 against the size overflows float32
+	d := simpleFontPDF(t)
+	rec := run(t, d, resourcesOf(t, d), "BT /F1 "+size+" Tf [(AA) "+kick+" (BB)] TJ (CC) Tj ET")
+	if len(rec.texts) != 2 {
+		t.Fatalf("text calls = %d, want 2 (%+v): the kick poisoned the text matrix", len(rec.texts), rec.texts)
+	}
+	if rec.texts[0].glyphs != 4 {
+		t.Errorf("the TJ run holds %d glyphs, want 4: the strings after the kick were dropped", rec.texts[0].glyphs)
+	}
+	if rec.texts[1].glyphs != 2 {
+		t.Errorf("the following Tj holds %d glyphs, want 2: the poisoned matrix outlived the operator",
+			rec.texts[1].glyphs)
+	}
+}
+
+// TestTextLineMatrixSurvivesNonFiniteMove verifies textMove leaves the line matrix alone when the composed translation
+// would be non-finite. Td validates its operands but the composition still overflows once the operand and Tlm's own
+// translation are both near float32's ceiling, and since Tm is reset from Tlm a stored ±Inf was permanent for the text
+// object: Td/TD/T*/'/" all recompose from the poisoned Tlm, so only Tm or BT could recover.
+func TestTextLineMatrixSurvivesNonFiniteMove(t *testing.T) {
+	big := "3" + strings.Repeat("0", 38) // 3e38 is finite in float32; twice over is past the ~3.4e38 ceiling
+	d := simpleFontPDF(t)
+	rec := run(t, d, resourcesOf(t, d),
+		"BT /F1 1 Tf "+big+" 0 Td "+big+" 0 Td (AA) Tj 0 -12 Td (BB) Tj ET")
+	if len(rec.texts) != 2 {
+		t.Fatalf("text calls = %d, want 2 (%+v): the overflowing Td poisoned the line matrix", len(rec.texts),
+			rec.texts)
+	}
+	for i, want := range []int{2, 2} {
+		if rec.texts[i].glyphs != want {
+			t.Errorf("run %d holds %d glyphs, want %d", i, rec.texts[i].glyphs, want)
+		}
+	}
+}
+
+// TestImageColorSpaceFromResourcesNotCached verifies an image whose /ColorSpace is a bare name resolved through the
+// resource frame is not served from the reference-keyed decode cache. imaging falls back to resources /ColorSpace[name]
+// for such an image, so the same XObject drawn under two forms that map /CS0 to different spaces decodes to different
+// colors; keyed on the reference alone, the second draw reused the first frame's palette (and with the document store
+// wired the stale entry crossed pages).
+func TestImageColorSpaceFromResourcesNotCached(t *testing.T) {
+	// One 1x1 8-bpc image whose three payload bytes read as red under DeviceRGB and as white under DeviceGray.
+	d, err := cos.Open([]byte(minimalPDF(
+		"<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /CS0 /Length 3 >>\nstream\n\xff\x00\x00\nendstream",
+		"<< /Type /XObject /Subtype /Form /Resources << /XObject << /Im0 1 0 R >> /ColorSpace << /CS0 /DeviceRGB >> >> /Length 8 >>\nstream\n/Im0 Do\nendstream",
+		"<< /Type /XObject /Subtype /Form /Resources << /XObject << /Im0 1 0 R >> /ColorSpace << /CS0 /DeviceGray >> >> /Length 8 >>\nstream\n/Im0 Do\nendstream",
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := cos.Dict{catXObject: cos.Dict{"FmRGB": cos.Ref{Num: 2}, "FmGray": cos.Ref{Num: 3}}}
+	rec := run(t, d, res, "/FmRGB Do /FmGray Do")
+	draws := rec.byOp(opFillImage)
+	if len(draws) != 2 {
+		t.Fatalf("recorded %d image draws, want 2 (ops: %v)", len(draws), ops(rec))
+	}
+	for i, want := range [][]byte{{255, 0, 0, 255}, {255, 255, 255, 255}} {
+		img := draws[i].img
+		if img == nil {
+			t.Fatalf("draw %d decoded nothing", i)
+		}
+		if !bytes.Equal(img.Pix, want) {
+			t.Errorf("draw %d decoded %v, want %v: the resource frame's /CS0 was not consulted", i, img.Pix, want)
+		}
 	}
 }

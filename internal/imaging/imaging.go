@@ -106,6 +106,22 @@ func DecodeXObject(d *cos.Document, stream *cos.Stream, resources cos.Dict) (*Im
 	return dec.run()
 }
 
+// NeedsResources reports whether decoding the image dictionary dict would consult the resource dictionary in scope,
+// which happens when its /ColorSpace (or /CS) is a bare name that does not parse as a space on its own — colorSpace
+// then falls back to resources /ColorSpace[name]. Such an image decodes to different colors under different resource
+// frames, so a caller that caches decoded images by the XObject's reference alone must not cache this one: the
+// dictionary's identity does not determine the result. Reported conservatively — a name that no frame defines either
+// answers true, costing a re-decode rather than risking a stale one.
+func NeedsResources(d *cos.Document, dict cos.Dict) bool {
+	dec := &decoder{d: d, dict: dict}
+	name, isName := dec.entry("ColorSpace", "CS").(cos.Name)
+	if !isName {
+		return false
+	}
+	_, err := pdfcolor.Parse(d, name)
+	return err != nil
+}
+
 // DecodeInline decodes an inline image (BI … ID … EI) whose dictionary and payload the content interpreter has
 // isolated. resources is the resource dictionary in scope, used to resolve named /CS entries.
 func DecodeInline(d *cos.Document, dict cos.Dict, payload []byte, resources cos.Dict) (*Image, error) {

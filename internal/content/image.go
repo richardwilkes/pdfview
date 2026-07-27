@@ -27,7 +27,11 @@ const maxCachedImages = 32
 func (in *interp) drawImageXObject(raw cos.Object, stream *cos.Stream) {
 	var img *imaging.Image
 	resources := in.res[len(in.res)-1]
-	if ref, isRef := raw.(cos.Ref); isRef {
+	// The cache is keyed on the reference alone, so an image whose decode also consults the resource frame in scope
+	// (imaging.NeedsResources: a bare /ColorSpace name resolved through resources /ColorSpace) must not go through it —
+	// two forms mapping /CS0 to different spaces would otherwise render the second image with the first's palette, and
+	// with the document store wired the stale entry would cross pages. Those images decode per draw, charged as usual.
+	if ref, isRef := raw.(cos.Ref); isRef && !imaging.NeedsResources(in.doc, stream.Dict) {
 		img = in.cachedImage(ref, stream, resources)
 	} else {
 		img = in.decodeXObject(stream, resources)

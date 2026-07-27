@@ -122,12 +122,20 @@ func fontSize(f *font.Font) uint64 {
 }
 
 // textMove implements Td (and the T*/'/" leading moves): translate the line matrix and restart the text matrix from it.
+// The composed matrix gets the same finiteness guard every other matrix-composing site applies: finite operands against
+// a finite Tlm still overflow once both are near float32's ceiling, and since Tm is reset from Tlm, a stored ±Inf would
+// make newRun return nil for every later show operator — with only Tm or BT able to recover, never another Td. Leaving
+// the line matrix where it was drops that move instead of deleting the rest of the text.
 func (in *interp) textMove(tx, ty float32) {
 	if !isFinitePt(tx, ty) {
 		return
 	}
-	in.tlm = gfx.Translate(tx, ty).Mul(in.tlm)
-	in.tm = in.tlm
+	moved := gfx.Translate(tx, ty).Mul(in.tlm)
+	if !moved.IsFinite() {
+		return
+	}
+	in.tlm = moved
+	in.tm = moved
 }
 
 // opTm implements Tm.
@@ -183,10 +191,18 @@ func (in *interp) opTJ() {
 			continue
 		}
 		if n, isNum := cos.AsReal(el); isNum && isFinitePt(float32(n), 0) {
+			// Guard the kicked text matrix like appendGlyphs guards the advanced one: the operand is range-checked, but
+			// float32(-n)/1000 still overflows against a large Tf size or Tz, and a stored ±Inf would make newRun return
+			// nil for every later show operator until the next BT/Tm/Td — the rest of the text object would silently
+			// vanish. Leaving the matrix where it was drops that one kick instead.
+			var kicked gfx.Matrix
 			if vertical { // TJ numbers kick the vertical advance, with no horizontal-scaling factor.
-				in.tm = gfx.Translate(0, float32(-n)/1000*ts.size).Mul(in.tm)
+				kicked = gfx.Translate(0, float32(-n)/1000*ts.size).Mul(in.tm)
 			} else {
-				in.tm = gfx.Translate(float32(-n)/1000*ts.size*ts.scale, 0).Mul(in.tm)
+				kicked = gfx.Translate(float32(-n)/1000*ts.size*ts.scale, 0).Mul(in.tm)
+			}
+			if kicked.IsFinite() {
+				in.tm = kicked
 			}
 		}
 	}
@@ -228,17 +244,29 @@ func (in *interp) newRun() *device.TextRun {
 	return &device.TextRun{Font: ts.font, WMode: ts.font.WMode(), CTM: in.gs.ctm}
 }
 
+// maxRunGlyphs caps how many glyphs one show operator's run may hold (one TJ array's strings share the allowance, since
+// they compose a single run). The per-glyph budget charge bounds a Run's total glyph work but not the peak heap of a
+// single run: a glyph costs one or two payload bytes in the string operand — which internal/filter lets a content
+// stream inflate to 64 MB — against a ~44-byte device.Glyph in the run, so one uncapped Tj built hundreds of megabytes
+// of live entries (near a gigabyte through append's growth) from a stream that flate-compresses to a few kilobytes,
+// before the device ever saw the run. This is the class stext.maxChars caps downstream, applied to the interpreter-side
+// run the way maxOperandElements caps one operand, and sits far above any real show operator (a whole page of text runs
+// to a few thousand glyphs).
+const maxRunGlyphs = 1 << 16
+
 // appendGlyphs decodes one string operand into positioned glyphs, advancing the text matrix per glyph. The glyph count
-// drains the per-Run operator budget so huge strings cannot amplify work unboundedly. In vertical writing mode (ISO
-// 32000-2 9.7.4.3), each glyph is displaced by its position vector v (folded into its Trm) and the text matrix advances
-// by the vertical displacement w1 in y — with no horizontal-scaling contribution, which applies only to x-axis
-// quantities (9.3.4).
+// drains the per-Run operator budget so huge strings cannot amplify work unboundedly, and the run itself is capped at
+// maxRunGlyphs. In vertical writing mode (ISO 32000-2 9.7.4.3), each glyph is displaced by its position vector v (folded
+// into its Trm) and the text matrix advances by the vertical displacement w1 in y — with no horizontal-scaling
+// contribution, which applies only to x-axis quantities (9.3.4).
 func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 	ts := &in.gs.text
 	vertical := run.WMode == 1
 	ts.font.ForEachCode(s, func(code uint32, nBytes uint8) bool {
 		oneByte := nBytes == 1
-		if in.budget < 0 {
+		// A full run stops the decode outright rather than merely skipping the append: the remaining codes would only
+		// advance a text matrix no later glyph of this run can use, and the string's tail is the hostile part.
+		if in.budget < 0 || len(run.Glyphs) >= maxRunGlyphs {
 			return false
 		}
 		in.budget--

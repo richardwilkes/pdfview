@@ -118,8 +118,27 @@ func (g *gstate) clone() gstate {
 	return out
 }
 
+// maxFrameCacheEntries caps each name-keyed parse cache of one resource frame. The name-keyed layer caches NEGATIVE
+// results too, and content may name any number of resources the dictionary does not define: "/s0 sh /s1 sh ..." costs
+// one budget unit per operator while storing one nil entry apiece (~54 bytes of live heap), so an uncapped map let the
+// maxTotalOps allowance buy millions of entries retained for the frame's lifetime — through cs/CS and scn just as
+// through sh. Past the cap the resolution still happens and the result is still returned, it is simply not remembered:
+// a defined name falls through to the reference-keyed per-Run cache (capped at maxCachedResources for this same
+// reason) and an undefined one re-resolves for free. The cap sits far above the handful of spaces, shadings and
+// patterns a real resource frame names.
+const maxFrameCacheEntries = 1 << 10
+
+// cacheByName stores v under name in one of resFrame's name-keyed caches, dropping the store once the cache holds
+// maxFrameCacheEntries. A full cache degrades to re-resolving the name, never to a wrong result.
+func cacheByName[V any](m map[cos.Name]V, name cos.Name, v V) {
+	if len(m) < maxFrameCacheEntries {
+		m[name] = v
+	}
+}
+
 // resFrame holds the per-resource-frame parse caches (one frame per entry of the res stack), keyed by resource name so
-// repeated operators cannot force repeated stream decodes. Negative results cache as nil.
+// repeated operators cannot force repeated stream decodes. Negative results cache as nil, bounded by
+// maxFrameCacheEntries.
 type resFrame struct {
 	spaces   map[cos.Name]pdfcolor.Space
 	shadings map[cos.Name]*shading.Shading
@@ -505,12 +524,12 @@ func (in *interp) colorSpace(name cos.Name) (pdfcolor.Space, bool) {
 	}
 	obj, ok := in.resource("ColorSpace", name)
 	if !ok {
-		cache[name] = nil
+		cacheByName(cache, name, nil)
 		return nil, false
 	}
 	// Negative entries are cached too (here and in parseSpace): repeated failures must not repeat the work.
 	space := in.parseSpace(obj)
-	cache[name] = space
+	cacheByName(cache, name, space)
 	return space, space != nil
 }
 

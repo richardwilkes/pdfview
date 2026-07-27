@@ -90,7 +90,7 @@ func (in *interp) resolvePattern(name cos.Name) *patternRes {
 	if raw, ok := in.resource(namePattern, name); ok {
 		pat = in.parsePatternEntry(raw)
 	}
-	frame.patterns[name] = pat
+	cacheByName(frame.patterns, name, pat)
 	return pat
 }
 
@@ -300,6 +300,6 @@ func (in *interp) shadingFor(name cos.Name) *shading.Shading {
 	if obj, ok := in.resource("Shading", name); ok {
 		sh = in.parseShading(obj)
 	}
-	frame.shadings[name] = sh
+	cacheByName(frame.shadings, name, sh)
 	return sh
 }
