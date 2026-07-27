@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
@@ -189,6 +190,17 @@ endbfrange
 endcmap
 end`
 
+// bfLead renders what bfRune reports for a code as a string ("" when the code maps nowhere), so the table-driven
+// expectations stay readable. A multi-rune target surfaces only its leading rune — the one rune per code Font.Unicode
+// carries, and the only one bfRune decodes.
+func bfLead(cm *cmapPDF, code uint32, nBytes uint8) string {
+	r, ok := cm.bfRune(code, nBytes)
+	if !ok {
+		return ""
+	}
+	return string(r)
+}
+
 func TestToUnicodeBF(t *testing.T) {
 	cm := parseCMap([]byte(testToUnicodeContent), 0, nil)
 	if cm == nil {
@@ -198,13 +210,13 @@ func TestToUnicodeBF(t *testing.T) {
 		0x03: " ",
 		0x0f: "⁴",
 		0x10: "A", 0x11: "B", 0x12: "C", // bfrange increments the last code unit.
-		0x20: "ff",         // multi-unit target
+		0x20: "f",          // multi-unit target: the leading rune of "ff"
 		0x21: "\U0001D400", // surrogate pair
 		0x22: "1",
 		0x99: "", // unmapped
 	} {
-		if got := cm.bfString(code, 2); got != want {
-			t.Errorf("bfString(%#x) = %q, want %q", code, got, want)
+		if got := bfLead(cm, code, 2); got != want {
+			t.Errorf("bfRune(%#x) = %q, want %q", code, got, want)
 		}
 	}
 }
@@ -486,8 +498,8 @@ endbfrange`), 0, nil)
 		0x0050: "a", 0x0055: "f", // [0050, 0055] starts lower than the array entry [0053, 0056].
 		0x0056: "D", // The tail of [0053, 0056] survives, re-based onto the array's fourth element.
 	} {
-		if got := cm.bfString(code, 2); got != want {
-			t.Errorf("bfString(%#04x) = %q, want %q", code, got, want)
+		if got := bfLead(cm, code, 2); got != want {
+			t.Errorf("bfRune(%#04x) = %q, want %q", code, got, want)
 		}
 	}
 
@@ -698,11 +710,11 @@ endbfrange`), 0, nil)
 	if got := cm.cid(0x41, 2); got != 1000+0x41 {
 		t.Errorf("cid(41, 2 bytes) = %d, want %d from the 2-byte range", got, 1000+0x41)
 	}
-	if got, want := cm.bfString(0x41, 1), string(rune(0x41+0x21)); got != want {
-		t.Errorf("bfString(41, 1 byte) = %q, want %q from the 1-byte range", got, want)
+	if got, want := bfLead(cm, 0x41, 1), string(rune(0x41+0x21)); got != want {
+		t.Errorf("bfRune(41, 1 byte) = %q, want %q from the 1-byte range", got, want)
 	}
-	if got, want := cm.bfString(0x41, 2), string(rune(0x61+0x41)); got != want {
-		t.Errorf("bfString(41, 2 bytes) = %q, want %q from the 2-byte range", got, want)
+	if got, want := bfLead(cm, 0x41, 2), string(rune(0x61+0x41)); got != want {
+		t.Errorf("bfRune(41, 2 bytes) = %q, want %q from the 2-byte range", got, want)
 	}
 }
 
@@ -721,8 +733,8 @@ endcidrange`), 0, nil)
 	if cm == nil {
 		t.Fatal("parseCMap returned nil")
 	}
-	if got := cm.bfString(0x42, 1); got != "b" {
-		t.Errorf("bfString(42, 1 byte) = %q, want %q through the 2-byte entry", got, "b")
+	if got := bfLead(cm, 0x42, 1); got != "b" {
+		t.Errorf("bfRune(42, 1 byte) = %q, want %q through the 2-byte entry", got, "b")
 	}
 	if got := cm.cid(0x42, 1); got != 8 {
 		t.Errorf("cid(42, 1 byte) = %d, want 8 through the 2-byte entry", got)
@@ -758,5 +770,77 @@ func TestCMapRangeCapCountsEveryLength(t *testing.T) {
 	}
 	if bfCount(cm) != 0 {
 		t.Errorf("kept %d bf entries, want none", bfCount(cm))
+	}
+}
+
+// TestBFRuneDecodesOnlyTheLeadingUnit pins the lookup cost of /ToUnicode. parseBFRanges puts no cap on a bf target's
+// length — a hex string token carries up to the lexer's maxHexStringScan — while Font.Unicode keeps exactly one rune
+// per code. Decoding the whole target on every lookup allocated a []uint16 and a string proportional to it, so a
+// hostile /ToUnicode over a text-heavy page turned extraction into hundreds of gigabytes of churn for one rune a call.
+func TestBFRuneDecodesOnlyTheLeadingUnit(t *testing.T) {
+	const units = 1 << 16
+	target := make([]byte, 0, 2*units)
+	target = append(target, 0x00, 0x41) // 'A' leads; every unit after it is padding the lookup must never touch.
+	for len(target) < 2*units {
+		target = append(target, 0x00, 0x42)
+	}
+	cm := &cmapPDF{}
+	cm.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: target}}
+	r, ok := cm.bfRune(0x20, 2)
+	if !ok || r != 'A' {
+		t.Fatalf("bfRune = %q, %v; want 'A', true", r, ok)
+	}
+	// The lookup's cost must not depend on the target's length: the old whole-target decode allocated a []uint16 and a
+	// string proportional to it on every call.
+	small := &cmapPDF{}
+	small.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: []byte{0x00, 0x41}}}
+	huge := testing.AllocsPerRun(100, func() { cm.bfRune(0x20, 2) })
+	tiny := testing.AllocsPerRun(100, func() { small.bfRune(0x20, 2) })
+	if huge != tiny {
+		t.Errorf("bfRune allocated %v times for a %d-unit target but %v for a 1-unit one; it must decode only the "+
+			"leading unit", huge, units, tiny)
+	}
+}
+
+// TestBFRuneIncrementAndSurrogates pins the decoding rules the leading-rune shortcut has to preserve: the bfrange
+// increment lands on the FINAL code unit, so it reaches the leading rune only for a one-unit target or through the low
+// half of a surrogate pair, and a lone or mispaired surrogate decodes to U+FFFD exactly as utf16.Decode would.
+func TestBFRuneIncrementAndSurrogates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dst  []byte
+		inc  uint16
+		want rune
+	}{
+		{"single unit takes the increment", []byte{0x00, 0x41}, 2, 'C'},
+		{"single byte takes the increment", []byte{0x41}, 2, 'C'},
+		{"leading unit of a longer target is untouched", []byte{0x00, 0x41, 0x00, 0x42}, 2, 'A'},
+		{"surrogate pair combines", []byte{0xD8, 0x35, 0xDC, 0x00}, 0, '\U0001D400'},
+		{"surrogate pair takes the increment on its low half", []byte{0xD8, 0x35, 0xDC, 0x00}, 1, '\U0001D401'},
+		{"lone high surrogate", []byte{0xD8, 0x35}, 0, '�'},
+		{"lone low surrogate", []byte{0xDC, 0x00}, 0, '�'},
+		{"mispaired high surrogate", []byte{0xD8, 0x35, 0x00, 0x41}, 0, '�'},
+		{"odd trailing byte dropped", []byte{0x00, 0x41, 0x42}, 0, 'A'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := utf16BEFirstRune(tc.dst, tc.inc)
+			if !ok || got != tc.want {
+				t.Errorf("utf16BEFirstRune(% x, %d) = %q, %v; want %q, true", tc.dst, tc.inc, got, ok, tc.want)
+			}
+			// Whatever the shortcut reports must be the first rune of the full UTF-16 decoding.
+			units := make([]uint16, 0, len(tc.dst)/2)
+			for i := 0; i+1 < len(tc.dst); i += 2 {
+				units = append(units, uint16(tc.dst[i])<<8|uint16(tc.dst[i+1]))
+			}
+			if len(units) != 0 {
+				units[len(units)-1] += tc.inc
+				if full := []rune(string(utf16.Decode(units))); len(full) == 0 || full[0] != got {
+					t.Errorf("leading rune %q disagrees with the full decoding %q", got, full)
+				}
+			}
+		})
+	}
+	if _, ok := utf16BEFirstRune(nil, 0); ok {
+		t.Error("an empty target reported a rune; the caller must fall through to its other Unicode sources")
 	}
 }

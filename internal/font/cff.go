@@ -34,6 +34,10 @@ type cffTop struct {
 	matrix         [6]float32 // FontMatrix (0.001 0 0 0.001 0 0 default)
 	charsetOff     int        // charset offset (0/1/2 are the predefined charsets)
 	charStringsOff int        // CharStrings INDEX offset (0 when absent)
+	privOff        int        // Private DICT offset (0 when absent); the local Subrs offset is relative to it
+	privSize       int        // Private DICT length in bytes (0 when absent)
+	fdArrayOff     int        // FDArray INDEX offset, CID-keyed programs only (0 when absent)
+	fdSelectOff    int        // FDSelect offset, CID-keyed programs only (0 when absent)
 	hasBBox        bool
 	hasMatrix      bool
 	isCID          bool // ROS present: a CID-keyed program (charset maps GIDs to CIDs, not name SIDs)
@@ -73,8 +77,15 @@ func parseCFFTopDict(data []byte) (*cffTop, error) {
 			top.charsetOff = clampDictOffset(operands[len(operands)-1])
 		case op == 17 && len(operands) >= 1: // CharStrings offset
 			top.charStringsOff = clampDictOffset(operands[len(operands)-1])
+		case op == 18 && len(operands) >= 2: // Private: size then offset
+			top.privSize = clampDictOffset(operands[len(operands)-2])
+			top.privOff = clampDictOffset(operands[len(operands)-1])
 		case op == 0x0c1e: // ROS (escaped operator 12 30): CID-keyed
 			top.isCID = true
+		case op == 0x0c24 && len(operands) >= 1: // FDArray (escaped operator 12 36)
+			top.fdArrayOff = clampDictOffset(operands[len(operands)-1])
+		case op == 0x0c25 && len(operands) >= 1: // FDSelect (escaped operator 12 37)
+			top.fdSelectOff = clampDictOffset(operands[len(operands)-1])
 		}
 	}); err != nil {
 		return nil, err
@@ -414,12 +425,17 @@ func parseCFFTopFromStream(d *cos.Document, s *cos.Stream) *cffTop {
 	return top
 }
 
-// cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for charstring interpretation,
-// the name→GID map swept from its charset, and the FontMatrix that carries charstring space to em space.
+// cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for the charstrings and the
+// charset, the name→GID map swept from that charset, the subroutine arrays the repo's own budgeted Type 2 interpreter
+// needs (cff_charstring.go), and the FontMatrix that carries charstring space to em space.
 type cffInfo struct {
 	font *cff.CFF
 	// names maps charset glyph names to GIDs (go-text exposes name-per-GID; the sweep inverts it once).
 	names map[string]uint32
+	// subrs holds the global and local subroutine arrays a charstring may call, read from the same bytes go-text
+	// parsed. It is nil when the container walk could not recover them, which leaves subroutine calls failing (and so
+	// the glyph blank) rather than running unbudgeted.
+	subrs *cffSubrs
 	// matrix is the Top DICT FontMatrix (charstring units → em space at size 1).
 	matrix [6]float32
 }
@@ -435,7 +451,8 @@ func parseCFFGlyphs(d *cos.Document, s *cos.Stream, top *cffTop) *cffInfo {
 	return parseCFFGlyphBytes(raw, top)
 }
 
-// parseCFFGlyphBytes is the bytes-level half of parseCFFGlyphs (split out so the fuzzer can drive it directly).
+// parseCFFGlyphBytes is the bytes-level half of parseCFFGlyphs (split out so the fuzzer can drive it directly). top may
+// be nil, in which case the Top DICT is read here: the subroutine walk needs its Private/FDArray/FDSelect offsets.
 func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	defer func() {
 		if recover() != nil {
@@ -446,7 +463,16 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	if err != nil || f == nil {
 		return nil
 	}
+	dict := top
+	if dict == nil {
+		if parsed, dictErr := parseCFFTopDict(raw); dictErr == nil {
+			dict = parsed
+		}
+	}
 	info = &cffInfo{font: f, matrix: [6]float32{0.001, 0, 0, 0.001, 0, 0}}
+	if dict != nil {
+		info.subrs = parseCFFSubrs(raw, dict, len(f.Charstrings))
+	}
 	if top != nil && top.hasMatrix {
 		info.matrix = top.matrix
 	}

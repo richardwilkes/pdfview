@@ -203,6 +203,19 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	}
 	switch {
 	case f.sfnt != nil:
+		if f.sfnt.cff != nil {
+			// CFF-flavored OpenType: go-text's GlyphDataOutline would reach the same charstrings through its own
+			// unbudgeted cff.CFF.LoadGlyph, so the wrapped 'CFF ' table is interpreted here instead (cff_charstring.go).
+			// The scale stays the head table's upem, which is what this arm has always applied to these outlines.
+			if f.sfnt.upem <= 0 {
+				return nil
+			}
+			segs, ok := f.sfnt.cff.glyphSegments(gid)
+			if !ok {
+				return nil
+			}
+			return segmentsToPath(segs, gfx.Scale(1/f.sfnt.upem, 1/f.sfnt.upem))
+		}
 		if f.sfnt.face != nil {
 			outline, ok := f.sfnt.face.GlyphDataOutline(tables.GlyphID(gid))
 			if !ok || f.sfnt.upem <= 0 {
@@ -215,8 +228,8 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 		}
 		return nil
 	case f.cff != nil:
-		segs, _, err := f.cff.font.LoadGlyph(tables.GlyphID(gid))
-		if err != nil {
+		segs, ok := f.cff.glyphSegments(gid)
+		if !ok {
 			return nil
 		}
 		m := f.cff.matrix
@@ -242,8 +255,17 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 // programAdvance returns the embedded program's advance for a glyph in em units (the /Widths-absent fallback),
 // reporting false when no program supplies one.
 func (f *Font) programAdvance(gid uint32) (float32, bool) {
-	if f.sfnt != nil && f.sfnt.face != nil && f.sfnt.upem > 0 {
-		return f.sfnt.face.HorizontalAdvance(opentype.GID(gid)) / f.sfnt.upem, true
+	if f.sfnt != nil && f.sfnt.upem > 0 {
+		if f.sfnt.face != nil {
+			return f.sfnt.face.HorizontalAdvance(opentype.GID(gid)) / f.sfnt.upem, true
+		}
+		// go-text rejects a program with no cmap table — the exact case the direct glyf walker draws — so a font whose
+		// dictionary carried no /Widths would otherwise advance every code by /MissingWidth (0 by default) while its
+		// outlines rendered correctly, piling the whole string on one point. The hmtx table read at parse time is the
+		// same advance source the face would have used.
+		if adv, ok := f.sfnt.advance(gid); ok {
+			return adv, true
+		}
 	}
 	if f.t1 != nil {
 		return f.t1.advance(gid)

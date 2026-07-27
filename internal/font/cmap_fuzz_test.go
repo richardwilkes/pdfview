@@ -37,7 +37,7 @@ func FuzzCMap(f *testing.F) {
 				t.Fatalf("nextCode consumed %d bytes", n)
 			}
 			cm.cid(code, uint8(min(n, 4)))
-			cm.bfString(code, uint8(min(n, 4)))
+			cm.bfRune(code, uint8(min(n, 4)))
 			probe = probe[min(n, len(probe)):]
 		}
 	})

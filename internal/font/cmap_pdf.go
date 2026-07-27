@@ -14,6 +14,7 @@ import (
 	"math"
 	"slices"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
@@ -522,9 +523,15 @@ func (cm *cmapPDF) cid(code uint32, nBytes uint8) uint32 {
 	return 0
 }
 
-// bfString maps a code decoded at nBytes bytes to its bf target string (ToUnicode), decoding UTF-16BE; "" when
-// unmapped.
-func (cm *cmapPDF) bfString(code uint32, nBytes uint8) string {
+// bfRune maps a code decoded at nBytes bytes to the first rune of its bf target (ToUnicode), reporting false when the
+// code maps nowhere.
+//
+// Only the leading rune is decoded, never the whole target: Font.Unicode — the sole caller, and the one rune per code
+// the search/extraction seam carries — keeps just that one, while parseBFRanges puts no cap on a target's length (a hex
+// string token reaches the lexer's maxHexStringScan of ~512 KB). Decoding the whole target here allocated a []uint16
+// and a string proportional to it on EVERY lookup, so a hostile /ToUnicode over a text-heavy page turned extraction
+// into hundreds of gigabytes of churn to produce one rune per call.
+func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (rune, bool) {
 	order := lengthOrder(nBytes)
 	for c := cm; c != nil; c = c.base {
 		for _, n := range order {
@@ -539,30 +546,49 @@ func (cm *cmapPDF) bfString(code uint32, nBytes uint8) string {
 			}
 			idx := code - e.lo
 			if e.dstArray != nil {
-				return utf16BEToString(e.dstArray[idx], 0)
+				return utf16BEFirstRune(e.dstArray[idx], 0)
 			}
-			return utf16BEToString(e.dst, uint16(idx)+e.trimmed)
+			return utf16BEFirstRune(e.dst, uint16(idx)+e.trimmed)
 		}
 	}
-	return ""
+	return 0, false
 }
 
-// utf16BEToString decodes UTF-16BE bytes, adding inc to the final code unit (the bfrange increment rule: "the last byte
-// of the string shall be incremented", which for UTF-16 targets is the final code unit). Odd-length input drops the
-// trailing byte, matching lenient viewers.
-func utf16BEToString(b []byte, inc uint16) string {
+// utf16BEFirstRune decodes the first rune of UTF-16BE bytes, adding inc to the final code unit (the bfrange increment
+// rule: "the last byte of the string shall be incremented", which for UTF-16 targets is the final code unit). Odd
+// lengths drop the trailing byte, matching lenient viewers, and an empty target reports false — the caller then falls
+// through to its other Unicode sources, exactly as an absent entry does.
+//
+// The increment reaches the leading rune only when the target is one code unit long, or two of which the first is a
+// high surrogate; longer targets increment a unit the leading rune does not span. Lone or mispaired surrogates decode
+// to U+FFFD, which is what utf16.Decode yields for the same input.
+func utf16BEFirstRune(b []byte, inc uint16) (rune, bool) {
 	if len(b) < 2 {
 		if len(b) == 1 { // A single byte: treat as one 8-bit unit (some producers write <41>).
-			return string(rune(uint16(b[0]) + inc))
+			return rune(uint16(b[0]) + inc), true
 		}
-		return ""
+		return 0, false
 	}
-	units := make([]uint16, 0, len(b)/2)
-	for i := 0; i+1 < len(b); i += 2 {
-		units = append(units, uint16(b[i])<<8|uint16(b[i+1]))
+	units := len(b) / 2
+	first := uint16(b[0])<<8 | uint16(b[1])
+	if units == 1 {
+		first += inc
 	}
-	units[len(units)-1] += inc
-	return string(utf16.Decode(units))
+	switch {
+	case first >= 0xD800 && first < 0xDC00: // High surrogate: pairs with the next unit, if there is one.
+		if units < 2 {
+			return utf8.RuneError, true
+		}
+		second := uint16(b[2])<<8 | uint16(b[3])
+		if units == 2 {
+			second += inc
+		}
+		return utf16.DecodeRune(rune(first), rune(second)), true // U+FFFD when second is not a low surrogate.
+	case first >= 0xDC00 && first < 0xE000: // Low surrogate with no high one before it.
+		return utf8.RuneError, true
+	default:
+		return rune(first), true
+	}
 }
 
 // wModeResolved returns the CMap's writing mode, consulting the usecmap chain.

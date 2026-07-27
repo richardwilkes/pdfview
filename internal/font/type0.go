@@ -105,6 +105,21 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	}
 	if info.sfnt == nil && desc.fontFile3 != nil {
+		// ISO 32000-2 9.9 Table 126 permits /FontFile3 with /Subtype /OpenType for CIDFontType0 and CIDFontType2 alike,
+		// so an sfnt wrapper is tried before reading the stream as bare CFF — the same order loadSimple takes. Without
+		// it a composite font whose program is a real sfnt failed the OTTO/0x00010000 header check in the CFF reader
+		// and was substituted away: its ascender fell back to the standard-14 pin and its glyphs came from Liberation
+		// through /ToUnicode, or, with no /ToUnicode, nothing rendered at all. /Subtype is not consulted (loadType0
+		// dispatches on what is actually present, per the comment above); a stream that is not an sfnt fails the header
+		// check here and costs nothing.
+		if sfnt := parseSFNTStream(d, desc.fontFile3); sfnt.cidGlyphs() {
+			info.sfnt = sfnt
+			f.ascender, f.descender = sfnt.ascender, sfnt.descender
+			embedded = true
+			info.cidToGID = loadCIDToGID(d, descendant["CIDToGIDMap"])
+		}
+	}
+	if info.sfnt == nil && desc.fontFile3 != nil {
 		// CIDFontType0: a CFF program (bare CID-keyed CFF or Type1C). Metrics follow the bare-CFF FontBBox rule;
 		// CID→GID comes from the program's charset when it is CID-keyed, else CID = GID.
 		if top := parseCFFTopFromStream(d, desc.fontFile3); top != nil {

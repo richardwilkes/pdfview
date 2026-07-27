@@ -255,8 +255,10 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	}
 	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs their hsbw advances
 	// (programAdvance); everything else — substituted fonts per the std14-styles pin, and bare CFF until its charstring
-	// advances land — takes the AFM widths of the standard-14 stand-in.
-	if !f.hasWidths && f.sfnt == nil && f.t1 == nil {
+	// advances land — takes the AFM widths of the standard-14 stand-in. The test is whether the sfnt actually has an
+	// advance source, not merely whether one parsed: a program with neither a go-text face nor an hmtx table supplies
+	// no advance at all, and suppressing the AFM table for it left every code at /MissingWidth (0 by default).
+	if !f.hasWidths && !f.sfnt.hasAdvances() && f.t1 == nil {
 		f.afm = data.AFMWidths(std14)
 	}
 	f.buildGIDs()
@@ -341,10 +343,8 @@ func (f *Font) Width(code uint32, nBytes uint8) float32 {
 // one rune per code the search/extraction seam carries.
 func (f *Font) Unicode(code uint32, nBytes uint8) rune {
 	if f.toUni != nil {
-		if s := f.toUni.bfString(code, nBytes); s != "" {
-			for _, r := range s {
-				return r
-			}
+		if r, ok := f.toUni.bfRune(code, nBytes); ok {
+			return r
 		}
 	}
 	if f.type0 == nil && code < 256 {
