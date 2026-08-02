@@ -195,7 +195,12 @@ func jpxSizGuard(payload []byte, bare bool, budget int64) error {
 			return ErrBadImage // A zero subsampling factor divides by zero somewhere downstream.
 		}
 	}
-	if (xsiz-xo)*(ysiz-yo) > budget {
+	// The budget is charged in samples — pixels times components — not pixels: decode cost scales with the
+	// coefficient planes, so a three-component image is three times the work and memory of a gray one at the same
+	// pixel count. The fuzz soak found a 2250-byte payload declaring a 16.7 Mpx single-component-budget-sized image
+	// with three components; counting samples rejects it while every real encoding passes with orders of magnitude
+	// to spare (the corpus's densest payload decodes under nine pixels per payload byte).
+	if (xsiz-xo)*(ysiz-yo)*ncomp > budget {
 		return ErrTooLarge
 	}
 	tiles := ((xsiz - xto + xt - 1) / xt) * ((ysiz - yto + yt - 1) / yt)
