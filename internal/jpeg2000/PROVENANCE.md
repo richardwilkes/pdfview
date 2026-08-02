@@ -81,10 +81,22 @@ The upstream package doc comments for `j2k` still describe `Encode`, `EncodeWith
 `EncodeOptions`, which the prune removed. They were left alone: rewriting them is a judgement call, not a mechanical
 change, and keeping the diff against upstream to the four items above is worth more than the stale sentences cost.
 
-`test/e2e/register_pdfview_test.go` is pdfview-authored (MPL-2.0), not upstream code. The upstream end-to-end tests
-reach the decoders through `image.Decode`, which the registry removal above breaks; that file restores the two
-registrations inside the test binary, where the side effect is scoped to the test process. It exists so no upstream
-test had to be edited or dropped.
+### pdfview-authored files inside this tree
+
+These carry Rich's MPL-2.0 header, not the upstream provenance line, and are excluded from the diff audit above. They
+add to the vendored packages from the outside; no vendored file was edited to accommodate them.
+
+| File | What it is |
+| --- | --- |
+| `test/e2e/register_pdfview_test.go` | The upstream end-to-end tests reach the decoders through `image.Decode`, which the registry removal above breaks. This restores the two registrations inside the test binary, where the side effect is scoped to the test process. It exists so no upstream test had to be edited or dropped. |
+| `jp2/pdfview.go` | `DecodeComponents` and `DecodeInfo`, the two container-level entry points the PDF image pipeline needs and upstream never exposed: raw per-component planes from a JP2, and a header-only report of the container metadata alongside the codestream's own component geometry. |
+| `jp2/pdfview_test.go` | Pins both against the vendored vectors and their ground-truth planes, including a corruption sweep over every `.jp2` vector. |
+
+`jp2/pdfview.go` reads the SIZ marker segment itself rather than calling the codestream decoder's header pass. That
+pass runs `initTiles` immediately after SIZ even when asked for the configuration only, allocating one `tileState` per
+declared tile — bounded at 2^20 tiles, so a few dozen header bytes can cost hundreds of megabytes before any pixel is
+requested. Reading SIZ directly keeps `DecodeInfo` bounded by its input. `jp2/pdfview_test.go` cross-checks the two
+readings against each other on every vendored container so they cannot drift.
 
 ## Attribution files in this directory
 
