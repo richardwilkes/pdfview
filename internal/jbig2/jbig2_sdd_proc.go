@@ -30,6 +30,15 @@
 //   - Charges every bitmap this file allocates — the Huffman height-class collective bitmap, each symbol split out of
 //     it, and each input symbol duplicated on export — against the decode's cumulative pixel budget (embedded.go),
 //     and hands that budget to the procs it drives, whose own bitmaps are charged there.
+//   - Restored PDFium's cap on TOTWIDTH at 65535 and its overflow-safe collective-bitmap sizing
+//     (jbig2_sdd_proc.cpp:419-430) in the Huffman height-class path: the stride*HCHEIGHT length guard was computed in
+//     wrapping uint32, so a width sum large enough to wrap could pass it. TOTWIDTH is now rejected above 65535 and the
+//     size taken in uint64. (This is the only collective-bitmap site; the arithmetic path decodes each symbol
+//     individually and has no TOTWIDTH.)
+//   - Bounded REFAGGNINST, the count of instances aggregated into one symbol, at 32 per remaining stream byte in both
+//     the arithmetic and Huffman refinement/aggregate paths. This is hardening BEYOND PDFium, which decodes REFAGGNINST
+//     unguarded (jbig2_sdd_proc.cpp:100-116): the aggregate is coded inline here, bypassing the external pre-scan, so a
+//     hostile count drives the text-region instance loop directly — the audit's sharpest CPU amplifier.
 //
 // Derived from PDFium's core/fxcodec/jbig2 (Copyright 2014 The PDFium Authors; original code copyright 2014 Foxit
 // Software Inc.), BSD-3-Clause; see LICENSE-pdfium in this directory.
@@ -143,6 +152,11 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 					return nil, errors.New("failed to decode refaggninst")
 				}
 				if REFAGGNINST > 1 {
+					// Beyond-PDFium hardening: bound the aggregate-instance count by 32 per remaining stream byte
+					// before it becomes SBNUMINSTANCES and drives the text-region instance loop.
+					if uint64(REFAGGNINST) > uint64(arithDecoder.stream.GetByteLeft())*32 {
+						return nil, errors.New("refaggninst exceeds stream bound")
+					}
 					pDecoder := NewTRDProc()
 					pDecoder.budget = s.budget
 					pDecoder.SBHUFF = s.SDHUFF
@@ -341,6 +355,11 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 					return nil, errors.New("failed to decode refaggninst")
 				}
 				if REFAGGNINST > 1 {
+					// Beyond-PDFium hardening: bound the aggregate-instance count by 32 per remaining stream byte
+					// before it becomes SBNUMINSTANCES and drives the text-region instance loop.
+					if uint64(REFAGGNINST) > uint64(stream.GetByteLeft())*32 {
+						return nil, errors.New("refaggninst exceeds stream bound")
+					}
 					pDecoder := NewTRDProc()
 					pDecoder.budget = s.budget
 					pDecoder.SBHUFF = s.SDHUFF
@@ -452,8 +471,15 @@ func (s *SDDProc) DecodeHuffman(stream *BitStream, gbContexts, grContexts []Arit
 			stream.AlignByte()
 			var BHC *Image
 			if BMSIZE == 0 {
+				// PDFium caps TOTWIDTH at 65535 and sizes the collective bitmap through FX_SAFE_UINT32
+				// (jbig2_sdd_proc.cpp:419-430). Without the cap, stride*HCHEIGHT was computed in wrapping uint32, so a
+				// width sum large enough to wrap could slip under the remaining-bytes guard; the cap keeps the size in
+				// uint64 range and the comparison is taken in uint64.
+				if TOTWIDTH > JBig2MaxImageSize {
+					return nil, errors.New("collective bitmap width too large")
+				}
 				stride := (TOTWIDTH + 7) / 8
-				if stream.GetByteLeft() < stride*HCHEIGHT {
+				if uint64(stream.GetByteLeft()) < uint64(stride)*uint64(HCHEIGHT) {
 					return nil, errors.New("insufficient data for grid")
 				}
 				if err := s.budget.charge(int64(TOTWIDTH), int64(HCHEIGHT)); err != nil {

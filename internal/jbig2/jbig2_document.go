@@ -23,6 +23,17 @@
 //     segment declaring a data length near 2^32 wrapped the offset backwards and the segment loop re-parsed the same
 //     header forever — a hang on a few bytes of hostile input, found by fuzzing.
 //   - Dropped an ineffectual index advance in the symbol dictionary's custom Huffman table selection.
+//   - Restored PDFium's cap on SDNUMEXSYMS and SDNUMNEWSYMS at 65535 (jbig2_context.cpp:440-441); this translation
+//     read both as raw integers, so a declared new-symbol count near 2^32 sized make([]*Image, SDNUMNEWSYMS) and the
+//     IAID arithmetic context table before any symbol data was read.
+//   - Restored PDFium's bound on a direct text region's SBNUMINSTANCES at 32 instances per remaining stream byte
+//     (jbig2_context.cpp:662-675); each instance must be coded, so a count past what the stream can hold otherwise
+//     left the text-region instance loop to spin.
+//   - Restored PDFium's per-region IsValidImageSize check (0 < w,h <= 65535; jbig2_image.cpp:127-129, applied at
+//     jbig2_context.cpp:631/933/1116) once in ParseRegionInfo, covering the text, halftone, generic, and refinement
+//     regions this translation dropped it from; a value >= 2^31 also reads back negative here and is rejected.
+//   - Restored PDFium's IsValidImageSize check on the halftone grid dimensions HGW/HGH (jbig2_context.cpp:933), the
+//     pattern grid the halftone MMR path sizes its row buffers from.
 //
 // Derived from PDFium's core/fxcodec/jbig2 (Copyright 2014 The PDFium Authors; original code copyright 2014 Foxit
 // Software Inc.), BSD-3-Clause; see LICENSE-pdfium in this directory.
@@ -364,6 +375,12 @@ func (d *Document) parseSymbolDict(segment *Segment) Result {
 	} else {
 		sdd.SDNUMNEWSYMS = val
 	}
+	// PDFium rejects an export or new-symbol count over 65535 (jbig2_context.cpp:440-441) before either sizes an
+	// allocation. Both are raw integers here, so without this a hostile count sizes SDNEWSYMS and the IAID context
+	// table before any data is read.
+	if sdd.SDNUMEXSYMS > JBig2MaxExportSymbols || sdd.SDNUMNEWSYMS > JBig2MaxNewSymbols {
+		return ResultFailure
+	}
 	var inputSymbols []*Image
 	if segment.ReferredToSegmentCount > 0 {
 		for _, refNum := range segment.ReferredToSegmentNumbers {
@@ -529,6 +546,13 @@ func (d *Document) ParseRegionInfo(ri *RegionInfo) Result {
 		return ResultFailure
 	} else {
 		ri.Flags = val
+	}
+	// PDFium validates every region rectangle with IsValidImageSize (0 < w,h <= 65535; jbig2_image.cpp:127-129) at
+	// each region site (jbig2_context.cpp:631/933/1116); doing it once here covers the text, halftone, generic, and
+	// refinement paths. Width/Height are read from raw integers into int32, so a value >= 2^31 reads back negative and
+	// is caught by the <= 0 test.
+	if ri.Width <= 0 || ri.Height <= 0 || ri.Width > JBig2MaxImageSize || ri.Height > JBig2MaxImageSize {
+		return ResultFailure
 	}
 	return ResultSuccess
 }
@@ -697,6 +721,12 @@ func (d *Document) parseTextRegion(segment *Segment) Result {
 		return ResultFailure
 	} else {
 		pTRD.SBNUMINSTANCES = val
+	}
+	// PDFium bounds SBNUMINSTANCES by 32 instances per remaining stream byte (jbig2_context.cpp:662-675): each
+	// instance needs bits to code, so a count past what the stream can hold is malformed. This translation dropped the
+	// check, leaving the instance loop (jbig2_trd_proc.go) to spin on a hostile count.
+	if uint64(pTRD.SBNUMINSTANCES) > uint64(d.stream.GetByteLeft())*32 {
+		return ResultFailure
 	}
 	if segment.ReferredToSegmentCount > 0 {
 		for _, refNum := range segment.ReferredToSegmentNumbers {
@@ -962,6 +992,12 @@ func (d *Document) parseHalftoneRegion(segment *Segment) Result {
 		return ResultFailure
 	} else {
 		pHRD.HGH = val
+	}
+	// PDFium validates the halftone grid dimensions with IsValidImageSize (jbig2_context.cpp:933); the grid is the
+	// pattern grid, separate from the region rectangle. HGW is what lets the MMR path size make([]int, HGW+5), so an
+	// unbounded value here reaches that allocation.
+	if pHRD.HGW == 0 || pHRD.HGW > JBig2MaxImageSize || pHRD.HGH == 0 || pHRD.HGH > JBig2MaxImageSize {
+		return ResultFailure
 	}
 	if val, err := d.stream.ReadInteger(); err != nil {
 		return ResultFailure

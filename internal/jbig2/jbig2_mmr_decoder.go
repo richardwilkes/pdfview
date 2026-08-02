@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by the pdfview project (2026-08-02) under section 4(b) of the license above:
+//   - Bounded the uncompress2D changing-element index. This MMR decoder is jbig2dec/pdf.js lineage with no PDFium
+//     counterpart, so this is pure hardening, not a restoration. currOffsets is sized width+5, but a mode code that
+//     does not advance bitPos (a repeated VL1 over a pinned reference) grows currIdx without ending the row, walking
+//     the write past the buffer end — a panic on hostile input. Every write into currOffsets, and the reference-run
+//     writes into refOffsets sized from the prior row's returned count, now reject out of range instead of panicking.
+//     The decode logic is unchanged; a valid row never reaches the bound.
+
 package jbig2
 
 import (
@@ -236,6 +244,11 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 	currIdx := 0
 	bitPos := 0
 	whiteRun := true
+	// refRunLength is the prior row's returned changing-element count; the four sentinel writes below index up to
+	// refRunLength+3, so a count that overran its own buffer must not be trusted to index this one.
+	if refRunLength < 0 || refRunLength+3 >= len(refOffsets) {
+		return 0, errors.New("mmr reference run length out of bounds")
+	}
 	refOffsets[refRunLength] = m.width
 	refOffsets[refRunLength+1] = m.width
 	refOffsets[refRunLength+2] = m.width + 1
@@ -285,6 +298,9 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 				if bitPos > m.width {
 					return 0, errors.New("mmr run exceeds width")
 				}
+				if currIdx >= len(currOffsets) {
+					return 0, errors.New("mmr changing elements exceed row bound")
+				}
 				currOffsets[currIdx] = bitPos
 				currIdx++
 			}
@@ -312,6 +328,9 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		if bitPos < 0 || bitPos > m.width {
 			return 0, errors.New("mmr offset out of bounds")
 		}
+		if currIdx >= len(currOffsets) {
+			return 0, errors.New("mmr changing elements exceed row bound")
+		}
 		currOffsets[currIdx] = bitPos
 		currIdx++
 		whiteRun = !whiteRun
@@ -325,6 +344,9 @@ func (m *MMRDecompressor) uncompress2D(refOffsets []int, refRunLength int, currO
 		}
 	}
 	if currIdx == 0 || currOffsets[currIdx-1] != m.width {
+		if currIdx >= len(currOffsets) {
+			return 0, errors.New("mmr changing elements exceed row bound")
+		}
 		currOffsets[currIdx] = m.width
 		currIdx++
 	}
