@@ -210,6 +210,47 @@ once per milestone.
 Port fallbacks (appendices) insert 2–4 additional milestones for the affected codec, matching the original
 from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: core 5/3 path → breadth).
 
+## M1 evidence (2026-08-02) — gates run; verdict is Rich's call
+
+- **Corpus and goldens.** All 20 real-payload files landed (commit 84c213c) with regen.sh registration and README
+  provenance; `oracle/regen.sh` then rebuilt every golden — the 45 pre-existing ones byte-identical, so the corpus
+  and oracle build are exactly reproducible. Notable oracle pins the corpus established: MuPDF ignores
+  `/SMaskInData` entirely (embedded JPX alpha always applies; an explicit /SMask *multiplies* with it), ignores
+  `/Decode` for JPX even under Indexed, silently paints a truncated-mid-region JBIG2 image as a full-size white
+  plane, and hard-drops truncated JPX (strict OpenJPEG).
+- **Prototype glue** (this commit) wires both pinned libraries (`mububoki/jpeg2000 v1.0.0`,
+  `xiaoqidun/jbig2 @cddd575` — temporary go.mod deps, replaced by vendored `internal/` trees at M2/M3) at the
+  planned switch sites, with pre-decode budget enforcement (a JBIG2 segment-header scan bounds every
+  allocation-sizing field including the globals stream; JPX header parse feeds `maxPixelsFor`), panic-to-error
+  recovery, and the oracle-pinned semantics above. `FuzzJBIG2`/`FuzzJPX` targets drive the production entry points.
+- **Parity gate: 65/65 goldens pass** — all 13 JPX within `DefaultThresholds` (no per-golden thresholds.json, 9/7
+  included) and all 8 JBIG2. Getting there exposed two pre-existing engine divergences, fixed here and pinned by
+  unit tests plus the goldens: images magnified below 2× must blend samples (`blendsSamples`, taken from MuPDF's
+  `fz_paint_image_imp` rule and probe-verified at 1.83×/1.92× vs 2.00×/2.04×), and a /Mask finer than its base
+  image composites on the finer grid instead of being decimated. Fixing the latter surfaced a canvas v0.2.0 bug
+  (sprite blit lane composites `AlphaTypeUnpremul` sources as premultiplied — reported as richardwilkes/canvas#1);
+  `rasterImage` now premultiplies at hand-off, correct for both canvas lanes.
+- **Fuzz gate.** JPX: clean (90 s smoke + multi-hour soak, ~1 M+ execs, no panic/hang; errors descriptive). JBIG2:
+  **fails as an external dependency** — beyond the allocation-sizing fields the glue can bound externally, symbol
+  bitmap dimensions are arithmetic-decoded, so no wrapper can bound decode *work*: a ~100-byte payload+globals
+  pair decodes for ~20 s (live DoS; the library's only guard is 65535 per side per symbol with no cumulative area
+  cap — an in-decoder fix). It also rejects PDF-embedded streams outright unless the glue prepends a synthetic
+  9-byte T.88 file header, and upstream has zero tests.
+- **Provenance (dossier in the 2026-08-02 session records; summary in the project memory).** `xiaoqidun/jbig2` is
+  a translation of PDFium's JBIG2 decoder (≥98% confidence — e.g. PDFium's PDF-object-number cache key surviving
+  as an unused constructor argument, Chromium-local `num_ex_syms` reproduced verbatim) plus a second undisclosed
+  upstream: its MMR decoder is PDFBox's `MMRDecompressor` row-for-row. The translation *dropped* PDFium hardening
+  (checked arithmetic in the SDD export loop, the export-bounds guard, the `!USESKIP` conjunct). Vendoring means
+  three notice sets (xiaoqidun Apache-2.0, PDFium BSD-3 incl. Foxit, ASF/levigo Apache-2.0 + NOTICE).
+- **Recommendation** (decision deliberately left to Rich): **JPX — adopt**; vendor at M3 with the three-export jp2
+  surface (`DecodeComponents`, metadata, header-only config) and encoder prune. **JBIG2 — do not adopt as-is**;
+  options, in this session's preference order: (a) vendor + harden (fix the symbol-area DoS, restore the dropped
+  PDFium guards, embedded-profile entry, full triple attribution) — days of work, decoder demonstrably correct on
+  the corpus; (b) make our own PDFium-derived translation, properly attributed, keeping upstream hardening —
+  cleaner provenance story, more work; (c) from-spec port per Appendix A — cleanest, longest. The M1 empirical
+  gates passed for JBIG2 correctness (all 8 corpus files decode; 5 bit-exact vs oracle where the renderer agrees),
+  so the decision is about provenance posture and hardening cost, not decode capability.
+
 ## Risks and open questions
 
 - **Single-author, zero-user dependencies.** Both libraries are weeks old with no ecosystem soak. The vendoring

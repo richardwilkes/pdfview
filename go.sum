@@ -2,7 +2,11 @@ github.com/go-text/typesetting v0.3.4 h1:YYurUOtEb9kGSOz4uE3k4OpBGsp1dDL8+fjCeaF
 github.com/go-text/typesetting v0.3.4/go.mod h1:4qZCQphq4KSgGTAeI0uMEkVbROgfah8BuyF5LRYr7XY=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3 h1:drBZzMgdYPbmyXqOto4YhhJGrFIQCX94FpR4MzTCsos=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
+github.com/mububoki/jpeg2000 v1.0.0 h1:1ha5mqCg0DMK6zbbBp9bkUjEds4HYwQqmU3ItF3k9qs=
+github.com/mububoki/jpeg2000 v1.0.0/go.mod h1:q+kfbMgsqawC9I10Zk+goSZ8+ac4cOzcWdIL1vpsDLs=
 github.com/richardwilkes/canvas v0.2.0 h1:wD4WP2i0svOgrna8erEscxJNeetYi60gotGXlRW2B1E=
 github.com/richardwilkes/canvas v0.2.0/go.mod h1:aM7IK/9z1QWLrWLHcQrmOnYR6se+WHlQwt5awrMLIEM=
+github.com/xiaoqidun/jbig2 v0.0.0-20260728034722-cddd57533c97 h1:r9GZyTcO5Hs7y14JTShAeDp8d54jjFyCTVVgPLFz1Yk=
+github.com/xiaoqidun/jbig2 v0.0.0-20260728034722-cddd57533c97/go.mod h1:4ieZvd1EYR3zUzaAT4H8vLDb6XO+yjnxuh33So/5iC4=
 golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
 golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=

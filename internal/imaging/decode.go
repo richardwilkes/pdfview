@@ -24,14 +24,20 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	rowStride := 0
 	bpc := 1
 	validCols := w
-	if isCCITT(dec.codec) {
-		// CCITT output is always one bit per sample; rows are byte-aligned at the decoder's column count, which may
-		// differ from /Width (extra columns are dropped, missing ones read as zero samples). The codec fixes bpc at 1
-		// regardless of /BitsPerComponent, so we do not consult (or require) that key here — deployed viewers render
-		// CCITT images that omit it, and so do we.
+	bilevel := isCCITT(dec.codec) || isJBIG2(dec.codec)
+	switch {
+	case bilevel:
+		// CCITT and JBIG2 output is always one bit per sample; rows are byte-aligned at the decoder's column count,
+		// which may differ from /Width (extra columns are dropped, missing ones read as zero samples). Both codecs fix
+		// bpc at 1 regardless of /BitsPerComponent, so we do not consult (or require) that key here — deployed viewers
+		// render such images when they omit it, and so do we.
 		var cols int
 		var err error
-		data, cols, err = dec.decodeCCITT(h)
+		if isCCITT(dec.codec) {
+			data, cols, err = dec.decodeCCITT(h)
+		} else {
+			data, cols, err = dec.decodeJBIG2(h)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +45,7 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		if cols < validCols {
 			validCols = cols
 		}
-	} else {
+	default:
 		var err error
 		bpc, err = dec.bitsPerComponent()
 		if err != nil {
@@ -54,10 +60,11 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	if ncomp <= 0 || ncomp > 32 {
 		return nil, ErrBadImage
 	}
-	if isCCITT(dec.codec) && ncomp != 1 {
-		// CCITT is a bilevel, single-component codec: its rows are cols one-bit samples, one per pixel, and rowStride
-		// above is sized for that. A multi-component color space would make the per-pixel loop read ncomp samples per
-		// pixel against a single-component row, producing garbage. Decline the malformed pairing (rendered blank).
+	if bilevel && ncomp != 1 {
+		// CCITT and JBIG2 are bilevel, single-component codecs: their rows are cols one-bit samples, one per pixel, and
+		// rowStride above is sized for that. A multi-component color space would make the per-pixel loop read ncomp
+		// samples per pixel against a single-component row, producing garbage. Decline the malformed pairing (rendered
+		// blank).
 		return nil, ErrBadImage
 	}
 	if rowStride == 0 {
@@ -223,13 +230,13 @@ func inColorKey(samples, ranges []uint32) bool {
 }
 
 // stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current paint. A
-// decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT payloads
-// decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half. The unsupported codecs are
-// declined here rather than only in run(): applyStencilMask reaches this for a /Mask stencil stream too, and unpacking a
-// still-compressed JBIG2 or JPX payload as 1-bpc samples would punch pseudo-random holes in an otherwise correct base
-// image — the same verdict alphaPlane and run() reach for those codecs.
+// decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT and JBIG2
+// payloads decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half. JPX is declined
+// here rather than only in run(): applyStencilMask reaches this for a /Mask stencil stream too, and unpacking a
+// still-compressed continuous-tone payload as 1-bpc samples would punch pseudo-random holes in an otherwise correct
+// base image — the same verdict alphaPlane and run() reach for that codec.
 func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
-	if dec.codec == codecJBIG2Names || dec.codec == codecJPXNames {
+	if isJPX(dec.codec) {
 		return nil, ErrUnsupportedCodec
 	}
 	invert := false
@@ -242,10 +249,14 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	rowStride := rowStrideFor(w, 1, 1)
 	validCols := w
 	switch {
-	case isCCITT(dec.codec):
+	case isCCITT(dec.codec), isJBIG2(dec.codec):
 		var cols int
 		var err error
-		data, cols, err = dec.decodeCCITT(h)
+		if isCCITT(dec.codec) {
+			data, cols, err = dec.decodeCCITT(h)
+		} else {
+			data, cols, err = dec.decodeJBIG2(h)
+		}
 		if err != nil {
 			return nil, err
 		}

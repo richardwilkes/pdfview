@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-truncated.pdf",
+  "sha256": "93a9ac385c20d3cbf17f5a4060b332e98d75f37c2ce280f313b7bb2c8ab34e78",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        240,
+        116
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 334,
+          "height": 162,
+          "stride": 1336,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 500,
+          "height": 242,
+          "stride": 2000,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 240,
+          "height": 116,
+          "stride": 960,
+          "links": []
+        }
+      }
+    }
+  ]
+}

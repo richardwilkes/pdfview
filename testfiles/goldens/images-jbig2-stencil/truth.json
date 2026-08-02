@@ -1,0 +1,57 @@
+{
+  "file": "images-jbig2-stencil.pdf",
+  "sha256": "6e7f885ab33de5b2c1694d9e65db7e500e83933b13309baca4feb8cea267a9fd",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        286,
+        100
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 398,
+          "height": 139,
+          "stride": 1592,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 596,
+          "height": 209,
+          "stride": 2384,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 286,
+          "height": 100,
+          "stride": 1144,
+          "links": []
+        }
+      }
+    }
+  ]
+}

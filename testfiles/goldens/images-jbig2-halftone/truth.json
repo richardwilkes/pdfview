@@ -1,0 +1,57 @@
+{
+  "file": "images-jbig2-halftone.pdf",
+  "sha256": "dac9bff3a3e6168b23a65b37e940c0abb172d500ca94d9c63ab5cdb66ea48439",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        264,
+        168
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 367,
+          "height": 234,
+          "stride": 1468,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 550,
+          "height": 350,
+          "stride": 2200,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 264,
+          "height": 168,
+          "stride": 1056,
+          "links": []
+        }
+      }
+    }
+  ]
+}

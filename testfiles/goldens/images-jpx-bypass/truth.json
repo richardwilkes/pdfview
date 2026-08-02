@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-bypass.pdf",
+  "sha256": "f09d6a27e453b04c66919c441e5449aa1948fb23880d0d94a43273326d64de96",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        164,
+        164
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 228,
+          "height": 228,
+          "stride": 912,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 342,
+          "height": 342,
+          "stride": 1368,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 164,
+          "height": 164,
+          "stride": 656,
+          "links": []
+        }
+      }
+    }
+  ]
+}

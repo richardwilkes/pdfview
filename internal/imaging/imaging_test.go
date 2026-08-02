@@ -911,7 +911,10 @@ func TestMaskDimensionsBounded(t *testing.T) {
 	}
 }
 
-func TestStubCodecs(t *testing.T) {
+// TestUndecodableCodecs pins the degrade-to-blank contract for the two codecs the prototype glue now decodes: a
+// payload neither decoder can make sense of is declined outright, never partially decoded, and a JPXDecode payload in
+// the spec-illegal ImageMask role is still declined by name (the surviving ErrUnsupportedCodec case).
+func TestUndecodableCodecs(t *testing.T) {
 	d := testDoc(t)
 	for _, codec := range []string{"JBIG2Decode", "JPXDecode"} {
 		dict := cos.Dict{
@@ -920,11 +923,19 @@ func TestStubCodecs(t *testing.T) {
 		}
 		img, err := DecodeInline(d, dict, []byte{1, 2, 3, 4}, nil)
 		if err == nil || img != nil {
-			t.Fatalf("%s: stub must decline to decode", codec)
+			t.Fatalf("%s: an undecodable payload must be declined", codec)
 		}
-		if !strings.Contains(err.Error(), "unsupported") {
+		if !strings.Contains(err.Error(), "malformed") {
 			t.Fatalf("%s: %v", codec, err)
 		}
+	}
+	dict := cos.Dict{"W": cos.Integer(4), "H": cos.Integer(4), "IM": cos.Boolean(true), "F": cos.Name("JPXDecode")}
+	img, err := DecodeInline(d, dict, []byte{1, 2, 3, 4}, nil)
+	if err == nil || img != nil {
+		t.Fatal("JPXDecode as an ImageMask must be declined")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("JPXDecode ImageMask: %v", err)
 	}
 }
 

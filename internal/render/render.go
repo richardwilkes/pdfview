@@ -805,34 +805,64 @@ func (d *Device) EndTextClip() {
 // IgnoreText implements device.Device.
 func (d *Device) IgnoreText(*device.TextRun) {}
 
-// rasterImage wraps a decoded image's pixels as a canvas image: straight-alpha RGBA for ordinary images (the sampling
-// pipeline premultiplies), Alpha8 for stencils (which the pipeline tints with the paint color — exactly PDF's
-// image-mask semantics). Returns nil for empty or inconsistent pixel data.
+// rasterImage wraps a decoded image's pixels as a canvas image: premultiplied RGBA for images carrying alpha, opaque
+// RGBA for the rest, Alpha8 for stencils (which the pipeline tints with the paint color — exactly PDF's image-mask
+// semantics). Returns nil for empty or inconsistent pixel data.
+//
+// The decoded pixels are straight alpha, so an alpha-carrying image is premultiplied here rather than declared
+// unpremultiplied and left for the sampling pipeline to convert: canvas's integer-translation sprite blitter (the lane
+// an unrotated 1:1 image draw lands in) blits source bytes straight onto the premultiplied surface, which turns a
+// masked-out sample's leftover color into an additive smear of the base image over whatever it covers.
 func rasterImage(img *imaging.Image) *imagecore.Image {
 	if img == nil || img.Width <= 0 || img.Height <= 0 {
 		return nil
 	}
 	info := imagecore.ImageInfo{Width: int32(img.Width), Height: int32(img.Height)}
 	rowBytes := img.Width
+	pix := img.Pix
 	switch {
 	case img.Stencil:
 		info.ColorType = imagecore.ColorTypeAlpha8
 		info.AlphaType = imagecore.AlphaTypePremul
 	case img.HasAlpha:
 		info.ColorType = imagecore.ColorTypeRGBA8888
-		info.AlphaType = imagecore.AlphaTypeUnpremul
+		info.AlphaType = imagecore.AlphaTypePremul
 		rowBytes *= 4
+		pix = premultiplied(pix)
 	default:
 		info.ColorType = imagecore.ColorTypeRGBA8888
 		info.AlphaType = imagecore.AlphaTypeOpaque
 		rowBytes *= 4
 	}
-	return imagecore.NewRasterData(info, img.Pix, rowBytes)
+	return imagecore.NewRasterData(info, pix, rowBytes)
+}
+
+// premultiplied returns a copy of straight-alpha RGBA pixels with each color channel scaled by its own alpha, rounded
+// half-up. The copy is unavoidable: the decoded pixels are cached and reused across draws (and across pages), and their
+// straight-alpha form is what the mask compositing and the public API's unpremultiply both depend on. A trailing
+// partial pixel is left zeroed rather than read past.
+func premultiplied(pix []byte) []byte {
+	out := make([]byte, len(pix))
+	for i := 0; i+3 < len(pix); i += 4 {
+		a := uint32(pix[i+3])
+		out[i+3] = byte(a)
+		switch a {
+		case 0: // A transparent sample contributes nothing, so its color never reaches the surface.
+		case 255:
+			out[i], out[i+1], out[i+2] = pix[i], pix[i+1], pix[i+2]
+		default:
+			out[i] = byte((uint32(pix[i])*a + 127) / 255)
+			out[i+1] = byte((uint32(pix[i+1])*a + 127) / 255)
+			out[i+2] = byte((uint32(pix[i+2])*a + 127) / 255)
+		}
+	}
+	return out
 }
 
 // drawImage draws ci across the unit square of the ctm's source space: PDF image space puts the first sample row at the
 // top of that square (ISO 32000-2 8.9.5.2), so the image's pixel grid is flipped into the square before the ctm
-// applies. /Interpolate selects linear sampling; without it samples stay unfiltered (nearest), the mapping calibrated
+// applies. /Interpolate selects linear sampling; without it the sample boundaries still blend across the narrow
+// magnification band blendsSamples describes, and stay unfiltered (nearest) everywhere else, the mapping calibrated
 // against the oracle's renders.
 func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matrix, paint *canvas.Paint) {
 	w, h := float32(img.Width), float32(img.Height)
@@ -841,7 +871,7 @@ func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matr
 	var flip geom.Matrix
 	flip.SetAll(1/w, 0, 0, 0, -1/h, 1, 0, 0, 1)
 	sampling := shaders.SamplingOptions{Filter: shaders.FilterNearest}
-	if img.Interpolate {
+	if img.Interpolate || blendsSamples(ctm, w, h) {
 		sampling.Filter = shaders.FilterLinear
 	}
 	count := d.c.Save()
@@ -849,6 +879,26 @@ func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matr
 	d.c.Concat(&flip)
 	d.c.DrawImageRect(ci, geom.RectWH(w, h), geom.RectWH(w, h), sampling, paint, canvas.ConstraintFast)
 	d.c.RestoreToCount(count)
+}
+
+// blendsSamples reports whether an image of w x h samples drawn through the already-grid-fitted ctm has its sample
+// boundaries blended rather than reproduced hard. The oracle turns interpolation on once the image's unit square covers
+// more device pixels than it has samples on either axis, then turns it back off past twice that on either axis, so only
+// the band between 1x and 2x magnification blends (measured against the oracle at 1.83x and 1.92x, which blend, and
+// 2.00x and 2.04x, which do not). Minification never blends here: the oracle resamples the pixel grid down before
+// painting instead, a filter this engine does not reproduce.
+//
+// The per-axis extents are the device lengths of the unit square's edges, so a rotated or skewed transform measures the
+// magnification it actually applies. They are computed in float64 because squaring a large but finite float32 component
+// overflows to +Inf, which would report an arbitrarily magnified image as blending.
+func blendsSamples(ctm gfx.Matrix, w, h float32) bool {
+	dx := math.Hypot(float64(ctm.A), float64(ctm.B))
+	dy := math.Hypot(float64(ctm.C), float64(ctm.D))
+	sw, sh := float64(w), float64(h)
+	if dx > 2*sw || dy > 2*sh {
+		return false
+	}
+	return dx > sw || dy > sh
 }
 
 // gridfit snaps a rectilinear image transform outward to whole device pixels — the unit square's device extent becomes

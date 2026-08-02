@@ -13,12 +13,15 @@
 //
 // The pipeline: the stream's leading non-image filters are applied by internal/cos (ImageFilterSplit), then the
 // terminal image codec — none (raw samples), DCTDecode (stdlib image/jpeg, including CMYK/YCCK with the Adobe APP14
-// transform), or CCITTFaxDecode (x/image/ccitt) — produces component samples. Samples are unpacked per BitsPerComponent
+// transform), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (xiaoqidun/jbig2, see jbig2.go), or JPXDecode
+// (mububoki/jpeg2000, see jpx.go) — produces component samples. Samples are unpacked per BitsPerComponent
 // (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through internal/color (whose device
 // conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG pixels flow through the same
 // captured tables as the k operator). /SMask soft masks and /Mask entries (stencil stream or color-key array) become
-// the alpha channel. JBIG2Decode and JPXDecode are deliberate stubs: they return ErrUnsupportedCodec, the interpreter
-// skips the draw, and the page renders blank where the image would be — never an error to the caller.
+// the alpha channel. The JBIG2Decode and JPXDecode paths are the M1 evaluation prototype: they call the pinned
+// third-party decoders directly rather than the vendored in-tree copies the plan settles on, and JPXDecode as an
+// ImageMask stencil is still declined (the pairing is spec-illegal). Every decode failure still degrades to a skipped
+// image — the page renders blank where the image would be, never an error to the caller.
 //
 // Robustness: image dimensions are capped before any allocation, both absolutely (maxImagePixels) and in proportion to
 // the encoded payload's size (maxPixelsFor), so hostile dictionaries claiming absurd dimensions over a few payload
@@ -28,7 +31,6 @@ package imaging
 
 import (
 	"errors"
-	"log/slog"
 
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
@@ -39,7 +41,8 @@ import (
 var (
 	// ErrBadImage is reported for malformed image dictionaries or undecodable payloads.
 	ErrBadImage = errors.New("malformed image")
-	// ErrUnsupportedCodec is reported for the JBIG2Decode and JPXDecode stubs: the image renders blank, not an error.
+	// ErrUnsupportedCodec is reported for a codec this package declines outright, such as a JPXDecode payload used as
+	// an ImageMask stencil: the image renders blank, not an error.
 	ErrUnsupportedCodec = errors.New("unsupported image codec")
 	// ErrTooLarge is reported when the claimed dimensions exceed the allocation caps.
 	ErrTooLarge = errors.New("image too large")
@@ -188,11 +191,6 @@ func (dec *decoder) run() (*Image, error) {
 		return nil, ErrTooLarge
 	}
 	interpolate := dec.boolEntry("Interpolate", "I")
-	if dec.codec == codecJBIG2Names || dec.codec == codecJPXNames {
-		// Deliberate stubs: blank, not an error, with a debug-level note for diagnosability.
-		slog.Debug("pdfview: unsupported image codec; rendering blank", "codec", string(dec.codec))
-		return nil, ErrUnsupportedCodec
-	}
 	if dec.boolEntry("ImageMask", "IM") {
 		// A stencil mask: one bit per sample regardless of any declared BitsPerComponent or ColorSpace (ISO 32000-2
 		// 8.9.6.2); Decode [1 0] flips polarity.
@@ -205,8 +203,11 @@ func (dec *decoder) run() (*Image, error) {
 			Stencil: true, Interpolate: interpolate, HasAlpha: true,
 		}, nil
 	}
-	if isDCT(dec.codec) {
+	switch {
+	case isDCT(dec.codec):
 		return dec.decodeDCT(interpolate)
+	case isJPX(dec.codec):
+		return dec.decodeJPX()
 	}
 	return dec.decodeSamples(int(w), int(h), interpolate)
 }
