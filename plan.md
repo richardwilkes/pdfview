@@ -230,7 +230,13 @@ from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: 
   image composites on the finer grid instead of being decimated. Fixing the latter surfaced a canvas v0.2.0 bug
   (sprite blit lane composites `AlphaTypeUnpremul` sources as premultiplied — reported as richardwilkes/canvas#1);
   `rasterImage` now premultiplies at hand-off, correct for both canvas lanes.
-- **Fuzz gate.** JPX: clean (90 s smoke + multi-hour soak, ~1 M+ execs, no panic/hang; errors descriptive). JBIG2:
+- **Fuzz gate.** JPX: the 90 s smoke was clean, but a 2 h soak found one real defect at ~47 min: an 80-byte
+  codestream declaring a budget-compliant 16x256048 image cut into 128024 two-row tiles decoded successfully in
+  ~4 s over ~300 MB of per-tile bookkeeping (concurrent fuzz workers then OOMed). Header-declared, so — unlike the
+  JBIG2 case — it is boundable outside the library: `jpxSizGuard` now validates the SIZ marker (component count,
+  zero subsampling, image area, and declared tile count against what the payload could physically carry, one SOT
+  per tile) before the library parses, the crasher is a committed FuzzJPX regression seed rejecting in
+  microseconds, and the soak was relaunched clean over the guard. JBIG2:
   **fails as an external dependency** — beyond the allocation-sizing fields the glue can bound externally, symbol
   bitmap dimensions are arithmetic-decoded, so no wrapper can bound decode *work*: a ~100-byte payload+globals
   pair decodes for ~20 s (live DoS; the library's only guard is 65535 per side per symbol with no cumulative area
@@ -242,14 +248,17 @@ from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: 
   upstream: its MMR decoder is PDFBox's `MMRDecompressor` row-for-row. The translation *dropped* PDFium hardening
   (checked arithmetic in the SDD export loop, the export-bounds guard, the `!USESKIP` conjunct). Vendoring means
   three notice sets (xiaoqidun Apache-2.0, PDFium BSD-3 incl. Foxit, ASF/levigo Apache-2.0 + NOTICE).
-- **Recommendation** (decision deliberately left to Rich): **JPX — adopt**; vendor at M3 with the three-export jp2
-  surface (`DecodeComponents`, metadata, header-only config) and encoder prune. **JBIG2 — do not adopt as-is**;
-  options, in this session's preference order: (a) vendor + harden (fix the symbol-area DoS, restore the dropped
-  PDFium guards, embedded-profile entry, full triple attribution) — days of work, decoder demonstrably correct on
-  the corpus; (b) make our own PDFium-derived translation, properly attributed, keeping upstream hardening —
-  cleaner provenance story, more work; (c) from-spec port per Appendix A — cleanest, longest. The M1 empirical
-  gates passed for JBIG2 correctness (all 8 corpus files decode; 5 bit-exact vs oracle where the renderer agrees),
-  so the decision is about provenance posture and hardening cost, not decode capability.
+- **Verdict (decided by Rich, 2026-08-02): JPX — adopt `mububoki/jpeg2000`**; vendor at M3 with the three-export
+  jp2 surface (`DecodeComponents`, metadata, header-only config), the encoder prune, and the `jpxSizGuard`-style
+  bounds kept at the glue. **JBIG2 — do not adopt `xiaoqidun/jbig2` as-is; take option (a): vendor + harden.** M2
+  therefore vendors it into `internal/jbig2/` and, in-tree: fixes the symbol-area DoS (cumulative area cap fed
+  from the glue's budget), restores the three dropped PDFium guards (SDD export-loop checked arithmetic, the
+  export-bounds guard, the `!USESKIP` conjunct), adds an embedded-profile entry point (removing the glue's
+  synthetic file header), builds the missing test suite (jbig2enc payloads + committed reference output per the
+  Testing section), and carries the three notice sets (xiaoqidun Apache-2.0 + NOTICE, PDFium BSD-3 incl. Foxit,
+  ASF/levigo Apache-2.0 + NOTICE) with per-file provenance headers and goheader exclusions. The M1 empirical
+  gates passed for JBIG2 correctness (all 8 corpus files decode; bit-exact vs oracle where the renderer agrees),
+  so option (a) buys hardening and attribution, not decode capability.
 
 ## Risks and open questions
 

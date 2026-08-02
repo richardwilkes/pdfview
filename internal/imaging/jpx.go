@@ -11,6 +11,7 @@ package imaging
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	stdcolor "image/color"
 
@@ -117,6 +118,9 @@ func (dec *decoder) jpxRaster() (*jpxRaster, error) { return jpxRasterFor(dec.da
 func jpxRasterFor(payload []byte) (*jpxRaster, error) {
 	budget := maxPixelsFor(len(payload))
 	bare := jpxIsCodestream(payload)
+	if err := jpxSizGuard(payload, bare, budget); err != nil {
+		return nil, err
+	}
 	cfg, err := jpxConfig(payload, bare)
 	if err != nil {
 		return nil, err
@@ -147,6 +151,92 @@ func jpxRasterFor(payload []byte) (*jpxRaster, error) {
 // permits either (ISO 32000-2 7.4.9) and the two live in different packages upstream.
 func jpxIsCodestream(data []byte) bool {
 	return len(data) >= 2 && data[0] == 0xff && data[1] == 0x4f
+}
+
+// jpxMaxComponents bounds the SIZ component count. T.800 allows 16384, but this pipeline renders at most color plus
+// opacity channels, and every declared component costs the decoder per-component and per-tile-component state.
+const jpxMaxComponents = 32
+
+// jpxSizGuard validates the codestream's SIZ marker before the library parses it. The pixel budget alone does not
+// bound the decoder's work: its allocations scale with the declared tile GRID as well as the image area, and a header
+// can declare a budget-compliant image cut into an enormous number of degenerate tiles — the fuzz soak found an
+// 80-byte payload declaring a 16x256048 image (just under the budget floor) in 128024 two-row tiles, which decoded
+// for four seconds over ~300 MB of tile bookkeeping. Every real tile needs at least one SOT header in the payload, so
+// the declared tile count is bounded the way jbig2Caps bounds referred-to segments: by what the payload could
+// actually carry. Subsampling factors of zero and out-of-range component counts are rejected here too, so the library
+// never sees them.
+func jpxSizGuard(payload []byte, bare bool, budget int64) error {
+	cs := payload
+	if !bare {
+		var ok bool
+		if cs, ok = jp2Codestream(payload); !ok {
+			return ErrBadImage
+		}
+	}
+	// SOC (2 bytes), then SIZ: marker, Lsiz, Rsiz, Xsiz, Ysiz, XOsiz, YOsiz, XTsiz, YTsiz, XTOsiz, YTOsiz, Csiz
+	// (T.800 A.5.1 — SIZ must immediately follow SOC), then per-component Ssiz/XRsiz/YRsiz triples.
+	if len(cs) < 42 || cs[0] != 0xff || cs[1] != 0x4f || cs[2] != 0xff || cs[3] != 0x51 {
+		return ErrBadImage
+	}
+	be32 := func(off int) int64 { return int64(binary.BigEndian.Uint32(cs[off:])) }
+	xsiz, ysiz := be32(8), be32(12)
+	xo, yo := be32(16), be32(20)
+	xt, yt := be32(24), be32(28)
+	xto, yto := be32(32), be32(36)
+	ncomp := int64(binary.BigEndian.Uint16(cs[40:]))
+	if xsiz <= xo || ysiz <= yo || xt <= 0 || yt <= 0 || xto > xo || yto > yo {
+		return ErrBadImage
+	}
+	if ncomp < 1 || ncomp > jpxMaxComponents {
+		return ErrTooLarge
+	}
+	for c := 0; c < int(ncomp) && 42+c*3+2 < len(cs); c++ {
+		if cs[42+c*3+1] == 0 || cs[42+c*3+2] == 0 {
+			return ErrBadImage // A zero subsampling factor divides by zero somewhere downstream.
+		}
+	}
+	if (xsiz-xo)*(ysiz-yo) > budget {
+		return ErrTooLarge
+	}
+	tiles := ((xsiz - xto + xt - 1) / xt) * ((ysiz - yto + yt - 1) / yt)
+	if tiles > int64(len(cs))/12+1 {
+		// Each tile-part header (SOT) is 12 bytes, so a payload of this size cannot carry data for that many tiles.
+		return ErrTooLarge
+	}
+	return nil
+}
+
+// jp2Codestream returns the contents of the JP2 container's first jp2c box. The walk is self-bounding: every
+// iteration consumes at least the 8-byte box header of a fixed-length input. A box length that is zero (box runs to
+// EOF), one (64-bit XLBox follows), or malformed ends the walk at that box's own rules per ISO 15444-1 I.4.
+func jp2Codestream(data []byte) ([]byte, bool) {
+	for off := 0; off+8 <= len(data); {
+		length := int64(binary.BigEndian.Uint32(data[off:]))
+		boxType := binary.BigEndian.Uint32(data[off+4:])
+		body := off + 8
+		switch length {
+		case 0:
+			length = int64(len(data)) - int64(off)
+		case 1:
+			if off+16 > len(data) {
+				return nil, false
+			}
+			l := binary.BigEndian.Uint64(data[off+8:])
+			if l > uint64(len(data)) {
+				return nil, false
+			}
+			length = int64(l) //nolint:gosec // Bounded by len(data) above.
+			body = off + 16
+		}
+		if length < int64(body-off) || int64(off)+length > int64(len(data)) {
+			return nil, false
+		}
+		if boxType == 0x6a703263 { // "jp2c"
+			return data[body : int64(off)+length], true
+		}
+		off = int(int64(off) + length)
+	}
+	return nil, false
 }
 
 // jpxConfig parses just enough of the payload's headers to learn its dimensions and component shape. Panics escaping
