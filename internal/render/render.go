@@ -805,58 +805,30 @@ func (d *Device) EndTextClip() {
 // IgnoreText implements device.Device.
 func (d *Device) IgnoreText(*device.TextRun) {}
 
-// rasterImage wraps a decoded image's pixels as a canvas image: premultiplied RGBA for images carrying alpha, opaque
-// RGBA for the rest, Alpha8 for stencils (which the pipeline tints with the paint color — exactly PDF's image-mask
-// semantics). Returns nil for empty or inconsistent pixel data.
-//
-// The decoded pixels are straight alpha, so an alpha-carrying image is premultiplied here rather than declared
-// unpremultiplied and left for the sampling pipeline to convert: canvas's integer-translation sprite blitter (the lane
-// an unrotated 1:1 image draw lands in) blits source bytes straight onto the premultiplied surface, which turns a
-// masked-out sample's leftover color into an additive smear of the base image over whatever it covers.
+// rasterImage wraps a decoded image's pixels as a canvas image: straight-alpha RGBA for images carrying alpha (the
+// sampling pipeline premultiplies — both canvas lanes honor AlphaTypeUnpremul as of canvas v0.2.1, whose sprite
+// blitter fix this depends on), opaque RGBA for the rest, Alpha8 for stencils (which the pipeline tints with the paint
+// color — exactly PDF's image-mask semantics). Returns nil for empty or inconsistent pixel data.
 func rasterImage(img *imaging.Image) *imagecore.Image {
 	if img == nil || img.Width <= 0 || img.Height <= 0 {
 		return nil
 	}
 	info := imagecore.ImageInfo{Width: int32(img.Width), Height: int32(img.Height)}
 	rowBytes := img.Width
-	pix := img.Pix
 	switch {
 	case img.Stencil:
 		info.ColorType = imagecore.ColorTypeAlpha8
 		info.AlphaType = imagecore.AlphaTypePremul
 	case img.HasAlpha:
 		info.ColorType = imagecore.ColorTypeRGBA8888
-		info.AlphaType = imagecore.AlphaTypePremul
+		info.AlphaType = imagecore.AlphaTypeUnpremul
 		rowBytes *= 4
-		pix = premultiplied(pix)
 	default:
 		info.ColorType = imagecore.ColorTypeRGBA8888
 		info.AlphaType = imagecore.AlphaTypeOpaque
 		rowBytes *= 4
 	}
-	return imagecore.NewRasterData(info, pix, rowBytes)
-}
-
-// premultiplied returns a copy of straight-alpha RGBA pixels with each color channel scaled by its own alpha, rounded
-// half-up. The copy is unavoidable: the decoded pixels are cached and reused across draws (and across pages), and their
-// straight-alpha form is what the mask compositing and the public API's unpremultiply both depend on. A trailing
-// partial pixel is left zeroed rather than read past.
-func premultiplied(pix []byte) []byte {
-	out := make([]byte, len(pix))
-	for i := 0; i+3 < len(pix); i += 4 {
-		a := uint32(pix[i+3])
-		out[i+3] = byte(a)
-		switch a {
-		case 0: // A transparent sample contributes nothing, so its color never reaches the surface.
-		case 255:
-			out[i], out[i+1], out[i+2] = pix[i], pix[i+1], pix[i+2]
-		default:
-			out[i] = byte((uint32(pix[i])*a + 127) / 255)
-			out[i+1] = byte((uint32(pix[i+1])*a + 127) / 255)
-			out[i+2] = byte((uint32(pix[i+2])*a + 127) / 255)
-		}
-	}
-	return out
+	return imagecore.NewRasterData(info, img.Pix, rowBytes)
 }
 
 // drawImage draws ci across the unit square of the ctm's source space: PDF image space puts the first sample row at the
