@@ -10,27 +10,16 @@
 package imaging
 
 import (
-	"bytes"
 	"encoding/binary"
-	"image"
-	"io"
 	"log/slog"
 
-	"github.com/xiaoqidun/jbig2"
-
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/jbig2"
 )
 
 // isJBIG2 reports whether the codec is JBIG2Decode. The filter has no abbreviated inline-image spelling, so unlike
 // isDCT and isCCITT one name is the whole test.
 func isJBIG2(codec cos.Name) bool { return codec == codecJBIG2Names }
-
-// jbig2FileHeader is a synthetic ISO/IEC 14492 file header: the 8-byte file signature followed by a flags byte
-// selecting sequential organization with the page count absent, which describes exactly the PDF embedded profile
-// (ISO 32000-2 7.4.7: no file header, sequential segment headers, everything on page 1). The adopted decoder probes
-// for that header and refuses a payload without it unless /JBIG2Globals bytes are also supplied, so every embedded
-// stream is fed to it behind this prefix rather than only the ones a PDF happens to split.
-var jbig2FileHeader = []byte{0x97, 0x4a, 0x42, 0x32, 0x0d, 0x0a, 0x1a, 0x0a, 0x03}
 
 // jbig2MinSegmentHeader is the shortest legal segment header: a 4-byte segment number, the flags byte, the
 // referred-to count byte with no referred-to segments, a one-byte page association, and the 4-byte data length.
@@ -43,7 +32,8 @@ const jbig2MinSegmentHeader = 11
 // consulted — the codec fixes it at 1.
 //
 // The page bitmap's dimensions are recovered from the segment headers before the library sees the payload, so a
-// hostile stream cannot make it allocate past the caller's budget. A payload whose page information segment parsed but
+// hostile stream cannot make it allocate past the caller's budget, and the same budget goes to the library as a
+// cumulative cap covering the bitmaps no header declares. A payload whose page information segment parsed but
 // whose region data the library rejects (the truncated-mid-region case) yields a full-size all-white page, which is
 // what MuPDF paints for it; rows past the decoded page height and columns past its width are white for the same
 // reason. A payload with no usable page information is declined, and the image renders blank.
@@ -68,10 +58,10 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 		return nil, 0, ErrBadImage
 	}
 	budget := caps.pixels
-	page, decodeErr := jbig2Page(payload, globals)
+	page, decodeErr := jbig2Page(payload, globals, budget)
 	cols = pageW
 	if decodeErr == nil {
-		cols = page.Bounds().Dx()
+		cols = int(page.Width())
 	}
 	// Bound each dimension the way run() bounds Width/Height before multiplying: cols comes from the payload and h
 	// from the caller, so an unbounded product could overflow int64 and slip under the budget check.
@@ -88,24 +78,31 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 			"width", cols, "height", h)
 		return out, cols, nil
 	}
-	rows := page.Bounds().Dy()
+	rows := int(page.Height())
 	if rows > h {
 		rows = h
 	}
-	width := page.Bounds().Dx()
+	width := int(page.Width())
 	if width > cols {
 		width = cols
 	}
+	// The decoded page is already packed one bit per pixel, MSB first, but with JBIG2's polarity: a set bit is ink.
+	// The rows below are copied inverted into the white-filled output, whole bytes at a time where a byte holds only
+	// columns the crop keeps, and bit by bit across the boundary so columns past width stay white.
+	stride := int(page.Stride())
+	packed := page.Data()
+	wholeBytes := width >> 3
 	for y := range rows {
-		if (y+1)*page.Stride > len(page.Pix) {
+		if (y+1)*stride > len(packed) {
 			break
 		}
-		src := page.Pix[y*page.Stride:]
+		src := packed[y*stride:]
 		dst := out[y*rowBytes:]
-		for x := range width {
-			// The library hands back one 8-bit gray sample per pixel with 0 meaning black; anything below mid-scale
-			// is ink, and only ink clears a bit in the white-filled row.
-			if src[x] < 128 {
+		for i := range wholeBytes {
+			dst[i] = ^src[i]
+		}
+		for x := wholeBytes << 3; x < width; x++ {
+			if src[x>>3]&(0x80>>(x&7)) != 0 {
 				dst[x>>3] &^= 0x80 >> (x & 7)
 			}
 		}
@@ -131,25 +128,26 @@ func (dec *decoder) jbig2Globals() []byte {
 	return globals
 }
 
-// jbig2Page decodes the payload's first page through the adopted decoder. The library documents no panics, but it is
-// young and its input here is attacker-controlled, so a panic escaping it is converted to an error: the fuzz-enforced
-// "panics never escape" invariant is on this package's entry points, not on the dependency.
-func jbig2Page(data, globals []byte) (page *image.Gray, err error) {
+// jbig2Page decodes the payload's page through the vendored decoder's embedded-profile entry point, which takes the
+// stream as PDF stores it — no file header, sequential segments, everything on page 1 — and enforces budget as a
+// cumulative cap on every bitmap the decode allocates, the only bound possible on symbol dimensions that arrive as
+// arithmetic-decoded deltas. The library documents no panics, but its input here is attacker-controlled, so a panic
+// escaping it is converted to an error: the fuzz-enforced "panics never escape" invariant is on this package's entry
+// points, not on the dependency.
+func jbig2Page(data, globals []byte, budget int64) (page *jbig2.Image, err error) {
 	defer recoverCodec(codecJBIG2Names, &err)
-	r := io.MultiReader(bytes.NewReader(jbig2FileHeader), bytes.NewReader(data))
-	dec, err := jbig2.NewDecoderWithGlobals(r, globals)
+	dec, err := jbig2.NewEmbeddedDecoder(data, globals, jbig2.Limits{MaxPixels: budget})
 	if err != nil {
 		return nil, err
 	}
-	img, err := dec.Decode()
+	page, err = dec.DecodePage()
 	if err != nil {
 		return nil, err
 	}
-	gray, ok := img.(*image.Gray)
-	if !ok || gray.Bounds().Empty() {
+	if page == nil || page.Width() <= 0 || page.Height() <= 0 {
 		return nil, ErrBadImage
 	}
-	return gray, nil
+	return page, nil
 }
 
 // jbig2Caps bounds everything a JBIG2 stream can ask the decoder to allocate, derived from the payload's own size the

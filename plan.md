@@ -194,9 +194,18 @@ once per milestone.
 - **M1 — Corpus, goldens, and the adoption gate.** Build the full corpus above + regenerate goldens; wire both
   libraries behind prototype glue on a branch; run parity, truncation-leniency, and fuzz-soak gates; settle the
   JBIG2 provenance question. Exit: adopt/port decision per codec, recorded here with the evidence.
-- **M2 — JBIG2 integration.** Vendor into `internal/jbig2/` (or start the port per appendix A), production glue at
-  the three switch sites, stencil/SMask paths, `/JBIG2Globals`, truncation behavior matching MuPDF, fixtures/fuzz
-  targets, README row.
+- **M2 — JBIG2 integration. DONE (2026-08-02).** Vendored `xiaoqidun/jbig2 @cddd575` into `internal/jbig2/`
+  byte-identical (unit 1), pinned by a mutation-proofed fixture suite (unit 2), then hardened in-tree (unit 3):
+  a cumulative `Limits{MaxPixels}` charged before every stream-sized bitmap allocation (the M1 DoS drops 20.4 s →
+  55 ms), all five dropped PDFium guards restored (the dossier's three plus two more hangs the M2 fuzz found in
+  pristine upstream — a TRD nil-symbol spin and a segment-offset backward wrap), a big-endian embedded-profile
+  entry point (`NewEmbeddedDecoder`/`DecodePage`, no synthetic file header, no CWS/SWF unwrap, no endian sniff),
+  the `image.RegisterFormat` global side effect and container/gray-expansion layers pruned, and triple attribution
+  (upstream Apache-2.0 + NOTICE, PDFium BSD-3, PDFBox/ASF+levigo) in `NOTICE`/`LICENSE-pdfium`/`PROVENANCE.md`.
+  The refinement-gating divergence from PDFium was investigated and found correct (the Go bodies use bounds-checked
+  accessors, not PDFium's raw-pointer fast paths), pinned by two tests. Glue reads the packed page via
+  `Data()`/`Stride()` directly. All 9 JBIG2 goldens pass; the external module dependency is gone. Truncation still
+  degrades to the oracle's white page via the glue (the decoder keeps no partial output). README row deferred to M5.
 - **M3 — JPX integration.** Vendor into `internal/jpeg2000/` with the `jp2` metadata/`DecodeComponents` exposure
   and encoder prune (or start the port per appendix B), production glue, budget pre-check from the header parse,
   component→RGBA pipeline, README row.

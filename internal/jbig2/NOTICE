@@ -1,0 +1,73 @@
+JBIG2
+Copyright 2026 肖其顿 (XIAO QI DUN)
+
+This product includes software developed by
+肖其顿 (XIAO QI DUN) (https://github.com/xiaoqidun/jbig2).
+
+================================================================================
+Everything above this line is the NOTICE file of github.com/xiaoqidun/jbig2,
+reproduced verbatim. Everything below it was added by the pdfview project and is
+not part of the upstream NOTICE.
+================================================================================
+
+This directory is a vendored copy of github.com/xiaoqidun/jbig2 (see
+PROVENANCE.md). Examination of that code established that it is substantially a
+translation of two other works, neither of which the upstream NOTICE names. The
+notices those works require are reproduced below.
+
+PDFium
+------
+Most of this directory (the arithmetic decoder, bit stream, generic, refinement,
+halftone, pattern, symbol-dictionary and text-region decoders, the Huffman
+tables and decoder, the image, segment and symbol-dictionary containers, and the
+segment parser) is a translation of PDFium's JBIG2 decoder,
+core/fxcodec/jbig2/, used under the BSD-3-Clause license:
+
+    Copyright 2014 The PDFium Authors
+
+    Original code copyright 2014 Foxit Software Inc.
+    http://www.foxitsoftware.com
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are
+    met:
+
+       * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+       * Redistributions in binary form must reproduce the above
+    copyright notice, this list of conditions and the following disclaimer
+    in the documentation and/or other materials provided with the
+    distribution.
+       * Neither the name of Google Inc. nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The LICENSE-pdfium file in this directory is PDFium's LICENSE file reproduced
+whole; PDFium ships the BSD-3-Clause grant above followed by the full text of
+the Apache License, Version 2.0 in that one file.
+
+Apache PDFBox JBIG2 ImageIO plugin
+----------------------------------
+jbig2_mmr_decoder.go is a translation of MMRDecompressor and MMRConstants from
+the Apache PDFBox JBIG2 ImageIO plugin
+(org.apache.pdfbox.jbig2.decoder.mmr), used under the Apache License, Version
+2.0 — the same license the vendored tree itself carries, whose text is in the
+LICENSE file in this directory. That project's NOTICE file reads:
+
+    Apache JBig2 ImageIO Plugin
+    Copyright 2017 The Apache Software Foundation
+
+    Based on source code originally developed in the JBig2 project.
+    Copyright (C) 1995-2017 levigo holding GmbH
