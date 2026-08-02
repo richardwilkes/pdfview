@@ -1,0 +1,45 @@
+// Code from github.com/mububoki/jpeg2000 v1.0.0 (MIT); see internal/jpeg2000/LICENSE and PROVENANCE.md.
+
+package e2e_test
+
+import (
+	"bytes"
+	"image"
+	"os"
+	"testing"
+
+	_ "github.com/richardwilkes/pdfview/internal/jpeg2000/j2k"
+)
+
+// TestDecode_CblkStyleAll decodes a lossless RGB codestream coded with every
+// code-block style enabled at once (cblksty 0x3F = bypass | reset | termination |
+// vertically-causal | predictable-termination | segmentation-symbols,
+// opj_compress -M 63). It exercises raw-bit bypass passes, per-pass context resets,
+// per-pass MQ termination/restart, vertically-causal context masking, and the
+// uniform-context segmentation symbol — all interacting. Lossless, so the decode
+// must equal the source exactly.
+func TestDecode_CblkStyleAll(t *testing.T) {
+	const w, h, comps = 64, 64, 3
+	want := readPlanar(t, "../testdata/cblksty_all.raw", w, h, comps)
+	data, err := os.ReadFile("../testdata/cblksty_all.j2k")
+	if err != nil {
+		t.Fatalf("read j2k: %v", err)
+	}
+	imgI, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if b := imgI.Bounds(); b.Dx() != w || b.Dy() != h {
+		t.Fatalf("size: got %dx%d, want %dx%d", b.Dx(), b.Dy(), w, h)
+	}
+	plane := func(c, x, y int) byte { return want[c*w*h+y*w+x] }
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, b, _ := imgI.At(x, y).RGBA()
+			if uint8(r>>8) != plane(0, x, y) || uint8(g>>8) != plane(1, x, y) || uint8(b>>8) != plane(2, x, y) {
+				t.Fatalf("pixel(%d,%d): got (%d,%d,%d), want (%d,%d,%d)", x, y,
+					uint8(r>>8), uint8(g>>8), uint8(b>>8), plane(0, x, y), plane(1, x, y), plane(2, x, y))
+			}
+		}
+	}
+}

@@ -179,6 +179,9 @@ linters:
           - prealloc
           - predeclared
           - unconvert
+      # The jpeg2000 tree additionally keeps upstream's unchecked-discard error style (errcheck, errorlint), its
+      # pre-Go-1.22 loop-variable copies (copyloopvar), and the dead code the documented encoder prune left behind
+      # plus upstream's own (unused; see PROVENANCE.md). The jbig2 translation trips none of these.
       - path: ^internal/jpeg2000/
         linters:
           - goheader
@@ -189,6 +192,10 @@ linters:
           - prealloc
           - predeclared
           - unconvert
+          - errcheck
+          - errorlint
+          - copyloopvar
+          - unused
       # Cosmetic analyzer classes on vendored trees: struct packing, err shadowing, and naming that preserves the
       # upstream (and its own upstreams') identifiers. Bug- and security-level output from the same linters stays on.
       - path: ^internal/(jbig2|jpeg2000)/
@@ -198,7 +205,12 @@ linters:
       - path: ^internal/(jbig2|jpeg2000)/
         linters:
           - staticcheck
-        text: '^(ST1003|ST1016|QF1003)'
+        text: '^(ST1003|ST1016|QF100[123])'
+      # Vendored tests seed with math/rand; nothing cryptographic. Non-test vendored code keeps full gosec coverage.
+      - path: ^internal/jpeg2000/.*_test\.go$
+        linters:
+          - gosec
+        text: '^G404:'
 issues:
   max-same-issues: 0
 formatters:
