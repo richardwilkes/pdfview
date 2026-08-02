@@ -23,6 +23,10 @@
 //     class spins forever, the arithmetic decoder having no end of input to report.
 //   - Restored PDFium's export-count guard on the loop that fills the dictionary (`j >= SDNUMEXSYMS`), which bounds
 //     what is exported by what the segment declared even if the run lengths say otherwise.
+//   - Bounded the arithmetic export-flag loop by the decoder's end of input (the GRD/GRRD IsComplete pattern, which
+//     PDFium does not apply to this loop): a zero-length export run is legitimate mid-stream, but an exhausted
+//     decoder can return zero-length runs forever, and EXINDEX then never advances — a live CPU spin on hostile
+//     input. The Huffman export loop needs no guard; its bit reads fail at end of stream.
 //   - Charges every bitmap this file allocates — the Huffman height-class collective bitmap, each symbol split out of
 //     it, and each input symbol duplicated on export — against the decode's cumulative pixel budget (embedded.go),
 //     and hands that budget to the procs it drives, whose own bitmaps are charged there.
@@ -222,6 +226,11 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	EXINDEX := uint32(0)
 	num_ex_syms := uint32(0)
 	for EXINDEX < s.SDNUMINSYMS+s.SDNUMNEWSYMS {
+		// 零长度游程本身合法，但数据耗尽后解码器可能恒返回零游程，EXINDEX 便停滞不前；
+		// 与 GRD/GRRD 相同，先检查数据是否已经读完，避免无限循环
+		if arithDecoder.IsComplete() {
+			return nil, errors.New("data exhausted before export flags completed")
+		}
 		EXRUNLENGTH, ok := IAEX.Decode(arithDecoder)
 		if !ok {
 			return nil, errors.New("failed to decode exrunlength")

@@ -206,9 +206,18 @@ once per milestone.
   accessors, not PDFium's raw-pointer fast paths), pinned by two tests. Glue reads the packed page via
   `Data()`/`Stride()` directly. All 9 JBIG2 goldens pass; the external module dependency is gone. Truncation still
   degrades to the oracle's white page via the glue (the decoder keeps no partial output). README row deferred to M5.
+  Post-M2 (2026-08-02): the deferred multi-hour soak found a third pristine-upstream hang nine minutes in — the SDD
+  arithmetic export-flag loop spins forever once the decoder exhausts its data and returns zero-length runs, and the
+  loop is equally unguarded in PDFium itself (both reference snapshots), so this is hardening beyond upstream, not a
+  restored guard. Fixed in-tree with the GRD/GRRD `IsComplete` pattern; the ~90 s CPU spin now errors in
+  microseconds, pinned by the committed FuzzJBIG2 seed. The Huffman export loop was audited safe (bit reads fail at
+  end of stream); soak relaunched over the fix.
 - **M3 — JPX integration.** Vendor into `internal/jpeg2000/` with the `jp2` metadata/`DecodeComponents` exposure
   and encoder prune (or start the port per appendix B), production glue, budget pre-check from the header parse,
-  component→RGBA pipeline, README row.
+  component→RGBA pipeline, README row. Absolute-cap decision (Rich, 2026-08-02): keep `maxImagePixels` = 2^26 with
+  no JPX-specific absolute pixel cap — the sample-count proportional budget (83bdc3d) stays the only JPX-specific
+  bound, accepting the measured ~90 B/px worst case (~6 GB peak for a crafted gray payload at the cap, ~2 GB RGB)
+  in exchange for zero oracle divergence at large image sizes.
 - **M4 — JPX PDF semantics.** `/ColorSpace` precedence matrix, `/Decode`-with-Indexed, SMaskInData 0/1/2,
   `/SMask`-as-JPX gray path, stencil posture, depth normalization — each pinned to oracle goldens.
 - **M5 — Hardening and closeout.** Cap audit, extended fuzz soak, veraPDF sweep, benchmarks (and the JBIG2 repack
