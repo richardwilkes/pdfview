@@ -206,6 +206,24 @@ once per milestone.
   accessors, not PDFium's raw-pointer fast paths), pinned by two tests. Glue reads the packed page via
   `Data()`/`Stride()` directly. All 9 JBIG2 goldens pass; the external module dependency is gone. Truncation still
   degrades to the oracle's white page via the glue (the decoder keeps no partial output). README row deferred to M5.
+  Post-M2 hardening round 2 (2026-08-02): a systematic loop-termination audit of every decode-driven loop in the
+  tree, cross-read against both PDFium reference snapshots, found seven more dropped or missing bounds — restored in
+  one commit and pinned by 13 boundary tests (`hardening_test.go`), with all 9 JBIG2 goldens unmoved. Five are
+  PDFium guards this translation dropped: `SDNUMEXSYMS`/`SDNUMNEWSYMS` capped at 65535 (uncapped they sized
+  `make([]*Image, …)` and the IAID context table from a raw 32-bit field — 32 GB and 4 GB respectively),
+  `SBNUMINSTANCES` bounded by 32 per remaining stream byte, `IsValidImageSize` restored once in `ParseRegionInfo`
+  (covering text/halftone/generic/refinement in one place, and catching the ≥2^31-reads-negative case), the same
+  check on the halftone grid `HGW`/`HGH`, and `TOTWIDTH` capped with the collective-bitmap size taken in uint64
+  (it was a wrapping uint32, so a wrapped size slipped under the remaining-bytes guard). Two are beyond PDFium,
+  which is unguarded at both: `REFAGGNINST` bounded on the arithmetic *and* Huffman aggregate paths (it becomes
+  `SBNUMINSTANCES` inline, bypassing the glue's pre-scan — the audit's sharpest CPU amplifier), and bounds on every
+  changing-element write in `jbig2_mmr_decoder.go`'s `uncompress2D`. That last one was a live panic, not a spin:
+  the file is jbig2dec/pdf.js lineage with no PDFium counterpart, and a repeated VL1 mode code over a pinned
+  reference grows the index without advancing `bitPos`, walking past the `width+5` buffer — confirmed by removing
+  the guard and reproducing `index out of range [6] with length 6`, reachable through any halftone region with
+  HMMR=1. The audit also corrected two of its own inherited assumptions: the `TOTWIDTH` collective bitmap exists
+  only on the Huffman path (the arithmetic path decodes symbols individually), and the dead constants
+  `JBig2MaxNewSymbols`/`JBig2MaxExportSymbols` were already in `jbig2_basics.go`, declared and never referenced.
   Post-M2 (2026-08-02): the deferred multi-hour soak found a third pristine-upstream hang nine minutes in — the SDD
   arithmetic export-flag loop spins forever once the decoder exhausts its data and returns zero-length runs, and the
   loop is equally unguarded in PDFium itself (both reference snapshots), so this is hardening beyond upstream, not a
