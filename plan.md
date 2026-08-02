@@ -212,9 +212,25 @@ once per milestone.
   restored guard. Fixed in-tree with the GRD/GRRD `IsComplete` pattern; the ~90 s CPU spin now errors in
   microseconds, pinned by the committed FuzzJBIG2 seed. The Huffman export loop was audited safe (bit reads fail at
   end of stream); soak relaunched over the fix.
-- **M3 — JPX integration.** Vendor into `internal/jpeg2000/` with the `jp2` metadata/`DecodeComponents` exposure
-  and encoder prune (or start the port per appendix B), production glue, budget pre-check from the header parse,
-  component→RGBA pipeline, README row. Absolute-cap decision (Rich, 2026-08-02): keep `maxImagePixels` = 2^26 with
+- **M3 — JPX integration. DONE (2026-08-02).** Vendored `mububoki/jpeg2000 v1.0.0 @6bfb77fe2e65` into
+  `internal/jpeg2000/` (commit d1d5c23): 69 decoder `.go` files byte-identical to upstream modulo the provenance
+  header line and import rewrites (independently diff-audited — only `j2k/reader.go` and `jp2/reader.go` differ, for
+  the `image.RegisterFormat` init removal), encoder half pruned (37 files/6993 LOC, reverse-dependency-derived),
+  MIT `LICENSE` + `PROVENANCE.md`, extended `.golangci.yml` exclusions. No ISO/IEC 15444-4 conformance data
+  vendored (upstream keeps it external via `OPJ_DATA_ROOT` — no redistribution question). A test-scoped
+  `register_pdfview_test.go` restores the image-registry side effect inside the e2e test binary only. Then (commit
+  ebf4b11) the two container entry points the PDF layer needs, authored in `internal/jpeg2000/jp2/pdfview.go` with
+  no vendored-file edit: `DecodeComponents` (raw per-component planes, no palette/cdef/colorspace applied — an
+  /Indexed override consumes raw indices) and `DecodeInfo` (header-only: SIZ geometry + component precision/sign/
+  subsampling, plus the container's colr/pclr/cmap/cdef/CIELab/ICC metadata). `DecodeInfo` parses SIZ itself rather
+  than the vendored header pass, which allocates `[]tileState` proportional to the declared tile grid before any
+  pixel — the `jpxSizGuard` hazard again; the authored parser is bounded by its input and cross-checked against the
+  vendored `DecodeConfig` by test. Finally (this commit) the glue `internal/imaging/jpx.go` was flipped to the
+  vendored imports and the external module dropped from `go.mod` (`go.mod` back to three deps). All 13 JPX goldens
+  pass uncached through the vendored decoder; `./build.sh -a` green. README row + the now-stale "no pure-Go decoder"
+  claim deferred to M5. M4 (PDF semantics) will wire `DecodeInfo`/`DecodeComponents` into the glue for the
+  /ColorSpace-precedence, palette, cdef-opacity, and SMaskInData matrix.
+  Absolute-cap decision (Rich, 2026-08-02): keep `maxImagePixels` = 2^26 with
   no JPX-specific absolute pixel cap — the sample-count proportional budget (83bdc3d) stays the only JPX-specific
   bound, accepting the measured ~90 B/px worst case (~6 GB peak for a crafted gray payload at the cap, ~2 GB RGB)
   in exchange for zero oracle divergence at large image sizes.

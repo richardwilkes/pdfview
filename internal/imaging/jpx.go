@@ -15,11 +15,10 @@ import (
 	"image"
 	stdcolor "image/color"
 
-	"github.com/mububoki/jpeg2000/j2k"
-	"github.com/mububoki/jpeg2000/jp2"
-
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 	"github.com/richardwilkes/pdfview/internal/cos"
+	"github.com/richardwilkes/pdfview/internal/jpeg2000/j2k"
+	"github.com/richardwilkes/pdfview/internal/jpeg2000/jp2"
 )
 
 // isJPX reports whether the codec is JPXDecode. The filter has no abbreviated inline-image spelling, so unlike isDCT

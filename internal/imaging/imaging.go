@@ -13,8 +13,9 @@
 //
 // The pipeline: the stream's leading non-image filters are applied by internal/cos (ImageFilterSplit), then the
 // terminal image codec — none (raw samples), DCTDecode (stdlib image/jpeg, including CMYK/YCCK with the Adobe APP14
-// transform), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (xiaoqidun/jbig2, see jbig2.go), or JPXDecode
-// (mububoki/jpeg2000, see jpx.go) — produces component samples. Samples are unpacked per BitsPerComponent
+// transform), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (the vendored internal/jbig2 decoder, see jbig2.go), or
+// JPXDecode (the vendored internal/jpeg2000 decoder, see jpx.go) — produces component samples. Samples are unpacked
+// per BitsPerComponent
 // (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through internal/color (whose device
 // conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG pixels flow through the same
 // captured tables as the k operator). /SMask soft masks and /Mask entries (stencil stream or color-key array) become
