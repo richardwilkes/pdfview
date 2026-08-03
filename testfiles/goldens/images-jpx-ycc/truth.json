@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-ycc.pdf",
+  "sha256": "7e2b6a608b871bb80cd481203951e31cdd29e57ab29637a5a7c70d49ad4d3a5a",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        116,
+        116
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 162,
+          "height": 162,
+          "stride": 648,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 242,
+          "height": 242,
+          "stride": 968,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 116,
+          "height": 116,
+          "stride": 464,
+          "links": []
+        }
+      }
+    }
+  ]
+}

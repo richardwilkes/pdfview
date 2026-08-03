@@ -47,11 +47,12 @@ func TestTextCorpusPixels(t *testing.T) {
 // TestImageCorpusPixels enforces the image corpus — content the imaging pipeline must reproduce — against the goldens
 // at every recorded DPI.
 //
-// The two stub-codec files pin the blank-not-error contract. For images-jpx that is the golden itself: MuPDF's openjpeg
-// rejects the payload and MuPDF drops the image, so its golden is the page with a blank image area — exactly the stub's
-// output. For images-jbig2 MuPDF instead pads the failed decode into a black square, which a blank-rendering stub must
-// not match; its render is compared against the images-jpx golden instead, which is byte-identical page content (same
-// MediaBox, same vector marks, same image placement) with the image correctly absent.
+// The two damaged-codec files pin the blank-not-error contract. For images-jpx that is the golden itself: MuPDF's
+// openjpeg rejects the payload and MuPDF drops the image, so its golden is the page with a blank image area — exactly
+// what this engine paints when the vendored decoder rejects the same payload. For images-jbig2 MuPDF instead pads the
+// failed decode into a black square, a divergence this engine deliberately does not reproduce; its render is compared
+// against the images-jpx golden instead, which is byte-identical page content (same MediaBox, same vector marks, same
+// image placement) with the image correctly absent.
 func TestImageCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"images-dct", "images-raw", "images-indexed", "images-imagemask", "images-inline",
@@ -95,7 +96,7 @@ func TestAnnotationCorpusPixels(t *testing.T) {
 
 // comparePixelsToGolden renders corpus file name at every DPI recorded in goldenName's truth.json and compares pixels
 // against the golden's gate (its thresholds.json when present, else the default). goldenName equals name except for the
-// stub-codec cross-check described on TestImageCorpusPixels.
+// damaged-codec cross-check described on TestImageCorpusPixels.
 func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", name+".pdf"))

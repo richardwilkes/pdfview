@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-tiles.pdf",
+  "sha256": "c1632c60f0ec18ca35e6d273a31923b9f1bcb6dbc94f61481b9a5a93ce5c8882",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        164,
+        164
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 228,
+          "height": 228,
+          "stride": 912,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 342,
+          "height": 342,
+          "stride": 1368,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 164,
+          "height": 164,
+          "stride": 656,
+          "links": []
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-stencil.pdf",
+  "sha256": "65f96176843630a62ad7d68a4a85cd685725f04a4cdb24669b4e342fffca6865",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        144,
+        144
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 200,
+          "height": 200,
+          "stride": 800,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 300,
+          "height": 300,
+          "stride": 1200,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 144,
+          "height": 144,
+          "stride": 576,
+          "links": []
+        }
+      }
+    }
+  ]
+}

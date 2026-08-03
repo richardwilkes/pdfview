@@ -120,8 +120,9 @@ are binary with exact /Length values. Payload provenance:
   MMR bytes are exactly a CCITTFaxDecode K<0 payload.
 - The JBIG2 payload is a deliberately truncated segment header and the JPX payload lacks the JP2 signature box,
   so every decoder rejects them cleanly; MuPDF warns and the JPX page renders with the image absent. MuPDF's
-  jbig2 path instead pads the failed decode into a black square, which the pure-Go stub intentionally does not
-  reproduce (blank by design) — see TestImageCorpusPixels for how that file is pinned.
+  jbig2 path instead pads the failed decode into a black square, which this engine intentionally does not
+  reproduce (the vendored decoder rejects the payload and the image renders blank) — see TestImageCorpusPixels
+  for how that file is pinned.
 
 | File | Contents |
 | --- | --- |
@@ -132,9 +133,180 @@ are binary with exact /Length values. Payload provenance:
 | `images-inline.pdf` | Inline images: raw binary with /L, ASCIIHexDecode, a named colorspace from page resources, FlateDecode with /L, and /D [1 0] |
 | `images-smask.pdf` | /SMask alpha (mask dimensions differ from the base image), a stencil /Mask stream, and a color-key /Mask array |
 | `images-ccitt.pdf` | The G4 payload twice: default decoding and /BlackIs1 true |
-| `images-jbig2.pdf` | JBIG2Decode stub coverage (truncated payload; see above) |
-| `images-jpx.pdf` | JPXDecode stub coverage (invalid payload; see above) |
+| `images-jbig2.pdf` | JBIG2Decode damaged-payload coverage (truncated payload; see above) |
+| `images-jpx.pdf` | JPXDecode damaged-payload coverage (invalid payload; see above) |
 | `images-interpolate.pdf` | The same checkerboard drawn magnified with and without /Interpolate, pinning the sampling-filter mapping |
+
+## JBIG2 codec corpus (generated 2026-08-02)
+
+Eight single-page files generated 2026-08-02 by a throwaway dev-time Go program (same convention as the rest of the
+image corpus: only the outputs are committed; classic xref tables with mechanically computed offsets; uncompressed
+content streams; binary codec payloads with exact `/Length`). Every payload uses the PDF-embedded JBIG2 profile — no
+file header, no end-of-page or end-of-file segment, sequential segment headers, everything on page 1 — and every
+source bitmap is black marks on white, so the filter's inversion to `/DeviceGray` renders ink black. Each payload was
+decoded back at 1:1 against its source bitmap through `mutool draw` (MuPDF 1.28.1, which bundles jbig2dec) before the
+file was committed; the codings are exact, so the recorded pixels are byte-for-byte reproducible. Payload provenance:
+
+- Arithmetic generic regions come from jbig2enc 0.32 + leptonica 1.87.0 (`jbig2 -p <png>`), which emits exactly the
+  PDF profile: a page information segment followed by an immediate generic region, GBTEMPLATE 0, nominal AT pixels,
+  TPGDON off.
+- Symbol/text payloads come from `jbig2 -s -p -b <base> <png>`, whose `.sym` output is the shared symbol dictionary
+  and whose `.0000` output is the page information + text region pair. The source marks are drawn from primitive
+  rectangles and strokes (no font is rasterized) so that four single-connected-component shapes repeat 30 times and
+  the classifier builds a dictionary with real reuse. The first glyph row sits 6 pixels below the top edge: jbig2enc
+  places the first strip one row too high when marks start within five rows of the page top.
+- MMR bodies (generic regions, the pattern dictionary's collective bitmap, and the halftone gray-code bitplanes) are
+  produced the same way as the CCITT payload: a handwritten uncompressed bilevel TIFF (PhotometricInterpretation
+  MinIsWhite, so a set bit is black exactly as JBIG2's MMR convention requires) re-encoded with libtiff's
+  `tiffcp -c g4 -r <height>` into a single strip, whose raw bytes are lifted out. libtiff terminates each strip with
+  an EOFB, which is what Annex C.5 needs between consecutive halftone bitplanes.
+- The Huffman symbol dictionary + text region and the halftone pattern dictionary + region were assembled byte by byte
+  (jbig2enc can produce neither). Both use only the standard Annex B tables, so no code table segments are present,
+  and the Huffman dictionary stores its height-class collective bitmaps uncompressed (`BMSIZE 0`), keeping the file
+  free of any entropy coder.
+- The refinement payload was likewise hand-assembled: jbig2enc 0.32 refuses `-r` outright ("Refinement broke in recent
+  releases"), so the generator carries a dev-time MQ arithmetic encoder written from the T.88 Annex E flowcharts. The
+  file first paints an MMR-coded 2x2-blocked approximation, then replaces it with a GRTEMPLATE 1 refinement region
+  that carries the residual detail; with no referred-to intermediate region the reference bitmap is the page itself
+  (T.88 7.4.7.2), so the region's external combination operator is REPLACE.
+- `images-jbig2-truncated.pdf` cuts the arithmetic generic payload at 60% of its bytes, mid region data, with
+  `/Length` matching the truncated count. The segment's declared data length still says 287 bytes, so jbig2dec never
+  dispatches the region at all: MuPDF emits no warning, exits 0, and paints an all-white full-size image over the blue
+  band the page draws underneath. That band is there so a blank painted image stays distinguishable from a dropped
+  one.
+
+| File | Contents |
+| --- | --- |
+| `images-jbig2-generic.pdf` | Two generic regions as separate XObjects: a 128x80 arithmetic region (GBTEMPLATE 0, type 38) and a 96x64 MMR region (type 39) over a deliberately different, run-friendly source |
+| `images-jbig2-text.pdf` | A 184x72 symbol dictionary (4 symbols) plus text region (30 instances), arithmetic, concatenated into one self-contained stream with no `/JBIG2Globals` |
+| `images-jbig2-globals.pdf` | The same encoding split the PDF way: the symbol dictionary is a separate stream reached through `/DecodeParms << /JBIG2Globals ... >>`, the image stream holds only the page information and text region |
+| `images-jbig2-huffman.pdf` | Hand-assembled `SDHUFF 1` symbol dictionary (standard tables B.4/B.2/B.1, two height classes, uncompressed collective bitmaps) and `SBHUFF 1` text region (B.6/B.8/B.11 plus a runcode-coded symbol ID table), REFCORNER TOPLEFT, 3 symbols in 6 placements over 2 strips |
+| `images-jbig2-halftone.pdf` | Hand-assembled pattern dictionary (`HDMMR 1`, 8 gray levels of 6x6 cells) and halftone region (`HMMR 1`, 10x6 grid, 3 Gray-coded MMR bitplanes) |
+| `images-jbig2-refine.pdf` | An MMR generic region overpainted by a generic refinement region (type 43, GRTEMPLATE 1, TPGRON off, combination operator REPLACE) that sharpens it back to the exact source |
+| `images-jbig2-stencil.pdf` | The arithmetic generic payload in two stencil roles: an `/ImageMask true` XObject with default `/Decode` painted in a fill colour over a coloured page, and the `/Mask` of a small `/DeviceRGB` image |
+| `images-jbig2-truncated.pdf` | The arithmetic generic payload cut mid region data (196 of 328 bytes); see above for what MuPDF makes of it |
+
+## JPX corpus (generated 2026-08-02)
+
+Seventeen single-page files generated by throwaway dev-time programs — sixteen on 2026-08-02 and `images-jpx-cmyk.pdf`
+on 2026-08-03 (same convention as the image corpus: only the outputs are committed; classic xref tables with
+mechanically computed offsets; uncompressed content streams; binary codec payloads with exact /Length values). Every
+source image is machine-drawn — a 64x64 or 96x96 RGB pattern (solid color bars over a smooth 2-D gradient over a
+hard-edged disc and stripes), a grayscale variant, an eight-level palette-index variant, an RGBA variant whose alpha
+is a horizontal ramp, deeper-precision variants of the RGB and grayscale patterns, and a 64x64 four-component CMYK
+block grid — so no third-party image data is involved. Each image is drawn at 1.5 pt per sample, which at the goldens'
+144 dpi render scale makes one source sample exactly 3x3 device pixels.
+
+The CMYK source is a 4x4 grid of 16x16 patches over four rows: pure cyan, magenta, yellow and white; K-only black
+(0,0,0,255), CMY composite black (255,255,255,0), rich black (255,255,255,255) and K-only mid gray (0,0,0,128); a
+horizontal C ramp (`C = x*255/63`) under a constant K of 64; then C+M, M+Y, C+Y and an even 128 CMY midtone. The three
+blacks are the point of the fixture: which conversion formula a renderer uses is exactly what separates them.
+
+The deep-precision sources put the 8-bit pattern in the high bits and a deterministic left-to-right ramp in the
+bits below it, so the sub-8-bit content is never zero and never constant: the 12-bit gray sample is
+`grayAt<<4 | x/4`, the 16-bit gray sample is `grayAt<<8 | x*4`, and the 12-bit RGB samples are `r<<4 | x/4`,
+`g<<4 | y/4` and `b<<4 | 15-(x/4)`. Truncating those to 8 bits reproduces the 8-bit pattern exactly, so the
+goldens separate truncation from either rounding rule: rounding the discarded bits (`(v + 1<<(shift-1)) >>
+shift`) differs on 49% of the samples, and rescaling to the full 8-bit range (`round(v * 255 / (2^prec - 1))`)
+differs on 11%.
+
+The JPEG 2000 payloads were produced with OpenJPEG 2.5.4's `opj_compress` (`brew install openjpeg`), which is
+independent of any Go decoder; every lossless payload was verified to round-trip bit-exact through
+`opj_decompress` before the PDFs were assembled. Payload provenance, one line per file:
+
+| File | `opj_compress` arguments (after `-i <source> -o <payload>`) | Payload |
+| --- | --- | --- |
+| `images-jpx-53.pdf` | *(defaults)* | 2872 B JP2 |
+| `images-jpx-97.pdf` | `-I -r 8` | 1552 B JP2 |
+| `images-jpx-gray.pdf` | *(defaults, PGM source)* | 1054 B JP2 |
+| `images-jpx-ycc.pdf` | `-F 64,64,3,8,u@1x1:2x2:2x2 -mct 0` | 2282 B JP2 |
+| `images-jpx-palette.pdf` | *(defaults, PGM source, bare J2K)* + hand-assembled JP2 container | 469 B JP2 |
+| `images-jpx-alpha1.pdf` | *(defaults, RGBA PNG source)* | 731 B JP2 |
+| `images-jpx-alpha2.pdf` | *(defaults, premultiplied RGBA PNG source)* + `cdef` Typ patch | 1582 B JP2 |
+| `images-jpx-tiles.pdf` | `-t 32,32` | 6470 B JP2 |
+| `images-jpx-bypass.pdf` | `-M 63 -b 32,32 -c [32,32],[64,64],[128,128] -SOP -EPH -p RPCL -n 5` | 8283 B JP2 |
+| `images-jpx-raw.pdf` | *(defaults, `.j2k` output)* | 2787 B J2K |
+| `images-jpx-csoverride.pdf` | reuses the `-53` JP2 and the palette index J2K | 2872 B + 326 B |
+| `images-jpx-truncated.pdf` | the `-53` JP2 and the `-raw` J2K, each cut at 50% | 1436 B + 1393 B |
+| `images-jpx-depth.pdf` | `-F 64,64,1,12,u@1x1`; `-F 64,64,3,12,u@1x1:1x1:1x1`; `-F 64,64,1,16,u@1x1`; `-F 64,64,1,4,u@1x1` | 1320 B + 4368 B + 1586 B + 806 B JP2 |
+| `images-jpx-smask.pdf` | reuses the `-gray` JP2 and the `-53` JP2 as soft masks | 1054 B + 2872 B |
+| `images-jpx-stencil.pdf` | reuses the `-gray` JP2 | 1054 B JP2 |
+| `images-jpx-ixjp2.pdf` | reuses the hand-assembled palette JP2 twice | 469 B JP2 (x2) |
+| `images-jpx-cmyk.pdf` | `-F 64,64,4,8,u@1x1:1x1:1x1:1x1 -mct 0` (bare J2K) + hand-assembled JP2 container | 2472 B JP2 (x2) |
+
+Four payloads are not plain `opj_compress` output. The palette file's JP2 container is hand-assembled around a
+single-component 8-bit index codestream — signature, `ftyp`, `jp2h` (`ihdr` with NC 1, enumerated-sRGB `colr`, an
+eight-entry three-column `pclr`, a `cmap` mapping component 0 through all three palette columns) and `jp2c` — because
+`opj_compress` has no palette mode. The premultiplied file's `cdef` box (written by `opj_compress` itself from the PNG
+alpha channel) has its opacity channel's Typ patched from 1 to 2, since the encoder cannot know the color channels
+were premultiplied. The sYCC file needed no patching: given planar 4:2:0 raw input, `opj_compress` writes `colr`
+EnumCS 18 on its own. The CMYK file's container is hand-assembled for the same reason as the palette one — signature,
+`ftyp`, `jp2h` (`ihdr` with NC 4 and BPC 7, `colr` METH 1 EnumCS 12, no `cdef` because all four components are color
+channels) and `jp2c` — because `opj_compress` never writes enumerated CMYK: given the same four-component raw input it
+writes EnumCS 16 (sRGB) by default and EnumCS 18 (sYCC) under `-mct 0`, neither of which describes the data. `-mct 0`
+is required regardless, since the encoder otherwise applies the RGB-to-YCC transform to any input of three or more
+components; the committed codestream's COD carries SGcod MCT 0.
+
+The `-F` rows read headerless input whose sample layout is fixed by the option: component planes back to back,
+one byte per sample at eight bits or fewer and two big-endian bytes above that (the `.raw` extension selects
+`opj_compress`'s big-endian reader). Those payloads are round-tripped against `opj_decompress`'s PGM/PPM output
+rather than its `.raw` output, because the `.raw` *writer* emits little-endian samples while the reader consumes
+big-endian ones.
+
+Several behaviors here diverge from ISO 32000 and are pinned to MuPDF, not to the specification:
+
+- MuPDF ignores `/SMaskInData` for JPXDecode entirely. The embedded opacity channel is applied whatever the
+  value is (including 0, which per 7.4.9 should discard it), premultiplied data is never un-multiplied, and an
+  explicit `/SMask` multiplies on top of the embedded alpha instead of being ignored. So in
+  `images-jpx-alpha1.pdf` the third arm matches the second, not the first.
+- `mutool draw` exits nonzero on `images-jpx-truncated.pdf`: MuPDF runs OpenJPEG in strict mode, so a truncated
+  codestream is a hard decode failure and both images are dropped rather than partially painted. This matches
+  the pre-existing `images-jpx.pdf`, whose invalid payload fails the same way.
+- Bit depths other than 8 are shifted, not scaled. A codestream precision above 8 is truncated (`v >> (prec-8)`,
+  not rounded), and one below 8 is left-shifted (`v << (8-prec)`), so the 4-bit arm's maximum sample 15 renders
+  as 240 rather than 255 and the arm never reaches white. Both rules are pinned by `images-jpx-depth.pdf`.
+- `/ImageMask true` on a JPXDecode stream is ignored outright. In `images-jpx-stencil.pdf` MuPDF paints the
+  payload as an ordinary opaque grayscale image, with no trace of the current fill color and no transparency,
+  even though the dictionary has neither `/ColorSpace` nor `/BitsPerComponent`.
+- A JPXDecode `/SMask` whose payload has three components is reduced to alpha by the plain mean of the three,
+  `(R+G+B)/3` truncated — not by any luminance weighting (a 77/150/28 model misses by mean 9.4, max 60 of 255).
+- A JP2 container's own `pclr`/`cmap` palette is suppressed exactly when the PDF dictionary declares an
+  `/Indexed` colorspace, and applied otherwise. `images-jpx-ixjp2.pdf` pins both halves: the `/Indexed` arm
+  expands the raw index component through the PDF's lookup table, while the `/DeviceGray` arm gets the
+  container's palette and then loses the override to the usual component-count mismatch. Per 7.4.9 the
+  `/DeviceGray` arm should have shown the eight index values as near-black grays.
+- A four-component enumerated-CMYK JP2 renders identically with no `/ColorSpace` and with an explicit
+  `/DeviceCMYK`: MuPDF converts either arm through the same ICC-backed CMYK conversion it uses for every other
+  CMYK sample source (its pure cyan renders as the (0, 174, 239) US-Web-Coated primary, and the K-only,
+  CMY-composite, and rich blacks stay three distinct colors), never through the naive `255 − min(255, X + K)`
+  formula, which collapses all three blacks to one. `images-jpx-cmyk.pdf` pins every patch of both arms.
+
+| File | Contents |
+| --- | --- |
+| `images-jpx-53.pdf` | 64x64 lossless RGB: 5/3 reversible wavelet, reversible color transform, JP2 container |
+| `images-jpx-97.pdf` | 64x64 lossy RGB: 9/7 irreversible wavelet, ICT, scalar-expounded quantization at ~8x |
+| `images-jpx-gray.pdf` | 64x64 lossless single-component, `colr` EnumCS 17 (greyscale) |
+| `images-jpx-ycc.pdf` | 64x64 sYCC (`colr` EnumCS 18) with 4:2:0 chroma — components 1 and 2 carry dx=dy=2, so the decoder must upsample before the inverse color transform |
+| `images-jpx-palette.pdf` | Hand-assembled JP2 whose `pclr`/`cmap` boxes expand one 8-bit index component into three sRGB channels through an eight-entry palette |
+| `images-jpx-alpha1.pdf` | RGBA with straight alpha and a `cdef` opacity channel, over light/dark backdrop bands: `/SMaskInData 1`; `/SMaskInData 0` plus an explicit vertical-ramp `/SMask`; `/SMaskInData 1` plus that same `/SMask` |
+| `images-jpx-alpha2.pdf` | The same RGBA source premultiplied by its alpha, `cdef` Typ 2, `/SMaskInData 2` |
+| `images-jpx-tiles.pdf` | 96x96 lossless RGB on a 3x3 grid of 32x32 tiles (nine SOT/SOD pairs) |
+| `images-jpx-bypass.pdf` | 96x96 lossless RGB with all six code-block mode switches (cblksty 0x3f: bypass, reset, termall, VSC, segterm, segsym), 32x32 code-blocks, explicit per-resolution precincts, SOP and EPH markers on all 39 packets, and RPCL progression over 5 resolutions |
+| `images-jpx-raw.pdf` | A bare J2K codestream with no JP2 wrapper, so the colorspace can only come from the component count |
+| `images-jpx-csoverride.pdf` | PDF-side `/ColorSpace` overrides: RGB JP2 with `/DeviceRGB` (count matches, honored), the same payload with `/DeviceGray` (count mismatch — the payload's colorspace wins), and the bare index codestream with `[/Indexed /DeviceRGB 7 <lookup>]` twice, once with default `/Decode` and once with `/Decode [7 0]` (identical, since `/Decode` is ignored for JPXDecode) |
+| `images-jpx-truncated.pdf` | The `-53` JP2 payload and the `-raw` J2K payload, each cut in half mid-codestream with exact `/Length`; MuPDF warns and drops both images |
+| `images-jpx-depth.pdf` | Codestream precisions other than 8, all lossless, four arms: 12-bit grayscale, 12-bit RGB (RCT), 16-bit grayscale, 4-bit grayscale over the full 0..15 range. Every dictionary says `/BitsPerComponent 8` and carries no `/ColorSpace`, both of which must be ignored in favor of the codestream. The 12- and 16-bit sources carry a deliberate sub-8-bit ramp so truncation and rounding are distinguishable |
+| `images-jpx-smask.pdf` | JPX payloads in the `/SMask` role over light/dark backdrop bands, under a flat opaque `/DeviceRGB` base: the `-gray` payload as a `/DeviceGray` soft mask, and the three-component `-53` payload in that same one-component role |
+| `images-jpx-stencil.pdf` | The `-gray` payload behind `/ImageMask true` (no `/ColorSpace`, no `/BitsPerComponent`) painted with a dark blue fill over a pale yellow page — spec-illegal, so the golden pins MuPDF |
+| `images-jpx-ixjp2.pdf` | The hand-assembled palette JP2 under two PDF colorspaces: `[/Indexed /DeviceRGB 7 <lookup>]` whose eight-entry lookup deliberately shares no color with the container's `pclr`, and `/DeviceGray`. Which palette each arm shows says whether the container's palette was applied |
+| `images-jpx-cmyk.pdf` | One hand-assembled four-component JP2 whose `colr` declares enumerated CMYK (EnumCS 12), in two arms: no `/ColorSpace` at all, so the embedded `colr` governs, and an explicit `/ColorSpace /DeviceCMYK` of matching arity. The source's K-only, CMY-composite and rich blacks separate the CMYK-to-RGB conversion formulas |
+
+The stencil page is 144x144 pt so its full-page image lands on integer raster rows at all three golden DPIs. On a
+fractional page height, canvas's four-sample vertical coverage diverges from MuPDF's analytic coverage on the partial
+bottom row (alpha 0 versus 16 on a 0.11 px sliver as of canvas v0.2.1) — a pre-existing engine-level divergence that
+every golden carries sub-threshold, accepted as documented rather than fixed here (any fix belongs in
+richardwilkes/canvas on its own schedule). It is normally harmless, but on a 116 pt page that one row alone spent 1.47
+of this golden's 2.0 parity mean, which is why the page size avoids it.
 
 ## Shading and pattern probes (generated 2026-07-11)
 

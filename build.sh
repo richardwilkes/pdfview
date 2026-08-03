@@ -51,5 +51,7 @@ if [ "$LINT"x == "1x" ]; then
   fi
   echo -e "\033[33mLinting...\033[0m"
   "$TOOLS_DIR/golangci-lint" run ./...
+  # Do not force CGO_ENABLED=0 in the environment when running this script: the oracle module wraps the cgo MuPDF
+  # binding, and its lint pass needs a working cgo toolchain to typecheck.
   (cd oracle; "$TOOLS_DIR/golangci-lint" run -c ../.golangci.yml ./...)
 fi

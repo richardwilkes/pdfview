@@ -1,0 +1,57 @@
+{
+  "file": "images-jpx-csoverride.pdf",
+  "sha256": "0fc8b52c07c1b6fe7cdee079b80f090dd9dae52151a0cd34334689022c90c4d2",
+  "mupdf": "1.27.2",
+  "pageCount": 1,
+  "requiresAuth": false,
+  "auth": [
+    {
+      "password": "",
+      "status": 1
+    },
+    {
+      "password": "invalid-password",
+      "status": 1
+    }
+  ],
+  "dpis": [
+    72,
+    100,
+    150
+  ],
+  "pages": [
+    {
+      "page": 0,
+      "bounds": [
+        0,
+        0,
+        480,
+        116
+      ],
+      "linksRaw": [],
+      "renders": {
+        "100": {
+          "png": "page0-100.png",
+          "width": 667,
+          "height": 162,
+          "stride": 2668,
+          "links": []
+        },
+        "150": {
+          "png": "page0-150.png",
+          "width": 1000,
+          "height": 242,
+          "stride": 4000,
+          "links": []
+        },
+        "72": {
+          "png": "page0-72.png",
+          "width": 480,
+          "height": 116,
+          "stride": 1920,
+          "links": []
+        }
+      }
+    }
+  ]
+}

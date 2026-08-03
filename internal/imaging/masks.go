@@ -63,7 +63,7 @@ func (dec *decoder) applyStencilMask(img *Image, ms *cos.Stream) {
 
 // alphaPlane decodes an /SMask stream to one alpha byte per pixel. The mask is DeviceGray by definition, so the samples
 // map through the mask's /Decode array straight to alpha — never through the painting gray→RGB curve, which would
-// distort coverage. Unsupported codecs (JBIG2, JPX) and malformed masks report an error and the mask is ignored.
+// distort coverage. Malformed masks report an error and the mask is ignored.
 func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err error) {
 	data, codec, parms, err := d.ImageFilterSplit(sm.Dict, sm.Raw)
 	if err != nil {
@@ -79,8 +79,10 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	}
 	w, h = int(w64), int(h64)
 	switch {
-	case codec == codecJBIG2Names || codec == codecJPXNames:
-		return nil, 0, 0, ErrUnsupportedCodec
+	case isJPX(codec):
+		// JPX ignores /Decode (see decodeJPX), so its samples are the coverage directly rather than passing through
+		// alphaLUT the way every other codec's do.
+		return sub.jpxGrayPlane()
 	case isDCT(codec):
 		gray, gw, gh, dctErr := sub.dctGrayPlane()
 		if dctErr != nil {
@@ -94,12 +96,16 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	}
 	var bpc, rowStride int
 	validCols := w
-	if isCCITT(codec) {
-		// CCITT fixes bpc at 1 and supplies the column count itself, so — like decodeSamples — do not consult (or
-		// require) /BitsPerComponent here; a soft mask that omits the key must still decode. Rows are byte-aligned at
-		// the decoder's column count, so columns past it (when /Width > /Columns) read as zero samples.
+	if isCCITT(codec) || isJBIG2(codec) {
+		// CCITT and JBIG2 fix bpc at 1 and supply the column count themselves, so — like decodeSamples — do not consult
+		// (or require) /BitsPerComponent here; a soft mask that omits the key must still decode. Rows are byte-aligned
+		// at the decoder's column count, so columns past it (when /Width exceeds it) read as zero samples.
 		var cols int
-		data, cols, err = sub.decodeCCITT(h)
+		if isCCITT(codec) {
+			data, cols, err = sub.decodeCCITT(h)
+		} else {
+			data, cols, err = sub.decodeJBIG2(h)
+		}
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -179,9 +185,22 @@ func alphaByte(v float32) byte {
 // the image both span the same unit square). The nearest-sample products top out at 2^52 (a row index just under the
 // 2^26 pixel cap against a mask dimension at the same cap — say a 1 x 2^26 /SMask, only a few KB of payload, over a
 // tall base image), well inside the 64-bit int this engine requires.
+//
+// The oracle paints an image and its mask each at its own resolution — the mask becomes a clip rather than part of the
+// image — so a mask finer than the image on either axis must not be decimated onto the image's grid. Such a mask
+// expands the composite onto the finer count per axis first, replicating the image's samples across it; a mask no finer
+// than the image on either axis composites in place, the arrangement the /SMask goldens pin.
 func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 	if mw <= 0 || mh <= 0 || len(plane) < mw*mh {
 		return
+	}
+	if w, h := max(img.Width, mw), max(img.Height, mh); w != img.Width || h != img.Height {
+		// The finer grid can exceed the pixel cap even though the image and the mask are each within it (a 1 x 2^26
+		// mask over a 2^26 x 1 image), so bound it before allocating. An over-cap pairing keeps the image's own grid,
+		// which decimates the mask but still renders.
+		if int64(w)*int64(h) <= maxImagePixels {
+			expandForMask(img, w, h)
+		}
 	}
 	for y := range img.Height {
 		my := y * mh / img.Height
@@ -196,4 +215,20 @@ func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 			img.HasAlpha = true
 		}
 	}
+}
+
+// expandForMask replaces img's pixels with the same picture nearest-sampled onto a w x h grid, so a mask finer than the
+// image can be composited without losing its detail. The caller has already bounded w*h against maxImagePixels, the
+// same cap run() applies, so the RGBA allocation stays within the documented worst case; the row-index products stay
+// under 2^52 because both factors are within that cap.
+func expandForMask(img *Image, w, h int) {
+	pix := make([]byte, w*h*4)
+	for y := range h {
+		src := (y * img.Height / h) * img.Width * 4
+		dst := y * w * 4
+		for x := range w {
+			copy(pix[dst+x*4:dst+x*4+4], img.Pix[src+(x*img.Width/w)*4:])
+		}
+	}
+	img.Pix, img.Width, img.Height = pix, w, h
 }
