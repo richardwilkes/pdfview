@@ -61,6 +61,9 @@ func (d *Decoder) processSIZ() error {
 	if d.section != sectionMainHeader {
 		return fmt.Errorf("SIZ: unexpected in section %v", d.section)
 	}
+	if d.sizSeen {
+		return fmt.Errorf("SIZ: duplicate marker")
+	}
 
 	Lsiz, err := binutil.ReadU16(d.r)
 	if err != nil {
@@ -155,6 +158,7 @@ func (d *Decoder) processSIZ() error {
 	if err := d.header.siz.validate(); err != nil {
 		return fmt.Errorf("SIZ: %w", err)
 	}
+	d.sizSeen = true
 	return nil
 }
 

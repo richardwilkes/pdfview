@@ -125,6 +125,27 @@ func f2CmapBomb() []byte {
 	return out.b
 }
 
+// sizSwapBomb is a ~110-byte bare codestream that declares an innocent 16x16 image in its
+// leading SIZ — the one a caller's pre-decode budget check sees — then, after a complete
+// tile-part returns the parser to sectionMainHeader, presents a second SIZ redeclaring the
+// image as ~805Mx12336 (~9.9 Tsamples). Unguarded, finalizeImage allocates component and
+// output planes at the swapped geometry (the 2026-08-03 FuzzJPX soak hit a 447-byte variant
+// of this shape at ~77 GB RSS and ~25 s per decode); the duplicate-SIZ rejection errors at
+// the second marker instead.
+func sizSwapBomb() []byte {
+	w := &buf{}
+	w.u16(0xFF4F) // SOC
+	sizSeg(w, 16, 16)
+	// SOT: Psot covers SOT(12) + SOD(2) + payload(8) = 22, so the marker loop resumes
+	// after the payload with the parser back in sectionMainHeader.
+	w.u16(0xFF90).u16(10).u16(0).u32(22).u8(0).u8(1)
+	w.u16(0xFF93)                         // SOD
+	w.raw([]byte{0, 0, 0, 0, 0, 0, 0, 0}) // 8 payload bytes (never parsed)
+	sizSeg(w, 805318704, 12336)           // second SIZ: the hostile geometry swap
+	w.u16(0xFFD9)                         // EOC
+	return w.b
+}
+
 // TestPacketSequenceBoundRejectsLayerBomb pins F1: the layer/resolution product bomb is
 // rejected by the packet-sequence bound rather than sizing a multi-megabyte sequence.
 func TestPacketSequenceBoundRejectsLayerBomb(t *testing.T) {
@@ -148,6 +169,20 @@ func TestTilePartExceedingInputRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds remaining input") {
 		t.Fatalf("expected a remaining-input rejection, got %v", err)
+	}
+}
+
+// TestDuplicateSIZRejected pins the geometry-swap guard: a second SIZ marker segment is
+// refused outright, so a mid-stream SIZ can never replace dimensions that were validated
+// before decoding began.
+func TestDuplicateSIZRejected(t *testing.T) {
+	var d Decoder
+	_, err := d.Decode(bytes.NewReader(sizSwapBomb()), false)
+	if err == nil {
+		t.Fatal("expected the duplicate SIZ to be rejected")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected a duplicate-SIZ rejection, got %v", err)
 	}
 }
 
@@ -194,6 +229,7 @@ func TestWriteFuzzSeeds(t *testing.T) {
 		"jpx_f1_packet_seq_bomb.seed": f1LayerBomb(),
 		"jpx_f3_psot_bomb.seed":       f3PsotBomb(),
 		"jpx_f2_cmap_bomb.seed":       f2CmapBomb(),
+		"jpx_siz_swap_bomb.seed":      sizSwapBomb(),
 	} {
 		body := "go test fuzz v1\n[]byte(" + strconv.Quote(string(payload)) + ")\n"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {

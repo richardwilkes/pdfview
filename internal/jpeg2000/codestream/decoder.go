@@ -19,6 +19,12 @@ type Decoder struct {
 
 	header header
 
+	// sizSeen marks that the codestream's SIZ marker segment has been processed. ISO 15444-1 A.5.1 permits exactly
+	// one SIZ, in the main header; because the parser reuses sectionMainHeader between tile-parts (see processSOD),
+	// the section check alone would admit a second SIZ there, letting a hostile stream replace geometry the caller
+	// validated via DecodeConfig before committing to a full decode (see PROVENANCE.md, allocation hardening).
+	sizSeen bool
+
 	tiles []tileState
 
 	// reduce is the number of highest resolution levels to discard, producing a
@@ -222,6 +228,7 @@ func (d *Decoder) skipSegment() error {
 
 func (d *Decoder) Decode(r io.Reader, configOnly bool) (image.Image, error) {
 	d.r = r
+	d.sizSeen = false
 
 	// Expect SOC (Start of Codestream)
 	mk, err := d.readMarker()

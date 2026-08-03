@@ -399,6 +399,23 @@ once per milestone.
   divergence — now because the vendored decoder rejects the payload rather than because a stub declined it. The
   `internal/imaging` package comment needed no change (M4 already updated it).
 
+  **Re-soak find (2026-08-03): the SIZ geometry swap — fixed.** The relaunched `FuzzJPX` soak over the F1–F3-fixed
+  tree died at ~5m39s: a fuzz worker was killed while minimizing a 447-byte bare codestream that, replayed in normal
+  test mode, decodes for ~25 s at ~77 GB peak RSS. Mechanism (confirmed by marker parse and CPU profile — 91 % of
+  samples in `toImageGray` over one 12.9 Gpx plane): the leading SIZ declares an innocent 16×16 image, which is what
+  `jpxSizGuard` budgets; a complete 205-byte tile-part (Psot honored) hands the parser back to `sectionMainHeader`
+  (`processSOD` reuses that section between tile-parts); a second SIZ then redeclares the image as ~805M×16, and
+  EOF-finalization sizes the component and output planes from the swapped geometry — pixels the budget never saw.
+  The F-series shape yet again — a post-validation field the samples budget doesn't model — and a hole the cap audit
+  missed because it checked allocation sites against SIZ rather than SIZ's own mutability. Fixed in-tree with a
+  duplicate-SIZ rejection (`sizSeen` flag on the Decoder, reset per `Decode`): ISO 15444-1 A.5.1 permits exactly one
+  SIZ, and OpenJPEG's marker state machine rejects the same stream, so the oracle loses nothing and no legitimate
+  file is affected. Pinned by `TestDuplicateSIZRejected` plus two committed `FuzzJPX` regression seeds — the crafted
+  `jpx_siz_swap_bomb.seed` (env-gated regenerator extended) and the found crasher `812c06133f20440a` (the full seed
+  replay now passes in 0.45 s where that one input alone previously took 25.5 s). PROVENANCE.md gained the guard's
+  row. `./build.sh -a` green (note: run it without forcing `CGO_ENABLED=0` in the environment — the oracle-module
+  lint pass needs cgo); goldens untouched. The 2 h soak was relaunched over the fixed tree.
+
   **M4-deferred items resolved (Rich, 2026-08-03).** Odd-precision-plus-container combinations: leave as documented
   — the in-code constraint note stands, no corpus coverage; the 2694-file sweep exercised none, and there is no
   oracle evidence to pin against without speculative fixture engineering. Revisit only if a real file surfaces.
