@@ -57,7 +57,7 @@ func TestExtractWithNoPages(t *testing.T) {
 	if err := os.WriteFile(path, []byte(emptyPDF), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := extract(path, ""); err != nil {
+	if err := extract(path, 0, ""); err != nil {
 		t.Fatalf("expected no error for a zero-page document, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "page0.png")); !os.IsNotExist(err) {
@@ -73,7 +73,7 @@ func TestExtractWithOnePage(t *testing.T) {
 	if err := os.WriteFile(path, []byte(onePagePDF), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := extract(path, ""); err != nil {
+	if err := extract(path, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(filepath.Join(dir, "page0.png"))
@@ -82,5 +82,22 @@ func TestExtractWithOnePage(t *testing.T) {
 	}
 	if fi.Size() == 0 {
 		t.Error("expected page0.png to be non-empty")
+	}
+}
+
+// Requesting a page outside the document must fail with the range error rather than reaching RenderPage, and must not
+// leave a PNG behind.
+func TestExtractWithPageOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "one.pdf")
+	if err := os.WriteFile(path, []byte(onePagePDF), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := extract(path, 1, ""); err == nil {
+		t.Fatal("expected an error for an out-of-range page number")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "page1.png")); !os.IsNotExist(err) {
+		t.Errorf("expected no page1.png to be written for an out-of-range page number, got %v", err)
 	}
 }
