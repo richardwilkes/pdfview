@@ -33,7 +33,7 @@ type jpxRaster struct {
 	samples []byte // ncomp bytes per pixel, row-major.
 	alpha   []byte // One byte per pixel, nil when the payload carries no opacity channel.
 	w, h    int
-	ncomp   int // Color components: 1 (gray or palette index) or 3 (RGB after the payload's own color transform).
+	ncomp   int // Color components: 1 (gray or palette index), 3 (RGB after the payload's own color transform), or 4 (CMYK).
 }
 
 // decodeJPX handles JPXDecode payloads through the adopted JPEG 2000 decoder, which performs the wavelet, color, and
@@ -59,12 +59,24 @@ func (dec *decoder) decodeJPX() (*Image, error) {
 	mapping := jpxMapping(space)
 	pix := make([]byte, raster.w*raster.h*4)
 	hasAlpha := false
-	if raster.ncomp == 1 {
+	switch raster.ncomp {
+	case 1:
 		lut := mapping.lut(space, 8)
 		for i, s := range raster.samples {
 			raster.put(pix, i, lut[s], &hasAlpha)
 		}
-	} else {
+	case 4:
+		// CMYK converts through the space per pixel, the dctCMYK shape without its Adobe re-inversion: JPX samples
+		// arrive as true ink values, and the oracle renders them through the same ICC-backed DeviceCMYK conversion the
+		// DCT goldens pin (images-jpx-cmyk.pdf matches the k-operator conversion on every patch, both arms).
+		comps := make([]float32, 4)
+		for i := range raster.w * raster.h {
+			for c := range 4 {
+				comps[c] = mapping.apply(uint32(raster.samples[i*4+c]), c)
+			}
+			raster.put(pix, i, space.ToNRGBA(comps), &hasAlpha)
+		}
+	default:
 		conv := newJPX3(space, mapping)
 		for i := range raster.w * raster.h {
 			raster.put(pix, i, conv.at(raster.samples[i*3], raster.samples[i*3+1], raster.samples[i*3+2]), &hasAlpha)
@@ -101,14 +113,19 @@ func (dec *decoder) jpxGrayPlane() (gray []byte, w, h int, err error) {
 }
 
 // grayPlane reduces the raster to one byte per pixel: the samples themselves when the payload is single-component,
-// else the truncated mean of the three color samples.
+// else the truncated mean of the color samples. The three-component mean is the oracle's reduction (see jpxGrayPlane);
+// a four-component payload in a mask role has no oracle pin, so the same mean extends to it as the bounded default.
 func (r *jpxRaster) grayPlane() []byte {
 	if r.ncomp == 1 {
 		return r.samples
 	}
 	out := make([]byte, r.w*r.h)
 	for i := range out {
-		out[i] = byte((uint32(r.samples[i*3]) + uint32(r.samples[i*3+1]) + uint32(r.samples[i*3+2])) / 3)
+		sum := uint32(0)
+		for c := range r.ncomp {
+			sum += uint32(r.samples[i*r.ncomp+c])
+		}
+		out[i] = byte(sum / uint32(r.ncomp))
 	}
 	return out
 }
@@ -166,8 +183,8 @@ func jpxRasterFor(payload []byte, indexed bool) (*jpxRaster, error) {
 	if int64(cfg.Width)*int64(cfg.Height) > budget {
 		return nil, ErrTooLarge
 	}
-	if jpxWantsComponents(payload, bare, cfg, indexed) {
-		if raster, compErr := jpxComponentRaster(payload, bare, budget); compErr == nil {
+	if want, cmyk := jpxWantsComponents(payload, bare, cfg, indexed); want {
+		if raster, compErr := jpxComponentRaster(payload, bare, budget, cmyk); compErr == nil {
 			return raster, nil
 		}
 	}
@@ -179,34 +196,52 @@ func jpxRasterFor(payload []byte, indexed bool) (*jpxRaster, error) {
 }
 
 // jpxEnumSYCC is the `colr` box enumerated value for sYCC, whose luma/chroma components only become color after the
-// container applies its transform — machinery the components path skips.
-const jpxEnumSYCC = 18
+// container applies its transform — machinery the components path skips. jpxEnumCMYK is the enumerated CMYK value,
+// whose four components must reach the PDF color pipeline as ink values rather than the decoder's own RGB rendering.
+const (
+	jpxEnumSYCC = 18
+	jpxEnumCMYK = 12
+)
 
 // jpxWantsComponents reports whether the payload must be read as raw codestream components rather than through the
-// decoder's own rendering. The components path is the exception, never the default: it deliberately applies none of a
-// JP2 container's palette, `cdef`, or color-space machinery, so it may only take over where the PDF layer discards
-// that machinery anyway or where the container carries none.
+// decoder's own rendering, and whether a four-component (CMYK) raster is expected. The components path is the
+// exception, never the default: it deliberately applies none of a JP2 container's palette, `cdef`, or color-space
+// machinery, so it may only take over where the PDF layer discards that machinery anyway or where the container
+// carries none.
 //
 // A single-component bare codestream always qualifies. It is the one shape whose raw sample values matter rather than
 // their rendered gray — under an /Indexed override each sample is a palette index — and it has no container at all.
 //
-// A JP2 container qualifies in two cases. Under an /Indexed PDF space a single-component container's own pclr/cmap
+// A JP2 container qualifies in three cases. Under an /Indexed PDF space a single-component container's own pclr/cmap
 // palette is suppressed and its samples are the PDF palette's indices instead, the oracle's rule (images-jpx-ixjp2.pdf
-// pins both halves: the same payload under /DeviceGray keeps the container's palette). Otherwise it qualifies only to
-// normalize a precision the image path cannot: that path keeps a deep component's high byte, the correct truncation at
-// 16 bits and at no other depth. Precisions of 8 and 16 therefore stay on the image path, and so does any container
-// carrying a palette, CIELab parameters, an sYCC enumerated space, or a `cdef` opacity channel — none of which the
-// components path would apply, and none of which the corpus pairs with an odd precision.
-func jpxWantsComponents(payload []byte, bare bool, cfg image.Config, indexed bool) bool {
+// pins both halves: the same payload under /DeviceGray keeps the container's palette). An enumerated-CMYK container
+// with exactly four components and no palette, CIELab parameters, or opacity channel must deliver ink values: the
+// decoder's own rendering bakes in a naive CMYK→RGB formula, while the oracle converts through the same ICC-backed
+// DeviceCMYK path as every other CMYK sample source (images-jpx-cmyk.pdf pins both the embedded-colr and the explicit
+// /DeviceCMYK arm to it). Otherwise a container qualifies only to normalize a precision the image path cannot: that
+// path keeps a deep component's high byte, the correct truncation at 16 bits and at no other depth. Precisions of 8
+// and 16 therefore stay on the image path, and so does any container carrying a palette, CIELab parameters, an sYCC
+// enumerated space, or a `cdef` opacity channel — none of which the components path would apply, and none of which
+// the corpus pairs with an odd precision.
+func jpxWantsComponents(payload []byte, bare bool, cfg image.Config, indexed bool) (want, cmyk bool) {
 	if bare {
-		return cfg.ColorModel == stdcolor.GrayModel || cfg.ColorModel == stdcolor.Gray16Model
+		return cfg.ColorModel == stdcolor.GrayModel || cfg.ColorModel == stdcolor.Gray16Model, false
 	}
 	info, err := jpxInfo(payload)
 	if err != nil || len(info.Components) == 0 {
-		return false
+		return false, false
 	}
 	if indexed && len(info.Components) == 1 {
-		return true
+		return true, false
+	}
+	machinery := info.Palette != nil || info.CIELab != nil
+	for _, ch := range info.Channels {
+		if ch.Typ == 1 || ch.Typ == 2 { // Opacity and premultiplied opacity.
+			machinery = true
+		}
+	}
+	if info.EnumCS == jpxEnumCMYK && len(info.Components) == 4 && !machinery {
+		return true, true
 	}
 	odd := false
 	for _, c := range info.Components {
@@ -215,15 +250,7 @@ func jpxWantsComponents(payload []byte, bare bool, cfg image.Config, indexed boo
 			break
 		}
 	}
-	if !odd || info.Palette != nil || info.CIELab != nil || info.EnumCS == jpxEnumSYCC {
-		return false
-	}
-	for _, ch := range info.Channels {
-		if ch.Typ == 1 || ch.Typ == 2 { // Opacity and premultiplied opacity.
-			return false
-		}
-	}
-	return true
+	return odd && !machinery && info.EnumCS != jpxEnumSYCC, false
 }
 
 // jpxInfo reads a JP2 container's boxes and its codestream's SIZ segment without decoding a pixel.
@@ -365,7 +392,7 @@ func jpxImage(data []byte, bare bool) (img image.Image, err error) {
 
 // jpxComponentRaster decodes the payload to its native codestream components, keeping the raw sample values rather
 // than the decoder's rendering of them.
-func jpxComponentRaster(data []byte, bare bool, budget int64) (raster *jpxRaster, err error) {
+func jpxComponentRaster(data []byte, bare bool, budget int64, cmyk bool) (raster *jpxRaster, err error) {
 	defer recoverCodec(codecJPXNames, &err)
 	var comps []j2k.Component
 	if bare {
@@ -376,17 +403,17 @@ func jpxComponentRaster(data []byte, bare bool, budget int64) (raster *jpxRaster
 	if err != nil {
 		return nil, ErrBadImage
 	}
-	return jpxRasterOf(comps, budget)
+	return jpxRasterOf(comps, budget, cmyk)
 }
 
 // jpxRasterOf normalizes decoded components into a raster. One component becomes a gray (or palette-index) plane and
 // three become RGB — the codestream's own multiple-component transform has already run, so the three are color — while
-// any other count belongs on the image path. So do components whose native planes disagree in size, which a subsampled
-// or reduced-resolution reconstruction produces: this glue does not upsample, and no corpus payload reaches here with
-// them.
-func jpxRasterOf(comps []j2k.Component, budget int64) (*jpxRaster, error) {
+// four are accepted as ink values only when the routing established a CMYK payload. Any other count belongs on the
+// image path. So do components whose native planes disagree in size, which a subsampled or reduced-resolution
+// reconstruction produces: this glue does not upsample, and no corpus payload reaches here with them.
+func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, error) {
 	ncomp := len(comps)
-	if ncomp != 1 && ncomp != 3 {
+	if ncomp != 1 && ncomp != 3 && (!cmyk || ncomp != 4) {
 		return nil, ErrBadImage
 	}
 	w, h := comps[0].W, comps[0].H
@@ -552,8 +579,11 @@ func (dec *decoder) jpxSpace(ncomp int) pdfcolor.Space {
 	if space, err := dec.colorSpace(); err == nil && space.NComponents() == ncomp {
 		return space
 	}
-	if ncomp == 1 {
+	switch ncomp {
+	case 1:
 		return pdfcolor.DeviceGray
+	case 4:
+		return pdfcolor.DeviceCMYK
 	}
 	return pdfcolor.DeviceRGB
 }

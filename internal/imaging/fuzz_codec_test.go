@@ -62,7 +62,7 @@ func FuzzJPX(f *testing.F) {
 			if raster.w <= 0 || raster.h <= 0 || int64(raster.w)*int64(raster.h) > budget {
 				t.Fatalf("indexed=%v: raster is %dx%d against a budget of %d", indexed, raster.w, raster.h, budget)
 			}
-			if raster.ncomp != 1 && raster.ncomp != 3 {
+			if raster.ncomp != 1 && raster.ncomp != 3 && raster.ncomp != 4 {
 				t.Fatalf("indexed=%v: raster reports %d color components", indexed, raster.ncomp)
 			}
 			if want := raster.w * raster.h * raster.ncomp; len(raster.samples) != want {

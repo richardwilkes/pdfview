@@ -94,6 +94,7 @@ dump images-jpx-depth
 dump images-jpx-smask
 dump images-jpx-stencil
 dump images-jpx-ixjp2
+dump images-jpx-cmyk
 dump images-interpolate
 dump shading-axial
 dump shading-radial

@@ -425,8 +425,30 @@ once per milestone.
   hand-assembled EnumCS 12 container, mirroring the palette JP2's precedent), falling back to documenting the gap
   if the generator route or MuPDF acceptance fails.
 
-  Remaining before closeout: the `FuzzJPX` re-soak over the fixed tree (in flight) and the enumerated-CMYK corpus
-  attempt (in flight).
+  **Enumerated-CMYK JPX closed (2026-08-03).** The M4 generator gap fell to the palette JP2's precedent: a worker
+  encoded 4-component raw input (`opj_compress -F 64,64,4,8,u@1x1:1x1:1x1:1x1 -mct 0` — the `-mct 0` is mandatory,
+  since the encoder otherwise applies RGB→YCC to any input of three or more components, and it never writes EnumCS
+  12 on its own, labeling 4-component output sRGB by default and sYCC under `-mct 0`) and hand-assembled the
+  container (`ihdr` NC 4 BPC 7, `colr` METH 1 EnumCS 12, no `cdef`). `images-jpx-cmyk.pdf` carries the payload in
+  two arms — no `/ColorSpace`, and explicit `/DeviceCMYK` — over patches whose K-only, CMY-composite, and rich
+  blacks separate the candidate conversion formulas. The oracle renders both arms identically through MuPDF's
+  ICC-backed CMYK conversion (pure cyan → the (0,174,239) US-Web-Coated primary; the three blacks stay distinct at
+  35/31/32, 54/54/57, and 0/0/0), which is exactly the conversion `internal/color` already captures for DCT CMYK
+  and the `k` operator — and not the vendored decoder's naive `255−min` formula, which collapses the blacks. The
+  glue therefore routes it away from the vendored rendering: `jpxWantsComponents` grew a third container case
+  (EnumCS 12, exactly four components, no palette/CIELab/opacity machinery → raw component planes as ink values,
+  reported via a second return so `jpxRasterOf` only accepts four planes on that verdict), `decodeJPX` converts
+  ncomp=4 per pixel through the matching space (the dctCMYK shape minus its Adobe re-inversion, which is a DCT
+  storage quirk), `jpxSpace` falls back to DeviceCMYK at arity 4 so both arms meet the oracle, and `grayPlane`
+  generalizes its truncated mean to the raster's own component count (unpinned for CMYK in a mask role — a bounded
+  default, documented as such). Pinned by `TestParity/images-jpx-cmyk` within `DefaultThresholds` (no per-golden
+  thresholds.json), three new `TestJPXComponentsGate` rows, a four-component `grayPlane` case, and the `FuzzJPX`
+  postcondition widened to admit ncomp 4. The regeneration (this milestone's one) left all 69 pre-existing goldens
+  byte-identical; the corpus now counts 70. `./build.sh -a` green. mutool 1.28.1 agreed with the 1.27.2 oracle on
+  every sampled patch, so the pin is stable across at least two MuPDF releases.
+
+  Remaining before closeout: the `FuzzJPX` re-soak, restarted once more so the 2 h run covers the final integrated
+  tree (the SIZ-swap guard plus the CMYK routing).
 
 Port fallbacks (appendices) insert 2–4 additional milestones for the affected codec, matching the original
 from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: core 5/3 path → breadth).

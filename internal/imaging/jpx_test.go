@@ -64,13 +64,13 @@ func TestJPXNormalizeIgnoresSignedness(t *testing.T) {
 	for _, precision := range []int{4, 8, 12, 16} {
 		unsigned, err := jpxRasterOf([]j2k.Component{
 			{W: 4, H: 1, Precision: precision, Samples: samples},
-		}, maxImagePixels)
+		}, maxImagePixels, false)
 		if err != nil {
 			t.Fatalf("precision %d unsigned: %v", precision, err)
 		}
 		signed, err := jpxRasterOf([]j2k.Component{
 			{W: 4, H: 1, Precision: precision, Signed: true, Samples: samples},
-		}, maxImagePixels)
+		}, maxImagePixels, false)
 		if err != nil {
 			t.Fatalf("precision %d signed: %v", precision, err)
 		}
@@ -109,6 +109,12 @@ func TestJPXGrayPlaneMean(t *testing.T) {
 	if got := one.grayPlane(); len(got) != 2 || got[0] != 3 || got[1] != 7 {
 		t.Fatalf("a one-component raster reduced to %v", got)
 	}
+	// A four-component raster reduces by the same truncated mean over its own count. No oracle pin covers a CMYK
+	// payload in a mask role; the mean is the bounded default, not observed behavior.
+	four := &jpxRaster{samples: []byte{255, 0, 0, 0}, w: 1, h: 1, ncomp: 4}
+	if got := four.grayPlane(); len(got) != 1 || got[0] != 63 {
+		t.Fatalf("a four-component raster reduced to %v, want [63]", got)
+	}
 }
 
 // TestJPXComponentsGate pins which payloads leave the decoder's own rendering for the raw component planes. The
@@ -117,13 +123,17 @@ func TestJPXGrayPlaneMean(t *testing.T) {
 // no correct answer and the container carries nothing the path would drop. Every combination below has corpus goldens
 // behind it, which is what keeps the gate from widening on intuition.
 func TestJPXComponentsGate(t *testing.T) {
-	const depth = "images-jpx-depth.pdf"
+	const (
+		depth = "images-jpx-depth.pdf"
+		cmyk  = "images-jpx-cmyk.pdf"
+	)
 	for _, tc := range []struct {
-		file    string
-		why     string
-		stream  int
-		indexed bool
-		want    bool
+		file     string
+		why      string
+		stream   int
+		indexed  bool
+		want     bool
+		wantCMYK bool
 	}{
 		{file: depth, stream: 0, want: true, why: "12-bit gray"},
 		{file: depth, stream: 1, want: true, why: "12-bit RGB"},
@@ -137,6 +147,12 @@ func TestJPXComponentsGate(t *testing.T) {
 		{file: "images-jpx-alpha1.pdf", stream: 0, want: false, why: "a cdef opacity channel"},
 		{file: "images-jpx-raw.pdf", stream: 0, want: false, why: "a three-component bare codestream"},
 		{file: "images-jpx-csoverride.pdf", stream: 2, indexed: true, want: true, why: "a bare index codestream"},
+		{file: cmyk, stream: 0, want: true, wantCMYK: true, why: "enumerated-CMYK JP2, embedded colr"},
+		{file: cmyk, stream: 1, want: true, wantCMYK: true, why: "the same payload under /DeviceCMYK"},
+		{
+			file: cmyk, stream: 0, indexed: true, want: true, wantCMYK: true,
+			why: "CMYK routing is decided by the container, not the /Indexed verdict",
+		},
 	} {
 		d, streams := corpusImageStreams(t, tc.file)
 		var payloads [][]byte
@@ -154,9 +170,10 @@ func TestJPXComponentsGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s stream %d: %v", tc.file, tc.stream, err)
 		}
-		if got := jpxWantsComponents(payload, bare, cfg, tc.indexed); got != tc.want {
-			t.Fatalf("%s stream %d (%s) with indexed=%v routed to components=%v, want %v",
-				tc.file, tc.stream, tc.why, tc.indexed, got, tc.want)
+		got, gotCMYK := jpxWantsComponents(payload, bare, cfg, tc.indexed)
+		if got != tc.want || gotCMYK != tc.wantCMYK {
+			t.Fatalf("%s stream %d (%s) with indexed=%v routed to components=%v cmyk=%v, want %v %v",
+				tc.file, tc.stream, tc.why, tc.indexed, got, gotCMYK, tc.want, tc.wantCMYK)
 		}
 	}
 }
