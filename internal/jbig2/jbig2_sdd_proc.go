@@ -24,9 +24,14 @@
 //   - Restored PDFium's export-count guard on the loop that fills the dictionary (`j >= SDNUMEXSYMS`), which bounds
 //     what is exported by what the segment declared even if the run lengths say otherwise.
 //   - Bounded the arithmetic export-flag loop by the decoder's end of input (the GRD/GRRD IsComplete pattern, which
-//     PDFium does not apply to this loop): a zero-length export run is legitimate mid-stream, but an exhausted
-//     decoder can return zero-length runs forever, and EXINDEX then never advances — a live CPU spin on hostile
-//     input. The Huffman export loop needs no guard; its bit reads fail at end of stream.
+//     PDFium does not apply to this loop) and by a cap on zero-length runs: a zero-length export run is legitimate
+//     mid-stream, but a decoder that has run out of data can return zero-length runs forever while EXINDEX never
+//     advances — a live CPU spin on hostile input. End of input alone is not enough: a decoder parked on a terminal
+//     0xFF marker pads 1-bits without advancing its byte position (byteIn's b1 > 0x8f branch), so IsComplete never
+//     flips while the spin continues. Advancing runs are bounded by the loop condition itself, so only zero-length
+//     runs are counted; a conforming stream needs at most one, and a cap of one per flag slot plus one rejects
+//     nothing an encoder can emit. PDFium's loop is unguarded against both spins. The Huffman export loop needs no
+//     guard; its bit reads consume the stream and fail at end of input.
 //   - Charges every bitmap this file allocates — the Huffman height-class collective bitmap, each symbol split out of
 //     it, and each input symbol duplicated on export — against the decode's cumulative pixel budget (embedded.go),
 //     and hands that budget to the procs it drives, whose own bitmaps are charged there.
@@ -239,6 +244,7 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 	CUREXFLAG := false
 	EXINDEX := uint32(0)
 	num_ex_syms := uint32(0)
+	zeroRuns := uint64(0)
 	for EXINDEX < s.SDNUMINSYMS+s.SDNUMNEWSYMS {
 		// 零长度游程本身合法，但数据耗尽后解码器可能恒返回零游程，EXINDEX 便停滞不前；
 		// 与 GRD/GRRD 相同，先检查数据是否已经读完，避免无限循环
@@ -248,6 +254,15 @@ func (s *SDDProc) DecodeArith(arithDecoder *ArithDecoder, gbContexts, grContexts
 		EXRUNLENGTH, ok := IAEX.Decode(arithDecoder)
 		if !ok {
 			return nil, errors.New("failed to decode exrunlength")
+		}
+		// 解码器停在终止标记 0xFF 上时字节位置不再前进，IsComplete 恒为假，却可能无限返回零游程；
+		// 前进的游程已受循环条件约束，故只需对零游程计数设限——合法流至多需要一个零游程，
+		// 超过槽位总数加一必是原地空转
+		if EXRUNLENGTH == 0 {
+			zeroRuns++
+			if zeroRuns > uint64(len(EXFLAGS))+1 {
+				return nil, errors.New("export flag runs made no progress")
+			}
 		}
 		newExSize := uint64(EXINDEX) + uint64(uint32(EXRUNLENGTH))
 		if newExSize > uint64(len(EXFLAGS)) {
