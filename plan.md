@@ -299,7 +299,7 @@ once per milestone.
   Deferred to M5: enumerated-CMYK JPX (no generator path; the library's own conversion covers the no-override
   case), the odd-precision-plus-container-machinery combinations above, and whether the canvas edge-AA divergence
   is worth a canvas-side fix. All corpus checks, TestParity 69/69, and `./build.sh -a` green.
-- **M5 — Hardening and closeout. IN PROGRESS (2026-08-03).** Every gate the milestone names has run; the cap audit
+- **M5 — Hardening and closeout. DONE (2026-08-03).** Every gate the milestone names has run; the cap audit
   found real defects in the JPX tree and they are fixed. What landed:
 
   **Gates.** veraPDF sweep: 2694 files, all opened, all rendered page 0, all searched, zero errors, zero hangs,
@@ -447,8 +447,15 @@ once per milestone.
   byte-identical; the corpus now counts 70. `./build.sh -a` green. mutool 1.28.1 agreed with the 1.27.2 oracle on
   every sampled patch, so the pin is stable across at least two MuPDF releases.
 
-  Remaining before closeout: the `FuzzJPX` re-soak, restarted once more so the 2 h run covers the final integrated
-  tree (the SIZ-swap guard plus the CMYK routing).
+  **The closing gate (2026-08-03): the `FuzzJPX` re-soak over the final tree — PASS.** Run at `f50a3fb` with the
+  whole hardening stack live (F1–F3 caps, the duplicate-SIZ guard, the CMYK component routing) and every corpus
+  payload and regression crasher among its 2733 baseline seeds: 2 h clean end to end, 1,182,724,697 execs at
+  ~165 k/s — 4.4× the throughput of the invalidated pre-fix soak, on a quiet machine, with an explicit
+  `-timeout 150m` per the recorded fuzz gotcha — no crashers, no hangs, coverage corpus grown to 2849. With that,
+  every gate this milestone names has run against what ships, and M5 — and the plan — is closed. Outstanding
+  beyond the plan's scope: F6 stays documented-not-fixed in PROVENANCE.md pending a payload-level reproduction,
+  the odd-precision-plus-container combinations and the canvas edge-AA divergence stay documented per Rich's
+  2026-08-03 decisions, and merging `jbig2-jpx` into `main` is Rich's call.
 
 Port fallbacks (appendices) insert 2–4 additional milestones for the affected codec, matching the original
 from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: core 5/3 path → breadth).
