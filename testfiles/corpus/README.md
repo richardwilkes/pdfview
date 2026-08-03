@@ -187,13 +187,22 @@ file was committed; the codings are exact, so the recorded pixels are byte-for-b
 
 ## JPX corpus (generated 2026-08-02)
 
-Twelve single-page files generated 2026-08-02 by a throwaway dev-time Go program (same convention as the image
+Sixteen single-page files generated 2026-08-02 by a throwaway dev-time Go program (same convention as the image
 corpus: only the outputs are committed; classic xref tables with mechanically computed offsets; uncompressed
 content streams; binary codec payloads with exact /Length values). Every source image is machine-drawn by the
 same program — a 64x64 or 96x96 RGB pattern (solid color bars over a smooth 2-D gradient over a hard-edged disc
-and stripes), a grayscale variant, an eight-level palette-index variant, and an RGBA variant whose alpha is a
-horizontal ramp — so no third-party image data is involved. Each image is drawn at 1.5 pt per sample, which at
-the goldens' 144 dpi render scale makes one source sample exactly 3x3 device pixels.
+and stripes), a grayscale variant, an eight-level palette-index variant, an RGBA variant whose alpha is a
+horizontal ramp, and deeper-precision variants of the RGB and grayscale patterns — so no third-party image data
+is involved. Each image is drawn at 1.5 pt per sample, which at the goldens' 144 dpi render scale makes one
+source sample exactly 3x3 device pixels.
+
+The deep-precision sources put the 8-bit pattern in the high bits and a deterministic left-to-right ramp in the
+bits below it, so the sub-8-bit content is never zero and never constant: the 12-bit gray sample is
+`grayAt<<4 | x/4`, the 16-bit gray sample is `grayAt<<8 | x*4`, and the 12-bit RGB samples are `r<<4 | x/4`,
+`g<<4 | y/4` and `b<<4 | 15-(x/4)`. Truncating those to 8 bits reproduces the 8-bit pattern exactly, so the
+goldens separate truncation from either rounding rule: rounding the discarded bits (`(v + 1<<(shift-1)) >>
+shift`) differs on 49% of the samples, and rescaling to the full 8-bit range (`round(v * 255 / (2^prec - 1))`)
+differs on 11%.
 
 The JPEG 2000 payloads were produced with OpenJPEG 2.5.4's `opj_compress` (`brew install openjpeg`), which is
 independent of any Go decoder; every lossless payload was verified to round-trip bit-exact through
@@ -213,6 +222,10 @@ independent of any Go decoder; every lossless payload was verified to round-trip
 | `images-jpx-raw.pdf` | *(defaults, `.j2k` output)* | 2787 B J2K |
 | `images-jpx-csoverride.pdf` | reuses the `-53` JP2 and the palette index J2K | 2872 B + 326 B |
 | `images-jpx-truncated.pdf` | the `-53` JP2 and the `-raw` J2K, each cut at 50% | 1436 B + 1393 B |
+| `images-jpx-depth.pdf` | `-F 64,64,1,12,u@1x1`; `-F 64,64,3,12,u@1x1:1x1:1x1`; `-F 64,64,1,16,u@1x1`; `-F 64,64,1,4,u@1x1` | 1320 B + 4368 B + 1586 B + 806 B JP2 |
+| `images-jpx-smask.pdf` | reuses the `-gray` JP2 and the `-53` JP2 as soft masks | 1054 B + 2872 B |
+| `images-jpx-stencil.pdf` | reuses the `-gray` JP2 | 1054 B JP2 |
+| `images-jpx-ixjp2.pdf` | reuses the hand-assembled palette JP2 twice | 469 B JP2 (x2) |
 
 Three payloads are not plain `opj_compress` output. The palette file's JP2 container is hand-assembled around a
 single-component 8-bit index codestream — signature, `ftyp`, `jp2h` (`ihdr` with NC 1, enumerated-sRGB `colr`,
@@ -222,7 +235,13 @@ itself from the PNG alpha channel) has its opacity channel's Typ patched from 1 
 know the color channels were premultiplied. The sYCC file needed no patching: given planar 4:2:0 raw input,
 `opj_compress` writes `colr` EnumCS 18 on its own.
 
-Two behaviors here diverge from ISO 32000 and are pinned to MuPDF, not to the specification:
+The `-F` rows read headerless input whose sample layout is fixed by the option: component planes back to back,
+one byte per sample at eight bits or fewer and two big-endian bytes above that (the `.raw` extension selects
+`opj_compress`'s big-endian reader). Those payloads are round-tripped against `opj_decompress`'s PGM/PPM output
+rather than its `.raw` output, because the `.raw` *writer* emits little-endian samples while the reader consumes
+big-endian ones.
+
+Several behaviors here diverge from ISO 32000 and are pinned to MuPDF, not to the specification:
 
 - MuPDF ignores `/SMaskInData` for JPXDecode entirely. The embedded opacity channel is applied whatever the
   value is (including 0, which per 7.4.9 should discard it), premultiplied data is never un-multiplied, and an
@@ -231,6 +250,19 @@ Two behaviors here diverge from ISO 32000 and are pinned to MuPDF, not to the sp
 - `mutool draw` exits nonzero on `images-jpx-truncated.pdf`: MuPDF runs OpenJPEG in strict mode, so a truncated
   codestream is a hard decode failure and both images are dropped rather than partially painted. This matches
   the pre-existing `images-jpx.pdf`, whose invalid payload fails the same way.
+- Bit depths other than 8 are shifted, not scaled. A codestream precision above 8 is truncated (`v >> (prec-8)`,
+  not rounded), and one below 8 is left-shifted (`v << (8-prec)`), so the 4-bit arm's maximum sample 15 renders
+  as 240 rather than 255 and the arm never reaches white. Both rules are pinned by `images-jpx-depth.pdf`.
+- `/ImageMask true` on a JPXDecode stream is ignored outright. In `images-jpx-stencil.pdf` MuPDF paints the
+  payload as an ordinary opaque grayscale image, with no trace of the current fill color and no transparency,
+  even though the dictionary has neither `/ColorSpace` nor `/BitsPerComponent`.
+- A JPXDecode `/SMask` whose payload has three components is reduced to alpha by the plain mean of the three,
+  `(R+G+B)/3` truncated — not by any luminance weighting (a 77/150/28 model misses by mean 9.4, max 60 of 255).
+- A JP2 container's own `pclr`/`cmap` palette is suppressed exactly when the PDF dictionary declares an
+  `/Indexed` colorspace, and applied otherwise. `images-jpx-ixjp2.pdf` pins both halves: the `/Indexed` arm
+  expands the raw index component through the PDF's lookup table, while the `/DeviceGray` arm gets the
+  container's palette and then loses the override to the usual component-count mismatch. Per 7.4.9 the
+  `/DeviceGray` arm should have shown the eight index values as near-black grays.
 
 | File | Contents |
 | --- | --- |
@@ -246,6 +278,10 @@ Two behaviors here diverge from ISO 32000 and are pinned to MuPDF, not to the sp
 | `images-jpx-raw.pdf` | A bare J2K codestream with no JP2 wrapper, so the colorspace can only come from the component count |
 | `images-jpx-csoverride.pdf` | PDF-side `/ColorSpace` overrides: RGB JP2 with `/DeviceRGB` (count matches, honored), the same payload with `/DeviceGray` (count mismatch — the payload's colorspace wins), and the bare index codestream with `[/Indexed /DeviceRGB 7 <lookup>]` twice, once with default `/Decode` and once with `/Decode [7 0]` (identical, since `/Decode` is ignored for JPXDecode) |
 | `images-jpx-truncated.pdf` | The `-53` JP2 payload and the `-raw` J2K payload, each cut in half mid-codestream with exact `/Length`; MuPDF warns and drops both images |
+| `images-jpx-depth.pdf` | Codestream precisions other than 8, all lossless, four arms: 12-bit grayscale, 12-bit RGB (RCT), 16-bit grayscale, 4-bit grayscale over the full 0..15 range. Every dictionary says `/BitsPerComponent 8` and carries no `/ColorSpace`, both of which must be ignored in favor of the codestream. The 12- and 16-bit sources carry a deliberate sub-8-bit ramp so truncation and rounding are distinguishable |
+| `images-jpx-smask.pdf` | JPX payloads in the `/SMask` role over light/dark backdrop bands, under a flat opaque `/DeviceRGB` base: the `-gray` payload as a `/DeviceGray` soft mask, and the three-component `-53` payload in that same one-component role |
+| `images-jpx-stencil.pdf` | The `-gray` payload behind `/ImageMask true` (no `/ColorSpace`, no `/BitsPerComponent`) painted with a dark blue fill over a pale yellow page — spec-illegal, so the golden pins MuPDF |
+| `images-jpx-ixjp2.pdf` | The hand-assembled palette JP2 under two PDF colorspaces: `[/Indexed /DeviceRGB 7 <lookup>]` whose eight-entry lookup deliberately shares no color with the container's `pclr`, and `/DeviceGray`. Which palette each arm shows says whether the container's palette was applied |
 
 ## Shading and pattern probes (generated 2026-07-11)
 

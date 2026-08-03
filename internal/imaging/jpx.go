@@ -89,32 +89,68 @@ func (r *jpxRaster) put(pix []byte, i int, out stdcolor.NRGBA, hasAlpha *bool) {
 }
 
 // jpxGrayPlane returns the payload's gray bytes for a JPX /SMask, the analog of dctGrayPlane. A soft mask should carry
-// one component; a color payload in that role reduces through the standard luminance weights.
+// one component; a color payload in that role reduces by the plain mean of the three, truncated. That is the oracle's
+// reduction, not a luminance weighting: a 77/150/28 model misses the golden of images-jpx-smask.pdf by mean 9.4 and
+// max 60 of 255.
 func (dec *decoder) jpxGrayPlane() (gray []byte, w, h int, err error) {
 	raster, err := dec.jpxRaster()
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	if raster.ncomp == 1 {
-		return raster.samples, raster.w, raster.h, nil
+	return raster.grayPlane(), raster.w, raster.h, nil
+}
+
+// grayPlane reduces the raster to one byte per pixel: the samples themselves when the payload is single-component,
+// else the truncated mean of the three color samples.
+func (r *jpxRaster) grayPlane() []byte {
+	if r.ncomp == 1 {
+		return r.samples
 	}
-	out := make([]byte, raster.w*raster.h)
+	out := make([]byte, r.w*r.h)
 	for i := range out {
-		c := stdcolor.NRGBA{R: raster.samples[i*3], G: raster.samples[i*3+1], B: raster.samples[i*3+2], A: 255}
-		if g, ok := stdcolor.GrayModel.Convert(c).(stdcolor.Gray); ok {
-			out[i] = g.Y
+		out[i] = byte((uint32(r.samples[i*3]) + uint32(r.samples[i*3+1]) + uint32(r.samples[i*3+2])) / 3)
+	}
+	return out
+}
+
+// jpxSoftMask reports whether the image's /SMask stream is a JPXDecode payload. The terminal filter of an image
+// stream's chain is its codec (ISO 32000-2 7.4.1), so the last /Filter name is the same verdict ImageFilterSplit
+// reaches without decoding the mask's bytes a second time.
+func (dec *decoder) jpxSoftMask() bool {
+	sm, ok := dec.softMaskStream()
+	if !ok {
+		return false
+	}
+	switch f := dec.d.Resolve(sm.Dict["Filter"]).(type) {
+	case cos.Name:
+		return isJPX(f)
+	case cos.Array:
+		if len(f) > 0 {
+			name, isName := dec.d.Resolve(f[len(f)-1]).(cos.Name)
+			return isName && isJPX(name)
 		}
 	}
-	return out, raster.w, raster.h, nil
+	return false
 }
 
 // jpxRaster decodes the payload, enforcing the pixel budget from the header parse before the decoder allocates — the
 // library documents that it sizes its buffers from the declared dimensions with no cap of its own.
-func (dec *decoder) jpxRaster() (*jpxRaster, error) { return jpxRasterFor(dec.data) }
+func (dec *decoder) jpxRaster() (*jpxRaster, error) { return jpxRasterFor(dec.data, dec.jpxIndexed()) }
 
-// jpxRasterFor is jpxRaster with the payload passed explicitly, so the fuzz target can drive the same budget checks
-// and the same recovery the production path applies.
-func jpxRasterFor(payload []byte) (*jpxRaster, error) {
+// jpxIndexed reports whether the dictionary's /ColorSpace resolves to an /Indexed space. That verdict, not anything in
+// the payload, decides whether a JP2 container's own palette applies; see jpxWantsComponents.
+func (dec *decoder) jpxIndexed() bool {
+	space, err := dec.colorSpace()
+	if err != nil {
+		return false
+	}
+	_, indexed := space.(*pdfcolor.Indexed)
+	return indexed
+}
+
+// jpxRasterFor is jpxRaster with the payload and the /Indexed verdict passed explicitly, so the fuzz target can drive
+// the same budget checks and the same recovery the production path applies.
+func jpxRasterFor(payload []byte, indexed bool) (*jpxRaster, error) {
 	budget := maxPixelsFor(len(payload))
 	bare := jpxIsCodestream(payload)
 	if err := jpxSizGuard(payload, bare, budget); err != nil {
@@ -130,12 +166,8 @@ func jpxRasterFor(payload []byte) (*jpxRaster, error) {
 	if int64(cfg.Width)*int64(cfg.Height) > budget {
 		return nil, ErrTooLarge
 	}
-	if bare && (cfg.ColorModel == stdcolor.GrayModel || cfg.ColorModel == stdcolor.Gray16Model) {
-		// A single-component bare codestream is the one shape whose raw sample values matter rather than their
-		// rendered gray: under an /Indexed override each sample is a palette index. Only bare codestreams expose the
-		// native planes — the JP2 container path decodes to an image.Image and nothing else — so a palettized JP2
-		// falls through below and renders through its own pclr/cmap boxes instead.
-		if raster, compErr := jpxComponentRaster(payload, budget); compErr == nil {
+	if jpxWantsComponents(payload, bare, cfg, indexed) {
+		if raster, compErr := jpxComponentRaster(payload, bare, budget); compErr == nil {
 			return raster, nil
 		}
 	}
@@ -144,6 +176,63 @@ func jpxRasterFor(payload []byte) (*jpxRaster, error) {
 		return nil, err
 	}
 	return jpxRasterFrom(decoded, budget)
+}
+
+// jpxEnumSYCC is the `colr` box enumerated value for sYCC, whose luma/chroma components only become color after the
+// container applies its transform — machinery the components path skips.
+const jpxEnumSYCC = 18
+
+// jpxWantsComponents reports whether the payload must be read as raw codestream components rather than through the
+// decoder's own rendering. The components path is the exception, never the default: it deliberately applies none of a
+// JP2 container's palette, `cdef`, or color-space machinery, so it may only take over where the PDF layer discards
+// that machinery anyway or where the container carries none.
+//
+// A single-component bare codestream always qualifies. It is the one shape whose raw sample values matter rather than
+// their rendered gray — under an /Indexed override each sample is a palette index — and it has no container at all.
+//
+// A JP2 container qualifies in two cases. Under an /Indexed PDF space a single-component container's own pclr/cmap
+// palette is suppressed and its samples are the PDF palette's indices instead, the oracle's rule (images-jpx-ixjp2.pdf
+// pins both halves: the same payload under /DeviceGray keeps the container's palette). Otherwise it qualifies only to
+// normalize a precision the image path cannot: that path keeps a deep component's high byte, the correct truncation at
+// 16 bits and at no other depth. Precisions of 8 and 16 therefore stay on the image path, and so does any container
+// carrying a palette, CIELab parameters, an sYCC enumerated space, or a `cdef` opacity channel — none of which the
+// components path would apply, and none of which the corpus pairs with an odd precision.
+func jpxWantsComponents(payload []byte, bare bool, cfg image.Config, indexed bool) bool {
+	if bare {
+		return cfg.ColorModel == stdcolor.GrayModel || cfg.ColorModel == stdcolor.Gray16Model
+	}
+	info, err := jpxInfo(payload)
+	if err != nil || len(info.Components) == 0 {
+		return false
+	}
+	if indexed && len(info.Components) == 1 {
+		return true
+	}
+	odd := false
+	for _, c := range info.Components {
+		if c.Precision != 8 && c.Precision != 16 {
+			odd = true
+			break
+		}
+	}
+	if !odd || info.Palette != nil || info.CIELab != nil || info.EnumCS == jpxEnumSYCC {
+		return false
+	}
+	for _, ch := range info.Channels {
+		if ch.Typ == 1 || ch.Typ == 2 { // Opacity and premultiplied opacity.
+			return false
+		}
+	}
+	return true
+}
+
+// jpxInfo reads a JP2 container's boxes and its codestream's SIZ segment without decoding a pixel.
+func jpxInfo(data []byte) (info *jp2.Info, err error) {
+	defer recoverCodec(codecJPXNames, &err)
+	if info, err = jp2.DecodeInfo(bytes.NewReader(data)); err != nil {
+		return nil, ErrBadImage
+	}
+	return info, nil
 }
 
 // jpxIsCodestream reports whether the payload is a bare codestream (the SOC marker) rather than a JP2 container. PDF
@@ -274,47 +363,101 @@ func jpxImage(data []byte, bare bool) (img image.Image, err error) {
 	return img, nil
 }
 
-// jpxComponentRaster decodes a bare codestream to its native single component, keeping the raw sample values.
-func jpxComponentRaster(data []byte, budget int64) (raster *jpxRaster, err error) {
+// jpxComponentRaster decodes the payload to its native codestream components, keeping the raw sample values rather
+// than the decoder's rendering of them.
+func jpxComponentRaster(data []byte, bare bool, budget int64) (raster *jpxRaster, err error) {
 	defer recoverCodec(codecJPXNames, &err)
-	comps, err := j2k.DecodeComponents(bytes.NewReader(data), j2k.Options{})
-	if err != nil || len(comps) != 1 {
+	var comps []j2k.Component
+	if bare {
+		comps, err = j2k.DecodeComponents(bytes.NewReader(data), j2k.Options{})
+	} else {
+		comps, err = jp2.DecodeComponents(bytes.NewReader(data), j2k.Options{})
+	}
+	if err != nil {
 		return nil, ErrBadImage
 	}
-	c := comps[0]
-	if c.W <= 0 || c.H <= 0 || c.Precision < 1 || c.Precision > 32 || len(c.Samples) < c.W*c.H {
+	return jpxRasterOf(comps, budget)
+}
+
+// jpxRasterOf normalizes decoded components into a raster. One component becomes a gray (or palette-index) plane and
+// three become RGB — the codestream's own multiple-component transform has already run, so the three are color — while
+// any other count belongs on the image path. So do components whose native planes disagree in size, which a subsampled
+// or reduced-resolution reconstruction produces: this glue does not upsample, and no corpus payload reaches here with
+// them.
+func jpxRasterOf(comps []j2k.Component, budget int64) (*jpxRaster, error) {
+	ncomp := len(comps)
+	if ncomp != 1 && ncomp != 3 {
 		return nil, ErrBadImage
 	}
-	if int64(c.W)*int64(c.H) > budget {
+	w, h := comps[0].W, comps[0].H
+	if w <= 0 || h <= 0 {
+		return nil, ErrBadImage
+	}
+	// The decoded planes need not match the header the budget was checked against, so re-check them, as jpxRasterFrom
+	// does for the image path.
+	if int64(w)*int64(h) > budget {
 		return nil, ErrTooLarge
 	}
-	// Samples arrive in the signed domain: the display level shift the encoder subtracted goes back on, the result is
-	// clamped to the component's own range, and depths past 8 bits drop their low bits (this engine renders through
-	// 8-bit pixels, as MuPDF does).
-	offset := int64(1) << (c.Precision - 1)
-	maxVal := int64(1)<<c.Precision - 1
-	shift := 0
-	if c.Precision > 8 {
-		shift = c.Precision - 8
-	}
-	samples := make([]byte, c.W*c.H)
-	for i := range samples {
-		v := int64(c.Samples[i]) + offset
-		if v < 0 {
-			v = 0
-		} else if v > maxVal {
-			v = maxVal
+	for _, c := range comps {
+		if c.W != w || c.H != h || c.Precision < 1 || c.Precision > 32 || len(c.Samples) < w*h {
+			return nil, ErrBadImage
 		}
-		samples[i] = byte(v >> shift)
 	}
-	return &jpxRaster{samples: samples, w: c.W, h: c.H, ncomp: 1}, nil
+	samples := make([]byte, w*h*ncomp)
+	for ci, c := range comps {
+		norm := newJPXNorm(c.Precision)
+		for i, off := 0, ci; i < w*h; i, off = i+1, off+ncomp {
+			samples[off] = norm.at(c.Samples[i])
+		}
+	}
+	return &jpxRaster{samples: samples, w: w, h: h, ncomp: ncomp}, nil
+}
+
+// jpxNorm maps one component's samples from the decoder's signed domain onto the 8-bit values this pipeline renders.
+// The oracle shifts and never rounds or rescales: a precision above 8 drops its low bits (v >> (p−8)) and one below 8
+// left-shifts (v << (8−p)), so a 4-bit component's maximum sample 15 renders as 240 and the component never reaches
+// white. Precision alone decides all of it — the decoder documents signed and unsigned components alike as arriving
+// centered on zero with the encoder's DC level shift still subtracted, so the same offset restores both.
+type jpxNorm struct {
+	offset int64
+	maxVal int64
+	shift  int
+	up     bool
+}
+
+// newJPXNorm builds the normalizer for a component of the given precision, which must be 1 through 32.
+func newJPXNorm(precision int) jpxNorm {
+	n := jpxNorm{offset: int64(1) << (precision - 1), maxVal: int64(1)<<precision - 1}
+	switch {
+	case precision > 8:
+		n.shift = precision - 8
+	case precision < 8:
+		n.shift, n.up = 8-precision, true
+	}
+	return n
+}
+
+// at normalizes one sample.
+func (n jpxNorm) at(v int32) byte {
+	s := int64(v) + n.offset
+	if s < 0 {
+		s = 0
+	} else if s > n.maxVal {
+		s = n.maxVal
+	}
+	if n.up {
+		return byte(s << n.shift)
+	}
+	return byte(s >> n.shift)
 }
 
 // jpxRasterFrom flattens a decoded image into color samples plus straight alpha. The decoder emits image.Gray(16) for
 // one component and image.NRGBA(64) for every color form (RGB, sYCC, CIELab, ICC, CMYK, palette-expanded, and
-// gray+alpha), with alpha 255 where the payload defines no opacity. Deep forms keep only their high byte: the 16-bit
-// channels hold each sample's raw 0..2^P−1 value, and the jp2 package exposes no per-component precision to rescale
-// by, so anything but a true 16-bit component renders dark. No corpus payload exercises that yet.
+// gray+alpha), with alpha 255 where the payload defines no opacity. Deep forms keep only their high byte, since the
+// 16-bit channels hold each sample's raw 0..2^P−1 value: that is exactly the oracle's truncation at 16 bits and wrong
+// at every other depth, which is why jpxWantsComponents routes odd precisions to the components path instead. What
+// still arrives here at an odd precision is the combination that path declines to handle (a palette, CIELab, sYCC, or
+// an opacity channel), where rendering dark is preferred over dropping the container's color machinery.
 func jpxRasterFrom(img image.Image, budget int64) (*jpxRaster, error) {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()

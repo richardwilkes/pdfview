@@ -90,6 +90,10 @@ dump images-jpx-bypass
 dump images-jpx-raw
 dump images-jpx-csoverride
 dump images-jpx-truncated
+dump images-jpx-depth
+dump images-jpx-smask
+dump images-jpx-stencil
+dump images-jpx-ixjp2
 dump images-interpolate
 dump shading-axial
 dump shading-radial

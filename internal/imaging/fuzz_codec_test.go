@@ -43,31 +43,36 @@ func FuzzJBIG2(f *testing.F) {
 }
 
 // FuzzJPX drives raw JPXDecode payloads through jpxRasterFor, the entry point run() and alphaPlane reach, so the
-// header-parse budget check and the panic recovery wrap the third-party decoder exactly as they do in production. The
-// decoder must neither panic nor hang, and every raster it returns must be self-consistent and inside the budget the
-// payload's own size allows. Seeds are the corpus files' JPX payloads, both JP2-wrapped and bare codestreams.
+// header-parse budget check and the panic recovery wrap the third-party decoder exactly as they do in production. Each
+// payload runs under both /Indexed verdicts, since that flag selects between the container's own rendering and the raw
+// component planes. The decoder must neither panic nor hang, and every raster it returns must be self-consistent and
+// inside the budget the payload's own size allows. Seeds are the corpus files' JPX payloads, both JP2-wrapped and bare
+// codestreams.
 func FuzzJPX(f *testing.F) {
 	for _, seed := range codecSeeds(f, codecJPXNames) {
 		f.Add(seed.payload)
 	}
 	f.Fuzz(func(t *testing.T, payload []byte) {
-		raster, err := jpxRasterFor(payload)
-		if err != nil {
-			return
-		}
-		budget := maxPixelsFor(len(payload))
-		if raster.w <= 0 || raster.h <= 0 || int64(raster.w)*int64(raster.h) > budget {
-			t.Fatalf("raster is %dx%d against a budget of %d", raster.w, raster.h, budget)
-		}
-		if raster.ncomp != 1 && raster.ncomp != 3 {
-			t.Fatalf("raster reports %d color components", raster.ncomp)
-		}
-		if want := raster.w * raster.h * raster.ncomp; len(raster.samples) != want {
-			t.Fatalf("raster holds %d samples, want %d for %dx%d at %d components",
-				len(raster.samples), want, raster.w, raster.h, raster.ncomp)
-		}
-		if raster.alpha != nil && len(raster.alpha) != raster.w*raster.h {
-			t.Fatalf("raster holds %d alpha bytes, want %d", len(raster.alpha), raster.w*raster.h)
+		for _, indexed := range []bool{false, true} {
+			raster, err := jpxRasterFor(payload, indexed)
+			if err != nil {
+				continue
+			}
+			budget := maxPixelsFor(len(payload))
+			if raster.w <= 0 || raster.h <= 0 || int64(raster.w)*int64(raster.h) > budget {
+				t.Fatalf("indexed=%v: raster is %dx%d against a budget of %d", indexed, raster.w, raster.h, budget)
+			}
+			if raster.ncomp != 1 && raster.ncomp != 3 {
+				t.Fatalf("indexed=%v: raster reports %d color components", indexed, raster.ncomp)
+			}
+			if want := raster.w * raster.h * raster.ncomp; len(raster.samples) != want {
+				t.Fatalf("indexed=%v: raster holds %d samples, want %d for %dx%d at %d components",
+					indexed, len(raster.samples), want, raster.w, raster.h, raster.ncomp)
+			}
+			if raster.alpha != nil && len(raster.alpha) != raster.w*raster.h {
+				t.Fatalf("indexed=%v: raster holds %d alpha bytes, want %d", indexed, len(raster.alpha),
+					raster.w*raster.h)
+			}
 		}
 	})
 }

@@ -232,9 +232,10 @@ func inColorKey(samples, ranges []uint32) bool {
 // stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current paint. A
 // decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT and JBIG2
 // payloads decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half. JPX is declined
-// here rather than only in run(): applyStencilMask reaches this for a /Mask stencil stream too, and unpacking a
-// still-compressed continuous-tone payload as 1-bpc samples would punch pseudo-random holes in an otherwise correct
-// base image — the same verdict alphaPlane and run() reach for that codec.
+// outright: unpacking a still-compressed continuous-tone payload as 1-bpc samples would punch pseudo-random holes in an
+// otherwise correct base image, and the oracle evidence for the codec's stencil behavior covers only the /ImageMask
+// XObject, which run() diverts to decodeJPX before reaching here. What still arrives is applyStencilMask's /Mask
+// stencil stream, which no golden pins.
 func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	if isJPX(dec.codec) {
 		return nil, ErrUnsupportedCodec

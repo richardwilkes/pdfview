@@ -15,14 +15,14 @@
 // terminal image codec — none (raw samples), DCTDecode (stdlib image/jpeg, including CMYK/YCCK with the Adobe APP14
 // transform), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (the vendored internal/jbig2 decoder, see jbig2.go), or
 // JPXDecode (the vendored internal/jpeg2000 decoder, see jpx.go) — produces component samples. Samples are unpacked
-// per BitsPerComponent
-// (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through internal/color (whose device
-// conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG pixels flow through the same
-// captured tables as the k operator). /SMask soft masks and /Mask entries (stencil stream or color-key array) become
-// the alpha channel. The JBIG2Decode and JPXDecode paths are the M1 evaluation prototype: they call the pinned
-// third-party decoders directly rather than the vendored in-tree copies the plan settles on, and JPXDecode as an
-// ImageMask stencil is still declined (the pairing is spec-illegal). Every decode failure still degrades to a skipped
-// image — the page renders blank where the image would be, never an error to the caller.
+// per BitsPerComponent (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through
+// internal/color (whose device conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG pixels
+// flow through the same captured tables as the k operator). /SMask soft masks and /Mask entries (stencil stream or
+// color-key array) become the alpha channel. /ImageMask true on a JPXDecode image XObject is ignored outright rather
+// than declined, the oracle's posture for that spec-illegal pairing: the payload paints as an ordinary opaque image,
+// untinted by the fill color, while a /Mask stencil stream naming that codec is still declined, since no oracle
+// evidence covers it. Every decode failure still degrades to a skipped image — the page renders blank where the image
+// would be, never an error to the caller.
 //
 // Robustness: image dimensions are capped before any allocation, both absolutely (maxImagePixels) and in proportion to
 // the encoded payload's size (maxPixelsFor), so hostile dictionaries claiming absurd dimensions over a few payload
@@ -43,7 +43,7 @@ var (
 	// ErrBadImage is reported for malformed image dictionaries or undecodable payloads.
 	ErrBadImage = errors.New("malformed image")
 	// ErrUnsupportedCodec is reported for a codec this package declines outright, such as a JPXDecode payload used as
-	// an ImageMask stencil: the image renders blank, not an error.
+	// a /Mask stencil stream: the image renders blank, not an error.
 	ErrUnsupportedCodec = errors.New("unsupported image codec")
 	// ErrTooLarge is reported when the claimed dimensions exceed the allocation caps.
 	ErrTooLarge = errors.New("image too large")
@@ -191,10 +191,19 @@ func (dec *decoder) run() (*Image, error) {
 	if w*h > maxPixelsFor(len(dec.data)) {
 		return nil, ErrTooLarge
 	}
-	interpolate := dec.boolEntry("Interpolate", "I")
-	if dec.boolEntry("ImageMask", "IM") {
+	// A JPXDecode soft mask carries its always-smoothed posture onto the image it masks. The oracle paints an image and
+	// its mask each at its own resolution with its own filter, while compositeAlpha folds the mask into the image on
+	// the finer of the two grids, so the combined raster must be sampled the way the mask alone would have been —
+	// otherwise a mask finer than the 2x magnification band renders its coverage steps hard (images-jpx-smask.pdf pins
+	// it: an 8x8 base under a 64x64 JPX mask at 2.08x and 3.13x).
+	interpolate := dec.boolEntry("Interpolate", "I") || dec.jpxSoftMask()
+	if dec.boolEntry("ImageMask", "IM") && !isJPX(dec.codec) {
 		// A stencil mask: one bit per sample regardless of any declared BitsPerComponent or ColorSpace (ISO 32000-2
-		// 8.9.6.2); Decode [1 0] flips polarity.
+		// 8.9.6.2); Decode [1 0] flips polarity. A JPXDecode payload is the one exception, and it is the oracle's, not
+		// the specification's: MuPDF ignores /ImageMask on that codec outright and paints the payload as an ordinary
+		// opaque image, with no fill-color tinting and no transparency, so the entry falls through to decodeJPX below
+		// (images-jpx-stencil.pdf pins it). The exception is scoped to this entry alone — a /Mask stencil stream still
+		// declines the codec in stencilPlane, where no oracle evidence covers it.
 		alpha, err := dec.stencilPlane(int(w), int(h))
 		if err != nil {
 			return nil, err

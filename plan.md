@@ -272,8 +272,33 @@ once per milestone.
   no JPX-specific absolute pixel cap — the sample-count proportional budget (83bdc3d) stays the only JPX-specific
   bound, accepting the measured ~90 B/px worst case (~6 GB peak for a crafted gray payload at the cap, ~2 GB RGB)
   in exchange for zero oracle divergence at large image sizes.
-- **M4 — JPX PDF semantics.** `/ColorSpace` precedence matrix, `/Decode`-with-Indexed, SMaskInData 0/1/2,
-  `/SMask`-as-JPX gray path, stencil posture, depth normalization — each pinned to oracle goldens.
+- **M4 — JPX PDF semantics. DONE (2026-08-02).** The three matrix rows M1 left unpinned got corpus files and fresh
+  oracle goldens (the milestone's one regeneration; all 65 pre-existing goldens byte-identical), and the glue grew
+  the vendored-component path M3 built the entry points for. New pins, each documented in the corpus README:
+  `images-jpx-depth` — MuPDF shifts, never rounds or rescales (>8-bit truncates `v>>(p-8)`, <8-bit left-shifts
+  `v<<(8-p)`, so 4-bit sample 15 renders 240; the sources carry a deliberate sub-8-bit ramp making truncation,
+  shift-rounding, and rescale-rounding mutually distinguishable, and MuPDF matched truncation on every disagreeing
+  sample). `images-jpx-smask` — a 3-component JPX `/SMask` reduces by the plain truncated mean `(R+G+B)/3`, not any
+  luminance weighting; the arm also exposed that a JPX soft mask's always-smoothed posture must carry onto the
+  raster it masks (compositeAlpha folds the mask onto the finer grid, so the combined image samples the way the
+  mask alone would have). `images-jpx-stencil` — MuPDF ignores `/ImageMask true` on JPXDecode outright and paints
+  the payload as an ordinary opaque image (neither drops nor thresholds); run() now diverts that pairing to
+  decodeJPX, while the `/Mask` stencil-stream path keeps declining (no oracle evidence covers it).
+  `images-jpx-ixjp2` — a JP2 container's own pclr/cmap palette is suppressed exactly when the PDF declares
+  `/Indexed` (raw indices feed the PDF lookup, via jp2.DecodeComponents); under any other space it applies, and the
+  post-palette component count then decides the usual override-arity rule (the `/DeviceGray` arm pins that half).
+  Glue: `jpxWantsComponents` routes to the component path only for the Indexed-single-component case and for odd
+  precisions (≠8/16) on containers carrying no palette/CIELab/sYCC/cdef-opacity — those combinations keep the image
+  path (odd-precision ones render dark; no corpus coverage, constraint documented in code). A shared `jpxNorm`
+  helper (signed-domain offset, clamp, shift) serves both the bare and container component paths; the bare path's
+  missing sub-8-bit left-shift was fixed by it. FuzzJPX now drives both `/Indexed` verdicts per payload. The
+  stencil corpus page is 144x144 pt so its full-page fill lands on integer raster rows at all three golden DPIs:
+  on a fractional page height, canvas v0.2.1's four-sample vertical coverage diverges from MuPDF's analytic
+  coverage on the partial bottom row (alpha 0 vs 16 on a 0.11 px sliver — a pre-existing engine-level divergence
+  every golden carries sub-threshold; on a 116 pt page that one row alone spent 1.47 of the 2.0 parity mean).
+  Deferred to M5: enumerated-CMYK JPX (no generator path; the library's own conversion covers the no-override
+  case), the odd-precision-plus-container-machinery combinations above, and whether the canvas edge-AA divergence
+  is worth a canvas-side fix. All corpus checks, TestParity 69/69, and `./build.sh -a` green.
 - **M5 — Hardening and closeout.** Cap audit, extended fuzz soak, veraPDF sweep, benchmarks (and the JBIG2 repack
   decision), `maxPixelsFor` tuning if real scans demand it (JBIG2's symbol reuse compresses better than the CCITT
   8192×-payload rationale assumes), docs cleanup: imaging package comment, README "Stubs" section and the
