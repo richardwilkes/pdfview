@@ -371,6 +371,10 @@ once per milestone.
   ~0.43 s per megapixel lossless (~110 B/px allocated), ~0.27 s lossy (~162 B/px). One anomaly recorded but not
   pursued: the 9/7 path allocates *more* than 5/3 (169.6 vs 116.3 MB) while running ~40 % faster on a 2.5× smaller
   payload, which looks like an allocation inefficiency in irreversible reconstruction rather than an inherent cost.
+  Quiet-machine re-measure (2026-08-03, M4 Max, 8 counts, spread under ±2 %): JBIG2 2.17 ms/op at the same 178
+  allocs (the original ~3 ms was load-inflated), JPX 5/3 0.379 s/op and 9/7 0.227 s/op — modestly faster than the
+  loaded run, with allocation profiles byte-for-byte identical (116.25 vs 169.60 MB/op), so the 9/7-allocates-more
+  anomaly is confirmed real rather than measurement noise. These are the numbers of record.
 
   **JBIG2 repack decision: moot, closed.** M2's glue already reads the packed bitmap through `Data()`/`Stride()`;
   there is no `image.Gray` intermediate to eliminate, and the benchmark's ~180 allocs/op confirms it.
@@ -395,9 +399,17 @@ once per milestone.
   divergence — now because the vendored decoder rejects the payload rather than because a stub declined it. The
   `internal/imaging` package comment needed no change (M4 already updated it).
 
-  Remaining before closeout: the `FuzzJPX` re-soak over the fixed tree, a quiet-machine benchmark re-measure, and
-  the M4-deferred items (enumerated-CMYK JPX, the odd-precision-plus-container combinations, and whether the canvas
-  edge-AA divergence is worth a canvas-side fix).
+  **M4-deferred items resolved (Rich, 2026-08-03).** Odd-precision-plus-container combinations: leave as documented
+  — the in-code constraint note stands, no corpus coverage; the 2694-file sweep exercised none, and there is no
+  oracle evidence to pin against without speculative fixture engineering. Revisit only if a real file surfaces.
+  Canvas edge-AA divergence: accepted as a documented engine-level divergence — sub-threshold on every golden,
+  pre-existing, not a JBIG2/JPX regression; any fix belongs in richardwilkes/canvas on its own schedule, outside
+  this plan. Enumerated-CMYK JPX: attempt a corpus file (the raw 4-component `opj_compress` route with a
+  hand-assembled EnumCS 12 container, mirroring the palette JP2's precedent), falling back to documenting the gap
+  if the generator route or MuPDF acceptance fails.
+
+  Remaining before closeout: the `FuzzJPX` re-soak over the fixed tree (in flight) and the enumerated-CMYK corpus
+  attempt (in flight).
 
 Port fallbacks (appendices) insert 2–4 additional milestones for the affected codec, matching the original
 from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: core 5/3 path → breadth).
