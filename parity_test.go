@@ -173,10 +173,10 @@ func parityRender(t *testing.T, golden *testsupport.Golden, doc *pdfview.Documen
 			compareHits(t, fmt.Sprintf("%s search %q", label, needle), again.SearchHits, render.Search[needle])
 		}
 	}
-	// images-jbig2's own golden records MuPDF padding its failed JBIG2 decode into a black square, which the
-	// blank-rendering stub deliberately does not reproduce; its pixel content is enforced in TestImageCorpusPixels
-	// against the images-jpx golden, whose page content is byte-identical apart from the codec name. Everything else
-	// about it (dims, stride, links) compares above.
+	// images-jbig2's own golden records MuPDF padding its failed JBIG2 decode into a black square, a divergence this
+	// engine deliberately does not reproduce (the vendored decoder rejects the garbage payload and the image renders
+	// blank); its pixel content is enforced in TestImageCorpusPixels against the images-jpx golden, whose page content
+	// is byte-identical apart from the codec name. Everything else about it (dims, stride, links) compares above.
 	if golden.Name == "images-jbig2" {
 		return
 	}

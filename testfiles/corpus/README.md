@@ -120,8 +120,9 @@ are binary with exact /Length values. Payload provenance:
   MMR bytes are exactly a CCITTFaxDecode K<0 payload.
 - The JBIG2 payload is a deliberately truncated segment header and the JPX payload lacks the JP2 signature box,
   so every decoder rejects them cleanly; MuPDF warns and the JPX page renders with the image absent. MuPDF's
-  jbig2 path instead pads the failed decode into a black square, which the pure-Go stub intentionally does not
-  reproduce (blank by design) — see TestImageCorpusPixels for how that file is pinned.
+  jbig2 path instead pads the failed decode into a black square, which this engine intentionally does not
+  reproduce (the vendored decoder rejects the payload and the image renders blank) — see TestImageCorpusPixels
+  for how that file is pinned.
 
 | File | Contents |
 | --- | --- |
@@ -132,8 +133,8 @@ are binary with exact /Length values. Payload provenance:
 | `images-inline.pdf` | Inline images: raw binary with /L, ASCIIHexDecode, a named colorspace from page resources, FlateDecode with /L, and /D [1 0] |
 | `images-smask.pdf` | /SMask alpha (mask dimensions differ from the base image), a stencil /Mask stream, and a color-key /Mask array |
 | `images-ccitt.pdf` | The G4 payload twice: default decoding and /BlackIs1 true |
-| `images-jbig2.pdf` | JBIG2Decode stub coverage (truncated payload; see above) |
-| `images-jpx.pdf` | JPXDecode stub coverage (invalid payload; see above) |
+| `images-jbig2.pdf` | JBIG2Decode damaged-payload coverage (truncated payload; see above) |
+| `images-jpx.pdf` | JPXDecode damaged-payload coverage (invalid payload; see above) |
 | `images-interpolate.pdf` | The same checkerboard drawn magnified with and without /Interpolate, pinning the sampling-filter mapping |
 
 ## JBIG2 codec corpus (generated 2026-08-02)

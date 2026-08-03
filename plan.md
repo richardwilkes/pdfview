@@ -299,10 +299,105 @@ once per milestone.
   Deferred to M5: enumerated-CMYK JPX (no generator path; the library's own conversion covers the no-override
   case), the odd-precision-plus-container-machinery combinations above, and whether the canvas edge-AA divergence
   is worth a canvas-side fix. All corpus checks, TestParity 69/69, and `./build.sh -a` green.
-- **M5 — Hardening and closeout.** Cap audit, extended fuzz soak, veraPDF sweep, benchmarks (and the JBIG2 repack
-  decision), `maxPixelsFor` tuning if real scans demand it (JBIG2's symbol reuse compresses better than the CCITT
-  8192×-payload rationale assumes), docs cleanup: imaging package comment, README "Stubs" section and the
-  now-stale "no maintained pure-Go decoder exists" claim, parity carve-out resolution, corpus README provenance.
+- **M5 — Hardening and closeout. IN PROGRESS (2026-08-03).** Every gate the milestone names has run; the cap audit
+  found real defects in the JPX tree and they are fixed. What landed:
+
+  **Gates.** veraPDF sweep: 2694 files, all opened, all rendered page 0, all searched, zero errors, zero hangs,
+  slowest file 1.32 s — the first full sweep with both codecs live. Extended fuzz soaks, 2 h each, all PASS with no
+  crashers and no hangs: `FuzzJBIG2` 439.8 M execs (~57 k/s), `FuzzJPX` 269.1 M execs, `FuzzImaging` 86.5 M execs.
+  The JBIG2 number is the meaningful one for M2's hardening — its predecessors died at ~9 min and ~52 min, so a
+  clean 440 M-exec run closes that thread. Note the JPX soak ran against the *pre-fix* tree (Go compiles the fuzz
+  binary at launch and the fixes below landed mid-run), so a re-soak over the fixed tree is required before this
+  milestone closes.
+
+  **Cap audit (the milestone's main find).** An independent read-the-code audit of every file-driven allocation in
+  both vendored trees, cross-checked against the glue's guards. `internal/jbig2` came back clean: all ten guards M2
+  and its two follow-up rounds claim were found, each dominating the site it protects. The imaging glue came back
+  clean: every codec path charges its budget before allocating, and the fuzz entry points match production. But
+  `internal/jpeg2000` — the tree with far less scrutiny — had three real defects, two of them fatal, all confirmed
+  at the code before any fix was written. The common shape is that `jpxSizGuard` charges a budget in *samples*
+  (pixels × components), and each defect multiplies a budget-compliant allocation by a *count the budget does not
+  model*:
+  - **F1 (fatal)** — the COD quality-layer count is a raw `uint16` with only a `0→1` fixup and no cap anywhere, and
+    it multiplies the packet-sequence slice (`numLayers·numResolutions·numComps·maxPrec` `[4]int` tuples). An
+    **83-byte** codestream declaring `layers=0xFFFF` over a 1024×1024 single-component image demands **2.2 TB**.
+  - **F2 (fatal)** — the JP2 `cmap` box's channel count is uncapped (`len(c)/4`), and `applyPalette` allocates one
+    full w×h `int32` plane per channel, all retained. A **~41 KB** JP2 with 10240 cmap entries over a 2048×2048
+    image demands **~160 GB**, growing 16 MB per 4 payload bytes.
+  - **F3 (medium)** — the tile-part buffer is sized from `Psot` against a fixed 256 MiB absolute ceiling rather than
+    the input that carries it, so a **78-byte** payload allocates 256 MiB up front before the short read fails.
+
+  Why these mattered enough to fix rather than document: **a Go out-of-memory is an uncatchable `fatal error`**, so
+  `recoverCodec` cannot degrade the image to blank. F1 and F2 kill the process, breaking the never-an-error-to-the-
+  caller invariant in a way a panic never could. Neither fuzzer found them in ~700 M combined executions — both need
+  crafted header structure that mutation from small seeds will not synthesize — which is exactly the argument for
+  running a code audit alongside the soaks rather than trusting fuzzing alone.
+
+  **Fixes (in-tree, matching M2's posture on the JBIG2 tree).** `tier2.go` bounds the packet-sequence product
+  against a new `maxPackets` (1<<20, sized alongside its existing `maxPrecincts`/`maxCodeBlocks` siblings and
+  capping the slice near 32 MB); the guard sits before the progression-order switch, which was verified to dominate
+  all three sequence builders (each emits at most one packet per layer/resolution/component/precinct, and all three
+  are called only from `tryParseStandardLRCP`, itself single-caller). `box/jp2.go` refuses a `cmap` longer than 32
+  channels at parse — refused, never truncated, since a truncated map would mis-render — so the container falls back
+  to non-palette handling, with a defensive mirror of the same cap at `applyPalette`'s allocation site. `sod.go`
+  bounds `Psot` by the reader's unread length (every call site hands it a `*bytes.Reader`), with an incremental
+  `io.LimitReader` fallback for any future reader lacking `Len`. Each is pinned by a crafted-payload test in
+  `internal/jpeg2000/codestream/harden_test.go` and by a committed `FuzzJPX` regression seed, with an env-gated
+  regenerator so the seeds cannot drift from the builders that produced them. All four edits are documented in
+  `internal/jpeg2000/PROVENANCE.md` under a new "Allocation hardening" section; the vendored files keep their
+  upstream MIT provenance headers. Verified independently of the worker's claims: vendored tree tests green
+  uncached, **all goldens bit-identical** (so the caps reject nothing legitimate), seeds replay clean through the
+  production glue.
+
+  **F6 — investigated, hot path deliberately left unchanged.** The audit also flagged a suspected CPU spin in
+  `engine/tagtree.go`: `ProgressiveDecodeValue` iterates to its 65536 cap, and because `ResetKnown` is never called
+  in the decode path, a zero-bit-plane tag-tree parent saturated by one code-block leaves every later leaf in that
+  precinct spinning the full loop while consuming no input. The mechanism was confirmed at the `TagTree` API level
+  (a demonstration drove a root's `m` to 65536, after which a second leaf ran 65536 iterations on zero input), but
+  no payload-level reproduction was completed, and the obvious guard — terminate when an iteration consumes no
+  input — is **provably unsafe**: a legitimate leaf whose shared ancestors were saturated *below* the cap must run
+  no-op iterations at low thresholds before reading its own bit at a higher one, so that guard would consume the
+  wrong bits and change decoded values. A safe design exists (break only when the minimum path `m` reaches the
+  `2^maxBits` cap, which legitimate zero-bit-plane values — always well under 40 — never reach) and is recorded in
+  PROVENANCE for a properly-seeded pass. Correctness of the golden decodes outweighs a speculative guard with no
+  committed reproduction. Estimated exposure if reachable: ~76 KB payload → ~10–30 s spin, bounded but real.
+
+  **Benchmarks** (`internal/imaging/bench_codec_test.go`, fixtures + provenance under `testdata/bench/`, both
+  driving the production entry points): a 2550×3300 300-dpi scanned-text JBIG2 page (symbol dictionary + 3088 text
+  placements, jbig2enc 0.32) and 1024×1024 RGB JPX payloads under both wavelets (`opj_compress` 2.5.4, lossless 5/3
+  and lossy 9/7). Sources machine-drawn, only encoder outputs committed. JBIG2 symbol mode is essentially free per
+  pixel — a full 8.4 Mpx page decodes in ~3 ms at ~180 allocs, the 1.05 MB output plane dominating — because only
+  the placements are decoded and the rest is blitting cached symbol bitmaps. JPX is ~100× more expensive per pixel:
+  ~0.43 s per megapixel lossless (~110 B/px allocated), ~0.27 s lossy (~162 B/px). One anomaly recorded but not
+  pursued: the 9/7 path allocates *more* than 5/3 (169.6 vs 116.3 MB) while running ~40 % faster on a 2.5× smaller
+  payload, which looks like an allocation inefficiency in irreversible reconstruction rather than an inherent cost.
+
+  **JBIG2 repack decision: moot, closed.** M2's glue already reads the packed bitmap through `Data()`/`Stride()`;
+  there is no `image.Gray` intermediate to eliminate, and the benchmark's ~180 allocs/op confirms it.
+
+  **`maxPixelsFor` decision (Rich, 2026-08-03): leave unchanged.** The benchmark fixture is the first real data
+  point. At 300 dpi a scanned page uses 22.9 % of its budget (4493 B payload → 36.8 Mpx granted, 8.4 Mpx needed;
+  1873 px/byte against the 8192 the cap allows). But a 600-dpi probe of the same page (not committed) yielded 4788 B
+  for 33.7 Mpx — 7030 px/byte, headroom factor **1.17** — so a 600-dpi page with fewer distinct symbols or more
+  reuse would be rejected outright. The cap stays anyway: no real file fails (the 2694-file sweep and every golden
+  render), it is a *shared* cap across CCITT/raw/JBIG2, and it doubles as the JBIG2 decode-*work* bound — the same
+  budget that turned M1's 20.4 s DoS into 55 ms. Raising it on synthetic evidence would weaken that for every codec.
+  The knob is one line at `internal/imaging/imaging.go:62` if real 600-dpi scans ever demand it. Note the measured
+  ratio is conservative in the safe direction: the synthetic source carries no scanner noise, and noise inflates
+  payload bytes without adding pixels.
+
+  **Docs and carve-out.** README's Stubs section is gone: the Filters row now states real JBIG2 and JPX coverage,
+  the stale "no maintained pure-Go decoder exists for either" claim is removed, an "Out of scope" bullet keeps the
+  appearance-synthesis exclusion, both vendored trees have Architecture rows and a license/provenance paragraph, and
+  the fuzz-target count is corrected to twelve authored plus the two vendored. The corpus README and the
+  parity/render test comments no longer describe the codecs as stubs. **Carve-out resolved as the plan intended:**
+  our blank versus MuPDF's black square on the garbage `images-jbig2` payload remains the single documented
+  divergence — now because the vendored decoder rejects the payload rather than because a stub declined it. The
+  `internal/imaging` package comment needed no change (M4 already updated it).
+
+  Remaining before closeout: the `FuzzJPX` re-soak over the fixed tree, a quiet-machine benchmark re-measure, and
+  the M4-deferred items (enumerated-CMYK JPX, the odd-precision-plus-container combinations, and whether the canvas
+  edge-AA divergence is worth a canvas-side fix).
 
 Port fallbacks (appendices) insert 2–4 additional milestones for the affected codec, matching the original
 from-spec plan's phasing (JBIG2: generic → symbol/text → completeness; JPX: core 5/3 path → breadth).

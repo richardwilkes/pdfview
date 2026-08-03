@@ -45,7 +45,10 @@ panics never escape the public API (enforced by fuzzing).
 
 - **COS layer**: classic, stream, and hybrid xref; /Prev chains; object streams; repair scan for broken files.
 - **Filters**: Flate, LZW (both EarlyChange modes), ASCIIHex, ASCII85, RunLength, PNG/TIFF predictors, DCT
-  (including CMYK/YCCK with Adobe transforms), CCITT Group 3/4.
+  (including CMYK/YCCK with Adobe transforms), CCITT Group 3/4, JBIG2 (generic, symbol/text, halftone, and
+  refinement regions, arithmetic and Huffman/MMR coding, /JBIG2Globals), and JPX (JPEG 2000: 5/3 and 9/7
+  wavelets, tiles, precincts, palettes, sYCC, embedded alpha, bare codestreams, and the PDF-side /ColorSpace,
+  /SMaskInData, and /Indexed semantics pinned to MuPDF).
 - **Color**: DeviceGray/RGB/CMYK (behaviorally matched to MuPDF's ICC-backed conversions), CalGray/CalRGB
   (approximated by their device analogs), ICCBased (N-component fallback), Indexed, Separation/DeviceN with tint
   transforms. Lab is not supported.
@@ -55,9 +58,8 @@ panics never escape the public API (enforced by fuzzing).
 - **Graphics**: full path/clip/text operator set, form XObjects, images (including inline images, image masks,
   SMasks, color-key masking, /Interpolate), shadings types 1–7, tiling and shading patterns, transparency groups,
   soft masks, all 16 blend modes, annotation appearance streams (/AP /N).
-- **Stubs**: JBIG2 and JPX (JPEG 2000) images render blank with a debug log entry rather than erroring — no
-  maintained pure-Go decoder exists for either. Appearance-stream *synthesis* (drawing widgets that carry no /AP)
-  is likewise out of scope; annotations without a usable appearance draw nothing.
+- **Out of scope**: appearance-stream *synthesis* (drawing widgets that carry no /AP); annotations without a
+  usable appearance draw nothing.
 
 ## Usage
 
@@ -121,6 +123,8 @@ The public API lives in [pdf.go](pdf.go) (plus [drawpage.go](drawpage.go)); ever
 | `internal/type1` / `internal/font` | Font parsing, encodings, widths, glyph outlines |
 | `internal/content` | Content-stream interpreter; emits device calls |
 | `internal/imaging` | Image XObject decoding |
+| `internal/jbig2` | Vendored JBIG2 decoder, hardened in-tree (Apache-2.0, with PDFium BSD-3 and PDFBox notices) |
+| `internal/jpeg2000` | Vendored JPEG 2000 decoder (MIT) |
 | `internal/shading` | Shading types 1–7 parsed and tessellated |
 | `internal/device` | The device seam: one interpreter, N devices |
 | `internal/render` | **Sole canvas importer.** The raster device |
@@ -131,6 +135,11 @@ The content interpreter emits drawing operations through a `Device` interface; t
 canvas surface, and the structured-text device assembles characters, lines, and search quads from the same calls.
 Search runs its own interpreter pass at scale 1 so hit rectangles reproduce the C-float coordinate funnel of the
 original binding exactly.
+
+The two vendored decoder trees are pure Go and keep their upstream licenses (the repository's MPL-2.0 is
+file-scoped): `internal/jbig2` carries Apache-2.0 plus the PDFium BSD-3 and PDFBox notices its lineage requires,
+and `internal/jpeg2000` carries MIT. Each tree's PROVENANCE.md records the upstream commit vendored and the
+in-tree changes (allocation caps, loop guards, and PDF-profile entry points beyond what upstream ships).
 
 ## Testing scheme
 
@@ -146,8 +155,9 @@ original binding exactly.
   files, encrypted variants, public-domain IRS forms, the GLAIVE fixture, and one CC BY 4.0 cherry-pick from the
   [veraPDF corpus](https://github.com/veraPDF/veraPDF-corpus). The full veraPDF corpus (2694 files) is used as an
   offline soak (`testfiles/external/fetch-verapdf.sh` + `TestExternalCorpusSoak`), not committed.
-- Ten fuzz targets cover the parsing surfaces (open, filters, crypt, content, CMap, Type 1, font programs, imaging,
-  shading, stext); CI runs short smokes, and crashers found by longer local runs are committed as regression seeds.
+- Twelve fuzz targets cover the parsing surfaces (open, filters, crypt, content, CMap, Type 1, font programs,
+  imaging, the JBIG2 and JPX codec glue, shading, stext), and the vendored JPEG 2000 tree keeps its two upstream
+  targets; CI runs short smokes, and crashers found by longer local runs are committed as regression seeds.
 
 ## Building
 
