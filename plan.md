@@ -246,7 +246,10 @@ once per milestone.
   through IAFS, which has no out-of-band path, so every strip advances `NINSTANCES` toward the bounded
   `SBNUMINSTANCES`, and the halftone/pattern loops iterate fixed grid counts. The crasher is committed as FuzzJBIG2
   regression seed `8740de3ce74202c1` — the ~90 s spin now errors in microseconds (the seed run passes in 0.35 s
-  where it previously hung past any timeout), `./build.sh -a` green, soak relaunched over the fix.
+  where it previously hung past any timeout), `./build.sh -a` green. The 2 h FuzzJBIG2 soak relaunched over the fix
+  (commit d48a3d7) then ran clean end to end — 448.8 M execs at ~62 k/s, PASS, no hangs or crashes — the first
+  fully clean multi-hour soak over the hardened tree (its predecessors died at ~9 min and ~52 min). JBIG2 hardening
+  is closed until M5's extended soak.
 - **M3 — JPX integration. DONE (2026-08-02).** Vendored `mububoki/jpeg2000 v1.0.0 @6bfb77fe2e65` into
   `internal/jpeg2000/` (commit d1d5c23): 69 decoder `.go` files byte-identical to upstream modulo the provenance
   header line and import rewrites (independently diff-audited — only `j2k/reader.go` and `jp2/reader.go` differ, for
