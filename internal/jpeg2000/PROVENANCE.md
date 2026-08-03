@@ -67,8 +67,9 @@ the decoder path is now covered only by the opt-in ISO conformance suite (`TestC
 
 ## Local modifications
 
-Only four mechanical changes were made. A diff of every vendored `.go` file against the pinned upstream commit, with
-the provenance line stripped and the import rewrites reversed, is empty except for the two files in the third row.
+Four mechanical changes and four allocation-hardening guards were made. A diff of every vendored `.go` file against the
+pinned upstream commit, with the provenance line stripped and the import rewrites reversed, is empty except for the two
+files in the third row of the first table and the four files in the hardening table below.
 
 | Change | Where | Why |
 | --- | --- | --- |
@@ -80,6 +81,31 @@ the provenance line stripped and the import rewrites reversed, is empty except f
 The upstream package doc comments for `j2k` still describe `Encode`, `EncodeWithOptions`, `EncodeComponents`, and
 `EncodeOptions`, which the prune removed. They were left alone: rewriting them is a judgement call, not a mechanical
 change, and keeping the diff against upstream to the four items above is worth more than the stale sentences cost.
+
+### Allocation hardening
+
+The same in-tree hardening posture applied to `internal/jbig2` (see its `PROVENANCE.md`): the PDF image glue
+(`internal/imaging/jpx.go`) charges a pixels×components budget from the SIZ marker before this tree parses, but three
+allocation sites are sized by file fields that budget never models, so they blow past it. Two are fatal — they demand
+terabytes from a sub-100-byte payload, and a Go out-of-memory is an uncatchable `fatal error`, so the glue's `recover`
+cannot degrade the image to blank. Each guard bounds the work against the input that carries it, matching the existing
+`maxPrecincts`/`maxCodeBlocks`/`maxTilePartBytes` limits already in the tree. Vendored files keep their upstream
+provenance headers; the edits are documented here, not in code comments.
+
+| File | Site | Bound added | Attack closed |
+| --- | --- | --- | --- |
+| `codestream/tier2.go` | `tryParseStandardLRCP`, before the progression-order switch | Reject when `numLayers·numResolutions·numComps·maxPrec > maxPackets` (new const `1<<20`, alongside `maxPrecincts`/`maxCodeBlocks`). Every builder — `packetOrder`, `pocSequence`, `packetSeqPosition` — emits at most one packet per (layer, resolution, component, precinct), so the product bounds the returned `[][4]int` slice and each builder's iteration count. | A COD with `layers=0xFFFF` (and/or a large decomposition depth) over a single-precinct image makes the builders enumerate millions of packets, sizing a multi-megabyte sequence slice from a few payload bytes. Fatal (uncatchable OOM). |
+| `codestream/sod.go` | `processSOD`, before the tile-part payload buffer | A tile-part cannot exceed the input carrying it, so reject `remaining` greater than the reader's unread length when it is knowable (`d.r` is a `*bytes.Reader`, which exposes `Len`); a reader without a known length is read incrementally via `io.ReadAll(io.LimitReader(...))`. `maxTilePartBytes` stays the absolute ceiling. | An SOT with `Psot=0x0FFFFFFF` (just under `maxTilePartBytes`) drove `make([]byte, ~256 MiB)` up front from a sub-100-byte payload the read then fails to fill. Fatal (uncatchable OOM). |
+| `box/jp2.go` | `parseCmap` | Refuse a `cmap` describing more than `maxCMapChannels` output channels (new const `32`); the container then falls back to its non-palette handling rather than mis-rendering a truncated map. | A `cmap` listing thousands of output channels — each of which becomes a full w×h `int32` plane in `applyPalette` — allocates that many image-sized planes (~160 GB for 10240 channels over a 2048×2048 image). Fatal (uncatchable OOM). |
+| `codestream/palette.go` | `applyPalette`, before the per-channel plane loop | Reject `len(d.cmap) > maxOutputChannels` (new const `32`, mirroring `box.maxCMapChannels`). A defensive backstop to the `parseCmap` cap that holds regardless of how the cmap reached the decoder, and also protects upstream's own `image.Decode` path. | Same over-long-`cmap` plane blow-up as above, bounded at the allocation site itself. |
+
+A fourth, lower-severity site was investigated and left unchanged: `engine/tagtree.go` `ProgressiveDecodeValue` spins
+its full 65536-iteration value loop per code-block once a shared zero-bit-plane tag-tree parent is driven to the
+`2^maxBits` cap (a later leaf then reads no input yet still iterates to the cap). The mechanism was confirmed at the
+`TagTree` API level, but a payload-level reproduction was not completed within the available effort, and no local guard
+that terminates the loop is provably neutral to the golden decodes (a legitimate later leaf whose shared ancestors were
+saturated below the cap by an earlier leaf must run no-op iterations before reading its own bit, so a naive
+"terminate when no input is consumed" bound would change decoded values). The hot path was therefore left untouched.
 
 ### pdfview-authored files inside this tree
 

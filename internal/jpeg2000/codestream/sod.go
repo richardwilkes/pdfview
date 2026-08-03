@@ -53,19 +53,39 @@ func (d *Decoder) processSOD() error {
 		return fmt.Errorf("SOD: Psot too small: Psot=%d consumed=%d", d.cur.sot.Psot, consumed)
 	}
 	remaining := int(d.cur.sot.Psot) - consumed
-	// Bound the buffer a declared Psot can demand, so a hostile SOT cannot trigger
-	// an unbounded allocation before the (short) input fails to fill it.
+	// Bound the buffer a declared Psot can demand. maxTilePartBytes is the absolute
+	// ceiling, but a tile-part cannot be larger than the input that carries it, so also
+	// reject a Psot exceeding the bytes actually left in the reader when that is knowable
+	// (the codestream and container paths both hand this decoder a *bytes.Reader, which
+	// reports its unread length via Len). That refuses a hostile Psot up front instead of
+	// allocating make([]byte, remaining) the input can never fill. A reader that does not
+	// expose a remaining length is read incrementally (io.ReadAll grows only to the bytes
+	// present), so no single up-front allocation exceeds what the input can supply.
 	if remaining > maxTilePartBytes {
 		return fmt.Errorf("SOD: tile-part too large: %d bytes", remaining)
+	}
+	if lr, ok := d.r.(interface{ Len() int }); ok && remaining > lr.Len() {
+		return fmt.Errorf("SOD: tile-part exceeds remaining input: Psot wants %d, %d available", remaining, lr.Len())
 	}
 
 	// Read this tile-part's SOD payload and append it to the tile. A tile split
 	// into several tile-parts is reassembled here; the concatenated payload is
 	// parsed into code-blocks once, in parseTilePayload (called at finalize).
-	payload := make([]byte, remaining)
-	readN, err := io.ReadFull(d.r, payload)
-	if err != nil {
-		return fmt.Errorf("SOD payload read failed (expected %d, read %d): %w", remaining, readN, err)
+	var payload []byte
+	if _, ok := d.r.(interface{ Len() int }); ok {
+		payload = make([]byte, remaining)
+		readN, err := io.ReadFull(d.r, payload)
+		if err != nil {
+			return fmt.Errorf("SOD payload read failed (expected %d, read %d): %w", remaining, readN, err)
+		}
+	} else {
+		var err error
+		if payload, err = io.ReadAll(io.LimitReader(d.r, int64(remaining))); err != nil {
+			return fmt.Errorf("SOD payload read failed: %w", err)
+		}
+		if len(payload) != remaining {
+			return fmt.Errorf("SOD payload read failed (expected %d, read %d)", remaining, len(payload))
+		}
 	}
 	tile.payload = append(tile.payload, payload...)
 	d.cur.tilePartConsumed = consumed + remaining

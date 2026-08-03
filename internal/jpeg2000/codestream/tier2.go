@@ -89,11 +89,15 @@ type precTrees struct {
 }
 
 // Work limits for one tile's packet geometry, guarding against hostile headers.
-// Both are far above any realistic image (a 4096×4096 single-precinct image needs
-// well under 2^20 code-blocks).
+// All three are far above any realistic image (a 4096×4096 single-precinct image
+// needs well under 2^20 code-blocks). maxPackets bounds the packet-sequence slice a
+// tile's progression enumerates — numLayers·numResolutions·numComps·maxPrec entries,
+// 32 bytes each ([4]int) — near 32 MB, so a header pairing a large layer count with
+// tiny precincts cannot demand millions of packets from a few payload bytes.
 const (
 	maxPrecincts  = 1 << 20
 	maxCodeBlocks = 1 << 20
+	maxPackets    = 1 << 20
 )
 
 // precinctExp returns the precinct-size exponents (PPx, PPy) for component c at
@@ -443,6 +447,19 @@ func (d *Decoder) tryParseStandardLRCP(payload []byte) (blocks []engine.BlockStr
 	poc := d.tiles[d.cur.tileIndex].poc
 	if len(poc) == 0 {
 		poc = d.header.poc
+	}
+
+	// Bound the packet-sequence length before any builder enumerates it. Every builder
+	// emits at most one packet per (layer, resolution, component, precinct):
+	// packetOrder/pocSequence enumerate exactly that index space, and packetSeqPosition
+	// visits each resolution's precinct once per component and layer (its position scan
+	// steps by precinct boundaries, so its output — and its iteration count — are ≤ the
+	// same product). numLayers·numResolutions·numComps·maxPrec is therefore an upper
+	// bound on the seq slice. The product cannot overflow int64: numLayers ≤ 65535 (COD
+	// uint16), numResolutions ≤ 33 (Levels ≤ 32), numComps ≤ 65535 (Csiz uint16), and
+	// maxPrec ≤ maxPrecincts = 2^20 (enforced above), so it stays under 2^58.
+	if int64(numLayers)*int64(numResolutions)*int64(numComps)*int64(maxPrec) > maxPackets {
+		return nil, 0, false, fmt.Errorf("too many packets")
 	}
 
 	// The position-inner orders RPCL/PCRL/CPRL enumerate precincts by their position

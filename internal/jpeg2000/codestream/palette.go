@@ -8,6 +8,12 @@ import (
 	"image/color"
 )
 
+// maxOutputChannels caps how many output channels a palette expansion may generate
+// (one full w×h int32 plane each). It mirrors box.maxCMapChannels — a device colorspace
+// needs at most four channels plus opacity/aux — and bounds applyPalette independently
+// of how the cmap reached the decoder.
+const maxOutputChannels = 32
+
 // CMapEntry maps one output channel to a codestream component, either directly
 // (Type 0) or through a palette column (Type 1). It mirrors the JP2 `cmap` box.
 type CMapEntry struct {
@@ -31,6 +37,13 @@ func (d *Decoder) SetPalette(entries [][]int32, depths []int, cmap []CMapEntry) 
 // lookup indexed by a component sample. Component samples are read in the unsigned
 // display domain (decoded value + 2^(P-1)), which is the palette index.
 func (d *Decoder) applyPalette(fullPlanes [][]int32, w, h int) ([][]int32, []int, error) {
+	// Every cmap entry allocates a full w×h plane below, so bound the channel count
+	// before the loop regardless of how d.cmap was populated. A real colorspace needs
+	// at most four channels plus opacity/aux; a longer cmap is malformed and refused
+	// rather than truncated (which would mis-render).
+	if len(d.cmap) > maxOutputChannels {
+		return nil, nil, fmt.Errorf("palette: cmap defines %d output channels (max %d)", len(d.cmap), maxOutputChannels)
+	}
 	ne := len(d.paletteEntries)
 	out := make([][]int32, len(d.cmap))
 	depths := make([]int, len(d.cmap))

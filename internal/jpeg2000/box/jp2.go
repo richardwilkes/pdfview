@@ -21,6 +21,14 @@ const (
 // maxPaletteEntries caps the palette size (ISO allows up to 1024 entries).
 const maxPaletteEntries = 1024
 
+// maxCMapChannels caps the number of output channels a `cmap` box may define. Each
+// channel becomes a full w×h plane at palette expansion (see codestream.applyPalette),
+// so a hostile cmap listing thousands of channels would allocate that many image-sized
+// planes. A device colour space needs at most four channels, plus opacity and auxiliary
+// channels stays well under this; a longer cmap is malformed and refused, so the
+// container falls back to its non-palette handling rather than mis-rendering.
+const maxCMapChannels = 32
+
 // maxCodestreamBytes caps the jp2c payload we will buffer, so a hostile box
 // length cannot trigger an unbounded allocation. Far above any real test image.
 const maxCodestreamBytes = 1 << 28 // 256 MiB
@@ -335,7 +343,7 @@ func parsePclr(c []byte, info *JP2Info) {
 // U8) entries, one per output channel.
 func parseCmap(c []byte, info *JP2Info) {
 	n := len(c) / 4
-	if n < 1 {
+	if n < 1 || n > maxCMapChannels {
 		return
 	}
 	cmap := make([]CMapEntry, 0, n)
