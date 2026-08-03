@@ -279,7 +279,10 @@ const jpxMaxComponents = 32
 // for four seconds over ~300 MB of tile bookkeeping. Every real tile needs at least one SOT header in the payload, so
 // the declared tile count is bounded the way jbig2Caps bounds referred-to segments: by what the payload could
 // actually carry. Subsampling factors of zero and out-of-range component counts are rejected here too, so the library
-// never sees them.
+// never sees them. Deliberately absent is any JPX-specific absolute pixel cap below maxImagePixels: the sample-count
+// budget is the only JPX-specific bound, accepting the measured worst case of ~90 bytes of peak allocation per pixel
+// (~6 GB for a crafted single-component payload at the cap, ~2 GB for RGB) in exchange for zero oracle divergence at
+// large image sizes.
 func jpxSizGuard(payload []byte, bare bool, budget int64) error {
 	cs := payload
 	if !bare {

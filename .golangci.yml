@@ -166,7 +166,7 @@ linters:
         - -SA3000
   exclusions:
     rules:
-      # Vendored third-party trees (see plan.md and each tree's PROVENANCE.md) keep their upstream copyright
+      # Vendored third-party trees (see each tree's PROVENANCE.md) keep their upstream copyright
       # headers — Rich's MPL header must never be stamped onto someone else's code — and are not held to this
       # repo's style rules. Correctness- and security-level checks stay on: these trees decode hostile input.
       - path: ^internal/jbig2/

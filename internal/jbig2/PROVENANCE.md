@@ -23,8 +23,8 @@ no meaning outside PDFium, and PDFium's magic-number tables are reproduced verba
 is a translation of `MMRDecompressor` and `MMRConstants` from the Apache PDFBox JBIG2 ImageIO plugin (Apache-2.0;
 Copyright 2017 The Apache Software Foundation, based on code copyright 1995-2017 levigo holding GmbH), reproducing that
 project's code tables in its own non-canonical ordering. The upstream repository discloses neither derivation, so this
-vendored copy carries all three notice sets; see the "M1 evidence" section of `plan.md` at the repository root for the
-adoption decision this finding fed.
+vendored copy carries all three notice sets; the adoption decision this finding fed — vendor and harden in-tree rather
+than depend on the module — is recorded in commit 2f90677.
 
 ## Attribution files in this directory
 

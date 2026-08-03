@@ -85,3 +85,10 @@ Neither payload comes near its pixel budget. `jpxSizGuard` charges the budget in
 these need `1024 x 1024 x 3 = 3,145,728` against a `maxPixelsFor` result that both payload sizes drive past
 `maxImagePixels` and therefore clamp to 67,108,864 — a factor of 21.3 in hand. The smallest payload that could
 still carry this image is 384 bytes.
+
+### An open observation (the 9/7 allocation anomaly)
+
+The 9/7 payload decodes ~40% faster than the 5/3 one, on a 2.5x smaller payload, yet allocates more — 169.60 versus
+116.25 MB/op, byte-for-byte identical across a loaded run and a quiet-machine re-measure, so it is real rather than
+measurement noise. That looks like an allocation inefficiency in the irreversible reconstruction path rather than an
+inherent cost of the wavelet. Recorded, not pursued.
