@@ -230,6 +230,21 @@ once per milestone.
   restored guard. Fixed in-tree with the GRD/GRRD `IsComplete` pattern; the ~90 s CPU spin now errors in
   microseconds, pinned by the committed FuzzJBIG2 seed. The Huffman export loop was audited safe (bit reads fail at
   end of stream); soak relaunched over the fix.
+  **OPEN (2026-08-02): the 2 h soak over the fully-hardened tree (commit 2443171) found a fourth hang at ~52 min**
+  (`8740de3ce74202c1`, 234 bytes; ~55 M execs clean before it). It is the *same* arithmetic export-flag loop
+  (`jbig2_sdd_proc.go:242`), and the `IsComplete()` guard from `0c175f3` does not cover it: `IsComplete()` only
+  flips true when the byte stream is *exhausted*, but here the arithmetic decoder is parked on a terminal `0xFF`
+  marker (`byteIn`'s `b1 > 0x8f` branch pads 1-bits without advancing `IncByteIdx`), so its position stays
+  in-bounds, `IsComplete()` stays false, and the loop spins on repeated zero-length export runs while `EXINDEX`
+  never advances — a pure CPU spin (~110 MB RSS, `test timed out`). The correct fix is **progress-based, not
+  exhaustion-based**: bound the loop by `EXINDEX` strictly advancing (e.g. cap consecutive zero-length runs, or cap
+  total iterations by `len(EXFLAGS)`), and audit every other `IAx`-driven loop for the same marker-pad spin (the
+  height-class loop is already bounded by `HCLASSES`; the inner symbol loop breaks on IADW out-of-band). Check
+  whether PDFium shares the gap (its `jbig2_sdd_proc.cpp:194` export loop looks equally unguarded → likely
+  beyond-PDFium hardening again). The crasher seed is preserved at
+  `scratchpad/jbig2-export-spin-crasher.seed` (+ `.hex`) and was **deliberately kept out of the committed corpus**
+  so `go test` stays green; commit it as a FuzzJBIG2 regression seed together with the fix. Tree at HEAD `9e5a307`
+  is gate-green; this is the next JBIG2 work item.
 - **M3 — JPX integration. DONE (2026-08-02).** Vendored `mububoki/jpeg2000 v1.0.0 @6bfb77fe2e65` into
   `internal/jpeg2000/` (commit d1d5c23): 69 decoder `.go` files byte-identical to upstream modulo the provenance
   header line and import rewrites (independently diff-audited — only `j2k/reader.go` and `jp2/reader.go` differ, for
