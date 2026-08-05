@@ -52,6 +52,12 @@ func TestZeroValueDocument(t *testing.T) {
 			if got := doc.TableOfContents(72); got != nil {
 				t.Errorf("TableOfContents = %v, want nil", got)
 			}
+			if _, _, err := doc.PageSize(0); !errors.Is(err, pdfview.ErrDocumentReleased) {
+				t.Errorf("PageSize error = %v, want ErrDocumentReleased", err)
+			}
+			if _, _, err := doc.PageRenderSize(0, 72); !errors.Is(err, pdfview.ErrDocumentReleased) {
+				t.Errorf("PageRenderSize error = %v, want ErrDocumentReleased", err)
+			}
 			if _, err := doc.RenderPage(0, 72, 0, ""); !errors.Is(err, pdfview.ErrDocumentReleased) {
 				t.Errorf("RenderPage error = %v, want ErrDocumentReleased", err)
 			}

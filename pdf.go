@@ -270,6 +270,50 @@ func (d *Document) PageCount() int {
 	return 0
 }
 
+// PageSize returns the given 0-based page's width and height in PDF points (1/72 inch): the extent of its effective
+// box (the inherited /MediaBox intersected with any /CropBox) after /Rotate is applied, so 90 and 270 degree rotations
+// swap the axes. This is the extent RenderPage rasterizes. It returns ErrDocumentReleased if the document has been
+// released, ErrInvalidPageNumber for an out-of-range page, and ErrUnableToLoadPage when the page cannot be loaded.
+func (d *Document) PageSize(pageNumber int) (width, height float32, err error) {
+	var pg *page
+	if pg, err = d.pageSize(pageNumber); err != nil {
+		return 0, 0, err
+	}
+	return pg.width, pg.height, nil
+}
+
+// PageRenderSize returns the pixel dimensions of the image RenderPage produces for the given 0-based page at the given
+// dpi, without rendering it. It applies the same scale and rounding RenderPage does, so the result matches a
+// subsequent RenderPage call at the same dpi exactly. It returns ErrDocumentReleased if the document has been
+// released, ErrInvalidPageNumber for an out-of-range page, and ErrUnableToLoadPage when the page cannot be loaded.
+func (d *Document) PageRenderSize(pageNumber, dpi int) (width, height int, err error) {
+	var pg *page
+	if pg, err = d.pageSize(pageNumber); err != nil {
+		return 0, 0, err
+	}
+	width, height = renderSpec{scale: dpiToScale(dpi)}.extents(pg)
+	return width, height, nil
+}
+
+func (d *Document) pageSize(pageNumber int) (*page, error) {
+	if !d.usable() {
+		return nil, ErrDocumentReleased
+	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.released() {
+		return nil, ErrDocumentReleased
+	}
+	if pageNumber < 0 || pageNumber >= d.eng.pageCount() {
+		return nil, ErrInvalidPageNumber
+	}
+	pg, err := d.eng.loadPage(pageNumber)
+	if err != nil {
+		return nil, err
+	}
+	return pg, nil
+}
+
 func dpiToScale(dpi int) float64 {
 	// Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off.
 	return min(float64(max(dpi, 1))/72, 10)
@@ -321,9 +365,8 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 		}
 		// The page extents are computed in float32 (the precision the engine's geometry pipeline carries) before being
 		// widened, matching the C float precision the MuPDF-based implementation exposed.
-		bw, bh := pg.bounds()
-		w := float64(bw)
-		h := float64(bh)
+		w := float64(pg.width)
+		h := float64(pg.height)
 		if w <= 0 || h <= 0 {
 			return renderSpec{}, ErrInvalidPageSize
 		}
@@ -867,12 +910,6 @@ func renderExtent(extent float32, scale float64) int {
 		return 0
 	}
 	return int(v)
-}
-
-// bounds returns the page's width and height in PDF points (the page's effective box extent after rotation), computed
-// in float32.
-func (p *page) bounds() (width, height float32) {
-	return p.width, p.height
 }
 
 // search returns the quads of up to maxHits text matches on the page, in the emission order MuPDF's search reports them
