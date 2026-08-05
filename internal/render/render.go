@@ -92,11 +92,21 @@ type Device struct {
 	untrackedState int
 	width          int
 	height         int
+	// stemDarkening dilates fill-mode text outlines by a sub-pixel stroke so thin stems keep full ink coverage at
+	// small sizes, matching platform rasterizers (CoreGraphics font smoothing, FreeType CFF darkening); see
+	// stemDarkenWidth in glyphmask.go. Off by default at this level so the device's raw output stays pinned to the
+	// MuPDF-parity goldens; the public engine layer opts in per document.
+	stemDarkening bool
 }
 
 // SetStore wires the document's budgeted resource store into the device, migrating the glyph-path cache from per-render
 // to document scope.
 func (d *Device) SetStore(st *store.Store) { d.store = st }
+
+// SetStemDarkening enables or disables stem darkening for the text this device renders from here on (see the Device
+// field). Cached glyph coverage planes carry the setting in their key, so toggling between renders on a reused device
+// or store can never serve a plane rasterized under the other setting.
+func (d *Device) SetStemDarkening(on bool) { d.stemDarkening = on }
 
 // Size reports the surface dimensions in pixels, for the caller's reuse check (see Reset).
 func (d *Device) Size() [2]int { return [2]int{d.width, d.height} }
@@ -714,7 +724,9 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 // FillText implements device.Device: fill the run's merged outline (already in device space via the Trms) with the
 // non-zero winding rule, antialiased, matching the oracle's glyph rasterization. Plain solid fills — the overwhelmingly
 // common case — go through the glyph coverage cache instead (glyphmask.go), which blits each glyph's cached analytic-AA
-// coverage at its exact subpixel position.
+// coverage at its exact subpixel position. Stem darkening, when enabled, dilates both routes identically (see
+// stemDarkenWidth); mesh- and tiling-painted text keeps the exact fill, since those routes build their own coverage
+// from the undilated outline.
 func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
 	// The coverage-blit fast path composites into the device's own surface at pixel-space positions; a device wrapping
 	// a caller's canvas (Wrap) has neither, so it always fills merged outlines.
@@ -737,6 +749,10 @@ func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
 	if !ok {
 		return
 	}
+	// The glyphs of a run share their Trm linear part (only the origin advances within one show-text operator), so one
+	// run-level dilation width reproduces exactly what the blit path applies per glyph — TestGlyphBlitMatchesDirectFill
+	// holds under darkening because of this.
+	applyStemDarkening(cpaint, d.runStemDarkenWidth(run))
 	d.withShadingBBox(paint, func() {
 		d.c.DrawPath(p, cpaint)
 	})

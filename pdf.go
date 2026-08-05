@@ -348,6 +348,43 @@ func (s renderSpec) extents(pg *page) (width, height int) {
 	return width, height
 }
 
+// SetStemDarkening enables or disables stem darkening for subsequent renders (RenderPage, RenderPageForSize, and
+// DrawPage). It is enabled by default.
+//
+// Stem darkening dilates fill-mode text outlines by a sub-pixel, size-dependent amount before rasterization, so stems
+// thinner than a pixel keep full ink coverage instead of fading to gray — the same treatment platform rasterizers
+// apply (CoreGraphics "font smoothing", FreeType's CFF stem darkening), tuned here to match macOS Preview's rendered
+// text weight. Disable it for exact analytic-AA area coverage — the geometry-faithful rasterization MuPDF produces,
+// which the package's parity goldens are recorded against. Text painted with mesh-shading or tiling patterns, stroked
+// text, Type 3 glyphs, and text clip paths are never darkened under either setting.
+//
+// Does nothing on a released document.
+func (d *Document) SetStemDarkening(enabled bool) {
+	if !d.usable() {
+		return
+	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.released() {
+		return
+	}
+	d.eng.stemDarkening = enabled
+}
+
+// StemDarkening reports whether stem darkening is enabled (see SetStemDarkening). Returns false if the document has
+// been released.
+func (d *Document) StemDarkening() bool {
+	if !d.usable() {
+		return false
+	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.released() {
+		return false
+	}
+	return d.eng.stemDarkening
+}
+
 // RenderPage renders the specified page at the requested dpi. If search is not empty, then the bounding boxes of up to
 // maxHits matching text on the page will be returned.
 func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*RenderedPage, error) {
@@ -633,6 +670,9 @@ type engineDocument struct {
 	// render; it is dropped on a dimension change or a render panic. Safe under the document mutex like every other
 	// engine field.
 	dev *render.Device
+	// stemDarkening mirrors the public SetStemDarkening switch; openEngine starts it enabled and every render passes it
+	// to the device it draws with.
+	stemDarkening bool
 }
 
 // page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points (the
@@ -689,7 +729,7 @@ func openEngine(buffer []byte, maxCacheSize uint64) (eng *engineDocument, err er
 	if derr != nil {
 		return nil, ErrUnableToOpenPDF
 	}
-	return &engineDocument{doc: d, store: store.New(maxCacheSize)}, nil
+	return &engineDocument{doc: d, store: store.New(maxCacheSize), stemDarkening: true}, nil
 }
 
 // needsPassword reports whether the document is encrypted and the empty user password does not grant access.
@@ -850,6 +890,7 @@ func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width
 		e.dev = nil
 	}
 	dev.SetStore(e.store)
+	dev.SetStemDarkening(e.stemDarkening)
 	ctm, err := e.doc.PageCTM(pg.number, float32(spec.scale))
 	if err != nil {
 		return nil, 0, 0, 0, ErrUnableToLoadPage

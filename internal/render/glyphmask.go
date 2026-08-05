@@ -43,20 +43,87 @@ import (
 // back to the merged-outline fill, whose cost is amortized over the few such glyphs a page has.
 const maxGlyphMaskDim = 256
 
+// Stem darkening: exact analytic-AA coverage renders a stem narrower than a pixel as a smear of mid grays, so at body
+// sizes text comes out visibly lighter than the platform rasterizers users compare against — CoreGraphics dilates glyph
+// outlines ("font smoothing"), and FreeType darkens CFF stems, for exactly this reason. When enabled, glyph fills are
+// drawn stroke-and-fill with a sub-pixel pen so sub-pixel features saturate to full ink while letterform geometry stays
+// within half the pen width of exact. The width below was fitted against macOS Preview renders of embedded-CFF body
+// text at 72/150/300 dpi (ink coverage matches within 1% relative at each): linear in the glyph's device pixel size at
+// small sizes, capped at one device pixel so display sizes gain only a hair of weight. Stroking is per glyph appearance
+// and cached with the coverage plane, so warm renders pay nothing.
+const (
+	// stemDarkenPerPpem is the pen width per device pixel of em: 8 pt text at 300 dpi (33 ppem) gets a 0.5 px pen.
+	stemDarkenPerPpem = 0.015
+	// stemDarkenMaxPx caps the pen for display sizes (measured against Preview: its dilation stops growing around a
+	// device pixel).
+	stemDarkenMaxPx = 1.0
+)
+
+// stemDarkenWidth returns the stroke-and-fill pen width, in device pixels, dilating a glyph outline whose glyph→device
+// linear part is (a, b, c, d) — zero when darkening is off or the transform is degenerate. sqrt|det| is the geometric
+// mean of the glyph's device pixel size (its ppem for an unrotated square transform), which keeps the width stable
+// under rotation and reasonable under skew. Computed in float64 so finite float32 inputs cannot overflow the products.
+func (d *Device) stemDarkenWidth(ma, mb, mc, md float32) float32 {
+	if !d.stemDarkening {
+		return 0
+	}
+	det := math.Abs(float64(ma)*float64(md) - float64(mb)*float64(mc))
+	w := stemDarkenPerPpem * math.Sqrt(det)
+	if !(w > 0) { // Degenerate or NaN transforms fall back to the exact fill.
+		return 0
+	}
+	if w > stemDarkenMaxPx {
+		w = stemDarkenMaxPx
+	}
+	return float32(w)
+}
+
+// runStemDarkenWidth returns the dilation pen width for a whole run: the glyphs of a run share their Trm linear part
+// (only the origin advances within one show-text operator), so the first finite glyph speaks for all of them.
+func (d *Device) runStemDarkenWidth(run *device.TextRun) float32 {
+	if !d.stemDarkening {
+		return 0
+	}
+	for i := range run.Glyphs {
+		g := &run.Glyphs[i]
+		if g.Trm.IsFinite() {
+			return d.stemDarkenWidth(g.Trm.A, g.Trm.B, g.Trm.C, g.Trm.D)
+		}
+	}
+	return 0
+}
+
+// applyStemDarkening turns a fill paint into the equivalent stroke-and-fill with pen width w (a no-op for w <= 0). The
+// stroker merges the pen outline and the source path into one geometry filled in a single pass, so coverage saturates
+// rather than double-blending — translucent text composites exactly once. Round joins keep thin-stem corners from
+// growing miter spikes; the butt cap stays, so degenerate open contours that fill to nothing still draw nothing.
+func applyStemDarkening(p *canvas.Paint, w float32) {
+	if w <= 0 {
+		return
+	}
+	p.Style = canvas.StyleStrokeAndFill
+	p.StrokeWidth = w
+	p.Join = canvas.JoinRound
+}
+
 // maxGlyphMaskBytes caps the live coverage planes the per-device cache holds. Bounding this cache by entry count is not
 // a bound on its memory: one plane may be maxGlyphMaskDim² = 64 KiB, so a few thousand entries is hundreds of
 // megabytes. At 16 MiB the cap holds tens of thousands of ordinary text-size glyphs — well past what any real page
 // draws — while a page of display-size glyphs costs 16 MiB rather than a quarter of a gigabyte.
 const maxGlyphMaskBytes = 16 << 20
 
-// glyphMaskKey identifies one cached glyph coverage plane: glyph identity, the Trm linear part, and the subpixel phase
-// of the glyph origin. Distinct store key type per the store's kind-separation rule.
+// glyphMaskKey identifies one cached glyph coverage plane: glyph identity, the Trm linear part, the subpixel phase of
+// the glyph origin, and whether stem darkening dilated it. Distinct store key type per the store's kind-separation
+// rule. dark must be part of the key even though the darkening width is derived from a–d: the same document can render
+// with darkening toggled between renders (the per-device map and the store both outlive a render), and a plane
+// rasterized under one setting must never satisfy a lookup under the other.
 type glyphMaskKey struct {
 	font   *font.Font
 	gid    uint32
 	a, b   float32
 	c, d   float32
 	fx, fy float32
+	dark   bool
 }
 
 // glyphMask is one cached coverage plane. plane is nil for glyphs the blit path cannot handle (too large or
@@ -169,6 +236,9 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 	}
 	if leftover != nil && !leftover.IsEmpty() {
 		if cpaint, ok := d.preparePaint(p, nil); ok {
+			// The same run-level pen the merged-outline path applies (FillText), so a glyph declined by the mask path
+			// darkens exactly as it would have on the slow path.
+			applyStemDarkening(cpaint, d.runStemDarkenWidth(run))
 			d.c.DrawPath(leftover, cpaint)
 		}
 	}
@@ -188,7 +258,10 @@ func (d *Device) blitTextRun(run *device.TextRun, p device.Paint) bool {
 // is reused, deferred or done in place, leaving the analytic-AA fill (which the merged outline would pay anyway) as
 // nearly the whole of it.
 func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy float32) *glyphMask {
-	key := glyphMaskKey{font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy}
+	key := glyphMaskKey{
+		font: f, gid: g.GID, a: g.Trm.A, b: g.Trm.B, c: g.Trm.C, d: g.Trm.D, fx: fx, fy: fy,
+		dark: d.stemDarkening,
+	}
 	st := d.maskStore()
 	if st != nil {
 		if v, ok := st.Get(key); ok {
@@ -310,6 +383,14 @@ func (d *Device) renderGlyphMask(g *device.Glyph, gp *path.Path, fx, fy float32)
 	fill := d.maskPath
 	fill.Rewind() // Restores the winding fill and empty storage a fresh path would have had.
 	fill.AddPathMatrix(gp, &m, path.AddPathAppend)
+	// The paint is shared across misses, so both branches assign the style fields every time. The dilated geometry
+	// extends at most stemDarkenMaxPx/2 past the outline bounds (round joins spike no further), which the mask rect's
+	// one-pixel padding above already absorbs.
+	d.maskPaint.Style = canvas.StyleFill
+	d.maskPaint.StrokeWidth = 0
+	if w := d.stemDarkenWidth(g.Trm.A, g.Trm.B, g.Trm.C, g.Trm.D); w > 0 {
+		applyStemDarkening(d.maskPaint, w)
+	}
 	surf.Canvas().DrawPath(fill, d.maskPaint)
 	// White premultiplied by coverage stores the coverage in every channel; take the alpha byte (R|G<<8|B<<16|A<<24).
 	plane := coveragePlane(pm, w, h)

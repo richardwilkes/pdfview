@@ -617,6 +617,59 @@ func delta(a, b uint8) int {
 	return int(b - a)
 }
 
+// TestStemDarkenedBlitMatchesDirectFill extends TestGlyphBlitMatchesDirectFill's invariant to a darkening device: the
+// direct composite, the DrawImage route, and the merged-outline fill must still agree, since the mask path dilates
+// each glyph with the same pen the merged path applies per run (the glyphs of a run share their Trm linear part). Also
+// pins that darkening is not a silent no-op: at body size the darkened glyph must carry more ink than the exact fill.
+func TestStemDarkenedBlitMatchesDirectFill(t *testing.T) {
+	f := helveticaFont(t)
+	trm := gfx.Matrix{A: 24.37, B: 0, C: 0, D: -24.37}.Mul(gfx.Translate(2.31, 27.63)) // fractional phase on purpose
+	render := func(dark bool, prep func(d *Device), paint device.Paint) []byte {
+		d := newDevice(t, 32, 32)
+		d.SetStemDarkening(dark)
+		if prep != nil {
+			prep(d)
+		}
+		d.FillText(glyphRun(t, f, 'H', trm, gfx.Identity()), paint)
+		pix, _, err := d.Pixels()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix
+	}
+	direct := render(true, nil, redPaint())
+	var octagon gfx.Path // large non-rect clip fully covering the glyph: forces the DrawImage route
+	octagon.MoveTo(10, -40)
+	octagon.LineTo(70, 16)
+	octagon.LineTo(10, 72)
+	octagon.LineTo(-50, 16)
+	octagon.Close()
+	viaCanvas := render(true, func(d *Device) { d.ClipPath(&octagon, false, gfx.Identity()) }, redPaint())
+	nearOpaque := redPaint()
+	nearOpaque.Alpha = 254.4 / 255 // folds to alpha 254: forces the merged-outline DrawPath fill
+	merged := render(true, nil, nearOpaque)
+	for i := range direct {
+		if delta(direct[i], viaCanvas[i]) > 2 {
+			t.Fatalf("darkened direct blit diverges from canvas image draw at byte %d: %d vs %d",
+				i, direct[i], viaCanvas[i])
+		}
+		if delta(direct[i], merged[i]) > 3 {
+			t.Fatalf("darkened direct blit diverges from merged outline fill at byte %d: %d vs %d",
+				i, direct[i], merged[i])
+		}
+	}
+	ink := func(pix []byte) (total uint64) {
+		for i := 3; i < len(pix); i += 4 {
+			total += uint64(pix[i])
+		}
+		return total
+	}
+	exact := render(false, nil, redPaint())
+	if ink(direct) <= ink(exact) {
+		t.Fatalf("stem darkening added no ink: %d vs %d", ink(direct), ink(exact))
+	}
+}
+
 // TestGlyphMaskScratchReuseIsClean pins that the per-miss scratch the mask renderer reuses across glyphs — the coverage
 // surface, the transformed outline path and the fill paint — carries nothing from the glyph before it. A glyph rendered
 // after a much larger, ink-heavy one must come out byte-identical to the same glyph on a device that has drawn nothing

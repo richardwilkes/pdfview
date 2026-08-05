@@ -10,6 +10,7 @@
 package pdfview_test
 
 import (
+	"bytes"
 	"errors"
 	"image"
 	"math"
@@ -329,6 +330,51 @@ func TestInternalLinks(t *testing.T) {
 	}
 	if !sawFit {
 		t.Error("expected a link with the /Fit DestPoint (0, 0)")
+	}
+}
+
+// TestStemDarkening pins the public switch: it defaults to enabled, darkened text carries more ink than the exact
+// fill, the toggle takes effect on the same document — whose reused device and store must not serve coverage planes
+// rasterized under the other setting — and re-enabling reproduces the darkened render byte for byte.
+func TestStemDarkening(t *testing.T) {
+	data, err := os.ReadFile("testfiles/corpus/text-type1.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdfview.New(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer doc.Release()
+	if !doc.StemDarkening() {
+		t.Fatal("stem darkening should default to enabled")
+	}
+	renderPix := func() []byte {
+		page, renderErr := doc.RenderPage(0, 150, 0, "")
+		if renderErr != nil {
+			t.Fatal(renderErr)
+		}
+		return page.Image.Pix
+	}
+	// Most PDF pages paint no background, so summed alpha is summed text coverage.
+	ink := func(pix []byte) (total uint64) {
+		for i := 3; i < len(pix); i += 4 {
+			total += uint64(pix[i])
+		}
+		return total
+	}
+	dark := renderPix()
+	doc.SetStemDarkening(false)
+	if doc.StemDarkening() {
+		t.Fatal("SetStemDarkening(false) did not stick")
+	}
+	exact := renderPix()
+	if ink(dark) <= ink(exact) {
+		t.Fatalf("darkened render has no more ink than the exact fill: %d vs %d", ink(dark), ink(exact))
+	}
+	doc.SetStemDarkening(true)
+	if !bytes.Equal(dark, renderPix()) {
+		t.Fatal("re-enabling stem darkening did not reproduce the darkened render; a cached plane leaked across the toggle")
 	}
 }
 

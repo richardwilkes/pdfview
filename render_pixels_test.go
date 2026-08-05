@@ -108,6 +108,9 @@ func comparePixelsToGolden(t *testing.T, name, goldenName string, enforce bool) 
 		t.Fatal(err)
 	}
 	defer doc.Release()
+	// The goldens record MuPDF's exact-coverage rasterization; stem darkening (default on) deliberately diverges from
+	// it, so the pixel gates run with it off.
+	doc.SetStemDarkening(false)
 	goldenDir := filepath.Join("testfiles", "goldens", goldenName)
 	thresholds, err := testsupport.LoadThresholds(goldenDir)
 	if err != nil {

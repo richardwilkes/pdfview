@@ -106,6 +106,7 @@ func (e *engineDocument) drawPage(c *canvas.Canvas, pg *page, ctm geom.Matrix) (
 	// pg.height are the box's extent in the same top-left, y-down page space ctm maps from.
 	dev.ClipPageBox(pg.width, pg.height, render.FromGeom(ctm))
 	dev.SetStore(e.store)
+	dev.SetStemDarkening(e.stemDarkening)
 	e.runPage(pg, full, dev)
 	return nil
 }

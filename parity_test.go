@@ -60,6 +60,9 @@ func parityOne(t *testing.T, golden *testsupport.Golden) {
 		t.Fatalf("New: %v", err)
 	}
 	defer doc.Release()
+	// The goldens record MuPDF's exact-coverage rasterization; stem darkening (default on) deliberately diverges from
+	// it, so parity runs with it off.
+	doc.SetStemDarkening(false)
 	parityAuth(t, truth, data, doc)
 	if got := doc.PageCount(); got != truth.PageCount {
 		t.Errorf("PageCount = %d, oracle says %d", got, truth.PageCount)
