@@ -10,6 +10,7 @@
 package font
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"strconv"
@@ -456,7 +457,18 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	}()
 	f, err := cff.Parse(raw)
 	if err != nil || f == nil {
-		return nil
+		// A rejected program may only be carrying a deprecated Private DICT operator, which costs a copy of the whole
+		// program to rewrite — hence the retry rather than sanitizing every font up front.
+		sanitized := sanitizeCFFPrivateDicts(raw, top)
+		if sanitized == nil {
+			return nil
+		}
+		if f, err = cff.Parse(sanitized); err != nil || f == nil {
+			return nil
+		}
+		// The rewrite is byte-for-byte in place, so every offset still holds; the walks below read the sanitized copy
+		// anyway, so they and go-text can never disagree about what the container says.
+		raw = sanitized
 	}
 	dict := top
 	if dict == nil {
@@ -480,6 +492,102 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 		}
 	}
 	return info
+}
+
+// Deprecated Private DICT operators, dropped between CFF specification 1.0 and 1.1 but still emitted by Adobe
+// Distiller-era producers. go-text's Private DICT parser accepts only the 1.1 operator set and fails the entire font on
+// anything else, where FreeType — and so MuPDF — skips what it does not recognize; a program carrying one of these is
+// otherwise perfectly good, and rejecting it costs every glyph in the font to substitution. Both take a single operand,
+// as does initialRandomSeed, which go-text accepts and ignores, so overwriting the escaped operator's second byte
+// removes the obstruction without moving a byte or changing any value the renderer consumes.
+const (
+	cffOpForceBoldThreshold = 15 // Escaped operator 12 15.
+	cffOpLenIV              = 16 // Escaped operator 12 16.
+	cffOpInitialRandomSeed  = 19 // Escaped operator 12 19.
+)
+
+// sanitizeCFFPrivateDicts returns a copy of a CFF program with the deprecated operators above rewritten in every
+// Private DICT it declares, or nil when there was nothing to rewrite (in which case the caller has no reason to parse
+// again). raw is never written to: it aliases cached stream data the rest of the engine still reads.
+//
+// top may be nil, and is re-read here when it is; the copy is taken before the walk rather than after a detection pass
+// because this runs only once a parse has already failed.
+func sanitizeCFFPrivateDicts(raw []byte, top *cffTop) []byte {
+	if top == nil {
+		parsed, err := parseCFFTopDict(raw)
+		if err != nil {
+			return nil
+		}
+		top = parsed
+	}
+	out := bytes.Clone(raw)
+	changed := rewriteCFFPrivateDict(out, top.privOff, top.privSize)
+	// A CID-keyed program keeps a Private DICT per FDArray entry (TN5176 section 18), and one built by the same tooling
+	// carries the same deprecated operators there; go-text parses all of them, so any single one still fails the font.
+	if top.fdArrayOff > 0 {
+		if fontDicts, _, err := cffIndex(out, top.fdArrayOff, maxCFFFontDicts); err == nil {
+			for _, dict := range fontDicts {
+				privOff, privSize := cffPrivateRange(dict)
+				if rewriteCFFPrivateDict(out, privOff, privSize) {
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return out
+}
+
+// rewriteCFFPrivateDict rewrites the deprecated operators of the Private DICT spanning [off, off+size) of data,
+// reporting whether anything changed. A range that does not lie inside the program names no DICT, which is the same
+// verdict cffLocalSubrs reaches for it.
+func rewriteCFFPrivateDict(data []byte, off, size int) bool {
+	if off <= 0 || size <= 0 || off+size > len(data) {
+		return false
+	}
+	dict := data[off : off+size]
+	changed := false
+	// A positional walk, not a search: an operand byte can hold any value, so only stepping the encodings of TN5176
+	// table 3 tells an operator from the middle of a number. Every step is forward and every index is guarded, so
+	// hostile bytes end the walk rather than spinning or reaching outside the DICT.
+	for i := 0; i < len(dict); {
+		switch b := dict[i]; {
+		case b <= 21: // Operator, where 12 escapes to a two-byte one.
+			if b != 12 {
+				i++
+				continue
+			}
+			if i+1 >= len(dict) {
+				return changed
+			}
+			if dict[i+1] == cffOpForceBoldThreshold || dict[i+1] == cffOpLenIV {
+				dict[i+1] = cffOpInitialRandomSeed
+				changed = true
+			}
+			i += 2
+		case b == 28: // 16-bit integer.
+			i += 3
+		case b == 29: // 32-bit integer.
+			i += 5
+		case b == 30: // Real: packed BCD nibbles, ending at the first 0xf in either half of a byte.
+			for i++; i < len(dict); {
+				nibbles := dict[i]
+				i++
+				if nibbles&0x0f == 0x0f || nibbles&0xf0 == 0xf0 {
+					break
+				}
+			}
+		case b >= 32 && b <= 246: // 1-byte integer.
+			i++
+		case b >= 247 && b <= 254: // 2-byte integer.
+			i += 2
+		default: // 22..27, 31 and 255 are reserved, and occupy one byte apiece.
+			i++
+		}
+	}
+	return changed
 }
 
 // gid maps a code to a GID for a bare CFF program: the encoding's glyph name against the charset sweep, with the code

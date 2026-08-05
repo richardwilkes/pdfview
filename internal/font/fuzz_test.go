@@ -27,6 +27,10 @@ func FuzzFontProgram(f *testing.F) {
 	f.Add([]byte{1, 0, 4, 4, 0, 0})               // CFF header prefix
 	f.Add([]byte("OTTO"))
 	f.Add(buildT1Program()) // Type 1 program (t1_test.go's builder)
+	// A bare CFF whose Private DICT carries a deprecated CFF 1.0 operator, so mutations start from a program that
+	// reaches the sanitize-and-retry arm of parseCFFGlyphBytes rather than failing at the first parse.
+	f.Add(cffLayout(nil, nil, [][]byte{boxCharstring(0), boxCharstring(100)},
+		privDictWithDeprecatedOp(cffOpForceBoldThreshold), nil))
 	f.Fuzz(func(_ *testing.T, raw []byte) {
 		if info := parseSFNT(raw); info != nil {
 			fnt := &Font{sfnt: info, enc: &standardEncoding}

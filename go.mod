@@ -4,6 +4,6 @@ go 1.26.0
 
 require (
 	github.com/go-text/typesetting v0.3.4
-	github.com/richardwilkes/canvas v0.2.4
+	github.com/richardwilkes/canvas v0.2.5
 	golang.org/x/image v0.44.0
 )

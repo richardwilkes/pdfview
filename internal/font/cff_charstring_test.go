@@ -243,7 +243,10 @@ func TestCFFSegmentFloodIsBudgeted(t *testing.T) {
 // cidCFFLayout assembles a CID-keyed CFF: the Top DICT carries ROS, FDArray and FDSelect, and each font DICT in the
 // FDArray holds its own Private DICT with its own local subroutines. It is the layout every CJK CIDFontType0 subset
 // uses, and the one where picking the wrong local subroutine array silently draws the wrong glyph.
-func cidCFFLayout(charstrings [][]byte, fdLocalSubrs [][][]byte, fdSelect []byte) []byte {
+//
+// privDict is shared by every font DICT and must name its local Subrs at an offset equal to its own length, since the
+// subroutine INDEX is written immediately after it.
+func cidCFFLayout(charstrings [][]byte, fdLocalSubrs [][][]byte, fdSelect, privDict []byte) []byte {
 	head := []byte{1, 0, 4, 1}
 	name := buildIndex([]byte("Test"))
 	str := buildIndex()
@@ -271,15 +274,14 @@ func cidCFFLayout(charstrings [][]byte, fdLocalSubrs [][][]byte, fdSelect []byte
 	fontDicts := make([][]byte, len(fdLocalSubrs))
 	off := fdSelectOff + len(fdSelect)
 	for i, subrs := range fdLocalSubrs {
-		priv := privDictWithSubrs()
 		index := buildIndex(subrs...)
 		fd := []byte{29, 0, 0, 0, 0, 29, 0, 0, 0, 0, 18} // Private: size then offset
-		binary.BigEndian.PutUint32(fd[1:], uint32(len(priv)))
+		binary.BigEndian.PutUint32(fd[1:], uint32(len(privDict)))
 		binary.BigEndian.PutUint32(fd[6:], uint32(off))
 		fontDicts[i] = fd
-		tail.Write(priv)
+		tail.Write(privDict)
 		tail.Write(index)
-		off += len(priv) + len(index)
+		off += len(privDict) + len(index)
 	}
 	patch(12, off)
 	top = buildIndex(dict) // Re-encoded with the patched offsets; the 32-bit operands keep the length the same.
@@ -310,7 +312,7 @@ func TestCFFCIDLocalSubrsFollowFDSelect(t *testing.T) {
 		{3, 0, 2, 0, 0, 0, 0, 2, 1, 0, 3}, // format 3: [0,2) → FD 0, [2,3) → FD 1, sentinel 3
 	} {
 		raw := cidCFFLayout([][]byte{{csEndchar}, callSubr, callSubr},
-			[][][]byte{{subrA}, {subrB}}, fdSelect)
+			[][][]byte{{subrA}, {subrB}}, fdSelect, privDictWithSubrs())
 		info := loadCFFInfo(t, raw)
 		if info.subrs == nil || len(info.subrs.local) != 2 {
 			t.Fatalf("FDSelect format %d: font DICT subroutines not recovered: %+v", fdSelect[0], info.subrs)
