@@ -14,6 +14,8 @@ import (
 	"image"
 	stdcolor "image/color"
 	"image/jpeg"
+	"runtime"
+	"sync"
 
 	pdfcolor "github.com/richardwilkes/pdfview/internal/color"
 )
@@ -116,6 +118,67 @@ func (dec *decoder) dctByteMapping(space pdfcolor.Space) [][]float32 {
 	return out
 }
 
+// minParallelRows is the fewest rows a band is worth handing to a goroutine of its own. Below twice this height an
+// image converts serially on the calling goroutine, so the many small rasters a typical PDF carries (icons, rules,
+// logos, tiling-pattern cells) pay nothing for the fan-out machinery.
+const minParallelRows = 16
+
+// parallelRows splits an image's h rows into contiguous bands, one goroutine per band, runs convert over each, and
+// returns only once every band has finished. The per-pixel conversions below dominate the cost of decoding a
+// page-scale DCT image — a CMYK JPEG spends nearly all of its decode inside internal/color's 17^4-grid multilinear
+// interpolation, run once per pixel — and they are perfectly parallel over rows, which is where that time comes back.
+//
+// Why splitting by rows cannot change a single output byte:
+//
+//   - Each band writes only the pixels of its own rows: every destination offset is (y*w+x)*4 and the bands partition
+//     y, so no two goroutines address the same byte of pix. The decoded source raster is only ever read.
+//   - Everything the conversions share is fully built and read-only by the time the fan-out starts: the color space,
+//     the /Decode byte mapping from dctByteMapping, the color-key ranges, and the byte LUTs. So are the tables inside
+//     internal/color, whose lazy loads sit behind sync.OnceValue/sync.OnceValues and are safe to reach concurrently.
+//     A /Separation or /DeviceN space does evaluate its tint transform per pixel, but internal/function's Eval methods
+//     read only parsed state and allocate their own working storage per call.
+//   - The mutable per-pixel scratch — the component and sample buffers a conversion rewrites for every pixel — is not
+//     shared: convert allocates its own inside each band.
+//   - hasAlpha is the only state that spans pixels, and it moves in one direction only (false to true, never read back
+//     inside the loops), so OR-ing the bands' results together afterwards yields exactly what a single serial pass
+//     would have produced, whatever order the pixels ran in. Each band accumulates into a flag of its own rather than
+//     writing through the caller's pointer, and the merge happens after Wait, which orders every band's write ahead of
+//     the read here.
+//
+// Nothing is retained past the call and no state is kept at package level, so a caller rendering several documents at
+// once is no different from one rendering a single page.
+func parallelRows(h int, hasAlpha *bool, convert func(y0, y1 int, bandAlpha *bool)) {
+	workers := min(runtime.GOMAXPROCS(0), h/minParallelRows)
+	if workers <= 1 {
+		convert(0, h, hasAlpha)
+		return
+	}
+	rowsPer := (h + workers - 1) / workers
+	flags := make([]bool, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		y0 := i * rowsPer
+		if y0 >= h {
+			break
+		}
+		y1 := min(y0+rowsPer, h)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var bandAlpha bool
+			convert(y0, y1, &bandAlpha)
+			flags[i] = bandAlpha
+		}()
+	}
+	wg.Wait()
+	for _, f := range flags {
+		if f {
+			*hasAlpha = true
+			break
+		}
+	}
+}
+
 func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(1, 8)
 	space := dec.dctSpace(1)
@@ -126,56 +189,66 @@ func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *boo
 		comps[0] = mapping[0][s]
 		lut[s] = space.ToNRGBA(comps)
 	}
-	samples := make([]uint32, 1)
-	for y := range h {
-		row := src.Pix[y*src.Stride:]
-		for x := range w {
-			s := row[x]
-			out := lut[s]
-			if colorKey != nil {
-				samples[0] = uint32(s)
-				if inColorKey(samples, colorKey) {
-					out.A = 0
+	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
+		samples := make([]uint32, 1) // Rewritten per pixel, so it belongs to the band rather than the image.
+		for y := y0; y < y1; y++ {
+			row := src.Pix[y*src.Stride:]
+			for x := range w {
+				s := row[x]
+				out := lut[s]
+				if colorKey != nil {
+					samples[0] = uint32(s)
+					if inColorKey(samples, colorKey) {
+						out.A = 0
+					}
 				}
+				if out.A != 255 {
+					*bandAlpha = true
+				}
+				off := (y*w + x) * 4
+				pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
 			}
-			// As on the raw-sample path, HasAlpha tracks the emitted alpha rather than only the color-key path: a
-			// 1-component space can produce a transparent color on its own (/Separation /None's ToNRGBA does).
-			if out.A != 255 {
-				*hasAlpha = true
-			}
-			off := (y*w + x) * 4
-			pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
 		}
-	}
+	})
 }
 
 func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *bool) {
 	conv := dec.newDCT3()
-	for y := range h {
-		for x := range w {
-			r, g, b := stdcolor.YCbCrToRGB(src.Y[src.YOffset(x, y)], src.Cb[src.COffset(x, y)], src.Cr[src.COffset(x, y)])
-			conv.put(pix, (y*w+x)*4, r, g, b, hasAlpha)
+	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
+		c := conv.forBand()
+		for y := y0; y < y1; y++ {
+			for x := range w {
+				r, g, b := stdcolor.YCbCrToRGB(src.Y[src.YOffset(x, y)], src.Cb[src.COffset(x, y)],
+					src.Cr[src.COffset(x, y)])
+				c.put(pix, (y*w+x)*4, r, g, b, bandAlpha)
+			}
 		}
-	}
+	})
 }
 
 // dctRGBA converts a 3-component JPEG image/jpeg handed back untransformed. Its alpha is 255 for every pixel (the
 // decoder fills the channel), so only the mask paths can make a pixel non-opaque.
 func (dec *decoder) dctRGBA(pix []byte, src *image.RGBA, w, h int, hasAlpha *bool) {
 	conv := dec.newDCT3()
-	for y := range h {
-		row := src.Pix[y*src.Stride:]
-		for x := range w {
-			off4 := x * 4
-			conv.put(pix, (y*w+x)*4, row[off4], row[off4+1], row[off4+2], hasAlpha)
+	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
+		c := conv.forBand()
+		for y := y0; y < y1; y++ {
+			row := src.Pix[y*src.Stride:]
+			for x := range w {
+				off4 := x * 4
+				c.put(pix, (y*w+x)*4, row[off4], row[off4+1], row[off4+2], bandAlpha)
+			}
 		}
-	}
+	})
 }
 
 // dct3 is the shared per-pixel conversion for a 3-component DCT image: the /Decode mapping, the color-key ranges, and
 // the space the component bytes convert through. DeviceRGB — the overwhelmingly common case — reduces to one byte LUT
 // per channel; any other 3-component space (a /DeviceN with three colorants) converts through its ToNRGBA per pixel, as
 // the raw-sample path does for multi-component spaces.
+//
+// Everything here is read-only after newDCT3 builds it except comps and samples, which put rewrites for every pixel;
+// forBand hands each row band its own pair of those so the bands share only the immutable part.
 type dct3 struct {
 	space    pdfcolor.Space
 	mapping  [][]float32
@@ -205,6 +278,22 @@ func (dec *decoder) newDCT3() *dct3 {
 		c.samples = make([]uint32, 3)
 	}
 	return c
+}
+
+// forBand returns a converter for one row band: a copy of c carrying its own per-pixel scratch, so concurrent bands
+// never write the same buffer. The copied tables (the LUT, the mapping, the color-key ranges) and the space are only
+// read from here on, and the buffers are allocated exactly where newDCT3 allocated them — the fast paths that leave
+// them nil (a DeviceRGB space, an absent color key) must stay nil, since put keys its behavior off those same fields.
+// Building the converter itself cannot move into the band, since newDCT3 reads and parses through the decoder.
+func (c *dct3) forBand() *dct3 {
+	band := *c
+	if c.comps != nil {
+		band.comps = make([]float32, 3)
+	}
+	if c.samples != nil {
+		band.samples = make([]uint32, 3)
+	}
+	return &band
 }
 
 // put converts one pixel's three component bytes into pix at off.
@@ -240,28 +329,30 @@ func (dec *decoder) dctCMYK(pix []byte, src *image.CMYK, w, h int, hasAlpha *boo
 	colorKey := dec.colorKeyRanges(4, 8)
 	space := dec.dctSpace(4)
 	mapping := dec.dctByteMapping(space)
-	comps := make([]float32, 4)
-	samples := make([]uint32, 4)
-	for y := range h {
-		row := src.Pix[y*src.Stride:]
-		for x := range w {
-			off4 := x * 4
-			for c := range 4 {
-				stored := 255 - row[off4+c]
-				samples[c] = uint32(stored)
-				comps[c] = mapping[c][stored]
+	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
+		comps := make([]float32, 4)
+		samples := make([]uint32, 4)
+		for y := y0; y < y1; y++ {
+			row := src.Pix[y*src.Stride:]
+			for x := range w {
+				off4 := x * 4
+				for c := range 4 {
+					stored := 255 - row[off4+c]
+					samples[c] = uint32(stored)
+					comps[c] = mapping[c][stored]
+				}
+				out := space.ToNRGBA(comps)
+				if colorKey != nil && inColorKey(samples, colorKey) {
+					out.A = 0
+				}
+				if out.A != 255 {
+					*bandAlpha = true
+				}
+				off := (y*w + x) * 4
+				pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
 			}
-			out := space.ToNRGBA(comps)
-			if colorKey != nil && inColorKey(samples, colorKey) {
-				out.A = 0
-			}
-			if out.A != 255 {
-				*hasAlpha = true
-			}
-			off := (y*w + x) * 4
-			pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
 		}
-	}
+	})
 }
 
 // rgbByteFor converts one mapped DeviceRGB component to its rendered byte through the same conversion as
