@@ -11,6 +11,7 @@ package font
 
 import (
 	"errors"
+	"math"
 
 	psi "github.com/go-text/typesetting/font/cff/interpreter"
 	"github.com/go-text/typesetting/font/opentype"
@@ -28,6 +29,12 @@ import (
 // maxHandlerOps, which exist for the identical reason. Because it drives the very same CharstringReader methods, the
 // outlines it produces are those LoadGlyph produced; only the hostile programs behave differently, and they draw
 // nothing.
+//
+// Three deliberate additions go past go-text, all of them TN5177-legal forms it fails or ignores where FreeType — and
+// so MuPDF — accepts them: the deprecated dotsection hint runs as a no-op, the arithmetic/storage/conditional operator
+// group (section 4.4-4.5) is implemented (compute below), and the four-operand endchar composes two standard-encoding
+// glyphs the way Type 1's seac did (seacEndchar below) instead of silently drawing an empty glyph. Type1C conversions
+// of Adobe-era fonts are where all three exist in the wild.
 //
 // Driving the machine ourselves means owning the subroutine arrays too: go-text keeps them unexported, so cffSubrs
 // re-walks the container (INDEX and DICT readers from cff.go) for the Global Subr INDEX, the Private DICT's local Subrs
@@ -51,6 +58,13 @@ const (
 	maxCFFSubrs = 65536
 	// maxCFFFontDicts bounds the FDArray entries of a CID-keyed program (FDSelect indices are single bytes).
 	maxCFFFontDicts = 256
+	// maxCFFArithValue bounds every value the arithmetic operators may leave on the stack. Numbers the machine parses
+	// are at most 16-bit-integer sized, so before compute existed nothing on the stack could take a coordinate past
+	// float32's range; a mul/add chain can, and a non-finite float32 must never reach outline geometry. 2^30 is far
+	// past any coordinate a real glyph computes and still leaves the full budget's worth of accumulation finite.
+	maxCFFArithValue = 1 << 30
+	// cffTransientSize is the transient array behind put/get, at the size TN5177 Appendix B guarantees.
+	cffTransientSize = 32
 )
 
 var errCFFBudget = errors.New("charstring work budget exhausted")
@@ -247,11 +261,16 @@ func cffFDSelectRanges(data []byte, pos, nGlyphs, gidSize int) []uint8 {
 }
 
 // type2Handler interprets a Type 2 charstring, mirroring go-text's own handler operator for operator so the outlines
-// match what cff.CFF.LoadGlyph would have produced, and charging every dispatch against a work budget so a hostile
-// subroutine call graph cannot run unbounded.
+// match what cff.CFF.LoadGlyph would have produced (plus the package comment's deliberate additions), and charging
+// every dispatch against a work budget so a hostile subroutine call graph cannot run unbounded.
 type type2Handler struct {
+	info *cffInfo // The owning program, for the component charstrings a seac endchar names.
 	cs   psi.CharstringReader
-	work int
+	// transient is the scratch array behind put and get (TN5177 section 4.5), fresh per glyph like FreeType's.
+	transient [cffTransientSize]float64
+	work      int
+	rng       uint32 // random's deterministic generator state, seeded on first use.
+	inSeac    bool   // Set while interpreting a seac component, where further composition is forbidden.
 }
 
 // Context implements psi.OperatorHandler.
@@ -267,6 +286,14 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 	var err error
 	if op.IsEscaped {
 		switch op.Operator {
+		case 0: // dotsection
+			// A Type 1 hint bracketing the dot of letters like 'i' that survives in Type1C conversions of Adobe-era
+			// fonts. TN5177 Appendix A keeps it reserved and FreeType (so also MuPDF) runs it as a no-op; go-text's own
+			// handler rejects it, which would drop the whole glyph over an operator that carries no geometry.
+		case 3, 4, 5, 9, 10, 11, 12, 14, 15, 18, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30:
+			// The arithmetic, storage, and conditional operators compute on the argument stack and leave their
+			// results there for the operator that consumes them, so they never clear it.
+			return h.compute(state, op.Operator)
 		case 34: // hflex
 			err = h.cs.Hflex(state)
 		case 35: // flex
@@ -286,6 +313,13 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 		return state.Return() // Does not clear the argument stack.
 	case 14: // endchar
 		// The optional leading width operand is the PDF /Widths' business, not the outline's, so it is dropped here.
+		// Four operands (five with that width) are the deprecated accented-glyph form instead — exactly the two counts
+		// FreeType accepts, so a sloppy charstring with other junk left on the stack still just ends.
+		if state.ArgStack.Top == 4 || state.ArgStack.Top == 5 {
+			if err = h.seacEndchar(state); err != nil {
+				return err
+			}
+		}
 		h.cs.ClosePath()
 		return psi.ErrInterrupt
 	case 10: // callsubr
@@ -339,12 +373,266 @@ func (c *cffInfo) glyphSegments(gid uint32) ([]opentype.Segment, bool) {
 	if c.font == nil || uint64(gid) >= uint64(len(c.font.Charstrings)) {
 		return nil, false
 	}
-	var (
-		machine psi.Machine
-		handler type2Handler
-	)
+	var machine psi.Machine
+	handler := type2Handler{info: c}
 	if err := machine.Run(c.font.Charstrings[gid], c.subrs.localFor(gid), c.subrs.globalFor(), &handler); err != nil {
 		return nil, false
 	}
 	return handler.cs.Segments, true
+}
+
+// compute runs one operator of the arithmetic, storage, and conditional group (TN5177 sections 4.4 and 4.5), which
+// go-text's handler rejects wholesale even though old Type1C conversions genuinely reach div and its siblings. Results
+// stay on the stack for the operator that consumes them. Malformed use — underflow, a zero divisor, a negative square
+// root, an out-of-range index — fails the glyph like any other bad charstring, and every pushed value is bounded so no
+// operator chain can carry a coordinate past what outline geometry survives.
+func (h *type2Handler) compute(state *psi.Machine, op byte) error {
+	st := &state.ArgStack
+	push := func(v float64) error {
+		// The comparison is written so NaN fails it too.
+		if int(st.Top) >= len(st.Vals) || !(v >= -maxCFFArithValue && v <= maxCFFArithValue) {
+			return errBadCFF
+		}
+		st.Vals[st.Top] = v
+		st.Top++
+		return nil
+	}
+	unary := func(f func(v float64) float64) error {
+		if st.Top < 1 {
+			return errBadCFF
+		}
+		return push(f(st.Pop()))
+	}
+	binary := func(f func(a, b float64) float64) error {
+		if st.Top < 2 {
+			return errBadCFF
+		}
+		b := st.Pop()
+		a := st.Pop()
+		return push(f(a, b))
+	}
+	truth := func(b bool) float64 {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	switch op {
+	case 3: // and
+		return binary(func(a, b float64) float64 { return truth(a != 0 && b != 0) })
+	case 4: // or
+		return binary(func(a, b float64) float64 { return truth(a != 0 || b != 0) })
+	case 5: // not
+		return unary(func(v float64) float64 { return truth(v == 0) })
+	case 9: // abs
+		return unary(math.Abs)
+	case 10: // add
+		return binary(func(a, b float64) float64 { return a + b })
+	case 11: // sub
+		return binary(func(a, b float64) float64 { return a - b })
+	case 12: // div
+		if st.Top < 2 || st.Vals[st.Top-1] == 0 {
+			return errBadCFF
+		}
+		return binary(func(a, b float64) float64 { return a / b })
+	case 14: // neg
+		return unary(func(v float64) float64 { return -v })
+	case 15: // eq
+		return binary(func(a, b float64) float64 { return truth(a == b) })
+	case 18: // drop
+		if st.Top < 1 {
+			return errBadCFF
+		}
+		st.Pop()
+		return nil
+	case 20: // put
+		if st.Top < 2 {
+			return errBadCFF
+		}
+		i := st.Pop()
+		v := st.Pop()
+		if !(i >= 0 && i < cffTransientSize) {
+			return errBadCFF
+		}
+		h.transient[int(i)] = v
+		return nil
+	case 21: // get
+		if st.Top < 1 {
+			return errBadCFF
+		}
+		i := st.Pop()
+		if !(i >= 0 && i < cffTransientSize) {
+			return errBadCFF
+		}
+		return push(h.transient[int(i)])
+	case 22: // ifelse: s1 s2 v1 v2 → s1 when v1 <= v2, else s2.
+		if st.Top < 4 {
+			return errBadCFF
+		}
+		v2 := st.Pop()
+		v1 := st.Pop()
+		s2 := st.Pop()
+		s1 := st.Pop()
+		if v1 <= v2 {
+			return push(s1)
+		}
+		return push(s2)
+	case 23: // random
+		return push(h.random())
+	case 24: // mul
+		return binary(func(a, b float64) float64 { return a * b })
+	case 26: // sqrt
+		if st.Top < 1 || st.Vals[st.Top-1] < 0 {
+			return errBadCFF
+		}
+		return unary(math.Sqrt)
+	case 27: // dup
+		if st.Top < 1 {
+			return errBadCFF
+		}
+		return push(st.Vals[st.Top-1])
+	case 28: // exch
+		if st.Top < 2 {
+			return errBadCFF
+		}
+		st.Vals[st.Top-1], st.Vals[st.Top-2] = st.Vals[st.Top-2], st.Vals[st.Top-1]
+		return nil
+	case 29: // index: a negative operand duplicates the top element (TN5177 section 4.4).
+		if st.Top < 1 {
+			return errBadCFF
+		}
+		i := st.Pop()
+		if i >= float64(st.Top) {
+			return errBadCFF
+		}
+		if i < 0 {
+			i = 0
+		}
+		return push(st.Vals[st.Top-1-int32(i)])
+	case 30: // roll
+		if st.Top < 2 {
+			return errBadCFF
+		}
+		j := st.Pop()
+		n := st.Pop()
+		if !(j >= math.MinInt32 && j <= math.MaxInt32) || !(n >= 0 && n <= float64(st.Top)) {
+			return errBadCFF
+		}
+		rollStack(st, int32(n), int32(j))
+		return nil
+	}
+	return errBadCFF
+}
+
+// rollStack circularly shifts the top n stack entries by j positions, positive j toward the top of the stack (the
+// PostScript roll convention TN5177 adopts).
+func rollStack(st *psi.ArgStack, n, j int32) {
+	if n <= 1 {
+		return
+	}
+	j %= n
+	if j < 0 {
+		j += n
+	}
+	if j == 0 {
+		return
+	}
+	group := st.Vals[st.Top-n : st.Top]
+	rotated := make([]float64, n)
+	for i := range group {
+		rotated[(int32(i)+j)%n] = group[i]
+	}
+	copy(group, rotated)
+}
+
+// random returns the next value in (0,1] for operator 12 23. The spec asks only for a pseudo-random value in that
+// range, and a page must raster identically on every run and platform, so this is a fixed-seed xorshift sequence
+// rather than anything environmental (FreeType is deterministic here for the same reason).
+func (h *type2Handler) random() float64 {
+	if h.rng == 0 {
+		h.rng = 2463534242 // Marsaglia's xorshift32 example seed.
+	}
+	h.rng ^= h.rng << 13
+	h.rng ^= h.rng >> 17
+	h.rng ^= h.rng << 5
+	return (float64(h.rng%(1<<24)) + 1) / (1 << 24)
+}
+
+// seacEndchar composes the deprecated accented-glyph endchar (TN5177 Appendix C): adx ady bchar achar name two
+// standard-encoding glyphs, the base drawn in place and the accent displaced by (adx, ady). go-text reads none of it
+// and returns an empty outline for such glyphs; FreeType composes, and accented Latin glyphs in Type1C conversions are
+// exactly where the form survives. A component may not itself compose (FreeType rejects the nesting too), and both
+// components share the caller's work budget, so a self-referential program terminates instead of recursing.
+func (h *type2Handler) seacEndchar(state *psi.Machine) error {
+	if h.info == nil || h.inSeac {
+		return errBadCFF
+	}
+	top := state.ArgStack.Top
+	adx := state.ArgStack.Vals[top-4]
+	ady := state.ArgStack.Vals[top-3]
+	base, ok := h.info.stdEncodingGID(state.ArgStack.Vals[top-2])
+	if !ok {
+		return errBadCFF
+	}
+	accent, ok := h.info.stdEncodingGID(state.ArgStack.Vals[top-1])
+	if !ok {
+		return errBadCFF
+	}
+	if err := h.seacComponent(base, 0, 0); err != nil {
+		return err
+	}
+	// Stack values are bounded by the machine's number forms and compute's push, so the float32 narrowing is finite.
+	return h.seacComponent(accent, float32(adx), float32(ady))
+}
+
+// stdEncodingGID resolves a seac operand: a StandardEncoding code whose glyph name the program's charset must map to a
+// GID. A CID-keyed program has no charset names, so composition correctly fails there.
+func (c *cffInfo) stdEncodingGID(code float64) (uint32, bool) {
+	if !(code >= 0 && code < 256) {
+		return 0, false
+	}
+	name := standardEncoding[int(code)]
+	if name == "" {
+		return 0, false
+	}
+	gid, ok := c.names[name]
+	return gid, ok
+}
+
+// seacComponent interprets one component charstring in a fresh sub-handler and appends its outline displaced by
+// (dx, dy). The sub-handler continues this handler's work budget, and the segment cap is re-checked over the combined
+// outline, so composition buys a hostile program nothing.
+func (h *type2Handler) seacComponent(gid uint32, dx, dy float32) error {
+	if uint64(gid) >= uint64(len(h.info.font.Charstrings)) {
+		return errBadCFF
+	}
+	sub := type2Handler{info: h.info, work: h.work, inSeac: true}
+	var machine psi.Machine
+	if err := machine.Run(h.info.font.Charstrings[gid], h.info.subrs.localFor(gid), h.info.subrs.globalFor(), &sub); err != nil {
+		return err
+	}
+	h.work = sub.work
+	if len(h.cs.Segments)+len(sub.cs.Segments) > maxCFFSegments {
+		return errCFFBudget
+	}
+	for _, seg := range sub.cs.Segments {
+		for i := range segmentPoints(seg.Op) {
+			seg.Args[i].X += dx
+			seg.Args[i].Y += dy
+		}
+		h.cs.Segments = append(h.cs.Segments, seg)
+	}
+	return nil
+}
+
+// segmentPoints is how many of a segment's three points its operation uses.
+func segmentPoints(op opentype.SegmentOp) int {
+	switch op {
+	case opentype.SegmentOpMoveTo, opentype.SegmentOpLineTo:
+		return 1
+	case opentype.SegmentOpQuadTo:
+		return 2
+	default:
+		return 3
+	}
 }
