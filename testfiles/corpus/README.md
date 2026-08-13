@@ -88,6 +88,20 @@ needles pin layout (quads) and, for the Type0 files, the /ToUnicode extraction c
 - `text-trmodes.pdf` — standard-14 text across every text render mode: Tr 0/1/2 fill/stroke/both, Tr 3
   invisible (its needle pins extraction of invisible text), Tr 7 clip-only and Tr 4/5 fill+clip / stroke+clip
   with colored bands painted through the live clip, plus rise (Ts) and horizontal scaling (Tz) lines.
+- `text-ligature.pdf` — one 400×200 page (generated 2026-08-13, same handcrafted convention; all widths explicit
+  so the layout comes from the file rather than from either engine's standard-14 metric fallback) pinning the
+  characters one glyph can spell. Every line shows a single glyph that extracts as more than one rune, through
+  each of the routes MuPDF takes: a one-to-many /ToUnicode `bfchar` ("sacri" + one glyph + "ce" reads
+  *sacrifice*), a /ToUnicode target that is itself a ligature code point (U+FB02, so one glyph + "ower" reads
+  *flower*), a glyph with NO /ToUnicode whose name reaches U+FB03 through the AGL ("o" + one glyph + "ce" reads
+  *office*), a target whose leading rune is a surrogate pair with a rune after it (𝐀A), a `bfrange` whose
+  multi-unit target increments across three codes (*aaabac*), and a glyph named in the underscore-separated form
+  (`f_l`, no /ToUnicode) that only reaches its code point through the rewrite MuPDF's
+  `fz_unicode_from_glyph_name` applies to five such names (one glyph + "ute" reads *flute*). The needles pin all
+  of it: `sacrice` and `fute` — what the text reads when only a target's first rune survives — must find
+  nothing, `lower`/`ffice`/`lute` start inside a glyph so their quads pin where the extra characters sit (at the
+  glyph's advance end, carrying no advance of their own), and `aab` spans one glyph's extra character into the
+  next glyph's first.
 
 ## Encrypted variants
 

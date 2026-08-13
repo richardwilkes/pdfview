@@ -510,3 +510,143 @@ func TestRecordCapsCharacters(t *testing.T) {
 		t.Errorf("a post-cap run grew the recording to %d characters", got)
 	}
 }
+
+// mkLigatureRun builds a one-glyph run whose glyph draws a ligature: unicode leads the extraction and rest follows it,
+// as a one-to-many /ToUnicode mapping supplies. Like mkRun the font is metric-free, so the recorded quads have no
+// height; the vertical extent of the characters a glyph spells out is pinned by TestRecordFillerGeometry below and,
+// against MuPDF itself, by the text-ligature corpus goldens.
+func mkLigatureRun(unicode rune, rest []rune, x, y, size, adv float32) *device.TextRun {
+	return &device.TextRun{
+		Font: &font.Font{},
+		Glyphs: []device.Glyph{{
+			Trm:     gfx.Matrix{A: size, D: size, E: x, F: y},
+			Unicode: unicode,
+			Rest:    rest,
+			Advance: adv,
+		}},
+	}
+}
+
+// TestRecordSpellsOutOneToManyToUnicode covers the reason a ligature is searchable at all: a glyph whose /ToUnicode
+// target holds several runes contributes one character per rune, not just the target's first. Keeping only the first
+// left the fl glyph of "Reflect" extracting as "Refect", which no reader searching for the word could find
+// (richardwilkes/gcs#1092).
+func TestRecordSpellsOutOneToManyToUnicode(t *testing.T) {
+	dev := New()
+	dev.FillText(mkLigatureRun('f', []rune{'l'}, 100, 200, 10, 0.6), device.Paint{})
+	if got := runes(dev.Chars()); got != "fl" {
+		t.Fatalf("recorded %q, want %q", got, "fl")
+	}
+	chars := dev.Chars()
+	base, filler := chars[0], chars[1]
+	// The extra character carries no advance and stands where the glyph left the pen, so the text after the glyph
+	// keeps the spacing the glyph laid down and a match starting at the extra character starts at the glyph's end.
+	if filler.Origin != base.End || filler.End != base.End {
+		t.Errorf("filler spans %+v-%+v, want both at the base's end %+v", filler.Origin, filler.End, base.End)
+	}
+	if filler.Size != base.Size || filler.Axis != base.Axis {
+		t.Errorf("filler size/axis = %v/%v, want the base's %v/%v", filler.Size, filler.Axis, base.Size, base.Axis)
+	}
+	// The whole point: the word the glyphs spell is findable, and searching for the leading rune alone still is.
+	if got := searchChars(chars, "fl", 8); len(got) != 1 {
+		t.Errorf("searching %q found %d quads, want 1", "fl", len(got))
+	}
+	if got := searchChars(chars, "f", 8); len(got) != 1 {
+		t.Errorf("searching %q found %d quads, want 1", "f", len(got))
+	}
+}
+
+// TestRecordFillerGeometry pins the quad of a character a glyph spells out beyond its first: MuPDF hands a no-glyph
+// character the current pen as both its start and its end point, so the quad is zero-width and sits at the base's
+// advance end, while still spanning the font's full ascender-to-descender height there.
+func TestRecordFillerGeometry(t *testing.T) {
+	dev := New()
+	base := mkChar('f', 100, 200, 6, 10)
+	dev.chars = append(dev.chars, base)
+	dev.recordFillers(&dev.chars[0], []rune{'l'})
+	if len(dev.chars) != 2 {
+		t.Fatalf("recorded %d characters, want 2", len(dev.chars))
+	}
+	want := gfx.Quad{
+		UL: gfx.Point{X: base.End.X, Y: base.Quad.UL.Y},
+		UR: gfx.Point{X: base.End.X, Y: base.Quad.UL.Y},
+		LL: gfx.Point{X: base.End.X, Y: base.Quad.LL.Y},
+		LR: gfx.Point{X: base.End.X, Y: base.Quad.LL.Y},
+	}
+	if got := dev.chars[1].Quad; got != want {
+		t.Errorf("filler quad = %+v, want %+v", got, want)
+	}
+}
+
+// TestRecordDecomposesLigatureCodePoints covers the other route a glyph reaches extraction spelling several letters:
+// the Unicode alphabetic-presentation ligatures, which a glyph named "fl" reaches through the AGL with no /ToUnicode
+// involved at all. MuPDF's fz_add_stext_char decomposes them, so a page using them is searchable by the letters drawn.
+func TestRecordDecomposesLigatureCodePoints(t *testing.T) {
+	for _, tc := range []struct {
+		want string
+		r    rune
+	}{
+		{r: 0xFB00, want: "ff"},
+		{r: 0xFB01, want: "fi"},
+		{r: 0xFB02, want: "fl"},
+		{r: 0xFB03, want: "ffi"},
+		{r: 0xFB04, want: "ffl"},
+		{r: 0xFB05, want: "st"},
+		{r: 0xFB06, want: "st"},
+		{r: 'A', want: "A"},    // Every other rune passes through untouched.
+		{r: 0xFB07, want: "﬇"}, // Including the unassigned code point just past the set.
+	} {
+		dev := New()
+		dev.FillText(mkLigatureRun(tc.r, nil, 100, 200, 10, 0.6), device.Paint{})
+		if got := runes(dev.Chars()); got != tc.want {
+			t.Errorf("%#U recorded %q, want %q", tc.r, got, tc.want)
+		}
+	}
+}
+
+// TestRecordDecomposesLigaturesWithinOneToMany pins that the two routes compose the way MuPDF's do: every rune a
+// one-to-many /ToUnicode target supplies reaches the ligature decomposition as its own character, the leading one
+// included.
+func TestRecordDecomposesLigaturesWithinOneToMany(t *testing.T) {
+	dev := New()
+	dev.FillText(mkLigatureRun(0xFB01, []rune{'x', 0xFB02}, 100, 200, 10, 0.6), device.Paint{})
+	if got := runes(dev.Chars()); got != "fixfl" {
+		t.Fatalf("recorded %q, want %q", got, "fixfl")
+	}
+	// Only the first character carries the glyph's advance; every other stands at the pen the glyph left behind.
+	chars := dev.Chars()
+	for i, c := range chars[1:] {
+		if c.Origin != chars[0].End || c.End != chars[0].End {
+			t.Errorf("character %d spans %+v-%+v, want both at %+v", i+1, c.Origin, c.End, chars[0].End)
+		}
+	}
+}
+
+// TestRecordCapsCharactersAcrossFillers pins that the extra characters a glyph spells out are subject to the same cap
+// as any other: a file may not walk past it by hiding characters behind one glyph.
+func TestRecordCapsCharactersAcrossFillers(t *testing.T) {
+	rest := make([]rune, 255) // What one code's /ToUnicode target can hold, capped as MuPDF's PDF_MRANGE_CAP caps it.
+	for i := range rest {
+		rest[i] = 'a'
+	}
+	glyphs := make([]device.Glyph, 4096)
+	for i := range glyphs {
+		glyphs[i] = device.Glyph{
+			Trm:     gfx.Matrix{A: 12, D: 12, E: float32(i) * 6, F: 200},
+			Unicode: 'a',
+			Rest:    rest,
+			Advance: 0.5,
+		}
+	}
+	dev := New()
+	for range 8 {
+		// A fresh run pointer per delivery: the dedup guard keys on identity, so each of these records its glyphs.
+		dev.FillText(&device.TextRun{Font: &font.Font{}, Glyphs: glyphs}, device.Paint{})
+		if got := len(dev.Chars()); got > maxChars {
+			t.Fatalf("recorded %d characters, past the cap of %d", got, maxChars)
+		}
+	}
+	if got := len(dev.Chars()); got != maxChars {
+		t.Fatalf("recorded %d characters, want the cap of %d", got, maxChars)
+	}
+}

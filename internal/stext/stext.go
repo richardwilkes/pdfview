@@ -123,6 +123,7 @@ func (d *Device) record(run *device.TextRun) {
 		if len(d.chars) >= maxChars {
 			return
 		}
+		first, rest := expand(g)
 		d.chars = append(d.chars, Char{
 			Quad: gfx.Quad{
 				UL: g.Trm.Apply(gfx.Point{X: 0, Y: asc}),
@@ -132,11 +133,99 @@ func (d *Device) record(run *device.TextRun) {
 			},
 			Origin: g.Trm.Apply(gfx.Point{}),
 			End:    g.Trm.Apply(gfx.Point{X: g.Advance}),
-			Rune:   g.Unicode,
+			Rune:   first,
 			Size:   float32(math.Hypot(float64(g.Trm.C), float64(g.Trm.D))),
 			Axis:   g.Trm.B == 0 && g.Trm.C == 0,
 		})
+		d.recordFillers(&d.chars[len(d.chars)-1], rest)
 	}
+}
+
+// recordFillers appends the characters spelling out a glyph's further runes. They carry no advance of their own and sit
+// where the pen already stands — at base's end — so the text after the glyph keeps the spacing the glyph laid down.
+// This is MuPDF's filler-glyph geometry: fz_add_stext_char_imp hands a no-glyph character the current pen as both its
+// start and its end point and leaves the pen there, while the character's quad still spans the font's full
+// ascender-to-descender height.
+func (d *Device) recordFillers(base *Char, rest []rune) {
+	if len(rest) == 0 {
+		return
+	}
+	pen := base.End
+	// The quad's vertical reach as a displacement from the baseline, which is what a zero-width quad at the pen is
+	// built from: the glyph's matrix has already rotated and scaled it, and must not translate it a second time.
+	upX, upY := base.Quad.UL.X-base.Origin.X, base.Quad.UL.Y-base.Origin.Y
+	downX, downY := base.Quad.LL.X-base.Origin.X, base.Quad.LL.Y-base.Origin.Y
+	up := gfx.Point{X: pen.X + upX, Y: pen.Y + upY}
+	down := gfx.Point{X: pen.X + downX, Y: pen.Y + downY}
+	for _, r := range rest {
+		if len(d.chars) >= maxChars {
+			return
+		}
+		d.chars = append(d.chars, Char{
+			Quad:   gfx.Quad{UL: up, UR: up, LL: down, LR: down},
+			Origin: pen,
+			End:    pen,
+			Rune:   r,
+			Size:   base.Size,
+			Axis:   base.Axis,
+		})
+	}
+}
+
+// expand splits a glyph's extraction runes into the one the glyph's own quad carries and the ones filler characters
+// carry after it. Two independent sources put more than one rune behind a single glyph, and MuPDF applies both, in this
+// order:
+//
+//   - A one-to-many /ToUnicode mapping (Glyph.Rest), which pdf_show_char shows as filler glyphs after the real one.
+//   - A ligature code point, which fz_add_stext_char decomposes into the letters it draws, so a glyph reaching
+//     extraction as U+FB02 is searchable as "fl". MuPDF applies this to every rune it is handed — the fillers of a
+//     one-to-many mapping reach it as their own text-span items — so the /ToUnicode runes run through it too.
+//
+// The overwhelmingly common glyph maps to one ordinary rune and allocates nothing here.
+func expand(g device.Glyph) (first rune, rest []rune) {
+	if len(g.Rest) == 0 {
+		if lig := ligature(g.Unicode); lig != "" {
+			return rune(lig[0]), []rune(lig[1:])
+		}
+		return g.Unicode, nil
+	}
+	out := make([]rune, 0, len(g.Rest)+3)
+	for i := range len(g.Rest) + 1 {
+		r := g.Unicode
+		if i > 0 {
+			r = g.Rest[i-1]
+		}
+		if lig := ligature(r); lig != "" {
+			for _, c := range lig {
+				out = append(out, c)
+			}
+			continue
+		}
+		out = append(out, r)
+	}
+	return out[0], out[1:]
+}
+
+// ligature returns the letters a Unicode alphabetic-presentation ligature stands for, or "" for every other rune. The
+// set is the one MuPDF's fz_add_stext_char decomposes (its FZ_STEXT_PRESERVE_LIGATURES option turns this off, and the
+// search path never sets it); the two st ligatures both spell "st". Every replacement is ASCII, so indexing the string
+// by byte indexes it by rune.
+func ligature(r rune) string {
+	switch r {
+	case 0xFB00:
+		return "ff"
+	case 0xFB01:
+		return "fi"
+	case 0xFB02:
+		return "fl"
+	case 0xFB03:
+		return "ffi"
+	case 0xFB04:
+		return "ffl"
+	case 0xFB05, 0xFB06: // Long st and st.
+		return "st"
+	}
+	return ""
 }
 
 // Search finds needle in the recorded characters and returns the hit quads in emission order, at most maxQuads of them

@@ -194,7 +194,7 @@ end`
 // expectations stay readable. A multi-rune target surfaces only its leading rune — the one rune per code Font.Unicode
 // carries, and the only one bfRune decodes.
 func bfLead(cm *cmapPDF, code uint32, nBytes uint8) string {
-	r, ok := cm.bfRune(code, nBytes)
+	r, _, ok := cm.bfRune(code, nBytes)
 	if !ok {
 		return ""
 	}
@@ -786,9 +786,9 @@ func TestBFRuneDecodesOnlyTheLeadingUnit(t *testing.T) {
 	}
 	cm := &cmapPDF{}
 	cm.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: target}}
-	r, ok := cm.bfRune(0x20, 2)
-	if !ok || r != 'A' {
-		t.Fatalf("bfRune = %q, %v; want 'A', true", r, ok)
+	r, multi, ok := cm.bfRune(0x20, 2)
+	if !ok || r != 'A' || !multi {
+		t.Fatalf("bfRune = %q, %v, %v; want 'A', true, true", r, multi, ok)
 	}
 	// The lookup's cost must not depend on the target's length: the old whole-target decode allocated a []uint16 and a
 	// string proportional to it on every call.
@@ -842,5 +842,94 @@ func TestBFRuneIncrementAndSurrogates(t *testing.T) {
 	}
 	if _, ok := utf16BEFirstRune(nil, 0); ok {
 		t.Error("an empty target reported a rune; the caller must fall through to its other Unicode sources")
+	}
+}
+
+// TestBFRunesAfterFirst pins the whole-target decoding against the same authority the leading-rune shortcut is pinned
+// against: the leading rune and the runes after it, concatenated, must be the target's full UTF-16 decoding.
+func TestBFRunesAfterFirst(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		want  string
+		dst   []byte
+		inc   uint16
+		multi bool
+	}{
+		{name: "one unit", dst: []byte{0x00, 0x41}, want: "A"},
+		{name: "one byte", dst: []byte{0x41}, want: "A"},
+		{name: "ligature target", dst: []byte{0x00, 0x66, 0x00, 0x6C}, want: "fl", multi: true},
+		{name: "increment lands on the final unit", dst: []byte{0x00, 0x66, 0x00, 0x6C}, inc: 2, want: "fn", multi: true},
+		{name: "surrogate pair alone", dst: []byte{0xD8, 0x35, 0xDC, 0x00}, want: "\U0001D400"},
+		{
+			name: "surrogate pair then a rune", dst: []byte{0xD8, 0x35, 0xDC, 0x00, 0x00, 0x41}, want: "\U0001D400A",
+			multi: true,
+		},
+		{
+			name: "rune then a surrogate pair", dst: []byte{0x00, 0x41, 0xD8, 0x35, 0xDC, 0x00}, want: "A\U0001D400",
+			multi: true,
+		},
+		{
+			name: "mispaired surrogate after the first rune", dst: []byte{0x00, 0x41, 0xD8, 0x35, 0x00, 0x42},
+			want: "A�B", multi: true,
+		},
+		{name: "trailing high surrogate", dst: []byte{0x00, 0x41, 0xD8, 0x35}, want: "A�", multi: true},
+		{name: "odd trailing byte dropped", dst: []byte{0x00, 0x41, 0x00, 0x42, 0x43}, want: "AB", multi: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := &cmapPDF{}
+			cm.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: tc.dst, trimmed: tc.inc}}
+			first, multi, ok := cm.bfRune(0x20, 2)
+			if !ok {
+				t.Fatal("bfRune reported no mapping")
+			}
+			if multi != tc.multi {
+				t.Errorf("bfRune reported multi = %v, want %v", multi, tc.multi)
+			}
+			got := string(first) + string(cm.bfRunesAfterFirst(0x20, 2))
+			if got != tc.want {
+				t.Errorf("decoded %q, want %q", got, tc.want)
+			}
+			// The full decoding is the authority: whatever this reports must be what utf16.Decode makes of the same
+			// units with the bfrange increment applied to the last of them.
+			units := make([]uint16, 0, len(tc.dst)/2)
+			for i := 0; i+1 < len(tc.dst); i += 2 {
+				units = append(units, uint16(tc.dst[i])<<8|uint16(tc.dst[i+1]))
+			}
+			if len(units) != 0 {
+				units[len(units)-1] += tc.inc
+				if want := string(utf16.Decode(units)); got != want {
+					t.Errorf("decoded %q, but the full UTF-16 decoding is %q", got, want)
+				}
+			}
+		})
+	}
+	// A code that maps nowhere has no runes after its first, and never allocates looking for them.
+	cm := &cmapPDF{}
+	if got := cm.bfRunesAfterFirst(0x20, 2); got != nil {
+		t.Errorf("an unmapped code reported %q", string(got))
+	}
+}
+
+// TestBFRunesAfterFirstCapped pins the bound on how many characters one glyph can spell out. parseBFRanges puts no cap
+// on a target's length — a hex string token reaches the lexer's maxHexStringScan of ~512 KB — so without this a single
+// glyph, shown once per page position a work budget allows, expands into a quarter-million recorded characters each.
+// MuPDF stops at the same place: its bfrange parser truncates a target to PDF_MRANGE_CAP code units and increments the
+// last unit that survives.
+func TestBFRunesAfterFirstCapped(t *testing.T) {
+	const units = 1 << 15
+	dst := make([]byte, 0, 2*units)
+	for range units {
+		dst = append(dst, 0x00, 0x41)
+	}
+	cm := &cmapPDF{}
+	cm.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: dst}}
+	got := cm.bfRunesAfterFirst(0x20, 2)
+	if len(got) != maxBFRunes-1 { // The leading rune is the caller's; this returns the rest of the capped target.
+		t.Fatalf("a %d-unit target yielded %d runes, want %d", units, len(got), maxBFRunes-1)
+	}
+	// The increment lands on the last unit that survives the cap, not on the last unit written.
+	cm.bf[1][0].trimmed = 1
+	if got = cm.bfRunesAfterFirst(0x20, 2); got[len(got)-1] != 'B' {
+		t.Errorf("the last surviving rune is %q, want 'B' — the increment must land on it", got[len(got)-1])
 	}
 }

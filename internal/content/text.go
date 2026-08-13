@@ -289,6 +289,7 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 			}
 			run.Glyphs = append(run.Glyphs, device.Glyph{
 				Trm:     trm,
+				Rest:    ts.font.UnicodeRest(code, nBytes),
 				GID:     ts.font.GID(code, nBytes),
 				Code:    code,
 				Unicode: ts.font.Unicode(code, nBytes),

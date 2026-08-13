@@ -90,9 +90,15 @@ type Tiling struct {
 // Glyph is one positioned glyph in a text run. Trm is the fully composed glyph-space→device-space matrix for this glyph
 // (text-space parameters, text matrix, and ctm folded together — glyph space here is the em-normalized space where an
 // advance of 1.0 is one em); Advance is the glyph's advance in that space. Unicode is the extraction/search value (0
-// when unknown).
+// when unknown), and Rest holds the further runes of a one-to-many /ToUnicode mapping — nil for every ordinary glyph.
+//
+// One glyph stays one glyph even when it spells several runes: Rest is extraction data, which only the structured-text
+// device reads. MuPDF instead appends a zero-advance "filler" glyph per extra rune to the same text span, which every
+// device then has to recognize by its negative glyph id and skip; carrying the runes on the glyph that drew them keeps
+// the painting devices unable to double-draw a ligature.
 type Glyph struct {
 	Trm     gfx.Matrix
+	Rest    []rune
 	GID     uint32
 	Code    uint32
 	Unicode rune

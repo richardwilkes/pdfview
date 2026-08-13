@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -688,5 +689,93 @@ func TestCFFIndexBoundsRejectOutOfRangeOffsets(t *testing.T) {
 	}
 	if got := parseCFFCharsetCID(small, &cffTop{isCID: true, charStringsOff: math.MaxInt32, charsetOff: 32}); got != nil {
 		t.Error("parseCFFCharsetCID accepted a CharStrings offset past the data")
+	}
+}
+
+// TestUnicodeRest pins where the characters a single glyph spells out come from. Only /ToUnicode produces them: it is
+// the one source ISO 32000-2 9.10.3 lets map a code to several runes, and the glyph-name path carries one rune per
+// code, because MuPDF's cid_to_ucs is an array of single values filled from fz_unicode_from_glyph_name. A ligature
+// glyph with no /ToUnicode reaches its letters the other way, through a ligature code point the extraction device
+// decomposes — see TestLigatureAltName.
+func TestUnicodeRest(t *testing.T) {
+	const toUni = `/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+1 begincodespacerange <00> <ff> endcodespacerange
+3 beginbfchar
+<01> <00660069>
+<02> <fb02>
+<03> <0041>
+endbfchar
+endcmap end end`
+	f, err := loadFromDict(t,
+		`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica
+		    /Encoding << /Differences [1 /fi 2 /fl 3 /A 4 /fl 5 /f_l] >> /ToUnicode 2 0 R >>`,
+		fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(toUni)+1, toUni))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		want string
+		code uint32
+		rest []rune
+	}{
+		{code: 1, want: "f", rest: []rune{'i'}}, // A one-to-many target: everything past the first rune.
+		{code: 2, want: "ﬂ"},                    // A single-rune target, ligature or not, has nothing after it.
+		{code: 3, want: "A"},
+		// No /ToUnicode entry: both spellings of the fl glyph's name reach the ligature code point, which is one rune
+		// with nothing after it — the letters come out of the extraction device's decomposition, not from here.
+		{code: 4, want: "ﬂ"},
+		{code: 5, want: "ﬂ"},
+	} {
+		got := string(f.Unicode(tc.code, 1))
+		if got != tc.want {
+			t.Errorf("Unicode(%d) = %q, want %q", tc.code, got, tc.want)
+		}
+		if rest := f.UnicodeRest(tc.code, 1); !slices.Equal(rest, tc.rest) {
+			t.Errorf("UnicodeRest(%d) = %q, want %q", tc.code, string(rest), string(tc.rest))
+		}
+	}
+	// A font with no /ToUnicode at all never reports extra runes, whatever its glyph names resolve to.
+	bare, err := loadFromDict(t,
+		`<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Differences [1 /fl 2 /f_l] >> >>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for code := uint32(1); code <= 2; code++ {
+		if rest := bare.UnicodeRest(code, 1); rest != nil {
+			t.Errorf("UnicodeRest(%d) = %q with no /ToUnicode present", code, string(rest))
+		}
+	}
+}
+
+// TestLigatureAltName pins the underscore-separated ligature names, the form an OpenType-aware producer writes for a
+// ligature glyph. Only the five MuPDF's fz_unicode_from_glyph_name special-cases are rewritten; every other underscore
+// name keeps its first component's rune, which is where MuPDF's truncate-at-the-underscore lands too. Extraction reads
+// the rewritten name, so a font whose fl glyph is named "f_l" and carries no /ToUnicode still extracts the ligature
+// code point that the structured-text device spells back out as "fl".
+func TestLigatureAltName(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"f_f", "ﬀ"},
+		{"f_i", "ﬁ"},
+		{"f_l", "ﬂ"},
+		{"f_f_i", "ﬃ"},
+		{"f_f_l", "ﬄ"},
+		{"f_l.alt", "ﬂ"}, // The suffix is stripped before the rewrite, as MuPDF strips it first.
+		{"fl", "ﬂ"},      // The plain AGL name was never affected.
+		{"f_x", "f"},     // An f-name that is not one of the five keeps its first component.
+		{"T_h", "T"},     // So does every name that does not start with f.
+		{"f", "f"},
+		{"A", "A"},
+	} {
+		f, err := loadFromDict(t, `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica
+		    /Encoding << /Differences [1 /`+tc.name+`] >> >>`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(f.Unicode(1, 1)); got != tc.want {
+			t.Errorf("a glyph named %q extracts as %q, want %q", tc.name, got, tc.want)
+		}
+		if rest := f.UnicodeRest(1, 1); rest != nil {
+			t.Errorf("a glyph named %q reported %q after its first rune", tc.name, string(rest))
+		}
 	}
 }

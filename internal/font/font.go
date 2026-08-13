@@ -339,18 +339,40 @@ func (f *Font) Width(code uint32, nBytes uint8) float32 {
 }
 
 // Unicode returns the Unicode rune for a code decoded at nBytes bytes, or 0 when none is known. A /ToUnicode CMap takes
-// precedence over every other source (ISO 32000-2 9.10.2); multi-rune targets (ligatures) surface their first rune, the
-// one rune per code the search/extraction seam carries.
+// precedence over every other source (ISO 32000-2 9.10.2); a multi-rune target surfaces its first rune here, and
+// UnicodeRest returns the remainder.
 func (f *Font) Unicode(code uint32, nBytes uint8) rune {
+	r, _ := f.unicode(code, nBytes)
+	return r
+}
+
+// UnicodeRest returns the runes past the first that a code's /ToUnicode target maps to — the one-to-many mappings of
+// ISO 32000-2 9.10.3, which a ligature glyph uses to spell out the letters it draws ("fl" for a single fl glyph). It is
+// nil for every ordinary code, so the search/extraction seam pays for the whole-target decode only where a code really
+// does carry more than one rune.
+//
+// Only /ToUnicode produces these; buildUnicode's glyph-name table is one rune per code, for the reasons given there. A
+// ligature glyph carrying no /ToUnicode is still searchable by the letters it draws, but by the other route: its name
+// reaches a ligature code point, which the structured-text device decomposes.
+func (f *Font) UnicodeRest(code uint32, nBytes uint8) []rune {
+	if _, multi := f.unicode(code, nBytes); !multi {
+		return nil
+	}
+	return f.toUni.bfRunesAfterFirst(code, nBytes)
+}
+
+// unicode resolves a code's leading rune, reporting whether a /ToUnicode target supplied it and carried more runes
+// after it.
+func (f *Font) unicode(code uint32, nBytes uint8) (r rune, multi bool) {
 	if f.toUni != nil {
-		if r, ok := f.toUni.bfRune(code, nBytes); ok {
-			return r
+		if r, multi, ok := f.toUni.bfRune(code, nBytes); ok {
+			return r, multi
 		}
 	}
 	if f.type0 == nil && code < 256 {
-		return f.uni[code]
+		return f.uni[code], false
 	}
-	return 0
+	return 0, false
 }
 
 // GlyphName returns the glyph name a simple font's encoding assigns to code ("" when none).
@@ -448,10 +470,16 @@ func (f *Font) ForEachCode(s []byte, fn func(code uint32, nBytes uint8) bool) {
 // buildUnicode fills the code→rune table: glyph name through the Adobe Glyph List (including its uniXXXX and uXXXXXX
 // conventions), else the code itself for ASCII, else unknown. A /ToUnicode CMap, when present, takes precedence over
 // this table at lookup time (see Unicode).
+//
+// One rune per code is all this table carries, which is the whole of what the glyph-name route can extract: MuPDF's
+// cid_to_ucs is an array of single values filled from fz_unicode_from_glyph_name, and a name resolving to several code
+// points (the AGL's Hebrew points, a multi-value uniXXXXYYYY) keeps only the first here as it does there. The one route
+// by which a name reaches more than one character is ligatureAltName below, which turns the name into a ligature code
+// point that the structured-text device then spells out.
 func buildUnicode(f *Font) {
 	for code := range 256 {
 		if name := f.enc[code]; name != "" {
-			if s := GlyphNameToUnicode(name); s != "" {
+			if s := GlyphNameToUnicode(ligatureAltName(name)); s != "" {
 				runes := []rune(s)
 				f.uni[code] = runes[0]
 				continue
@@ -461,6 +489,38 @@ func buildUnicode(f *Font) {
 			f.uni[code] = rune(code)
 		}
 	}
+}
+
+// ligatureAltName rewrites the five underscore-separated ligature names MuPDF's fz_unicode_from_glyph_name special-
+// cases ("f_l" and friends, the form an OpenType-aware producer writes for a ligature glyph) into the AGL names of the
+// code points they stand for; every other name passes through untouched.
+//
+// Without it the name splits into components whose first alone survives, so a page setting "flu" as one f_l glyph plus
+// "u" extracted as "fu" and no reader could search for the word. The rewrite reaches an alphabetic-presentation code
+// point instead, which the structured-text device decomposes back into the letters drawn.
+//
+// The other underscore names are deliberately left alone: MuPDF truncates those at the first underscore, and taking
+// the first component's rune — which is what the split-and-keep-the-first-rune path already does — lands in the same
+// place. This is extraction only, exactly as it is in MuPDF, where fz_unicode_from_glyph_name feeds cid_to_ucs while
+// glyph SELECTION by name goes through fz_unicode_from_glyph_name_strict, which has no such rewrite.
+func ligatureAltName(name string) string {
+	trimmed := name
+	if dot := strings.IndexByte(trimmed, '.'); dot > 0 {
+		trimmed = trimmed[:dot]
+	}
+	switch trimmed {
+	case "f_f":
+		return "ff"
+	case "f_i":
+		return "fi"
+	case "f_l":
+		return "fl"
+	case "f_f_i":
+		return "ffi"
+	case "f_f_l":
+		return "ffl"
+	}
+	return name
 }
 
 // GlyphNameToUnicode implements the AGL algorithm for one glyph name: strip any suffix after the first period, split

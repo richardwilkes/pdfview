@@ -1,0 +1,68 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Resources << /Font << /F1 5 0 R /F2 7 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 239 >>
+stream
+BT /F1 20 Tf 20 160 Td (sacri\001ce) Tj ET
+BT /F1 20 Tf 20 130 Td (\002ower) Tj ET
+BT /F2 20 Tf 20 100 Td (o\003ce) Tj ET
+BT /F1 20 Tf 20 70 Td (\004Z) Tj ET
+BT /F1 20 Tf 20 40 Td (\020\021\022) Tj ET
+BT /F2 20 Tf 20 10 Td (\006ute) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 1 /LastChar 122 /Widths [500 500 500 500 500 500 517 517 517 517 517 517 517 517 517 420 420 420 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517] /Encoding << /Type /Encoding /Differences [1 /fi 2 /fl 4 /A 16 /a 17 /a 18 /a] >> /ToUnicode 6 0 R >>
+endobj
+6 0 obj
+<< /Length 334 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CMapName /Probe-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<00> <ff>
+endcodespacerange
+3 beginbfchar
+<01> <00660069>
+<02> <fb02>
+<04> <d835dc00 0041>
+endbfchar
+1 beginbfrange
+<10> <12> <00610061>
+endbfrange
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 1 /LastChar 122 /Widths [500 500 500 500 500 500 517 517 517 517 517 517 517 517 517 420 420 420 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517 517] /Encoding << /Type /Encoding /Differences [3 /ffi 6 /f_l] >> >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000000546 00000 n 
+0000001240 00000 n 
+0000001624 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+2280
+%%EOF

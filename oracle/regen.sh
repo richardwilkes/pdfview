@@ -40,6 +40,8 @@ dump text-std14 -search Hello -search 'hello world' -search 'brown fox' -search 
 dump text-type1 -search BCD -search 'Aé' -search DAC -search eBe
 dump text-type0-cid2 -search '你佡世界' -search WXYZ
 dump text-type0-cid0 -search PRS -search SQRP
+dump text-ligature -search sacrifice -search sacrice -search flower -search lower -search office -search 'ffice' \
+  -search '𝐀AZ' -search aab -search ac -search flute -search lute -search fute
 dump text-type3
 dump text-trmodes -search 'Filled zero' -search 'Stroked pen' -search 'Both layers' -search 'Ghost words' \
   -search CLIPPED -search FILLCLIP -search Risen -search Wide -search STROKECLIP

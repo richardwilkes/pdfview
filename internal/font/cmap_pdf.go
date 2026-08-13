@@ -526,12 +526,85 @@ func (cm *cmapPDF) cid(code uint32, nBytes uint8) uint32 {
 // bfRune maps a code decoded at nBytes bytes to the first rune of its bf target (ToUnicode), reporting false when the
 // code maps nowhere.
 //
-// Only the leading rune is decoded, never the whole target: Font.Unicode — the sole caller, and the one rune per code
-// the search/extraction seam carries — keeps just that one, while parseBFRanges puts no cap on a target's length (a hex
-// string token reaches the lexer's maxHexStringScan of ~512 KB). Decoding the whole target here allocated a []uint16
-// and a string proportional to it on EVERY lookup, so a hostile /ToUnicode over a text-heavy page turned extraction
-// into hundreds of gigabytes of churn to produce one rune per call.
-func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (rune, bool) {
+// Only the leading rune is decoded here, never the whole target: this is the per-glyph lookup, while parseBFRanges puts
+// no cap on a target's length (a hex string token reaches the lexer's maxHexStringScan of ~512 KB). Decoding the whole
+// target on every call allocated a []uint16 and a string proportional to it, so a hostile /ToUnicode over a text-heavy
+// page turned extraction into hundreds of gigabytes of churn to produce one rune. Codes whose target carries more than
+// one rune — ligatures, and the "one-to-many" mappings of ISO 32000-2 9.10.3 generally — report multi, and the caller
+// asks bfRunesAfterFirst for the rest only for those.
+func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (r rune, multi, ok bool) {
+	dst, inc, found := cm.bfTarget(code, nBytes)
+	if !found {
+		return 0, false, false
+	}
+	r, ok = utf16BEFirstRune(dst, inc)
+	// A target is one-to-many when code units remain past the leading rune's own: one unit, or the two a surrogate
+	// pair spans. Odd trailing bytes are the dropped half-unit utf16BEFirstRune ignores, so they are not a rune.
+	return r, ok && len(dst)/2 > utf16RuneUnits(dst), ok
+}
+
+// bfRunesAfterFirst returns the runes of a code's bf target past its leading one, decoded UTF-16BE with surrogate pairs
+// combined — the "filler" characters MuPDF's pdf_show_char emits for a one-to-many mapping. It is called only for the
+// codes bfRune reported multi for, so the whole-target decode this does costs nothing on the ordinary one-rune path.
+//
+// The result is capped at maxBFRunes runes, exactly as MuPDF caps a mapping at PDF_MRANGE_CAP code units: without it a
+// single glyph in a hostile file expands into a quarter-million recorded characters.
+func (cm *cmapPDF) bfRunesAfterFirst(code uint32, nBytes uint8) []rune {
+	dst, inc, ok := cm.bfTarget(code, nBytes)
+	if !ok {
+		return nil
+	}
+	// The cap is on code units, not on runes, and the increment lands on the last unit that survives it — both as
+	// MuPDF's bfrange parser does, which truncates the target string before incrementing its final unit.
+	units := min(len(dst)/2, maxBFRunes)
+	unit := func(i int) uint16 {
+		u := uint16(dst[i*2])<<8 | uint16(dst[i*2+1])
+		if i == units-1 {
+			u += inc
+		}
+		return u
+	}
+	out := make([]rune, 0, units)
+	for i := utf16RuneUnits(dst); i < units; i++ {
+		first := unit(i)
+		switch {
+		case first >= 0xD800 && first < 0xDC00 && i+1 < units:
+			if second := unit(i + 1); second >= 0xDC00 && second < 0xE000 {
+				out = append(out, utf16.DecodeRune(rune(first), rune(second)))
+				i++
+				continue
+			}
+			out = append(out, utf8.RuneError) // A high surrogate the next unit does not complete.
+		case first >= 0xD800 && first < 0xE000:
+			out = append(out, utf8.RuneError) // A lone low surrogate, as utf16.Decode renders it.
+		default:
+			out = append(out, rune(first))
+		}
+	}
+	return out
+}
+
+// maxBFRunes caps how many runes one code's /ToUnicode target contributes, mirroring MuPDF's PDF_MRANGE_CAP: its
+// pdf_show_char decodes a mapping into an int[PDF_MRANGE_CAP] buffer and shows nothing past it.
+const maxBFRunes = 256
+
+// utf16RuneUnits returns how many UTF-16BE code units of b the leading rune spans: 2 for a well-formed surrogate pair,
+// otherwise 1 (0 for a target too short to hold a unit, which utf16BEFirstRune reports as no mapping at all).
+func utf16RuneUnits(b []byte) int {
+	if len(b) < 2 {
+		return 0
+	}
+	if first := uint16(b[0])<<8 | uint16(b[1]); first >= 0xD800 && first < 0xDC00 && len(b) >= 4 {
+		if second := uint16(b[2])<<8 | uint16(b[3]); second >= 0xDC00 && second < 0xE000 {
+			return 2
+		}
+	}
+	return 1
+}
+
+// bfTarget finds the bf target string a code maps to, along with the increment its position within a contiguous entry
+// adds to the target's final code unit (the bfrange rule; 0 for the explicit per-code array form).
+func (cm *cmapPDF) bfTarget(code uint32, nBytes uint8) (dst []byte, inc uint16, ok bool) {
 	order := lengthOrder(nBytes)
 	for c := cm; c != nil; c = c.base {
 		for _, n := range order {
@@ -546,12 +619,12 @@ func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (rune, bool) {
 			}
 			idx := code - e.lo
 			if e.dstArray != nil {
-				return utf16BEFirstRune(e.dstArray[idx], 0)
+				return e.dstArray[idx], 0, true
 			}
-			return utf16BEFirstRune(e.dst, uint16(idx)+e.trimmed)
+			return e.dst, uint16(idx) + e.trimmed, true
 		}
 	}
-	return 0, false
+	return nil, 0, false
 }
 
 // utf16BEFirstRune decodes the first rune of UTF-16BE bytes, adding inc to the final code unit (the bfrange increment
