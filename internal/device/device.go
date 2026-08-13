@@ -97,8 +97,8 @@ type Tiling struct {
 // device then has to recognize by its negative glyph id and skip; carrying the runes on the glyph that drew them keeps
 // the painting devices unable to double-draw a ligature.
 type Glyph struct {
-	Trm     gfx.Matrix
 	Rest    []rune
+	Trm     gfx.Matrix
 	GID     uint32
 	Code    uint32
 	Unicode rune

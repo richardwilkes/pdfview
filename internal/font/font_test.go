@@ -123,15 +123,18 @@ func TestBundledData(t *testing.T) {
 
 func TestGlyphNameToUnicode(t *testing.T) {
 	for name, want := range map[string]string{
-		"A":             "A",
-		"alpha":         "α",
-		"uni0041":       "A",
-		"uni00410042":   "AB",
-		"u0041":         "A",
-		"u1D400":        "\U0001D400",
-		"f_f_i":         "ffi", // Components resolve individually.
-		"A.sc":          "A",   // Suffix stripped.
-		"uniD800":       "",    // Surrogates rejected.
+		"A":           "A",
+		"alpha":       "α",
+		"uni0041":     "A",
+		"uni00410042": "AB",
+		"u0041":       "A",
+		"u1D400":      "\U0001D400",
+		// Components resolve individually — including for the names ligatureAltName rewrites, which this function
+		// never sees rewritten: extraction reaches their ligature code point through that rewrite, not through here
+		// (TestLigatureAltName).
+		"f_f_i":         "ffi",
+		"A.sc":          "A", // Suffix stripped.
+		"uniD800":       "",  // Surrogates rejected.
 		"bogusname":     "",
 		"":              "",
 		"A_uniD800":     "A",  // A bad component discards itself, not the components already resolved.
@@ -692,12 +695,12 @@ func TestCFFIndexBoundsRejectOutOfRangeOffsets(t *testing.T) {
 	}
 }
 
-// TestUnicodeRest pins where the characters a single glyph spells out come from. Only /ToUnicode produces them: it is
+// TestUnicodeFull pins where the characters a single glyph spells out come from. Only /ToUnicode produces them: it is
 // the one source ISO 32000-2 9.10.3 lets map a code to several runes, and the glyph-name path carries one rune per
 // code, because MuPDF's cid_to_ucs is an array of single values filled from fz_unicode_from_glyph_name. A ligature
 // glyph with no /ToUnicode reaches its letters the other way, through a ligature code point the extraction device
 // decomposes — see TestLigatureAltName.
-func TestUnicodeRest(t *testing.T) {
+func TestUnicodeFull(t *testing.T) {
 	const toUni = `/CIDInit /ProcSet findresource begin 12 dict begin begincmap
 1 begincodespacerange <00> <ff> endcodespacerange
 3 beginbfchar
@@ -715,8 +718,8 @@ endcmap end end`
 	}
 	for _, tc := range []struct {
 		want string
-		code uint32
 		rest []rune
+		code uint32
 	}{
 		{code: 1, want: "f", rest: []rune{'i'}}, // A one-to-many target: everything past the first rune.
 		{code: 2, want: "ﬂ"},                    // A single-rune target, ligature or not, has nothing after it.
@@ -730,8 +733,8 @@ endcmap end end`
 		if got != tc.want {
 			t.Errorf("Unicode(%d) = %q, want %q", tc.code, got, tc.want)
 		}
-		if rest := f.UnicodeRest(tc.code, 1); !slices.Equal(rest, tc.rest) {
-			t.Errorf("UnicodeRest(%d) = %q, want %q", tc.code, string(rest), string(tc.rest))
+		if _, rest := f.UnicodeFull(tc.code, 1); !slices.Equal(rest, tc.rest) {
+			t.Errorf("UnicodeFull(%d) rest = %q, want %q", tc.code, string(rest), string(tc.rest))
 		}
 	}
 	// A font with no /ToUnicode at all never reports extra runes, whatever its glyph names resolve to.
@@ -741,8 +744,8 @@ endcmap end end`
 		t.Fatal(err)
 	}
 	for code := uint32(1); code <= 2; code++ {
-		if rest := bare.UnicodeRest(code, 1); rest != nil {
-			t.Errorf("UnicodeRest(%d) = %q with no /ToUnicode present", code, string(rest))
+		if _, rest := bare.UnicodeFull(code, 1); rest != nil {
+			t.Errorf("UnicodeFull(%d) rest = %q with no /ToUnicode present", code, string(rest))
 		}
 	}
 }
@@ -774,7 +777,7 @@ func TestLigatureAltName(t *testing.T) {
 		if got := string(f.Unicode(1, 1)); got != tc.want {
 			t.Errorf("a glyph named %q extracts as %q, want %q", tc.name, got, tc.want)
 		}
-		if rest := f.UnicodeRest(1, 1); rest != nil {
+		if _, rest := f.UnicodeFull(1, 1); rest != nil {
 			t.Errorf("a glyph named %q reported %q after its first rune", tc.name, string(rest))
 		}
 	}

@@ -340,30 +340,32 @@ func (f *Font) Width(code uint32, nBytes uint8) float32 {
 
 // Unicode returns the Unicode rune for a code decoded at nBytes bytes, or 0 when none is known. A /ToUnicode CMap takes
 // precedence over every other source (ISO 32000-2 9.10.2); a multi-rune target surfaces its first rune here, and
-// UnicodeRest returns the remainder.
+// UnicodeFull returns the whole of it.
 func (f *Font) Unicode(code uint32, nBytes uint8) rune {
-	r, _ := f.unicode(code, nBytes)
+	r, _ := f.lookupUnicode(code, nBytes)
 	return r
 }
 
-// UnicodeRest returns the runes past the first that a code's /ToUnicode target maps to — the one-to-many mappings of
-// ISO 32000-2 9.10.3, which a ligature glyph uses to spell out the letters it draws ("fl" for a single fl glyph). It is
-// nil for every ordinary code, so the search/extraction seam pays for the whole-target decode only where a code really
-// does carry more than one rune.
+// UnicodeFull returns every rune a code maps to: the leading one Unicode reports, and — for the one-to-many /ToUnicode
+// mappings of ISO 32000-2 9.10.3, which a ligature glyph uses to spell out the letters it draws ("fl" for a single fl
+// glyph) — the runes after it. rest is nil for every ordinary code, so the extraction seam pays for the whole-target
+// decode only where a code really does carry more than one rune. It resolves both in one CMap lookup, which is why the
+// interpreter calls this rather than Unicode once per glyph and then asking again for the rest.
 //
-// Only /ToUnicode produces these; buildUnicode's glyph-name table is one rune per code, for the reasons given there. A
+// Only /ToUnicode produces a rest; buildUnicode's glyph-name table is one rune per code, for the reasons given there. A
 // ligature glyph carrying no /ToUnicode is still searchable by the letters it draws, but by the other route: its name
 // reaches a ligature code point, which the structured-text device decomposes.
-func (f *Font) UnicodeRest(code uint32, nBytes uint8) []rune {
-	if _, multi := f.unicode(code, nBytes); !multi {
-		return nil
+func (f *Font) UnicodeFull(code uint32, nBytes uint8) (first rune, rest []rune) {
+	r, multi := f.lookupUnicode(code, nBytes)
+	if !multi {
+		return r, nil
 	}
-	return f.toUni.bfRunesAfterFirst(code, nBytes)
+	return r, f.toUni.bfRunesAfterFirst(code, nBytes)
 }
 
-// unicode resolves a code's leading rune, reporting whether a /ToUnicode target supplied it and carried more runes
-// after it.
-func (f *Font) unicode(code uint32, nBytes uint8) (r rune, multi bool) {
+// lookupUnicode resolves a code's leading rune, reporting whether a /ToUnicode target supplied it and carried more
+// runes after it. The returns are unnamed so the inner lookup below can use the obvious names for them.
+func (f *Font) lookupUnicode(code uint32, nBytes uint8) (rune, bool) {
 	if f.toUni != nil {
 		if r, multi, ok := f.toUni.bfRune(code, nBytes); ok {
 			return r, multi

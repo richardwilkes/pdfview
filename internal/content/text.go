@@ -287,12 +287,13 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 			if !isFinitePt(emitted, 0) {
 				emitted = 0
 			}
+			uni, rest := ts.font.UnicodeFull(code, nBytes)
 			run.Glyphs = append(run.Glyphs, device.Glyph{
+				Rest:    rest,
 				Trm:     trm,
-				Rest:    ts.font.UnicodeRest(code, nBytes),
 				GID:     ts.font.GID(code, nBytes),
 				Code:    code,
-				Unicode: ts.font.Unicode(code, nBytes),
+				Unicode: uni,
 				Advance: emitted,
 			})
 		}

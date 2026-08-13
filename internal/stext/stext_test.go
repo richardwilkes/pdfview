@@ -511,16 +511,16 @@ func TestRecordCapsCharacters(t *testing.T) {
 	}
 }
 
-// mkLigatureRun builds a one-glyph run whose glyph draws a ligature: unicode leads the extraction and rest follows it,
+// mkLigatureRun builds a one-glyph run whose glyph draws a ligature: lead starts the extraction and rest follows it,
 // as a one-to-many /ToUnicode mapping supplies. Like mkRun the font is metric-free, so the recorded quads have no
 // height; the vertical extent of the characters a glyph spells out is pinned by TestRecordFillerGeometry below and,
 // against MuPDF itself, by the text-ligature corpus goldens.
-func mkLigatureRun(unicode rune, rest []rune, x, y, size, adv float32) *device.TextRun {
+func mkLigatureRun(lead rune, rest []rune, x, y, size, adv float32) *device.TextRun {
 	return &device.TextRun{
 		Font: &font.Font{},
 		Glyphs: []device.Glyph{{
 			Trm:     gfx.Matrix{A: size, D: size, E: x, F: y},
-			Unicode: unicode,
+			Unicode: lead,
 			Rest:    rest,
 			Advance: adv,
 		}},
@@ -529,8 +529,8 @@ func mkLigatureRun(unicode rune, rest []rune, x, y, size, adv float32) *device.T
 
 // TestRecordSpellsOutOneToManyToUnicode covers the reason a ligature is searchable at all: a glyph whose /ToUnicode
 // target holds several runes contributes one character per rune, not just the target's first. Keeping only the first
-// left the fl glyph of "Reflect" extracting as "Refect", which no reader searching for the word could find
-// (richardwilkes/gcs#1092).
+// left the fl glyph of "Reflect" contributing only its f, so the word extracted without its l and no reader searching
+// for it could find the page (richardwilkes/gcs#1092).
 func TestRecordSpellsOutOneToManyToUnicode(t *testing.T) {
 	dev := New()
 	dev.FillText(mkLigatureRun('f', []rune{'l'}, 100, 200, 10, 0.6), device.Paint{})
