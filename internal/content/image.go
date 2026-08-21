@@ -55,11 +55,8 @@ func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging
 func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dict) *imaging.Image {
 	key := ref.Key()
 	if in.st != nil {
-		if v, hit := in.st.Get(imageKey{ref: key}); hit {
-			if img, isImg := v.(*imaging.Image); isImg {
-				return img
-			}
-			return nil // Cached failure (negative entry).
+		if img, hit := in.st.Get[*imaging.Image](imageKey{ref: key}); hit {
+			return img // A nil image is a cached failure (negative entry).
 		}
 		img := in.decodeXObject(stream, resources)
 		in.st.Put(imageKey{ref: key}, img, imageSize(img))

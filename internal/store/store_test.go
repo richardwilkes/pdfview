@@ -28,17 +28,17 @@ func TestLRUEviction(t *testing.T) {
 		t.Fatalf("used = %d, want 80", got)
 	}
 	// Touch 1 so 2 becomes the eviction victim.
-	if v, ok := s.Get(keyA{1}); !ok || v != "a" {
+	if v, ok := s.Get[string](keyA{1}); !ok || v != "a" {
 		t.Fatalf("Get(1) = %v, %v", v, ok)
 	}
 	s.Put(keyA{3}, "c", 40)
-	if _, ok := s.Get(keyA{2}); ok {
+	if _, ok := s.Get[string](keyA{2}); ok {
 		t.Errorf("entry 2 not evicted")
 	}
-	if v, ok := s.Get(keyA{1}); !ok || v != "a" {
+	if v, ok := s.Get[string](keyA{1}); !ok || v != "a" {
 		t.Errorf("entry 1 wrongly evicted: %v, %v", v, ok)
 	}
-	if v, ok := s.Get(keyA{3}); !ok || v != "c" {
+	if v, ok := s.Get[string](keyA{3}); !ok || v != "c" {
 		t.Errorf("entry 3 missing: %v, %v", v, ok)
 	}
 	if got := s.Used(); got != 80 {
@@ -49,7 +49,7 @@ func TestLRUEviction(t *testing.T) {
 func TestBudgetHonored(t *testing.T) {
 	s := New(10)
 	s.Put(keyA{1}, "big", 11) // Larger than the whole budget: not cached.
-	if _, ok := s.Get(keyA{1}); ok {
+	if _, ok := s.Get[string](keyA{1}); ok {
 		t.Errorf("oversized entry cached")
 	}
 	for i := range 100 {
@@ -75,13 +75,31 @@ func TestUnlimitedNeverEvicts(t *testing.T) {
 
 func TestNilValueAndKeyKinds(t *testing.T) {
 	s := New(0)
-	s.Put(keyA{1}, nil, 1) // Negative caching.
-	v, ok := s.Get(keyA{1})
+	s.Put(keyA{1}, nil, 1) // Negative caching with an untyped nil.
+	v, ok := s.Get[any](keyA{1})
 	if !ok || v != nil {
 		t.Errorf("cached nil: %v, %v", v, ok)
 	}
-	if _, ok = s.Get(keyB{1}); ok { // Distinct key types never collide.
+	if p, hit := s.Get[*int](keyA{1}); !hit || p != nil { // The same untyped-nil entry hits any instantiation.
+		t.Errorf("cached nil as *int: %v, %v", p, hit)
+	}
+	s.Put(keyA{2}, (*int)(nil), 1) // Negative caching with a typed nil, as the engine stores them.
+	if p, hit := s.Get[*int](keyA{2}); !hit || p != nil {
+		t.Errorf("cached typed nil: %v, %v", p, hit)
+	}
+	if _, ok = s.Get[any](keyB{1}); ok { // Distinct key types never collide.
 		t.Errorf("keyB{1} hit keyA{1}")
+	}
+}
+
+func TestWrongTypeIsMiss(t *testing.T) {
+	s := New(0)
+	s.Put(keyA{1}, "a", 1)
+	if v, ok := s.Get[int](keyA{1}); ok {
+		t.Errorf("Get[int] over a string entry hit: %v", v)
+	}
+	if v, ok := s.Get[string](keyA{1}); !ok || v != "a" { // The mistyped Get must not disturb the entry.
+		t.Errorf("entry lost after mistyped Get: %v, %v", v, ok)
 	}
 }
 
@@ -89,7 +107,7 @@ func TestReplace(t *testing.T) {
 	s := New(100)
 	s.Put(keyA{1}, "old", 30)
 	s.Put(keyA{1}, "new", 50)
-	if v, _ := s.Get(keyA{1}); v != "new" {
+	if v, _ := s.Get[string](keyA{1}); v != "new" {
 		t.Errorf("value = %v, want new", v)
 	}
 	if got := s.Used(); got != 50 {
@@ -97,7 +115,7 @@ func TestReplace(t *testing.T) {
 	}
 	// Replacing beyond budget evicts the entry itself (it is the only one).
 	s.Put(keyA{1}, "huge", 200)
-	if _, ok := s.Get(keyA{1}); ok {
+	if _, ok := s.Get[string](keyA{1}); ok {
 		t.Errorf("oversized replacement survived")
 	}
 	if got := s.Used(); got != 0 {
@@ -113,13 +131,13 @@ func TestOversizedReplaceKeepsOthers(t *testing.T) {
 	// Re-put key 3 with a value larger than the whole budget. It must drop only key 3, not needlessly evict the
 	// other (useful) entries en route to evicting the oversized one.
 	s.Put(keyA{3}, "huge", 200)
-	if _, ok := s.Get(keyA{3}); ok {
+	if _, ok := s.Get[string](keyA{3}); ok {
 		t.Errorf("oversized replacement survived")
 	}
-	if v, ok := s.Get(keyA{1}); !ok || v != "a" {
+	if v, ok := s.Get[string](keyA{1}); !ok || v != "a" {
 		t.Errorf("entry 1 wrongly evicted: %v, %v", v, ok)
 	}
-	if v, ok := s.Get(keyA{2}); !ok || v != "b" {
+	if v, ok := s.Get[string](keyA{2}); !ok || v != "b" {
 		t.Errorf("entry 2 wrongly evicted: %v, %v", v, ok)
 	}
 	if got := s.Used(); got != 60 {
@@ -130,7 +148,7 @@ func TestOversizedReplaceKeepsOthers(t *testing.T) {
 func TestNilStoreSafe(t *testing.T) {
 	var s *Store
 	s.Put(keyA{1}, "x", 1)
-	if _, ok := s.Get(keyA{1}); ok {
+	if _, ok := s.Get[string](keyA{1}); ok {
 		t.Errorf("nil store returned a value")
 	}
 	if s.Used() != 0 || s.Max() != 0 || s.Len() != 0 {
@@ -157,7 +175,7 @@ func TestConcurrentAccess(t *testing.T) {
 			for i := range 1000 {
 				k := keyA{i % 61}
 				s.Put(k, fmt.Sprintf("%d-%d", g, i), 16)
-				s.Get(k)
+				s.Get[string](k)
 				// Max is read lock-free; exercise it under -race concurrently with the writers above to prove the
 				// documented immutable-after-New invariant holds and no race is introduced.
 				if got := s.Max(); got != 1<<10 {

@@ -653,11 +653,8 @@ type glyphKey struct {
 func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
 	key := glyphKey{font: f, gid: gid}
 	if d.store != nil {
-		if v, ok := d.store.Get(key); ok {
-			if p, isPath := v.(*path.Path); isPath {
-				return p
-			}
-			return nil // Cached failure (negative entry).
+		if p, ok := d.store.Get[*path.Path](key); ok {
+			return p // A nil path is a cached failure (negative entry).
 		}
 	} else if p, ok := d.glyphPaths[key]; ok {
 		return p

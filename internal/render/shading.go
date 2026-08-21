@@ -418,11 +418,8 @@ const maxCachedFuncGrids = 8
 func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
 	key := funcGridKey{sh: sh, w: w, h: h}
 	if d.store != nil {
-		if v, ok := d.store.Get(key); ok {
-			if img, isImage := v.(*imagecore.Image); isImage {
-				return img
-			}
-			return nil // Cached failure (negative entry).
+		if img, ok := d.store.Get[*imagecore.Image](key); ok {
+			return img // A nil image is a cached failure (negative entry).
 		}
 	} else if img, ok := d.funcGrids[key]; ok {
 		return img
@@ -548,11 +545,8 @@ func (d *Device) tileImage(t *device.Tiling, window gfx.Matrix, w, h int) *image
 	key := tileCellKey{pattern: t.Key, w: w, h: h}
 	cacheable := t.Key != nil && d.store != nil
 	if cacheable {
-		if v, ok := d.store.Get(key); ok {
-			if img, isImage := v.(*imagecore.Image); isImage {
-				return img
-			}
-			return nil // Cached failure (negative entry).
+		if img, ok := d.store.Get[*imagecore.Image](key); ok {
+			return img // A nil image is a cached failure (negative entry).
 		}
 	}
 	img := d.rasterizeTile(t, window, w, h)

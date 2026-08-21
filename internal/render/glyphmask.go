@@ -264,11 +264,8 @@ func (d *Device) glyphMask(f *font.Font, g *device.Glyph, gp *path.Path, fx, fy 
 	}
 	st := d.maskStore()
 	if st != nil {
-		if v, ok := st.Get(key); ok {
-			if m, isMask := v.(*glyphMask); isMask {
-				return m
-			}
-			return nil
+		if m, ok := st.Get[*glyphMask](key); ok {
+			return m // A nil mask is a cached failure (negative entry).
 		}
 	} else if m, ok := d.glyphMasks[key]; ok {
 		return m

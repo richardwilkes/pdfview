@@ -83,13 +83,10 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	key := ref.Key()
 	if isRef {
 		if in.st != nil {
-			if v, hit := in.st.Get(fontKey{ref: key}); hit {
-				if f, isFont := v.(*font.Font); isFont {
-					// A cached negative entry is a typed nil *font.Font, so report a miss on nil to match
-					// the no-store LRU path below; otherwise a repeated Tf would clear the current font.
-					return f, f != nil
-				}
-				return nil, false // Unexpected type; treat as a miss.
+			if f, hit := in.st.Get[*font.Font](fontKey{ref: key}); hit {
+				// A cached negative entry is a nil *font.Font, so report a miss on nil to match the
+				// no-store LRU path below; otherwise a repeated Tf would clear the current font.
+				return f, f != nil
 			}
 		} else if f, cached := in.fonts.get(key); cached {
 			return f, f != nil

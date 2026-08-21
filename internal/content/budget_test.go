@@ -182,7 +182,8 @@ func zipBomb(t *testing.T) string {
 func TestFailedBodyDecodeChargedForTheInflationItForced(t *testing.T) {
 	bomb := zipBomb(t)
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
-		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /FlateDecode", bomb))))
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /FlateDecode", bomb,
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +214,8 @@ func TestFailedBodyDecodeChargedForTheInflationItForced(t *testing.T) {
 func TestFailedBodyDecodeThatProducedNothingStaysCheap(t *testing.T) {
 	body := paddedBody("0 0 1 1 re f") // Never decoded: the filter is one internal/filter rejects outright.
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
-		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /JPXDecode", body))))
+		"/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Filter /JPXDecode", body,
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +272,8 @@ func TestZipBombedImageDecodeChargedForItsInflation(t *testing.T) {
 	bomb := zipBomb(t)
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
 		"/Type /XObject /Subtype /Image /Width 8 /Height 8 /BitsPerComponent 8 /ColorSpace /DeviceGray "+
-			"/Filter /FlateDecode", bomb))))
+			"/Filter /FlateDecode", bomb,
+	))))
 	if err != nil {
 		t.Fatal(err)
 	}

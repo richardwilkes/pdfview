@@ -50,24 +50,36 @@ func New(maxBytes uint64) *Store {
 	}
 }
 
-// Get returns the cached value for key and marks it most recently used. The second result distinguishes a cached nil
-// (negative caching: parse failures are cacheable) from a miss.
-func (s *Store) Get(key any) (any, bool) {
+// Get returns the cached value for key, asserted to V, and marks it most recently used. The second result
+// distinguishes a cached nil (negative caching: parse failures are cacheable) from a miss: a cached nil — typed or
+// untyped — is a hit that returns V's zero value. A cached value that is not a V reports a miss so the caller
+// re-derives and re-puts, but keys are dedicated per resource kind (see Store), so a consistently instantiated Get
+// never sees one.
+func (s *Store) Get[V any](key any) (V, bool) {
+	var zero V
 	if s == nil {
-		return nil, false
+		return zero, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	el, ok := s.entries[key]
 	if !ok {
-		return nil, false
+		return zero, false
 	}
 	e, ok := el.Value.(*entry)
 	if !ok { // Unreachable: only Put creates elements. Miss rather than panic if it ever isn't.
-		return nil, false
+		return zero, false
+	}
+	if e.val == nil { // An untyped-nil negative entry would fail the assertion below, yet it is a hit.
+		s.lru.MoveToFront(el)
+		return zero, true
+	}
+	v, ok := e.val.(V)
+	if !ok { // A value of another type under this key: miss rather than panic, without disturbing the LRU order.
+		return zero, false
 	}
 	s.lru.MoveToFront(el)
-	return e.val, true
+	return v, true
 }
 
 // Put caches val under key with the given byte-size estimate, evicting least-recently-used entries as needed to fit the

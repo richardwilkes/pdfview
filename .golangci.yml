@@ -225,7 +225,10 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
   exclusions:
     paths:
       # Vendored trees keep upstream formatting so hand-diffs against upstream commits stay readable.
