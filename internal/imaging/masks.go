@@ -202,6 +202,13 @@ func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 			expandForMask(img, w, h)
 		}
 	}
+	compositeAlphaFn(img, plane, mw, mh)
+}
+
+// compositeAlphaScalar is the composite itself, once compositeAlpha has bounded the mask and expanded the image where
+// a finer mask demanded it: one nearest sample of the plane per pixel, multiplied into that pixel's alpha. See
+// compositeAlphaFn for the vector form, which specializes the equal-dimension case.
+func compositeAlphaScalar(img *Image, plane []byte, mw, mh int) {
 	for y := range img.Height {
 		my := y * mh / img.Height
 		for x := range img.Width {

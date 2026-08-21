@@ -271,11 +271,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 			return nil, ErrBadImage
 		}
 		alpha := make([]byte, w*h)
-		for i, v := range gray {
-			if (v < 128) != invert {
-				alpha[i] = 255
-			}
-		}
+		thresholdFn(alpha, gray, invert)
 		return alpha, nil
 	}
 	alpha := make([]byte, w*h)
@@ -295,6 +291,32 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 		}
 	}
 	return alpha, nil
+}
+
+// thresholdScalar fills dst with the stencil coverage of a gray plane: 255 where the sample is below half, 0
+// elsewhere, or the reverse when invert is set. dst and gray must be the same length, and dst must start zero-filled —
+// this writes only the 255s and leaves the rest of a freshly allocated plane as it found it. See thresholdFn for the
+// vector form.
+func thresholdScalar(dst, gray []byte, invert bool) {
+	for i, v := range gray[:len(dst)] {
+		if (v < 128) != invert {
+			dst[i] = 255
+		}
+	}
+}
+
+// invertBytesScalar writes the ones' complement of src into dst, which must be the same length. It is how the JBIG2
+// row copy flips polarity: that codec stores ink as set bits, the opposite of this package's packed convention. See
+// invertBytesFn for the vector form.
+//
+// dctCMYK's Adobe re-inversion is the same operation on whole bytes (255 − v and ^v agree for every byte) but does
+// not use this: reconstructing the row into a buffer ahead of that loop measured ~10% slower than the subtraction it
+// already folds into the per-component read, in both builds, because the conversion after it dominates.
+func invertBytesScalar(dst, src []byte) {
+	src = src[:len(dst)]
+	for i := range dst {
+		dst[i] = ^src[i]
+	}
 }
 
 // rowStrideFor returns the byte length of one row of w pixels at ncomp components of bpc bits each. The product tops
