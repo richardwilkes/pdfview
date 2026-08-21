@@ -412,11 +412,7 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 	}
 	plane := make([]byte, ms.w*ms.h)
 	if ms.luminosity {
-		// The luminosity surface is opaque (prefilled with the backdrop), so the premultiplied bytes are the straight
-		// color values.
-		for i, j := 0, 0; j < len(plane); i, j = i+4, j+1 {
-			plane[j] = maskLuma(pix[i], pix[i+1], pix[i+2])
-		}
+		lumaPlaneFn(plane, pix)
 	} else {
 		for i, j := 3, 0; j < len(plane); i, j = i+4, j+1 {
 			plane[j] = pix[i]
@@ -436,6 +432,17 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 		AlphaType: imagecore.AlphaTypePremul,
 	}
 	return imagecore.NewRasterData(ainfo, plane, ms.w)
+}
+
+// lumaPlaneScalar reduces the RGBA readback in pix to one maskLuma value per pixel in plane. The luminosity surface
+// is opaque (prefilled with the backdrop), so the premultiplied bytes it hands over are the straight color values.
+//
+// It is the default behind lumaPlaneFn, and the fallback the vector kernel takes for planes too small to be worth its
+// setup.
+func lumaPlaneScalar(plane, pix []byte) {
+	for i, j := 0, 0; j < len(plane); i, j = i+4, j+1 {
+		plane[j] = maskLuma(pix[i], pix[i+1], pix[i+2])
+	}
 }
 
 // maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed, like the

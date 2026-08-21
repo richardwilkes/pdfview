@@ -244,10 +244,8 @@ func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 	if evenOdd {
 		out.SetFillType(path.FillEvenOdd)
 	}
-	for _, pt := range p.Points {
-		if !isFinite32(pt.X) || !isFinite32(pt.Y) {
-			return out
-		}
+	if !allFiniteFn(p.Points) {
+		return out
 	}
 	pi := 0
 	pts := p.Points
@@ -282,6 +280,19 @@ func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 		}
 	}
 	return out
+}
+
+// allFiniteScalar reports whether every coordinate of every point is finite. buildPath drops a path with any
+// non-finite coordinate whole rather than partially building it (see there), so this one answer decides the whole
+// path. It is the default behind allFiniteFn, and the fallback the vector kernel takes for short point runs and for a
+// machine whose vectors are wider than that kernel's reduction buffer.
+func allFiniteScalar(pts []gfx.Point) bool {
+	for _, pt := range pts {
+		if !isFinite32(pt.X) || !isFinite32(pt.Y) {
+			return false
+		}
+	}
+	return true
 }
 
 // buildPathIn converts a gfx.Path to a canvas path already mapped into the space ctm describes. buildPath establishes

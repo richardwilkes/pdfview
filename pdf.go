@@ -474,7 +474,20 @@ func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
 		return nil, ErrUnableToCreateImage
 	}
 	// The engine rasterizes with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so
-	// undo the premultiplication. Fully opaque (a == 255) and fully transparent (a == 0) pixels need no adjustment.
+	// undo the premultiplication.
+	unpremultiplyPixelsFn(pix)
+	return &image.NRGBA{
+		Pix:    pix,
+		Stride: stride,
+		Rect:   image.Rect(0, 0, width, height),
+	}, nil
+}
+
+// unpremultiplyPixelsScalar converts a premultiplied RGBA byte buffer to straight alpha in place. Fully opaque
+// (a == 255) and fully transparent (a == 0) pixels need no adjustment, and trailing bytes that do not complete a
+// pixel are left alone. It is the default behind unpremultiplyPixelsFn, and the fallback the vector kernel takes for
+// buffers too small to be worth its setup.
+func unpremultiplyPixelsScalar(pix []byte) {
 	for i := 0; i+3 < len(pix); i += 4 {
 		switch a := pix[i+3]; a {
 		case 0, 255:
@@ -484,11 +497,6 @@ func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
 			pix[i+2] = unpremultiply(pix[i+2], a)
 		}
 	}
-	return &image.NRGBA{
-		Pix:    pix,
-		Stride: stride,
-		Rect:   image.Rect(0, 0, width, height),
-	}, nil
 }
 
 // unpremultiply converts a single premultiplied color component back to its straight-alpha value, rounding to nearest

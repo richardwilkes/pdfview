@@ -432,25 +432,32 @@ func (d *Device) compositeMask(mask *glyphMask, x0, y0 int, r, g, b uint8) {
 		return
 	}
 	srcR, srcG, srcB := uint32(r), uint32(g), uint32(b)
-	srcWord := srcR | srcG<<8 | srcB<<16 | 0xff<<24
 	for y := cy0; y < cy1; y++ {
 		mrow := mask.plane[(y-y0)*w:]
 		drow := pm.Pix[y*int(pm.RowPixels):]
-		for x := cx0; x < cx1; x++ {
-			c := uint32(mrow[x-x0])
-			switch c {
-			case 0:
-			case 255:
-				drow[x] = srcWord
-			default:
-				inv := 255 - c
-				dst := drow[x]
-				dr := (srcR*c + (dst&0xff)*inv + 127) / 255
-				dg := (srcG*c + (dst>>8&0xff)*inv + 127) / 255
-				db := (srcB*c + (dst>>16&0xff)*inv + 127) / 255
-				da := (255*c + (dst>>24&0xff)*inv + 127) / 255
-				drow[x] = dr | dg<<8 | db<<16 | da<<24
-			}
+		compositeMaskSpanFn(drow[cx0:cx1], mrow[cx0-x0:cx1-x0], srcR, srcG, srcB)
+	}
+}
+
+// compositeMaskSpanScalar composites one clipped row of compositeMask's blit: drow is the destination span and cov the
+// matching run of coverage bytes. It is the default behind compositeMaskSpanFn, and the fallback the vector kernel
+// takes for spans too short to be worth its setup.
+func compositeMaskSpanScalar(drow []uint32, cov []byte, srcR, srcG, srcB uint32) {
+	srcWord := srcR | srcG<<8 | srcB<<16 | 0xff<<24
+	for x, cb := range cov {
+		c := uint32(cb)
+		switch c {
+		case 0:
+		case 255:
+			drow[x] = srcWord
+		default:
+			inv := 255 - c
+			dst := drow[x]
+			dr := (srcR*c + (dst&0xff)*inv + 127) / 255
+			dg := (srcG*c + (dst>>8&0xff)*inv + 127) / 255
+			db := (srcB*c + (dst>>16&0xff)*inv + 127) / 255
+			da := (255*c + (dst>>24&0xff)*inv + 127) / 255
+			drow[x] = dr | dg<<8 | db<<16 | da<<24
 		}
 	}
 }
