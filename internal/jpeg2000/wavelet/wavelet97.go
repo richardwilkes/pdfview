@@ -310,18 +310,7 @@ func inverse97VerticalCas0(out []float64, W, hlv, hhv int) {
 	oddRow := func(j int) []float64 { return highRow97(out, W, hhv, j) }
 
 	// Undo scaling: analysis multiplied low by 1/K and high by K.
-	for i := 0; i < hlv; i++ {
-		e := evenRow(i)
-		for x := 0; x < W; x++ {
-			e[x] *= c97K
-		}
-	}
-	for i := 0; i < hhv; i++ {
-		o := oddRow(i)
-		for x := 0; x < W; x++ {
-			o[x] *= 1.0 / c97K
-		}
-	}
+	scale97SweepFn(out, W, hlv, hhv)
 
 	// Undo update 2 (δ) on the even (low) rows. With no high rows the term is 0.
 	if hhv > 0 {
@@ -357,6 +346,25 @@ func inverse97VerticalCas0(out []float64, W, hlv, hhv int) {
 		ea, eb := evenRow(n), evenRow(n+1)
 		for x := 0; x < W; x++ {
 			o[x] -= c97Alpha * (ea[x] + eb[x])
+		}
+	}
+}
+
+// scale97SweepScalar is the pair of scaling sweeps, split out so it can be the default target of scale97SweepFn (see
+// simd_dispatch.go). Dispatch is per sweep rather than per row: the row loops stay whole and inlined here, which a
+// per-row indirect call would have cost the scalar path at small W. lowRow97 and highRow97 are what
+// inverse97VerticalCas0's evenRow and oddRow closures call.
+func scale97SweepScalar(out []float64, W, hlv, hhv int) {
+	for i := 0; i < hlv; i++ {
+		e := lowRow97(out, W, hlv, i)
+		for x := 0; x < W; x++ {
+			e[x] *= c97K
+		}
+	}
+	for i := 0; i < hhv; i++ {
+		o := highRow97(out, W, hhv, i)
+		for x := 0; x < W; x++ {
+			o[x] *= 1.0 / c97K
 		}
 	}
 }

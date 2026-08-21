@@ -602,18 +602,24 @@ func (d *Decoder) finalizeImage() (image.Image, error) {
 		for c := range nativePlanes {
 			lo := int32(-(1 << uint(compPrecisions[c]-1)))
 			hi := int32(1<<uint(compPrecisions[c]-1)) - 1
-			for i, v := range nativePlanes[c] {
-				if v < lo {
-					nativePlanes[c][i] = lo
-				} else if v > hi {
-					nativePlanes[c][i] = hi
-				}
-			}
+			clampPlaneFn(nativePlanes[c], lo, hi)
 		}
 		return nil, nil
 	}
 
 	return d.reconstructImage(fullPlanes, outW, outH)
+}
+
+// clampPlaneScalar is the post-transform range clamp's per-sample loop, split out so it can be the default target of
+// clampPlaneFn (see simd_dispatch.go). It holds for any lo and hi, ordered or not.
+func clampPlaneScalar(p []int32, lo, hi int32) {
+	for i, v := range p {
+		if v < lo {
+			p[i] = lo
+		} else if v > hi {
+			p[i] = hi
+		}
+	}
 }
 
 // DecodedComponent is one decoded component at its native (subsampled, reduced)

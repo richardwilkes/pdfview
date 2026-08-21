@@ -652,6 +652,13 @@ func ApplyRCT(planes []engine.ComponentPlane) {
 	if len(Y2) < n {
 		n = len(Y2)
 	}
+	applyRCTFn(Y0[:n], Y1[:n], Y2[:n])
+}
+
+// applyRCTScalar is ApplyRCT's per-sample loop, split out so it can be the default target of applyRCTFn (see
+// simd_dispatch.go). The three slices are the same length and do not overlap.
+func applyRCTScalar(Y0, Y1, Y2 []int32) {
+	n := len(Y0)
 	for i := 0; i < n; i++ {
 		y0 := Y0[i]
 		y1 := Y1[i]
