@@ -50,8 +50,8 @@ outside stays in `internal/imaging/jbig2.go`.
 ## Modifications
 
 Every file below carries the change notice this policy requires, stating the same thing at the point of the change.
-`embedded.go` and `pdfview_test.go` (with everything under `testdata/`) are pdfview-authored MPL-2.0 files, not
-upstream code, and carry Rich's header instead.
+`embedded.go`, `pdfview_test.go`, and the `simd_*` files (with everything under `testdata/`) are pdfview-authored
+MPL-2.0 files, not upstream code, and carry Rich's header instead.
 
 | File | Change | Why |
 | --- | --- | --- |
@@ -66,9 +66,24 @@ upstream code, and carry Rich's header instead.
 | `jbig2_pdd_proc.go` | Charges the pattern cells; hands the budget to the generic-region proc. | Cell count comes from `GRAYMAX`. |
 | `jbig2_bit_stream.go` | Pruned the little-endian mode. | T.88 fields are big-endian; the flag served only the pruned probe and container handling. |
 | `jbig2_arith_decoder.go` | Dropped the unused `arithQeStateCount`. | Dead constant. |
+| `jbig2_image.go` | Composition routed through the dispatch variables in `simd_dispatch.go`, whose defaults are the scalar code that was already there: the byte-aligned run calls `composeBytesFn`, which *is* `composeBytes`, and the per-byte loop offers the interior of a long enough unaligned run to `composeShiftedRunFn`, which by default consumes nothing. `Fill` and `Expand`'s 0xFF loops call `fillBytes`. | A `GOEXPERIMENT=simd` build on vector hardware repoints both variables at the kernels in `simd_on.go`; every other build is the scalar code it always was, and the scalar bodies still run below the kernels' length gates and for the partial bytes at each end of an unaligned run. The length test in front of the second call is there because a dispatch variable costs a call whatever it holds, and symbol placement composes rows a byte or two wide. Composition is the decoder's hot loop. `fillBytes` fills with a doubling copy instead of a store per byte, which Go's memclr rewrite does not cover for a non-zero value. |
+| `jbig2_mmr_decoder.go` | Bounded the `uncompress2D` changing-element index (2026-08-02). `fillBitmap`'s whole-byte black-run loop hands its run to `fillBytes` (2026-08-21). | `currOffsets` is sized width+5, but a mode code that does not advance `bitPos` grows `currIdx` without ending the row, walking the write past the buffer end — a panic on hostile input; this decoder is jbig2dec/pdf.js lineage with no PDFium counterpart, so that is hardening rather than restoration. The fill is the same bits by a memmove instead of a store per byte. |
 
-Unmodified: `jbig2_basics.go`, `jbig2_grd_proc_impl.go`, `jbig2_huffman_decoder.go`, `jbig2_image.go`, `jbig2_mmr.go`,
-`jbig2_mmr_decoder.go`, `jbig2_pattern_dict.go`, `jbig2_segment.go`, `jbig2_symbol_dict.go`.
+Unmodified: `jbig2_basics.go`, `jbig2_grd_proc_impl.go`, `jbig2_huffman_decoder.go`, `jbig2_mmr.go`,
+`jbig2_pattern_dict.go`, `jbig2_segment.go`, `jbig2_symbol_dict.go`.
+
+The `jbig2_mmr_decoder.go` row's first half records a change made in commit 2443171 whose notice went into the file
+but never reached this table; adding the fill brought it to light and it is stated here now.
+
+## SIMD kernels
+
+`simd_dispatch.go` (untagged), `simd_on.go` (`goexperiment.simd`), `simd_prefs_{arm64,amd64,other}.go`, and the
+`simd_*_test.go` files are pdfview-authored MPL-2.0 code, self-contained, and import nothing from this repository —
+the package keeps its import isolation, so the byte-fill helper and the PRNG are duplicated here rather than shared
+with `internal/vecmath`. They add vector forms of the two composition loops, dispatched through function variables
+whose defaults are the upstream scalar functions, so a build without the experiment, an architecture that has not
+been benchmarked, and a machine with emulated lanes all run the untouched scalar code. `simd_equiv_test.go` proves
+every kernel against the scalar function it replaces, byte for byte, at three length-gate settings.
 
 ## Vendoring record
 

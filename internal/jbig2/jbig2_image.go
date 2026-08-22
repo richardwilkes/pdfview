@@ -12,6 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by the pdfview project (2026-08-21) under section 4(b) of the license above:
+//   - Routed composition through the dispatch variables in simd_dispatch.go, whose defaults are the scalar code that
+//     was already here: ComposeTo's byte-aligned run now calls composeBytesFn, which is composeBytes itself, and its
+//     per-byte loop offers the interior of a long enough unaligned run to composeShiftedRunFn, which by default
+//     consumes nothing and leaves that loop composing the entire run as before. A GOEXPERIMENT=simd build on vector
+//     hardware repoints both at the kernels in simd_on.go; nothing else in this file changed, and the scalar bodies
+//     still stand and still run — for short runs, on every default build, and for the partial bytes at each end of
+//     an unaligned run. Composition is the decoder's hot loop: page composition moves whole full-width rows, and
+//     roughly seven of every eight symbol placements in a text region land off a byte boundary and so ran one
+//     readBits plus one composeByte per output byte.
+//   - Fill and Expand's 0xFF loops call fillBytes (simd_dispatch.go), which fills with a doubling copy instead of a
+//     store per byte. Go rewrites a zeroing range loop into a memclr but has no such rewrite for any other value.
+//     The bits written are the same bits.
+//
+// Derived from PDFium's core/fxcodec/jbig2 (Copyright 2014 The PDFium Authors; original code copyright 2014 Foxit
+// Software Inc.), BSD-3-Clause; see LICENSE-pdfium in this directory.
+
 package jbig2
 
 // Image 图像结构体
@@ -150,9 +167,7 @@ func (i *Image) Fill(v bool) {
 		clear(i.data)
 		return
 	}
-	for idx := range i.data {
-		i.data[idx] = 0xFF
-	}
+	fillBytes(i.data, 0xFF)
 }
 
 // Invert 反转图像像素
@@ -200,7 +215,7 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 			if byteCount > 0 {
 				srcIndex := srcY*i.stride + (srcX >> 3)
 				dstIndex := dstY*dst.stride + ((x + srcX) >> 3)
-				composeBytes(
+				composeBytesFn(
 					dst.data[dstIndex:dstIndex+byteCount],
 					i.data[srcIndex:srcIndex+byteCount],
 					op,
@@ -208,7 +223,26 @@ func (i *Image) ComposeTo(dst *Image, x, y int32, op ComposeOp) {
 				srcX += byteCount << 3
 			}
 		}
+		shiftLimit := endX - composeShiftedRunMin
 		for srcX < endX {
+			// pdfview: composeShiftedRunFn takes the interior whole destination bytes of the run, once the loop
+			// below has written the head byte that aligns the destination. Its default consumes nothing; a vector
+			// build's kernel returns a later column, and the loop below still writes the trailing partial byte.
+			//
+			// The two conditions in front of it are what the kernel needs before it can take anything at all: a run
+			// at least composeShiftedRunMin columns long, which shiftLimit above carries as one comparison, and a
+			// byte-aligned destination. Testing them here rather than paying a call to be told so is what keeps this
+			// loop, on a build with no kernel behind the variable, as fast as it was before there was one — a
+			// dispatch variable costs a call whatever it holds, and the rows symbol placement produces are only a
+			// byte or two wide. Clearing shiftLimit means one call settles the whole interior, so a decline is never
+			// retried.
+			if srcX <= shiftLimit && (x+srcX)&7 == 0 {
+				shiftLimit = -1
+				if next := composeShiftedRunFn(dst, dstY, i, srcY, x+srcX, srcX, endX, op); next > srcX {
+					srcX = next
+					continue
+				}
+			}
 			dstX := x + srcX
 			count := int32(8 - (dstX & 7))
 			if remaining := endX - srcX; count > remaining {
@@ -325,9 +359,7 @@ func (i *Image) Expand(height int32, defaultPixel bool) {
 		i.data = i.data[:newSize]
 	}
 	if defaultPixel {
-		for idx := oldSize; idx < newSize; idx++ {
-			i.data[idx] = 0xFF
-		}
+		fillBytes(i.data[oldSize:newSize], 0xFF)
 	} else {
 		clear(i.data[oldSize:newSize])
 	}

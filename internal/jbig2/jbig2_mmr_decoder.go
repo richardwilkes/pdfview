@@ -19,6 +19,12 @@
 //     the write past the buffer end — a panic on hostile input. Every write into currOffsets, and the reference-run
 //     writes into refOffsets sized from the prior row's returned count, now reject out of range instead of panicking.
 //     The decode logic is unchanged; a valid row never reaches the bound.
+//
+// Modified by the pdfview project (2026-08-21) under section 4(b) of the license above:
+//   - fillBitmap's whole-byte black-run loop now hands its run to fillBytes (simd_dispatch.go) instead of storing one
+//     0xFF per byte. Go turns a range loop that stores zero into a memclr but has no such rewrite for any other
+//     value, so that loop really was one store per byte; fillBytes seeds a byte and doubles it with copy, and keeps
+//     a scalar loop for runs too short to pay for the calls. The bits it writes are the same bits.
 
 package jbig2
 
@@ -365,9 +371,12 @@ func (m *MMRDecompressor) fillBitmap(img *Image, y int, offsets []int, count int
 			data[row+(start>>3)] |= 1 << uint(7-(start&7))
 			start++
 		}
-		for start+8 <= end {
-			data[row+(start>>3)] = 0xFF
-			start += 8
+		// pdfview: fill the whole bytes of a black run with one memset instead of one store per byte. fillBytes
+		// keeps its own scalar loop for short runs, which is what a run of a few bytes wants.
+		if whole := (end - start) >> 3; whole > 0 {
+			idx := row + (start >> 3)
+			fillBytes(data[idx:idx+whole], 0xFF)
+			start += whole << 3
 		}
 		for start < end {
 			data[row+(start>>3)] |= 1 << uint(7-(start&7))
