@@ -13,15 +13,6 @@ set -eo pipefail
 
 trap 'echo -e "\033[33;5msimd-bench failed on simd-bench.sh:$LINENO\033[0m"' ERR
 
-GOVER=$(go env GOVERSION)
-case "$GOVER" in
-  go1.2[7-9]* | go1.[3-9]* | go[2-9]*) ;;
-  *)
-    echo "Go 1.27 or later is required for GOEXPERIMENT=simd (found $GOVER)" >&2
-    exit 1
-    ;;
-esac
-
 PKGS=("$@")
 if [ ${#PKGS[@]} -eq 0 ]; then
   PKGS=(./ ./internal/jbig2 ./internal/render ./internal/filter ./internal/imaging ./internal/jpeg2000/codestream \
@@ -101,4 +92,7 @@ echo
 if [ ${#EMPTY[@]} -ne 0 ]; then
   echo "No SIMD benchmarks in: ${EMPTY[*]}"
 fi
-echo "Results in $OUT"
+
+tar czf simd-bench-results.tgz "$OUT"
+echo
+echo "Done. Send back simd-bench-results.tgz (or the $OUT directory)."
