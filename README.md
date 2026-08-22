@@ -21,6 +21,25 @@ pixel image decodes through row strides and sample bit positions that reach 2^35
 2^34, none of which a 32-bit `int` can hold. A 32-bit build is rejected at compile time rather than left to wrap
 silently.
 
+## SIMD
+
+By default, the module compiles to portable Go, and each performance-critical pixel loop has a scalar form. If you
+build with `GOEXPERIMENT=simd` on Go 1.27 or later, the build wires in vector kernels for arm64 and amd64, written
+against the standard library's `simd` package. The kernels cover:
+
+- `pdfview` — the unpremultiply of the rendered page
+- `internal/filter` — the PNG Up predictor row add
+- `internal/imaging` — the JBIG2 polarity invert, the DCT stencil threshold, the JPX plane normalize, and the SMask
+  composite
+- `internal/jbig2` — the bitmap compose runs, both aligned and shifted
+- `internal/jpeg2000` — the inverse RCT, the plane clamps, and the wavelet sweeps
+- `internal/render` — the glyph-blit composite, the soft-mask luma plane, and the path finiteness scan
+
+Both build modes give identical output, and equivalence tests check this on every kernel. If the CPU has no usable
+vector unit, the `simd` package reports emulation, and the dispatch keeps the scalar code at run time. Each kernel
+also carries a per-architecture dispatch preference from measured benchmarks (see `simd-bench.sh`), so a kernel that
+does not beat its scalar form on real silicon stays off.
+
 ## Features
 
 - Render any page to an `*image.NRGBA`, either at a fixed DPI (`RenderPage`) or scaled to fit a maximum width and
