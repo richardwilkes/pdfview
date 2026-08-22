@@ -8,11 +8,13 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // This example renders one page of a PDF to a PNG and prints the document's table of contents, the page's links, and
-// the bounding boxes of any matches of an optional search term.
+// the bounding boxes of any matches of an optional search term. The -page flag takes the page's display label (for
+// example "iv" or "A-3"), which is resolved through the document's page labels; pages that no /PageLabels range covers
+// answer to their 1-based decimal ordinal.
 //
 // Usage:
 //
-//	go run ./example [-page n] document.pdf [search]
+//	go run ./example [-page label] document.pdf [search]
 package main
 
 import (
@@ -27,21 +29,21 @@ import (
 )
 
 func main() {
-	pageNumber := flag.Int("page", 0, "0-based page number to render")
+	pageLabel := flag.String("page", "", "label of the page to render; empty renders the first page")
 	flag.Parse()
 	if flag.NArg() < 1 {
-		log.Fatalf("usage: %s [-page n] document.pdf [search]\n", os.Args[0]) //nolint:gosec // We want the executable's name
+		log.Fatalf("usage: %s [-page label] document.pdf [search]\n", os.Args[0]) //nolint:gosec // We want the executable's name
 	}
 	search := ""
 	if flag.NArg() > 1 {
 		search = flag.Arg(1)
 	}
-	if err := extract(flag.Arg(0), *pageNumber, search); err != nil {
+	if err := extract(flag.Arg(0), *pageLabel, search); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func extract(path string, pageNumber int, search string) (err error) {
+func extract(path, pageLabel, search string) (err error) {
 	var data []byte
 	if data, err = os.ReadFile(path); err != nil { //nolint:gosec // For the example, we don't care
 		return err
@@ -74,10 +76,21 @@ func extract(path string, pageNumber int, search string) (err error) {
 		fmt.Println("document has no renderable pages")
 		return nil
 	}
-	if pageNumber < 0 || pageNumber >= doc.PageCount() {
-		return fmt.Errorf("page %d out of range: document has %d page(s), numbered 0-%d", pageNumber, doc.PageCount(),
-			doc.PageCount()-1)
+	// Resolve the label to a 0-based page number. Labels are not unique: a document that restarts its numbering can
+	// have more than one page with the same label, so render the first match and report the rest.
+	pageNumber := 0
+	if pageLabel != "" {
+		matches := doc.PagesWithLabel(pageLabel)
+		if len(matches) == 0 {
+			return fmt.Errorf("no page has the label %q", pageLabel)
+		}
+		pageNumber = matches[0]
+		if len(matches) > 1 {
+			fmt.Printf("%d pages have the label %q; the first match, page %d, will be rendered\n",
+				len(matches), pageLabel, pageNumber)
+		}
 	}
+	fmt.Printf("rendering page %d (label %q)\n", pageNumber, doc.PageLabel(pageNumber))
 
 	// Render the requested page at 150 DPI, reporting up to 10 search matches.
 	var page *pdfview.RenderedPage

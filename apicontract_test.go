@@ -25,18 +25,26 @@ import (
 // TestZeroValueDocument pins that the exported Document's zero value — and a nil *Document — answer every method with
 // the value documented for a released document rather than panicking. Document embeds an unexported pointer, so both
 // would otherwise dereference nil on the very first statement of each method (the mutex lives behind that pointer),
-// contradicting the package's promise that panics never escape the public API.
+// contradicting the package's promise that panics never escape the public API. A genuinely released document runs the
+// same assertions, since those documented values are its values: the three states are indistinguishable to a caller.
 func TestZeroValueDocument(t *testing.T) {
 	surf := surface.NewRasterN32Premul(8, 8, nil)
 	if surf == nil {
 		t.Fatal("unable to create surface")
 	}
+	// openErr rather than err: the assertions below declare their own err, and shadowing one here would be reported.
+	releasedDoc, openErr := pdfview.New([]byte(letterLinkPDF), 0)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	releasedDoc.Release()
 	for _, tc := range []struct {
 		doc  *pdfview.Document
 		name string
 	}{
 		{name: "zero value", doc: &pdfview.Document{}},
 		{name: "nil pointer", doc: nil},
+		{name: "released", doc: releasedDoc},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			doc := tc.doc
@@ -51,6 +59,18 @@ func TestZeroValueDocument(t *testing.T) {
 			}
 			if got := doc.TableOfContents(72); got != nil {
 				t.Errorf("TableOfContents = %v, want nil", got)
+			}
+			if got := doc.PageLabel(0); got != "" {
+				t.Errorf("PageLabel = %q, want an empty string", got)
+			}
+			if got := doc.PageLabels(); got != nil {
+				t.Errorf("PageLabels = %v, want nil", got)
+			}
+			if got := doc.PagesWithLabel("1"); got != nil {
+				t.Errorf("PagesWithLabel = %v, want nil", got)
+			}
+			if got := doc.HasPageLabels(); got {
+				t.Error("HasPageLabels = true, want false")
 			}
 			if _, _, err := doc.PageSize(0); !errors.Is(err, pdfview.ErrDocumentReleased) {
 				t.Errorf("PageSize error = %v, want ErrDocumentReleased", err)

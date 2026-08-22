@@ -11,7 +11,8 @@
 // the flat page list, honoring the tree structure with cycle and depth guards, that PageCount and Page answer from),
 // encryption setup, and navigation: page geometry (the effective box and rotation, and the top-left/y-down coordinate
 // space derived from them), destinations (explicit arrays and named, via both the old-style /Dests dictionary and the
-// /Names name tree), the document outline, and link annotations.
+// /Names name tree), the document outline, link annotations, and page labels (the /PageLabels number tree, flattened
+// to one display label per page).
 package doc
 
 import (
@@ -58,6 +59,13 @@ type Document struct {
 	// non-nil map means the document has no name tree and none will be walked again. A successful Authenticate resets
 	// it to nil: an index flattened before the file key arrived is keyed on ciphertext.
 	destIndex map[string]cos.Object
+	// pageLabels is the catalog's /PageLabels number tree expanded to one display label per page, decoded but not
+	// sanitized, built on the first page-label query and reused by every later one (see PageLabels). It is nil until
+	// then and non-nil afterward — including the empty slice a zero-page document builds — so a document without the
+	// tree walks it once and never again. A successful Authenticate resets it to nil: /P prefixes are strings, so
+	// labels built before the file key arrived carry ciphertext, and buildPageList re-runs, so the page count itself
+	// can change.
+	pageLabels []string
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
 	// pageRefs holds the indirect reference of each page when it was reached through one (the zero Ref otherwise);
@@ -70,6 +78,10 @@ type Document struct {
 	resources []cos.Object
 	// encrypted records whether the trailer carried an /Encrypt dictionary, even if its handler is unsupported.
 	encrypted bool
+	// pageLabelsPresent records whether the pageLabels build found at least one usable range, which is the only thing
+	// that distinguishes a document that labels its pages "1", "2", "3" from one that carries no /PageLabels tree at
+	// all and got the same labels from the decimal fallback. It is meaningful only once pageLabels is non-nil.
+	pageLabelsPresent bool
 }
 
 // Open parses data as a PDF document, sets up decryption if it is encrypted, and builds its page list. The COS layer
@@ -161,8 +173,15 @@ func (d *Document) Authenticate(password string) byte {
 		// flattened before the key arrived keyed itself on the ciphertext DecryptString passed through untouched. Left
 		// in place, every /GoTo and outline destination naming a name would probe the decrypted name against ciphertext
 		// keys, miss, and resolve to page -1 for the life of the document.
+		//
+		// pageLabels is dropped on both counts: a /P prefix is a string, so labels built while locked carry the raw
+		// ciphertext the decryptor passed through untouched, and the buildPageList below can change the page count the
+		// cached slice is sized to. Nothing gates page labels on authentication either, so a locked document can well
+		// have been asked for them already.
 		d.cos.DropCaches()
 		d.destIndex = nil
+		d.pageLabels = nil
+		d.pageLabelsPresent = false
 		d.cos.ValidateRoot() //nolint:errcheck // A root that is still unusable yields an empty page list below.
 		d.buildPageList()
 	}

@@ -17,14 +17,15 @@ import (
 	"github.com/richardwilkes/canvas/surface"
 )
 
-// The engine seam methods authenticate, outline, and links each run untrusted work through the internal engine
-// (decryption plus page-tree re-parsing, outline-tree resolution, and /Annots resolution respectively). Per the
-// package's "hostile input surfaces as an error, never a panic" contract, each must recover any panic and return a safe
-// zero value rather than letting it escape the public API, exactly like openEngine, rasterize, and search.
+// The engine seam methods authenticate, outline, links, and the page-label pair each run untrusted work through the
+// internal engine (decryption plus page-tree re-parsing, outline-tree resolution, /Annots resolution, and /PageLabels
+// number-tree flattening respectively). Per the package's "hostile input surfaces as an error, never a panic" contract,
+// each must recover any panic and return a safe zero value rather than letting it escape the public API, exactly like
+// openEngine, rasterize, and search.
 //
-// A nil doc is a reliable panic source: doc.Authenticate reads d.encrypted, doc.Outline reads d.cos, and doc.Links
-// reads d.pages, so each dereferences the nil receiver immediately. Without the recover guards these calls crash the
-// test binary; with them they return the documented zero value.
+// A nil doc is a reliable panic source: doc.Authenticate reads d.encrypted, doc.Outline reads d.cos, doc.Links reads
+// d.pages, and doc.PageLabels reads d.pageLabels and then d.cos, so each dereferences the nil receiver immediately.
+// Without the recover guards these calls crash the test binary; with them they return the documented zero value.
 
 func TestAuthenticateRecoversPanic(t *testing.T) {
 	e := &engineDocument{} // doc is nil
@@ -37,6 +38,16 @@ func TestOutlineRecoversPanic(t *testing.T) {
 	e := &engineDocument{} // doc is nil
 	if root := e.outline(); root != nil {
 		t.Fatalf("expected nil outline when the engine panics, got %+v", root)
+	}
+}
+
+func TestPageLabelsRecoversPanic(t *testing.T) {
+	e := &engineDocument{} // doc is nil
+	if labels := e.pageLabels(); labels != nil {
+		t.Fatalf("expected nil labels when the engine panics, got %+v", labels)
+	}
+	if has := e.hasPageLabels(); has {
+		t.Fatal("expected false when the engine panics, got true")
 	}
 }
 

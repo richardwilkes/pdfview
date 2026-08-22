@@ -7,17 +7,19 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package pdfview renders PDF pages to images and extracts text-search hits, links, and the table of contents. It also
-// handles password-protected documents.
+// Package pdfview renders PDF pages to images and extracts text-search hits, links, the table of contents, and page
+// labels. It also handles password-protected documents.
 //
 // The package is a pure-Go PDF engine — no cgo, CGO_ENABLED=0 builds — with rasterization delegated to
 // github.com/richardwilkes/canvas. New parses documents (including damaged ones, via a repair scan) and decrypts
 // password-protected ones (standard security handler R2-R6); RenderPage and RenderPageForSize rasterize each page's
 // content — paths, clips, colors, form XObjects, images, fonts and text, shadings, patterns, transparency groups, soft
 // masks, blend modes, and annotation appearance streams — through the content-stream interpreter; text search returns
-// MuPDF-compatible hit rectangles; and DrawPage draws a page's content onto a caller-owned canvas. The engine's
-// behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates exactly,
-// pixels within committed perceptual thresholds. See README.md for the architecture.
+// MuPDF-compatible hit rectangles; PageLabel, PageLabels, and PagesWithLabel translate between a page's position in the
+// file and the display label the document gives it (front matter in roman numerals, an appendix that restarts at 1);
+// and DrawPage draws a page's content onto a caller-owned canvas. The engine's behavior is pinned against the
+// MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates exactly, pixels within committed perceptual
+// thresholds. See README.md for the architecture.
 //
 // # Platform requirements
 //

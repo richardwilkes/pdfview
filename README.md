@@ -48,6 +48,9 @@ does not beat its scalar form on real silicon stays off.
   (case folding, elastic whitespace, per-line quads).
 - Extract a page's links (both external URIs and internal page references with destination points).
 - Extract the document's table of contents.
+- Read the document's page labels — the display numbering a reader shows, such as front matter in roman numerals
+  ahead of a chapter that restarts at 1 (`PageLabel`, `PageLabels`, `HasPageLabels`), plus a case-insensitive
+  reverse lookup that reports every page carrying a given label (`PagesWithLabel`).
 - Handle password-protected documents: the standard security handler R2–R6 (RC4 and AES), with authentication
   status bits matching MuPDF's `fz_authenticate_password`.
 - Draw a page's vector content directly onto a caller-owned canvas via `DrawPage` (the one canvas-coupled API; see
@@ -129,14 +132,15 @@ filter chains, decompression expansion, and interpreter work, so termination is 
 
 ## Architecture
 
-The public API lives in [pdf.go](pdf.go) (plus [drawpage.go](drawpage.go)); everything else is `internal/`:
+The public API lives in [pdf.go](pdf.go) (plus [drawpage.go](drawpage.go) and [pagelabels.go](pagelabels.go));
+everything else is `internal/`:
 
 | Package | Responsibility |
 | --- | --- |
 | `internal/cos` | Lexer, object model, xref (classic/stream/hybrid), object streams, repair scan, resolver, decryption hooks |
 | `internal/filter` | Stream filters and predictors |
 | `internal/crypt` | Standard security handler R2–R6 |
-| `internal/doc` | Page tree, destinations, outline, links, annotations, page geometry |
+| `internal/doc` | Page tree, destinations, outline, links, annotations, page geometry, page labels |
 | `internal/function` | PDF functions type 0/2/3/4 |
 | `internal/color` | Color spaces → RGBA, behaviorally matched to the oracle |
 | `internal/type1` / `internal/font` | Font parsing, encodings, widths, glyph outlines |
