@@ -12,33 +12,20 @@ package pdfview
 import (
 	"fmt"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// benchRand is the same splitmix64 generator the equivalence tests use, repeated here because this file carries no
-// build tag and must compile in the default build too.
-type benchRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *benchRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
 
 // benchPix builds a premultiplied page buffer of w×h pixels in which the given percentage of pixels are translucent
 // (a random alpha in 1..254, with components kept at or below it so the data is real premultiplied output) and the
 // rest are opaque. When banded, the translucent pixels are one contiguous run rather than scattered, which is the
 // shape a real page has — transparency arrives as a soft-masked image or a group covering an area, not as noise.
 func benchPix(w, h, translucentPct int, banded bool) []byte {
-	rng := benchRand{state: 0xf00d}
+	rng := testrand.Rand(0xf00d)
 	pix := make([]byte, w*h*4)
 	band := len(pix) * translucentPct / 100
 	for i := 0; i < len(pix); i += 4 {
-		v := rng.next()
+		v := rng.Next()
 		a := uint32(255)
 		if banded {
 			if i < band {

@@ -12,29 +12,9 @@ package imaging
 import (
 	"fmt"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// simdBenchRand is the same splitmix64 generator the equivalence tests use, repeated here because this file carries
-// no build tag and has to compile in the default build too.
-type simdBenchRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *simdBenchRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *simdBenchRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // BenchmarkInvertBytesSIMD measures the JBIG2 polarity flip at the row width a 300 dpi bilevel scan of a letter page
 // produces (2550 columns packed one bit per pixel, so 319 whole bytes), over a page's worth of rows. The kernel is
@@ -44,10 +24,10 @@ func BenchmarkInvertBytesSIMD(b *testing.B) {
 		rowBytes = 319
 		rows     = 3300
 	)
-	rng := simdBenchRand{state: 0xb0d1}
+	rng := testrand.Rand(0xb0d1)
 	src := make([]byte, rowBytes*rows)
 	dst := make([]byte, rowBytes*rows)
-	rng.fill(src)
+	rng.Fill(src)
 	b.SetBytes(int64(len(src)))
 	b.ResetTimer()
 	for b.Loop() {
@@ -66,9 +46,9 @@ func BenchmarkThresholdSIMD(b *testing.B) {
 		w = 1275
 		h = 1650
 	)
-	rng := simdBenchRand{state: 0xb0d2}
+	rng := testrand.Rand(0xb0d2)
 	noise := make([]byte, w*h)
-	rng.fill(noise)
+	rng.Fill(noise)
 	gradient := make([]byte, w*h)
 	for i := range gradient {
 		gradient[i] = byte(i % w * 256 / w)
@@ -96,12 +76,12 @@ func BenchmarkNormalizePlaneSIMD(b *testing.B) {
 	dst := make([]byte, count)
 	for _, precision := range []int{8, 12, 16} {
 		b.Run(fmt.Sprintf("precision=%d", precision), func(b *testing.B) {
-			rng := simdBenchRand{state: 0xb0d3}
+			rng := testrand.Rand(0xb0d3)
 			norm := newJPXNorm(precision)
 			span := uint32(norm.maxVal + 1)
 			in := make([]int32, count)
 			for i := range in {
-				in[i] = int32(uint32(rng.next())%span) - int32(norm.offset)
+				in[i] = int32(uint32(rng.Next())%span) - int32(norm.offset)
 			}
 			b.SetBytes(int64(count))
 			b.ResetTimer()
@@ -125,9 +105,9 @@ func BenchmarkCompositeAlphaSIMD(b *testing.B) {
 		w = 1024
 		h = 1024
 	)
-	rng := simdBenchRand{state: 0xb0d4}
+	rng := testrand.Rand(0xb0d4)
 	noise := make([]byte, w*h)
-	rng.fill(noise)
+	rng.Fill(noise)
 	vignette := make([]byte, w*h)
 	for y := range h {
 		edge := min(y, h-1-y)
@@ -142,7 +122,7 @@ func BenchmarkCompositeAlphaSIMD(b *testing.B) {
 	scattered := make([]byte, w*h)
 	for i := range scattered {
 		if scattered[i] = 255; i%16 == 0 {
-			scattered[i] = byte(rng.next())
+			scattered[i] = byte(rng.Next())
 		}
 	}
 	for _, shape := range []struct {
@@ -151,7 +131,7 @@ func BenchmarkCompositeAlphaSIMD(b *testing.B) {
 	}{{name: "noise", plane: noise}, {name: "vignette", plane: vignette}, {name: "scattered", plane: scattered}} {
 		b.Run(shape.name, func(b *testing.B) {
 			pix := make([]byte, w*h*4)
-			rng.fill(pix)
+			rng.Fill(pix)
 			img := &Image{Pix: pix, Width: w, Height: h}
 			b.SetBytes(int64(w * h * 4))
 			b.ResetTimer()

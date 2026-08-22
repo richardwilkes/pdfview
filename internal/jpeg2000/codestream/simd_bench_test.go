@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/jpeg2000/engine"
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
 
 // These benchmarks are untagged on purpose: the same bodies run in the default build and under GOEXPERIMENT=simd,
@@ -33,14 +34,9 @@ var benchPlaneSizes = []struct {
 // clamp bounds the benchmarks use, so the clamp measures the pass-through case a valid codestream produces.
 func benchInt32Plane(n int, seed uint64) []int32 {
 	out := make([]int32, n)
-	s := seed
+	rnd := testrand.Rand(seed)
 	for i := range out {
-		s += 0x9E3779B97F4A7C15
-		z := s
-		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-		z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-		z ^= z >> 31
-		out[i] = int32(z%4096) - 2048
+		out[i] = int32(rnd.Next()%4096) - 2048
 	}
 	return out
 }

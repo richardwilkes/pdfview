@@ -12,6 +12,8 @@ package wavelet
 import (
 	"strconv"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
 
 // These benchmarks are untagged on purpose: the same bodies run in the default build and under GOEXPERIMENT=simd,
@@ -24,19 +26,6 @@ var benchVerticalWidths = []int{256, 1024, 2048}
 
 const benchVerticalH = 512
 
-// benchNoise is a self-contained fixed-seed PRNG, matching the equivalence tests: reproducible coefficient noise
-// without math/rand.
-func benchNoise(seed uint64) func() uint64 {
-	s := seed
-	return func() uint64 {
-		s += 0x9E3779B97F4A7C15
-		z := s
-		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-		z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-		return z ^ (z >> 31)
-	}
-}
-
 // BenchmarkInverse53VerticalSIMD measures the pair of 5/3 vertical sweeps in isolation — the exact function that
 // calls the two int32 dispatch variables. The buffer is transformed in place and never reset: the coefficients
 // wander (and wrap) across iterations, which costs int32 arithmetic nothing and keeps the measurement free of a
@@ -44,10 +33,10 @@ func benchNoise(seed uint64) func() uint64 {
 func BenchmarkInverse53VerticalSIMD(b *testing.B) {
 	for _, w := range benchVerticalWidths {
 		b.Run("W="+strconv.Itoa(w), func(b *testing.B) {
-			next := benchNoise(11)
+			rnd := testrand.Rand(11)
 			out := make([]int32, w*benchVerticalH)
 			for i := range out {
-				out[i] = int32(next()%(1<<21)) - (1 << 20)
+				out[i] = int32(rnd.Next()%(1<<21)) - (1 << 20)
 			}
 			hlv := benchVerticalH / 2
 			hhv := benchVerticalH - hlv
@@ -68,10 +57,10 @@ func BenchmarkInverse53VerticalSIMD(b *testing.B) {
 func BenchmarkInverse97VerticalSIMD(b *testing.B) {
 	for _, w := range benchVerticalWidths {
 		b.Run("W="+strconv.Itoa(w), func(b *testing.B) {
-			next := benchNoise(13)
+			rnd := testrand.Rand(13)
 			pristine := make([]float64, w*benchVerticalH)
 			for i := range pristine {
-				pristine[i] = float64(int64(next()%2000001)-1000000) / 1024
+				pristine[i] = float64(int64(rnd.Next()%2000001)-1000000) / 1024
 			}
 			out := make([]float64, len(pristine))
 			hlv := benchVerticalH / 2
@@ -123,10 +112,10 @@ func BenchmarkSynthesize97SIMD(b *testing.B) {
 // must not lose measurable time on the inputs it deliberately declines to vectorize.
 func BenchmarkInverse53VerticalSIMDBelowGate(b *testing.B) {
 	w := sub53RowMin - 1
-	next := benchNoise(17)
+	rnd := testrand.Rand(17)
 	out := make([]int32, w*benchVerticalH)
 	for i := range out {
-		out[i] = int32(next()%(1<<21)) - (1 << 20)
+		out[i] = int32(rnd.Next()%(1<<21)) - (1 << 20)
 	}
 	hlv := benchVerticalH / 2
 	hhv := benchVerticalH - hlv

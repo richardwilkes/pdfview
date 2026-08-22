@@ -15,30 +15,9 @@ import (
 	"reflect"
 	"simd"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// simdRand is a splitmix64 generator: four lines of arithmetic with a fixed seed, so these tests are reproducible
-// without math/rand (which gosec's G404 flags) and without a dependency on the standard library's generator staying
-// byte-stable across releases.
-type simdRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *simdRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *simdRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // scalarUnpremultiply returns what unpremultiplyPixelsScalar makes of a copy of pix.
 func scalarUnpremultiply(pix []byte) []byte {
@@ -118,10 +97,10 @@ func TestUnpremultiplySIMDMatchesScalar(t *testing.T) {
 	unpremultiplyMin = 0
 	var probe simd.Uint8s
 	lanes := probe.Len()
-	rng := simdRand{state: 0x9d0f}
+	rng := testrand.Rand(0x9d0f)
 	for n := range 4*lanes + 8 {
 		pix := make([]byte, n)
-		rng.fill(pix)
+		rng.Fill(pix)
 		want := scalarUnpremultiply(pix)
 		got := vectorUnpremultiply(pix)
 		if i := diff(got, want); i >= 0 {
@@ -140,7 +119,7 @@ func TestUnpremultiplySIMDAlphaMixes(t *testing.T) {
 	unpremultiplyMin = 0
 	var probe simd.Uint8s
 	pixels := probe.Len() * unpremultiplyChunkVectors * 2
-	rng := simdRand{state: 0x51ce}
+	rng := testrand.Rand(0x51ce)
 	for _, pattern := range [][]byte{
 		{0, 255, 1, 128, 254, 0, 7, 255},
 		{255},
@@ -150,7 +129,7 @@ func TestUnpremultiplySIMDAlphaMixes(t *testing.T) {
 	} {
 		for n := range pixels {
 			pix := make([]byte, n*4)
-			rng.fill(pix)
+			rng.Fill(pix)
 			for i := range n {
 				pix[i*4+3] = pattern[i%len(pattern)]
 			}
@@ -168,7 +147,7 @@ func TestUnpremultiplySIMDAlphaMixes(t *testing.T) {
 func TestUnpremultiplySIMDGate(t *testing.T) {
 	wasMin := unpremultiplyMin
 	t.Cleanup(func() { unpremultiplyMin = wasMin })
-	rng := simdRand{state: 0x6a7e}
+	rng := testrand.Rand(0x6a7e)
 	for _, gate := range []int{0, 4, 64, 256} {
 		unpremultiplyMin = gate
 		for _, n := range []int{gate - 4, gate, gate + 4, gate + 64} {
@@ -176,7 +155,7 @@ func TestUnpremultiplySIMDGate(t *testing.T) {
 				continue
 			}
 			pix := make([]byte, n)
-			rng.fill(pix)
+			rng.Fill(pix)
 			want := scalarUnpremultiply(pix)
 			got := vectorUnpremultiply(pix)
 			if i := diff(got, want); i >= 0 {

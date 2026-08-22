@@ -14,29 +14,8 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// benchRand is the same splitmix64 generator the equivalence tests use, repeated here because this file carries no
-// build tag and must compile in the default build too.
-type benchRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *benchRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *benchRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // glyphBoxes are the coverage plane sizes body text actually produces: roughly 9 pt at 96, 200, and 300 dpi.
 var glyphBoxes = [][2]int{{12, 16}, {24, 32}, {40, 50}}
@@ -80,9 +59,9 @@ func BenchmarkMaskLumaPlaneSIMD(b *testing.B) {
 	for _, side := range []int{512, 1024} {
 		b.Run(fmt.Sprintf("%dx%d", side, side), func(b *testing.B) {
 			n := side * side
-			rng := benchRand{state: 0xb1a5e}
+			rng := testrand.Rand(0xb1a5e)
 			pix := make([]byte, n*4)
-			rng.fill(pix)
+			rng.Fill(pix)
 			for i := 3; i < len(pix); i += 4 {
 				pix[i] = 255 // The luminosity surface is opaque.
 			}
@@ -101,10 +80,10 @@ func BenchmarkMaskLumaPlaneSIMD(b *testing.B) {
 func BenchmarkAllFiniteSIMD(b *testing.B) {
 	for _, n := range []int{32, 200, 4096} {
 		b.Run(fmt.Sprintf("points=%d", n), func(b *testing.B) {
-			rng := benchRand{state: 0xb1a5f}
+			rng := testrand.Rand(0xb1a5f)
 			pts := make([]gfx.Point, n)
 			for i := range pts {
-				pts[i] = gfx.Point{X: float32(rng.next()%2001) - 1000, Y: float32(rng.next()%2001) - 1000}
+				pts[i] = gfx.Point{X: float32(rng.Next()%2001) - 1000, Y: float32(rng.Next()%2001) - 1000}
 			}
 			b.SetBytes(int64(n * 8))
 			b.ResetTimer()

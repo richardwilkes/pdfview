@@ -17,35 +17,8 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/jpeg2000/engine"
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// splitmix64 is a self-contained fixed-seed PRNG. The tests need reproducible coefficient noise, not randomness, and
-// math/rand is off the table in this repository (gosec G404).
-type splitmix64 uint64
-
-func (s *splitmix64) next() uint64 {
-	*s += 0x9E3779B97F4A7C15
-	z := uint64(*s)
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-	return z ^ (z >> 31)
-}
-
-// int32s fills a slice of n coefficients spread across the full signed range, with the small magnitudes and the
-// extremes both represented: samples land in [-2^20, 2^20) most of the time, and every 16th one is pushed out to a
-// value near an int32 boundary so wrap-around and sign-extension behaviour is exercised too.
-func (s *splitmix64) int32s(n int) []int32 {
-	out := make([]int32, n)
-	for i := range out {
-		v := int32(uint32(s.next()))
-		if i%16 == 0 {
-			out[i] = v
-		} else {
-			out[i] = v >> 11
-		}
-	}
-	return out
-}
 
 // simdTestLengths returns the element counts every kernel is swept over: zero, every length inside the first vector,
 // the exact vector multiples, and each of those plus and minus one, so both the full-vector loop and the LoadPart /
@@ -99,8 +72,8 @@ func TestApplyRCTSIMDEquivalence(t *testing.T) {
 	for _, gate := range []int{0, savedGate, 1 << 30} {
 		applyRCTMin = gate
 		for _, n := range simdTestLengths() {
-			rnd := splitmix64(0x5EED0001)
-			y0, y1, y2 := rnd.int32s(n), rnd.int32s(n), rnd.int32s(n)
+			rnd := testrand.Rand(0x5EED0001)
+			y0, y1, y2 := rnd.Int32s(n), rnd.Int32s(n), rnd.Int32s(n)
 			w0, w1, w2 := append([]int32(nil), y0...), append([]int32(nil), y1...), append([]int32(nil), y2...)
 			applyRCTSIMD(y0, y1, y2)
 			applyRCTScalar(w0, w1, w2)
@@ -121,8 +94,8 @@ func TestApplyRCTSIMDEquivalence(t *testing.T) {
 func TestApplyRCTSIMDThroughDispatch(t *testing.T) {
 	saved := applyRCTFn
 	t.Cleanup(func() { applyRCTFn = saved })
-	rnd := splitmix64(0x5EED0002)
-	y0, y1, y2 := rnd.int32s(64), rnd.int32s(40), rnd.int32s(80)
+	rnd := testrand.Rand(0x5EED0002)
+	y0, y1, y2 := rnd.Int32s(64), rnd.Int32s(40), rnd.Int32s(80)
 	w0, w1, w2 := append([]int32(nil), y0...), append([]int32(nil), y1...), append([]int32(nil), y2...)
 
 	applyRCTFn = applyRCTSIMD
@@ -155,8 +128,8 @@ func TestClampPlaneSIMDEquivalence(t *testing.T) {
 			lo := int32(-(1 << uint(precision-1)))
 			hi := int32(1<<uint(precision-1)) - 1
 			for _, n := range simdTestLengths() {
-				rnd := splitmix64(0x5EED0003)
-				got := rnd.int32s(n)
+				rnd := testrand.Rand(0x5EED0003)
+				got := rnd.Int32s(n)
 				want := append([]int32(nil), got...)
 				clampPlaneSIMD(got, lo, hi)
 				clampPlaneScalar(want, lo, hi)
@@ -178,8 +151,8 @@ func TestClampPlaneSIMDTailUntouched(t *testing.T) {
 	lanes := probe.Len()
 	for n := 1; n <= 3*lanes; n++ {
 		buf := make([]int32, n+lanes)
-		rnd := splitmix64(0x5EED0004)
-		copy(buf, rnd.int32s(n+lanes))
+		rnd := testrand.Rand(0x5EED0004)
+		copy(buf, rnd.Int32s(n+lanes))
 		guard := append([]int32(nil), buf[n:]...)
 		clampPlaneSIMD(buf[:n], -128, 127)
 		for i, v := range guard {
@@ -201,8 +174,8 @@ func TestAddClampPlaneSIMDEquivalence(t *testing.T) {
 			offset := int32(1) << uint(precision-1)
 			maxIdx := int32(1)<<uint(precision) - 1
 			for _, n := range simdTestLengths() {
-				rnd := splitmix64(0x5EED0005)
-				src := rnd.int32s(n)
+				rnd := testrand.Rand(0x5EED0005)
+				src := rnd.Int32s(n)
 				got := make([]int32, n)
 				want := make([]int32, n)
 				addClampPlaneSIMD(got, src, offset, 0, maxIdx)

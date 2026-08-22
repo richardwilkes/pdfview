@@ -17,30 +17,9 @@ import (
 	"reflect"
 	"simd"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// simdRand is a splitmix64 generator: four lines of arithmetic with a fixed seed, so these tests are reproducible
-// without math/rand (which gosec's G404 flags) and without a dependency on the standard library's generator staying
-// byte-stable across releases.
-type simdRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *simdRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *simdRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // wiring is one dispatch variable and the two implementations it can hold, plus this architecture's verdict on which
 // of them it should be holding.
@@ -82,14 +61,14 @@ func TestSIMDWiring(t *testing.T) {
 func TestAddRowsSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Uint8s
 	lanes := probe.Len()
-	rng := simdRand{state: 0x5eed1}
+	rng := testrand.Rand(0x5eed1)
 	for n := range 3*lanes + 5 {
 		row := make([]byte, n)
 		prev := make([]byte, n)
 		for pass := range 2 {
 			if pass == 0 {
-				rng.fill(row)
-				rng.fill(prev)
+				rng.Fill(row)
+				rng.Fill(prev)
 			} else {
 				// The wrap case, held apart from the random data so a failure names it directly.
 				for i := range row {
@@ -120,7 +99,7 @@ func TestAddRowsSIMDMatchesScalar(t *testing.T) {
 func TestPNGUpPredictorSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Uint8s
 	lanes := probe.Len()
-	rng := simdRand{state: 0xfeed2}
+	rng := testrand.Rand(0xfeed2)
 	for _, columns := range []int{1, 3, lanes - 1, lanes, lanes + 1, 2 * lanes, 3*lanes + 7, 613} {
 		for _, colors := range []int{1, 3, 4} {
 			p := Params{Predictor: 15, Colors: colors, BitsPerComponent: 8, Columns: columns}
@@ -131,7 +110,7 @@ func TestPNGUpPredictorSIMDMatchesScalar(t *testing.T) {
 				// Filter types cycle so Up (2) lands next to None, Sub, Average, and Paeth rows.
 				data = append(data, byte(r%5))
 				row := make([]byte, rowLen)
-				rng.fill(row)
+				rng.Fill(row)
 				data = append(data, row...)
 			}
 			was := addRowsFn

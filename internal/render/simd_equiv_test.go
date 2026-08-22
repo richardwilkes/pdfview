@@ -18,36 +18,14 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/gfx"
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// simdRand is a splitmix64 generator: four lines of arithmetic with a fixed seed, so these tests are reproducible
-// without math/rand (which gosec's G404 flags) and without a dependency on the standard library's generator staying
-// byte-stable across releases.
-type simdRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *simdRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *simdRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // fillWords overwrites w with pseudorandom premultiplied pixels: each channel is at or below the alpha, which is what
 // the surface pixmap the glyph blit writes into actually holds.
-func (r *simdRand) fillWords(w []uint32) {
+func fillWords(r *testrand.Rand, w []uint32) {
 	for i := range w {
-		v := r.next()
+		v := r.Next()
 		a := uint32(v>>32) % 256
 		c0 := uint32(v) % (a + 1)
 		c1 := uint32(v>>8) % (a + 1)
@@ -116,7 +94,7 @@ func TestCompositeMaskSwitchArmsMatchFormula(t *testing.T) {
 // scalar switch, a ramp that walks every value there is (0 and 255 included, at every lane offset), noise, and a run
 // that changes character from one group of the vector kernel's scan to the next, so a single span drives all three of
 // its branches and every boundary between them.
-func coveragePatterns(n int, rng *simdRand) map[string][]byte {
+func coveragePatterns(n int, rng *testrand.Rand) map[string][]byte {
 	zero := make([]byte, n)
 	full := make([]byte, n)
 	ramp := make([]byte, n)
@@ -132,7 +110,7 @@ func coveragePatterns(n int, rng *simdRand) map[string][]byte {
 			blocks[i] = byte(i * 7)
 		}
 	}
-	rng.fill(noise)
+	rng.Fill(noise)
 	return map[string][]byte{"zero": zero, "full": full, "ramp": ramp, "noise": noise, "blocks": blocks}
 }
 
@@ -146,10 +124,10 @@ func TestCompositeMaskSpanSIMDMatchesScalar(t *testing.T) {
 	compositeMaskSpanMin = 0
 	var probe simd.Uint32s
 	lanes := probe.Len()
-	rng := simdRand{state: 0x71a5}
+	rng := testrand.Rand(0x71a5)
 	for n := range 2*compositeMaskGroup + 4*lanes {
 		dst := make([]uint32, n)
-		rng.fillWords(dst)
+		fillWords(&rng, dst)
 		for name, cov := range coveragePatterns(n, &rng) {
 			for _, src := range [][3]uint32{{0, 0, 0}, {255, 255, 255}, {17, 129, 250}} {
 				want := make([]uint32, n)
@@ -174,7 +152,7 @@ func TestCompositeMaskSpanSIMDMatchesScalar(t *testing.T) {
 func TestCompositeMaskSpanSIMDGate(t *testing.T) {
 	wasMin := compositeMaskSpanMin
 	t.Cleanup(func() { compositeMaskSpanMin = wasMin })
-	rng := simdRand{state: 0x71a6}
+	rng := testrand.Rand(0x71a6)
 	for _, gate := range []int{0, 1, 8, 33} {
 		compositeMaskSpanMin = gate
 		for _, n := range []int{gate - 1, gate, gate + 1, gate + 16} {
@@ -182,9 +160,9 @@ func TestCompositeMaskSpanSIMDGate(t *testing.T) {
 				continue
 			}
 			dst := make([]uint32, n)
-			rng.fillWords(dst)
+			fillWords(&rng, dst)
 			cov := make([]byte, n)
-			rng.fill(cov)
+			rng.Fill(cov)
 			want := make([]uint32, n)
 			copy(want, dst)
 			compositeMaskSpanScalar(want, cov, 11, 200, 33)
@@ -206,10 +184,10 @@ func TestCompositeMaskSpanSIMDGate(t *testing.T) {
 func TestCompositeMaskBlitMatchesScalar(t *testing.T) {
 	was := compositeMaskSpanFn
 	t.Cleanup(func() { compositeMaskSpanFn = was })
-	rng := simdRand{state: 0x8c0d}
+	rng := testrand.Rand(0x8c0d)
 	const w, h = 40, 24
 	plane := make([]byte, w*h)
-	rng.fill(plane)
+	rng.Fill(plane)
 	for i := range 64 { // Sprinkle the two special coverage values through the plane.
 		plane[i*3%len(plane)] = 0
 		plane[(i*7+1)%len(plane)] = 255
@@ -225,8 +203,8 @@ func TestCompositeMaskBlitMatchesScalar(t *testing.T) {
 		if pm == nil {
 			t.Fatal("no pixmap")
 		}
-		seed := simdRand{state: 0x8c0e}
-		seed.fillWords(pm.Pix)
+		seed := testrand.Rand(0x8c0e)
+		fillWords(&seed, pm.Pix)
 		for _, at := range [][2]int{{0, 0}, {-7, -5}, {20, 14}, {45, 30}, {-60, 0}, {3, -30}} {
 			d.compositeMask(mask, at[0], at[1], 12, 210, 90)
 		}
@@ -251,7 +229,7 @@ func TestMaskLumaPlaneSIMDMatchesScalar(t *testing.T) {
 	wasMin := maskLumaMin
 	t.Cleanup(func() { maskLumaMin = wasMin })
 	maskLumaMin = 0
-	rng := simdRand{state: 0x1d0c}
+	rng := testrand.Rand(0x1d0c)
 	lengths := make([]int, 0, maskLumaChunk+8)
 	for n := range maskLumaChunk + 5 {
 		lengths = append(lengths, n)
@@ -261,7 +239,7 @@ func TestMaskLumaPlaneSIMDMatchesScalar(t *testing.T) {
 		for _, kind := range []string{"noise", "ramp"} {
 			pix := make([]byte, n*4)
 			if kind == "noise" {
-				rng.fill(pix)
+				rng.Fill(pix)
 			} else {
 				for i := range n {
 					v := byte(i)
@@ -316,7 +294,7 @@ func TestMaskLumaPlaneSIMDExhaustiveChannels(t *testing.T) {
 func TestMaskLumaPlaneSIMDGate(t *testing.T) {
 	wasMin := maskLumaMin
 	t.Cleanup(func() { maskLumaMin = wasMin })
-	rng := simdRand{state: 0x1d0d}
+	rng := testrand.Rand(0x1d0d)
 	for _, gate := range []int{0, 1, 64, 300} {
 		maskLumaMin = gate
 		for _, n := range []int{gate - 1, gate, gate + 1, gate + 64} {
@@ -324,7 +302,7 @@ func TestMaskLumaPlaneSIMDGate(t *testing.T) {
 				continue
 			}
 			pix := make([]byte, n*4)
-			rng.fill(pix)
+			rng.Fill(pix)
 			want := make([]byte, n)
 			lumaPlaneScalar(want, pix)
 			got := make([]byte, n)
@@ -354,11 +332,11 @@ func TestAllFiniteSIMDMatchesScalar(t *testing.T) {
 	allFiniteMin = 0
 	var probe simd.Float32s
 	lanes := probe.Len()
-	rng := simdRand{state: 0x2f1e}
+	rng := testrand.Rand(0x2f1e)
 	for n := 1; n < 4*lanes+4; n++ {
 		base := make([]gfx.Point, n)
 		for i := range base {
-			base[i] = gfx.Point{X: float32(rng.next()%2001) - 1000, Y: float32(rng.next()%2001) - 1000}
+			base[i] = gfx.Point{X: float32(rng.Next()%2001) - 1000, Y: float32(rng.Next()%2001) - 1000}
 		}
 		base[0].X = math.MaxFloat32
 		base[n-1].Y = -math.MaxFloat32

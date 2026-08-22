@@ -17,30 +17,9 @@ import (
 	"reflect"
 	"simd"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// simdRand is a splitmix64 generator: four lines of arithmetic with a fixed seed, so these tests are reproducible
-// without math/rand (which gosec's G404 flags) and without depending on the standard library's generator staying
-// byte-stable across releases.
-type simdRand struct {
-	state uint64
-}
-
-// next returns the next value in the sequence.
-func (r *simdRand) next() uint64 {
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-
-// fill overwrites b with pseudorandom bytes.
-func (r *simdRand) fill(b []byte) {
-	for i := range b {
-		b[i] = byte(r.next() >> 24)
-	}
-}
 
 // byteLanes is the machine's Uint8s width, which the tail sweeps below are expressed in.
 func byteLanes() int {
@@ -109,10 +88,10 @@ func TestSIMDWiring(t *testing.T) {
 // kernel's length gate.
 func TestInvertBytesSIMDMatchesScalar(t *testing.T) {
 	lanes := byteLanes()
-	rng := simdRand{state: 0x1b16}
+	rng := testrand.Rand(0x1b16)
 	for n := range 3*lanes + 5 {
 		src := make([]byte, n)
-		rng.fill(src)
+		rng.Fill(src)
 		want := make([]byte, n)
 		invertBytesScalar(want, src)
 		sweepGate(t, &invertBytesMin, func() {
@@ -130,10 +109,10 @@ func TestInvertBytesSIMDMatchesScalar(t *testing.T) {
 // comparison with a sign-bit test and 127 against 128 is exactly where that equivalence has to hold.
 func TestThresholdSIMDMatchesScalar(t *testing.T) {
 	lanes := byteLanes()
-	rng := simdRand{state: 0x7412}
+	rng := testrand.Rand(0x7412)
 	for n := range 3*lanes + 5 {
 		gray := make([]byte, n)
-		rng.fill(gray)
+		rng.Fill(gray)
 		edges := []byte{0, 127, 128, 255, 1, 254, 126, 129}
 		for i := range min(n, len(edges)) {
 			gray[i] = edges[i]
@@ -160,7 +139,7 @@ func TestThresholdSIMDMatchesScalar(t *testing.T) {
 func TestNormalizePlaneSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Int32s
 	lanes := probe.Len()
-	rng := simdRand{state: 0x3ec1}
+	rng := testrand.Rand(0x3ec1)
 	for precision := 1; precision <= 32; precision++ {
 		n := newJPXNorm(precision)
 		for _, count := range []int{
@@ -169,7 +148,7 @@ func TestNormalizePlaneSIMDMatchesScalar(t *testing.T) {
 		} {
 			samples := make([]int32, count)
 			for i := range samples {
-				samples[i] = int32(rng.next())
+				samples[i] = int32(rng.Next())
 			}
 			edges := []int32{
 				0, 1, -1, int32(-n.offset), int32(-n.offset) - 1, int32(n.maxVal - n.offset),
@@ -211,7 +190,7 @@ func TestNormalizePlaneInt32SafeCovers32Bit(t *testing.T) {
 func TestCompositeAlphaSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Uint32s
 	lanes := probe.Len()
-	rng := simdRand{state: 0xa1fa}
+	rng := testrand.Rand(0xa1fa)
 	counts := []int{
 		1, lanes - 1, lanes, lanes + 1, 3*lanes + 1, compositeAlphaChunk - 1, compositeAlphaChunk,
 		compositeAlphaChunk + lanes + 1,
@@ -219,11 +198,11 @@ func TestCompositeAlphaSIMDMatchesScalar(t *testing.T) {
 	for _, count := range counts {
 		for _, mode := range []string{"random", "opaque", "zero", "one-hole"} {
 			pix := make([]byte, count*4)
-			rng.fill(pix)
+			rng.Fill(pix)
 			plane := make([]byte, count)
 			switch mode {
 			case "random":
-				rng.fill(plane)
+				rng.Fill(plane)
 			case "opaque":
 				for i := range plane {
 					plane[i] = 255

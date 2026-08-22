@@ -16,51 +16,9 @@ import (
 	"reflect"
 	"simd"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/testrand"
 )
-
-// splitmix64 is a self-contained fixed-seed PRNG. The tests need reproducible coefficient noise, not randomness, and
-// math/rand is off the table in this repository (gosec G404).
-type splitmix64 uint64
-
-func (s *splitmix64) next() uint64 {
-	*s += 0x9E3779B97F4A7C15
-	z := uint64(*s)
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-	return z ^ (z >> 31)
-}
-
-// int32s fills n coefficients spread across the signed range: most land in [-2^20, 2^20), the size real subband
-// coefficients reach, and every 16th is a full-range value so the wrap-around add and the arithmetic shift are
-// exercised at the extremes too.
-func (s *splitmix64) int32s(n int) []int32 {
-	out := make([]int32, n)
-	for i := range out {
-		v := int32(uint32(s.next()))
-		if i%16 == 0 {
-			out[i] = v
-		} else {
-			out[i] = v >> 11
-		}
-	}
-	return out
-}
-
-// float64s fills n coefficients with values whose exponents span the range a 9/7 subband actually carries, so the
-// bit-exactness comparisons are not all made on similar magnitudes.
-func (s *splitmix64) float64s(n int) []float64 {
-	out := make([]float64, n)
-	for i := range out {
-		v := float64(int64(s.next()%2000001)-1000000) / 1024
-		if i%8 == 0 {
-			v *= 1024
-		} else if i%8 == 3 {
-			v /= 65536
-		}
-		out[i] = v
-	}
-	return out
-}
 
 // simdTestLengths returns the row widths every kernel is swept over: zero, every width inside the first vector, the
 // exact vector multiples, and each of those plus and minus one, so both the full-vector loop and the LoadPart /
@@ -109,10 +67,10 @@ func TestSIMDWiring(t *testing.T) {
 // for element, over the full width sweep.
 func TestSub53RowSIMDEquivalence(t *testing.T) {
 	for _, w := range simdTestLengths() {
-		rnd := splitmix64(0x5EED1001)
-		e := rnd.int32s(w)
-		hl := rnd.int32s(w)
-		hr := rnd.int32s(w)
+		rnd := testrand.Rand(0x5EED1001)
+		e := rnd.Int32s(w)
+		hl := rnd.Int32s(w)
+		hr := rnd.Int32s(w)
 		want := append([]int32(nil), e...)
 		sub53RowSIMD(e, hl, hr)
 		for x := range want {
@@ -129,10 +87,10 @@ func TestSub53RowSIMDEquivalence(t *testing.T) {
 // TestAdd53RowSIMDEquivalence compares the 5/3 predict row kernel against the scalar expression it replaces.
 func TestAdd53RowSIMDEquivalence(t *testing.T) {
 	for _, w := range simdTestLengths() {
-		rnd := splitmix64(0x5EED1002)
-		o := rnd.int32s(w)
-		ll := rnd.int32s(w)
-		lr := rnd.int32s(w)
+		rnd := testrand.Rand(0x5EED1002)
+		o := rnd.Int32s(w)
+		ll := rnd.Int32s(w)
+		lr := rnd.Int32s(w)
 		want := append([]int32(nil), o...)
 		add53RowSIMD(o, ll, lr)
 		for x := range want {
@@ -156,8 +114,8 @@ func TestSweep53SIMDEquivalence(t *testing.T) {
 		sub53RowMin, add53RowMin = gate, gate
 		for _, shape := range [][3]int{{1, 1, 0}, {2, 1, 1}, {7, 3, 2}, {16, 2, 1}, {33, 9, 8}, {64, 32, 32}, {129, 4, 4}} {
 			w, hlv, hhv := shape[0], shape[1], shape[2]
-			rnd := splitmix64(0x5EED1003)
-			vec := rnd.int32s(w * (hlv + hhv))
+			rnd := testrand.Rand(0x5EED1003)
+			vec := rnd.Int32s(w * (hlv + hhv))
 			sca := append([]int32(nil), vec...)
 			if hhv > 0 {
 				sub53SweepSIMD(vec, w, hlv, hhv)
@@ -183,10 +141,10 @@ func TestSynthesize53SIMDThroughDispatch(t *testing.T) {
 	t.Cleanup(func() { sub53SweepFn, add53SweepFn = savedSub, savedAdd })
 	for _, shape := range [][2]int{{1, 1}, {2, 2}, {7, 5}, {16, 3}, {33, 17}, {64, 64}, {129, 8}} {
 		w, h := shape[0], shape[1]
-		rnd := splitmix64(0x5EED1004)
+		rnd := testrand.Rand(0x5EED1004)
 		wl, hlv := (w+1)/2, (h+1)/2
 		wh, hhv := w-wl, h-hlv
-		mk := func(bw, bh int) Band { return Band{W: bw, H: bh, Data: rnd.int32s(bw * bh)} }
+		mk := func(bw, bh int) Band { return Band{W: bw, H: bh, Data: rnd.Int32s(bw * bh)} }
 		ll, lh, hl, hh := mk(wl, hlv), mk(wl, hhv), mk(wh, hlv), mk(wh, hhv)
 
 		sub53SweepFn, add53SweepFn = sub53SweepSIMD, add53SweepSIMD
@@ -211,8 +169,8 @@ func TestSynthesize53SIMDThroughDispatch(t *testing.T) {
 func TestScaleRow97SIMDEquivalence(t *testing.T) {
 	for _, k := range []float64{c97K, 1.0 / c97K} {
 		for _, w := range simdTestLengths() {
-			rnd := splitmix64(0x5EED1005)
-			r := rnd.float64s(w)
+			rnd := testrand.Rand(0x5EED1005)
+			r := rnd.Float64s(w)
 			want := append([]float64(nil), r...)
 			scaleRow97SIMD(r, k)
 			for x := range want {
@@ -237,8 +195,8 @@ func TestScale97SweepSIMDEquivalence(t *testing.T) {
 		scaleRow97Min = gate
 		for _, shape := range [][3]int{{1, 1, 0}, {2, 1, 1}, {7, 3, 2}, {16, 2, 1}, {33, 9, 8}, {64, 32, 32}, {129, 4, 4}} {
 			w, hlv, hhv := shape[0], shape[1], shape[2]
-			rnd := splitmix64(0x5EED1006)
-			vec := rnd.float64s(w * (hlv + hhv))
+			rnd := testrand.Rand(0x5EED1006)
+			vec := rnd.Float64s(w * (hlv + hhv))
 			sca := append([]float64(nil), vec...)
 			scale97SweepSIMD(vec, w, hlv, hhv)
 			scale97SweepScalar(sca, w, hlv, hhv)
@@ -261,10 +219,10 @@ func TestSynthesize97SIMDThroughDispatch(t *testing.T) {
 	t.Cleanup(func() { scale97SweepFn = saved })
 	for _, shape := range [][2]int{{1, 1}, {2, 2}, {7, 5}, {16, 3}, {33, 17}, {64, 64}, {129, 8}} {
 		w, h := shape[0], shape[1]
-		rnd := splitmix64(0x5EED1007)
+		rnd := testrand.Rand(0x5EED1007)
 		wl, hlv := (w+1)/2, (h+1)/2
 		wh, hhv := w-wl, h-hlv
-		mk := func(bw, bh int) BandF { return BandF{W: bw, H: bh, Data: rnd.float64s(bw * bh)} }
+		mk := func(bw, bh int) BandF { return BandF{W: bw, H: bh, Data: rnd.Float64s(bw * bh)} }
 		ll, lh, hl, hh := mk(wl, hlv), mk(wl, hhv), mk(wh, hlv), mk(wh, hhv)
 
 		scale97SweepFn = scale97SweepSIMD
@@ -295,10 +253,10 @@ func TestSynthesize97SIMDThroughDispatch(t *testing.T) {
 func TestLiftRow97SIMDMatchesUnfusedScalar(t *testing.T) {
 	for _, c := range []float64{c97Alpha, c97Beta, c97Gamma, c97Delta} {
 		for _, w := range simdTestLengths() {
-			rnd := splitmix64(0x5EED1008)
-			dst := rnd.float64s(w)
-			a := rnd.float64s(w)
-			b := rnd.float64s(w)
+			rnd := testrand.Rand(0x5EED1008)
+			dst := rnd.Float64s(w)
+			a := rnd.Float64s(w)
+			b := rnd.Float64s(w)
 			want := append([]float64(nil), dst...)
 			liftRow97SIMD(dst, a, b, c)
 			for x := range want {
@@ -320,10 +278,10 @@ func TestLiftRow97SIMDMatchesUnfusedScalar(t *testing.T) {
 // a fused Float64s.MulAdd instead (fusion: they do not). It asserts nothing — both answers are legitimate — but it
 // leaves the answer in the test log where the next person to look at the 9/7 path will find it.
 func TestLiftRow97ScalarFusionReport(t *testing.T) {
-	rnd := splitmix64(0x5EED1009)
-	a := rnd.float64s(4096)
-	b := rnd.float64s(4096)
-	base := rnd.float64s(4096)
+	rnd := testrand.Rand(0x5EED1009)
+	a := rnd.Float64s(4096)
+	b := rnd.Float64s(4096)
+	base := rnd.Float64s(4096)
 	fused := append([]float64(nil), base...)
 	unfused := append([]float64(nil), base...)
 	for x := range fused {
