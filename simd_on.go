@@ -13,9 +13,9 @@ package pdfview
 
 import "simd"
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see
-// simd_prefs_arm64.go and its siblings). On hardware with no vector unit the simd package emulates every operation in
-// scalar Go, which is slower than the scalar code it would replace, so nothing is repointed there at all.
+// init points the package's dispatch variables at the vector kernels this architecture prefers (see simd_prefs_arm64.go
+// and its siblings). On hardware with no vector unit the simd package emulates every operation in scalar Go, which is
+// slower than the scalar code it would replace, so nothing is repointed there at all.
 func init() {
 	if simd.Emulated() {
 		return
@@ -46,18 +46,19 @@ const unpremultiplyNudge = 1 - 1.0/(1<<22)
 // work rather than silently ignoring the lanes past the buffer.
 const unpremultiplyReduceMax = 32
 
-// unpremultiplySIMD is the vector form of unpremultiplyPixelsScalar, with identical results for every buffer. It walks whole vectors of bytes, reinterpreting each as one pixel per uint32 lane (little-endian, so the
-// alpha byte is the lane's high byte), and leaves any trailing bytes that do not complete a pixel untouched, exactly
-// as the scalar loop's i+3 < len(pix) bound does.
+// unpremultiplySIMD is the vector form of unpremultiplyPixelsScalar, with identical results for every buffer. It walks
+// whole vectors of bytes, reinterpreting each as one pixel per uint32 lane (little-endian, so the alpha byte is the
+// lane's high byte), and leaves any trailing bytes that do not complete a pixel untouched, exactly as the scalar loop's
+// i+3 < len(pix) bound does.
 //
-// A vector is always a whole number of pixels wide: the vector byte count is at least 16 and a power of two, so it is
-// a multiple of 4, which also makes the final partial vector a whole number of pixels.
+// A vector is always a whole number of pixels wide: the vector byte count is at least 16 and a power of two, so it is a
+// multiple of 4, which also makes the final partial vector a whole number of pixels.
 //
 // The walk is two passes over a chunk at a time rather than one pass over the buffer, because the scalar loop it
-// replaces does almost nothing for a fully opaque page — a strided byte compare, no writes at all — and a page that
-// is entirely opaque or entirely transparent outside its content is the common case, not the exception. A chunk whose
-// alphas are all 0 or 255 is therefore skipped whole, which keeps its pixels out of the store traffic; the rest pay
-// one extra read of data the first pass just pulled into L1.
+// replaces does almost nothing for a fully opaque page — a strided byte compare, no writes at all — and a page that is
+// entirely opaque or entirely transparent outside its content is the common case, not the exception. A chunk whose
+// alphas are all 0 or 255 is therefore skipped whole, which keeps its pixels out of the store traffic; the rest pay one
+// extra read of data the first pass just pulled into L1.
 func unpremultiplySIMD(pix []byte) {
 	if len(pix) < unpremultiplyMin {
 		unpremultiplyPixelsScalar(pix)
