@@ -204,16 +204,28 @@ func inverse53VerticalCas0(out []int32, W, hlv, hhv int) {
 	// Undo the update step on the low (even) rows using the neighbouring high rows.
 	// When there are no high rows the term is (0+0+2)>>2 = 0, so the sweep is skipped.
 	if hhv > 0 {
-		for i := 0; i < hlv; i++ {
-			e := out[2*i*W : 2*i*W+W]
-			hl := highRow53(out, W, hhv, i-1)
-			hr := highRow53(out, W, hhv, i)
-			for x := 0; x < W; x++ {
-				e[x] -= (hl[x] + hr[x] + 2) >> 2
-			}
-		}
+		sub53SweepFn(out, W, hlv, hhv)
 	}
 	// Undo the prediction step on the high (odd) rows using the updated low rows.
+	add53SweepFn(out, W, hlv, hhv)
+}
+
+// sub53SweepScalar is the update sweep's loop, split out so it can be the default target of sub53SweepFn (see
+// simd_dispatch.go). Dispatch is per sweep rather than per row: the row loop stays whole and inlined here, which a
+// per-row indirect call would have cost the scalar path at small W.
+func sub53SweepScalar(out []int32, W, hlv, hhv int) {
+	for i := 0; i < hlv; i++ {
+		e := out[2*i*W : 2*i*W+W]
+		hl := highRow53(out, W, hhv, i-1)
+		hr := highRow53(out, W, hhv, i)
+		for x := 0; x < W; x++ {
+			e[x] -= (hl[x] + hr[x] + 2) >> 2
+		}
+	}
+}
+
+// add53SweepScalar is the prediction sweep's loop, split out for the same reason as sub53SweepScalar.
+func add53SweepScalar(out []int32, W, hlv, hhv int) {
 	for i := 0; i < hhv; i++ {
 		o := out[(2*i+1)*W : (2*i+1)*W+W]
 		ll := lowRow53(out, W, hlv, i)

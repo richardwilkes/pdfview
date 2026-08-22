@@ -59,9 +59,7 @@ func (d *Decoder) applyPalette(fullPlanes [][]int32, w, h int) ([][]int32, []int
 		switch cm.Type {
 		case 0: // direct copy of the component sample
 			depths[j] = comp.Precision
-			for i := range plane {
-				plane[i] = clamp(src[i]+offset, 0, maxIdx)
-			}
+			addClampPlaneFn(plane, src, offset, 0, maxIdx)
 		case 1: // palette lookup
 			if cm.Column < 0 {
 				return nil, nil, fmt.Errorf("palette: cmap column %d invalid", cm.Column)
@@ -87,6 +85,15 @@ func (d *Decoder) applyPalette(fullPlanes [][]int32, w, h int) ([][]int32, []int
 		out[j] = plane
 	}
 	return out, depths, nil
+}
+
+// addClampPlaneScalar is the direct-copy channel's per-sample loop, split out so it can be the default target of
+// addClampPlaneFn (see simd_dispatch.go). src is indexed over the length of dst, so a src shorter than dst panics
+// here exactly as the inline loop did.
+func addClampPlaneScalar(dst, src []int32, offset, lo, hi int32) {
+	for i := range dst {
+		dst[i] = clamp(src[i]+offset, lo, hi)
+	}
 }
 
 // toImagePalette builds the final image from palette-expanded planes (values are

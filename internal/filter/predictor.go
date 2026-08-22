@@ -95,9 +95,7 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 				row[i] += row[i-bpp]
 			}
 		case 2: // Up
-			for i := range rowLen {
-				row[i] += prev[i]
-			}
+			addRowsFn(row, prev)
 		case 3: // Average
 			for i := range rowLen {
 				left := 0
@@ -122,6 +120,16 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 		prev, row = row, prev
 	}
 	return out, nil
+}
+
+// addRowsScalar reconstructs a PNG "Up"-filtered row (RFC 2083 section 6.3) in place: dst[i] += src[i] over the whole
+// row, modulo 256. dst and src must be the same length. Unlike the other PNG filters, Up has no dependency between
+// neighboring bytes, so the whole row is one data-parallel add — see addRowsFn for the vector form.
+func addRowsScalar(dst, src []byte) {
+	src = src[:len(dst)]
+	for i := range dst {
+		dst[i] += src[i]
+	}
 }
 
 // paeth is the PNG Paeth prediction function (RFC 2083 section 6.6).

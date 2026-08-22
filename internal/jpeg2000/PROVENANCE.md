@@ -67,9 +67,10 @@ the decoder path is now covered only by the opt-in ISO conformance suite (`TestC
 
 ## Local modifications
 
-Four mechanical changes and four allocation-hardening guards were made. A diff of every vendored `.go` file against the
-pinned upstream commit, with the provenance line stripped and the import rewrites reversed, is empty except for the two
-files in the third row of the first table and the four files in the hardening table below.
+Four mechanical changes, four allocation-hardening guards, and five SIMD dispatch conversions were made. A diff of every
+vendored `.go` file against the pinned upstream commit, with the provenance line stripped and the import rewrites
+reversed, is empty except for the two files in the third row of the first table, the four files in the hardening table,
+and the five files in the SIMD dispatch table below.
 
 | Change | Where | Why |
 | --- | --- | --- |
@@ -108,6 +109,34 @@ that terminates the loop is provably neutral to the golden decodes (a legitimate
 saturated below the cap by an earlier leaf must run no-op iterations before reading its own bit, so a naive
 "terminate when no input is consumed" bound would change decoded values). The hot path was therefore left untouched.
 
+### SIMD dispatch variables
+
+pdfview ships a `GOEXPERIMENT=simd` build in which a handful of the repository's hottest per-sample loops run as
+vector kernels. The kernels are pdfview-authored and live in the files listed in the next table; the change to
+upstream code is that five loops moved into named functions in the file they already lived in, and their call sites
+now call a package-level function variable instead of running the loop inline. Nothing upstream was deleted and no
+loop left its file.
+
+Each variable defaults to the scalar function, so the default build calls exactly the code it always did through one
+indirect call per plane or per sweep — never per sample. `simd_on.go`'s `init`, compiled only under the experiment,
+repoints a variable at its kernel when the architecture's `simd_prefs_*.go` constant selects it and the `simd` package
+is not emulating vectors in software. A kernel that loses its benchmark is therefore switched off by a constant rather
+than deleted, and `simd_wiring_test.go` (default build) and `TestSIMDWiring` (experiment build) assert that each
+variable points where its build says it should.
+
+Every kernel is bit-identical to the loop it replaces — proven directly by `simd_equiv_test.go` in each package, which
+runs the same input through both functions and compares element for element (`math.Float64bits` for the float64
+sweeps, not an epsilon) across a length sweep that crosses each width gate in both directions, and indirectly by the
+whole decode suite, which runs a second time under the experiment.
+
+| File | Site | Dispatch |
+| --- | --- | --- |
+| `codestream/reconstruction.go` | `ApplyRCT`'s per-sample loop, now `applyRCTScalar` | `applyRCTFn` over the three planes, bounded to the shortest as before. |
+| `codestream/decoder.go` | `finalizeImage`'s componentsOnly range clamp, now `clampPlaneScalar` | `clampPlaneFn` per component plane. The kernel hands unordered bounds back to the scalar loop: a component precision above 32 overflows the `int32` bound computation and yields `lo > hi`, which Max-then-Min and the scalar chain disagree about. |
+| `codestream/palette.go` | `applyPalette`'s type 0 (direct copy) channel, now `addClampPlaneScalar` | `addClampPlaneFn`. The kernel hands back unordered bounds (same overflow case) and a source shorter than the destination, so the scalar loop's out-of-range panic still happens instead of a partial vector load quietly substituting zeros. |
+| `wavelet/wavelet.go` | `inverse53VerticalCas0`'s two sweeps, now `sub53SweepScalar` and `add53SweepScalar` | `sub53SweepFn` / `add53SweepFn`, one call per sweep. Dispatch is per sweep, not per row: a per-row indirect call cost the scalar path about 16% at row widths below the gate, because a call in the row-loop body is enough to change how that loop is compiled. |
+| `wavelet/wavelet97.go` | `inverse97VerticalCas0`'s pair of scaling sweeps, now `scale97SweepScalar` | `scale97SweepFn`, one call for both sweeps, for the same reason. The four lifting sweeps below it are deliberately left scalar; `liftRow97SIMD`'s doc comment in `wavelet/simd_on.go` records why (the compiler contracts `dst -= c*(a+b)` into a fused multiply-add on arm64, and a vector kernel that rounds twice would not match it). |
+
 ### pdfview-authored files inside this tree
 
 These carry Rich's MPL-2.0 header, not the upstream provenance line, and are excluded from the diff audit above. They
@@ -118,6 +147,12 @@ add to the vendored packages from the outside; no vendored file was edited to ac
 | `test/e2e/register_pdfview_test.go` | The upstream end-to-end tests reach the decoders through `image.Decode`, which the registry removal above breaks. This restores the two registrations inside the test binary, where the side effect is scoped to the test process. It exists so no upstream test had to be edited or dropped. |
 | `jp2/pdfview.go` | `DecodeComponents` and `DecodeInfo`, the two container-level entry points the PDF image pipeline needs and upstream never exposed: raw per-component planes from a JP2, and a header-only report of the container metadata alongside the codestream's own component geometry. |
 | `jp2/pdfview_test.go` | Pins both against the vendored vectors and their ground-truth planes, including a corruption sweep over every `.jp2` vector. |
+| `codestream/simd_dispatch.go`, `wavelet/simd_dispatch.go` | Untagged: the dispatch variables, defaulted to the scalar functions, and the width gates each kernel falls back below. |
+| `codestream/simd_on.go`, `wavelet/simd_on.go` | The vector kernels and the `init` that repoints the variables at them, built only under `GOEXPERIMENT=simd`. |
+| `codestream/simd_prefs_{arm64,amd64,other}.go` and the same three in `wavelet/` | Per-architecture constants saying which kernels that architecture prefers, settled from `simd-bench.sh` results. Unmeasured architectures get `_other`, where every constant is false. |
+| `codestream/simd_equiv_test.go`, `wavelet/simd_equiv_test.go` | Scalar-versus-vector equivalence, swept over every tail alignment and both sides of every gate, plus the experiment build's wiring assertions. Tagged for the experiment build. |
+| `codestream/simd_wiring_test.go`, `wavelet/simd_wiring_test.go` | The default build's mirror: every dispatch variable must still be its scalar function. Tagged `!goexperiment.simd`. |
+| `codestream/simd_bench_test.go`, `wavelet/simd_bench_test.go` | Untagged benchmarks through the dispatch variables, so one benchmark body measures both builds; `simd-bench.sh` benchstats the pair. |
 
 `jp2/pdfview.go` reads the SIZ marker segment itself rather than calling the codestream decoder's header pass. That
 pass runs `initTiles` immediately after SIZ even when asked for the configuration only, allocating one `tileState` per

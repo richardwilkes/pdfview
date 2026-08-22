@@ -436,6 +436,12 @@ func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, er
 	samples := make([]byte, w*h*ncomp)
 	for ci, c := range comps {
 		norm := newJPXNorm(c.Precision)
+		if ncomp == 1 {
+			// A single component stores contiguously, one byte per sample, which is the shape the vector kernel
+			// needs. The 3- and 4-component stores interleave, so they stay scalar.
+			normalizePlaneFn(samples, c.Samples[:w*h], norm)
+			continue
+		}
 		for i, off := 0, ci; i < w*h; i, off = i+1, off+ncomp {
 			samples[off] = norm.at(c.Samples[i])
 		}
@@ -465,6 +471,14 @@ func newJPXNorm(precision int) jpxNorm {
 		n.shift, n.up = 8-precision, true
 	}
 	return n
+}
+
+// normalizePlaneScalar normalizes a whole component plane into contiguous bytes: at, applied to every sample. dst and
+// samples must be the same length. See normalizePlaneFn for the vector form.
+func normalizePlaneScalar(dst []byte, samples []int32, n jpxNorm) {
+	for i, v := range samples[:len(dst)] {
+		dst[i] = n.at(v)
+	}
 }
 
 // at normalizes one sample.

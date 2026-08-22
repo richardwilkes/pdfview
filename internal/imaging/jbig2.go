@@ -98,9 +98,7 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 		}
 		src := packed[y*stride:]
 		dst := out[y*rowBytes:]
-		for i := range wholeBytes {
-			dst[i] = ^src[i]
-		}
+		invertBytesFn(dst[:wholeBytes], src[:wholeBytes])
 		for x := wholeBytes << 3; x < width; x++ {
 			if src[x>>3]&(0x80>>(x&7)) != 0 {
 				dst[x>>3] &^= 0x80 >> (x & 7)
