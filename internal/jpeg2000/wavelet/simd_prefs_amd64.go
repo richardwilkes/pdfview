@@ -15,12 +15,14 @@ package wavelet
 // kernel that loses its benchmark is switched off here rather than deleted — the code, its equivalence tests, and its
 // benchmark all stay, and the decision is one word.
 //
-// These values are settled per architecture from simd-bench.sh benchstat results. They are provisional mirrors of the
-// arm64 file until somebody runs simd-bench.sh on real amd64 hardware. The 9/7 scaling sweep is the one whose answer
-// is most likely to differ: on arm64 it measured below the bar (1.00-1.01x in context, two float64 lanes) and is off,
-// but 256-bit vectors double its lane count, so retest it first on AVX2 hardware.
+// These values are settled per architecture from simd-bench.sh benchstat results. Settled 2026-08-21 on an Intel
+// Xeon W-2191B (Skylake-X): the 5/3 vertical sweeps LOST 10-13% against the scalar loops there — the arm64 win does
+// not carry over — so both are off. The 9/7 scale sweep ran with its constant already false in that dataset, so its
+// on-state has no amd64 measurement; it stays off. Note from the same run: the whole wavelet package's scalar code
+// was a few percent slower under the experiment build on this box even with every kernel off, so any retest must
+// compare against the default build, not just in-binary A/B.
 const (
-	preferSub53Sweep   = true
-	preferAdd53Sweep   = true
+	preferSub53Sweep   = false
+	preferAdd53Sweep   = false
 	preferScale97Sweep = false
 )

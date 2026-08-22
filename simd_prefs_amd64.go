@@ -15,5 +15,6 @@ package pdfview
 // the scalar code it replaces on a given architecture is turned off here rather than deleted, since the same kernel
 // can be the right choice on another one. The values are settled from simd-bench.sh benchstat runs.
 //
-// amd64 values are provisional mirrors of the arm64 ones until they are benchmarked on real amd64 hardware.
+// Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X): 1.4x on an opaque page, 4.7x on
+// banded translucency, 1.7x on scattered translucency.
 const preferUnpremultiply = true

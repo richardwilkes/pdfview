@@ -12,10 +12,14 @@
 package imaging
 
 // Which kernels this architecture prefers over the scalar code they replace. See simd_prefs_arm64.go for what settles
-// these. The amd64 values are provisional mirrors of arm64's until they are benchmarked on real amd64 hardware.
+// these. Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X): the polarity invert wins
+// 4.3x, the stencil threshold 4.9-32x, and the /SMask composite 6.9-23x on every mask shape — its scalar baseline is
+// far more branch-bound on this microarchitecture than on the arm64 reference, so even the shape that loses on arm64
+// wins big here. The JPX 1-component normalization managed only 1.02-1.03x, below the 1.10x bar, so it is off; its
+// scalar byte-narrow tail dominates on this box.
 const (
 	preferInvertBytes    = true
 	preferThreshold      = true
-	preferNormalizePlane = true
+	preferNormalizePlane = false
 	preferCompositeAlpha = true
 )

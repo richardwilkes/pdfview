@@ -15,9 +15,9 @@ package codestream
 // kernel that loses its benchmark is switched off here rather than deleted — the code, its equivalence tests, and its
 // benchmark all stay, and the decision is one word.
 //
-// These values are settled per architecture from simd-bench.sh benchstat results. They are provisional mirrors of the
-// arm64 file until somebody runs simd-bench.sh on real amd64 hardware; the wider vectors there should only help these
-// three kernels, all of which are pure lane-wise int32 work, but that is a prediction and not a measurement.
+// These values are settled per architecture from simd-bench.sh benchstat results. Settled 2026-08-21 on an Intel
+// Xeon W-2191B (Skylake-X): RCT 1.4-1.5x, plane clamp 1.5-1.8x, palette add+clamp 1.8-2.0x. The below-gate clamp
+// call costs ~2.5 ns more than the inline scalar loop, a one-time cost per tiny plane that the gate makes irrelevant.
 const (
 	preferApplyRCT      = true
 	preferClampPlane    = true

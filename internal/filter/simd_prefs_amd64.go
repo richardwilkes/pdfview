@@ -12,5 +12,6 @@
 package filter
 
 // Which kernels this architecture prefers over the scalar code they replace. See simd_prefs_arm64.go for what settles
-// these. The amd64 values are provisional mirrors of arm64's until they are benchmarked on real amd64 hardware.
+// these. Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X): the row add wins 4.3-6.0x
+// in isolation and halves the end-to-end PNG Up predictor time.
 const preferAddRows = true
