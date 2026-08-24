@@ -253,8 +253,8 @@ func ligature(r rune) string {
 // replicate fz_search_stext_page black-box, as pinned by the quad-parity tests and the probe corpus: Unicode simple
 // case folding for non-space runes; a needle whitespace rune matches a run of extracted whitespace characters, a
 // horizontal gap of at least gapSpaceEm (a synthesized inter-word space), or a line break; a word never silently spans
-// a line break; matches do not overlap; each match yields one quad per line touched, split further by segmentQuads'
-// vertical-extent rule. A needle with no non-space rune returns no hits.
+// a line break; matches do not overlap; each match yields one quad per line touched, split further wherever
+// segmentQuads' corner-distance rule refuses to merge. A needle with no non-space rune returns no hits.
 func (d *Device) Search(needle string, maxQuads int) []gfx.Quad {
 	return searchChars(d.chars, needle, maxQuads)
 }
@@ -278,11 +278,19 @@ const (
 	spaceMaxDistEm = 0.8
 )
 
-// extentSplitFraction is the relative vertical-extent divergence beyond which the oracle starts a new hit quad within
-// one line. Probing brackets it in (0.101, 0.113) of the current quad's height (20-pt text merged a 22.6-pt space and
-// split a 22.9-pt one — hit-quad-split.pdf); 1/9 sits inside the bracket. Corpus quads all sit far from the threshold;
-// if a real file ever lands near it, re-bisect with more probes first.
-const extentSplitFraction = 1.0 / 9
+// The hit-quad merge fuzzes, in em fractions of the size of the character being merged. They are MuPDF's own values,
+// set in fz_new_search (source/fitz/stext-search.c) as hfuzz = 0.5 ("merge large gaps") and vfuzz = 0.1, and applied by
+// add_quad: a character joins the quad under construction only while both of its leading corners sit within
+// quadHFuzzEm along the line and within quadVFuzzEm across it of the two corners that quad currently ends at. Like the
+// line thresholds above they scale by the size of the character being placed, not the one before it.
+//
+// The vertical fuzz is what splits a hit around an oversized inter-word space or a raised digit, and its boundary is
+// exact rather than approximate: the comparisons are strict, so a character whose corners diverge by exactly
+// quadVFuzzEm of its em — a digit raised 0.1 em among letters of its own size — starts a new quad.
+const (
+	quadHFuzzEm = 0.5
+	quadVFuzzEm = 0.1
+)
 
 func searchChars(chars []Char, needle string, maxQuads int) []gfx.Quad {
 	runes := []rune(needle)
@@ -429,57 +437,102 @@ func gapBetween(prev, cur Char) float32 {
 	return float32(ux*float64(cur.Origin.X-prev.End.X) + uy*float64(cur.Origin.Y-prev.End.Y))
 }
 
-// segmentQuads assembles one line's matched characters into hit quads, reproducing the oracle's grouping (pinned by
-// irs-fw9 and hit-quad-split.pdf): characters extend the current quad horizontally while their vertical extent stays
-// within extentSplitFraction of the quad's height — measured against the extent the quad's FIRST character established,
-// which is never stretched by later merged characters — and a character diverging further (such as a much larger
-// inter-word space) closes the quad and starts its own. Non-axis-aligned text (rotated) keeps the first/last-corner
-// assembly; the corpus exercises only uniform-extent rotated runs.
+// hdist and vdist are add_quad's two corner distances, transcribed from source/fitz/stext-search.c. vdist is the
+// distance from a to b perpendicular to the line's direction. hdist is MuPDF's formula AS WRITTEN, minus sign included:
+// it is the along-line projection only when the direction is axis-aligned, and something else — neither a projection
+// nor a perpendicular — for a rotated one. It is reproduced verbatim rather than corrected because the oracle's quads
+// ARE this formula's output, so "fixing" the sign would move the hits of every rotated page away from MuPDF's.
+func hdist(dirX, dirY float64, a, b gfx.Point) float64 {
+	dx, dy := float64(b.X-a.X), float64(b.Y-a.Y)
+	return math.Abs(dx*dirX - dy*dirY)
+}
+
+func vdist(dirX, dirY float64, a, b gfx.Point) float64 {
+	dx, dy := float64(b.X-a.X), float64(b.Y-a.Y)
+	return math.Abs(dx*dirY - dy*dirX)
+}
+
+// virtualSpace builds the space character MuPDF's structured-text device would have recorded for the word-sized gap
+// between prev and cur, so that segmentQuads sees the stream add_quad sees. fz_add_stext_char_imp
+// (source/fitz/stext-device.c) synthesizes that space from the INCOMING glyph's trm, font and size, spanning from the
+// pen the previous glyph left behind to the incoming glyph's origin — so the space carries cur's em size and cur's
+// ascender-to-descender reach, measured at prev's pen on its leading edge and at cur's origin on its trailing one.
+//
+// Its trailing corners are therefore cur's own leading corners, and are copied rather than recomputed so that they are
+// bit-identical: the space always merges into cur at exactly zero distance, which is what makes a word gap cost the hit
+// nothing horizontally. Its leading corners are cur's vertical reach standing at the pen, which is what the vertical
+// tests at the gap end up comparing the open quad against.
+func virtualSpace(prev, cur Char) Char {
+	upX, upY := cur.Quad.UL.X-cur.Origin.X, cur.Quad.UL.Y-cur.Origin.Y
+	downX, downY := cur.Quad.LL.X-cur.Origin.X, cur.Quad.LL.Y-cur.Origin.Y
+	return Char{
+		Quad: gfx.Quad{
+			UL: gfx.Point{X: prev.End.X + upX, Y: prev.End.Y + upY},
+			UR: cur.Quad.UL,
+			LL: gfx.Point{X: prev.End.X + downX, Y: prev.End.Y + downY},
+			LR: cur.Quad.LL,
+		},
+		Origin: prev.End,
+		End:    cur.Origin,
+		Rune:   ' ',
+		Size:   cur.Size,
+		Axis:   cur.Axis,
+	}
+}
+
+// segmentQuads assembles one line's matched characters into hit quads, reproducing add_quad
+// (source/fitz/stext-search.c) exactly. Each character in turn extends the quad under construction while all four of
+// the corner distances below hold — its lower-left against the quad's lower-right and its upper-left against the quad's
+// upper-right, each within quadHFuzzEm along the line and quadVFuzzEm across it — and a character failing any one of
+// them closes that quad and opens its own. A merge REPLACES the open quad's trailing corners with the character's own
+// rather than unioning the two, so a quad always reaches from the leading corners of the first character merged into it
+// to the trailing corners of the last, which is what the oracle's quads over a kerned or backward-stepping run show.
+//
+// One rule serves every orientation. Vertically-mirrored axis-aligned text (Trm.D > 0, ascender below descender in
+// y-down space) needs no special case because vdist is an absolute distance; a uniformly rotated run needs none either,
+// because its adjacent characters' corners coincide exactly, so the run merges into the single first-to-last-corner
+// quad that a rotation-specific assembly would have produced.
+//
+// The virtual space is the one thing here that add_quad does not do, and it stands in for something upstream of it: a
+// word-sized gap between two glyphs is a real space character in MuPDF's stream (see virtualSpace) that add_quad merges
+// like any other, while pdfview's device records no such character and reads the gap itself as a word space instead
+// (see gapSpaceEm). Synthesizing the space here, ahead of the character that closes the gap, keeps the two models in
+// step: without it a TJ gap of half an em or more — text-std14's "Kerned Text" — would exceed quadHFuzzEm and split a
+// hit the oracle reports as one quad. With it the gap is bridged horizontally, the vertical tests still run at the gap
+// against the following character's extents, and a vertical split at a gap opens its new quad at the pen, covering the
+// gap, rather than at the character past it. Gaps too narrow to read as a word space are left alone, so add_quad's own
+// test sees them raw — which is what quadHFuzzEm is for.
 func segmentQuads(seg []Char) []gfx.Quad {
-	axis := true
-	for _, c := range seg {
-		if !c.Axis {
-			axis = false
-			break
-		}
-	}
-	if !axis {
-		first, last := seg[0].Quad, seg[len(seg)-1].Quad
-		return []gfx.Quad{{UL: first.UL, UR: last.UR, LL: first.LL, LR: last.LR}}
-	}
+	// add_quad measures against line->dir, the direction of the whole line the hit sits on. A segment never crosses a
+	// line break — the matcher cuts one there and a selection asks for one line at a time — so the direction its first
+	// character advances in is that line's direction.
+	dirX, dirY := advanceDir(seg[0])
 	var out []gfx.Quad
-	var top, bottom, minX, maxX float32
-	open := false
-	flush := func() {
-		if open {
-			out = append(out, gfx.Quad{
-				UL: gfx.Point{X: minX, Y: top},
-				UR: gfx.Point{X: maxX, Y: top},
-				LL: gfx.Point{X: minX, Y: bottom},
-				LR: gfx.Point{X: maxX, Y: bottom},
-			})
-			open = false
+	var open gfx.Quad
+	building := false
+	add := func(c Char) {
+		hfuzz, vfuzz := float64(quadHFuzzEm*c.Size), float64(quadVFuzzEm*c.Size)
+		if building &&
+			hdist(dirX, dirY, open.LR, c.Quad.LL) < hfuzz && vdist(dirX, dirY, open.LR, c.Quad.LL) < vfuzz &&
+			hdist(dirX, dirY, open.UR, c.Quad.UL) < hfuzz && vdist(dirX, dirY, open.UR, c.Quad.UL) < vfuzz {
+			open.UR, open.LR = c.Quad.UR, c.Quad.LR
+			return
 		}
-	}
-	for _, c := range seg {
-		cTop, cBottom := c.Quad.UL.Y, c.Quad.LL.Y
-		cMinX, cMaxX := min(c.Quad.UL.X, c.Quad.UR.X), max(c.Quad.UL.X, c.Quad.UR.X)
-		if open {
-			// Absolute value: vertically-mirrored axis-aligned text (Trm.D > 0) puts bottom above top, and a negative
-			// limit would reject every merge, fragmenting the line into one quad per character.
-			limit := float64(bottom-top) * extentSplitFraction
-			if limit < 0 {
-				limit = -limit
-			}
-			if math.Abs(float64(cTop-top)) <= limit && math.Abs(float64(cBottom-bottom)) <= limit {
-				minX, maxX = min(minX, cMinX), max(maxX, cMaxX)
-				continue
-			}
-			flush()
+		if building {
+			out = append(out, open)
 		}
-		top, bottom, minX, maxX = cTop, cBottom, cMinX, cMaxX
-		open = true
+		open, building = c.Quad, true
 	}
-	flush()
+	for i, c := range seg {
+		if i > 0 {
+			if prev := seg[i-1]; gapBetween(prev, c) >= gapSpaceEm*prev.Size {
+				add(virtualSpace(prev, c))
+			}
+		}
+		add(c)
+	}
+	if building {
+		out = append(out, open)
+	}
 	return out
 }

@@ -48,10 +48,21 @@ fonts, so nothing is embedded, and all content streams are stored uncompressed f
   nonzero, per-slot defaults 800/-200 otherwise — even for standard-14 BaseFonts (see internal/font's
   substituteMetrics).
 - `hit-quad-split.pdf` — one 612×792 page (generated 2026-07-11, same convention) pinning MuPDF's search-hit
-  quad grouping: a match whose interior space sits in a slightly-taller bold font keeps ONE quad with the
-  FIRST character's vertical extent (the irs-fw9 case, distilled); a trailing space before a line wrap is
+  quad grouping: a match whose interior space sits in a slightly-taller bold font keeps ONE quad, whose left
+  corners come from the first merged character and whose right corners from the last (the same here, since the
+  run ends in regular 20-pt Helvetica — the irs-fw9 case, distilled); a trailing space before a line wrap is
   included in the first segment's quad; and a match crossing a hugely-taller character (a 40-pt space between
   20-pt words) splits into three quads, the divergent character carrying its own extent.
+- `hit-quad-rise.pdf` — one 200×480 page (generated 2026-08-24, same convention) of eleven 20-pt Helvetica
+  `H2O` lines 40 pt apart, in which the `2` is displaced vertically by a different text rise (`Ts`) per line:
+  0, 0.05, 0.09, 0.1, 0.11, 0.25, 0.5, 0.75 and 1.0 em up, then 0.1 em down, and finally — with no rise — set
+  in 10-pt type instead of 20. It pins MuPDF's `add_quad` merge rule (source/fitz/stext-search.c): a character
+  joins the open quad only while its corners sit within 0.5 em along the line and 0.1 em across it, both
+  measured in the INCOMING character's size, so the bound is exclusive and scales with whichever character is
+  being added — never with the quad already open. The recorded quads are ONE per line through 0.09 em and
+  THREE (H, 2, O) from exactly 0.1 em onward, three for the 0.1-em drop, and three for the 10-pt `2`, whose
+  own 0.1 em is 1 pt against corner offsets of 8 pt and 2 pt. At 1.0 em the `2` starts its own structured-text
+  line, so "H2O" no longer matches at all and the golden records no quads for that line.
 - `damaged-startxref-zero.pdf` — trailer present, no xref table, `startxref 0`; MuPDF repairs by scanning.
 - `damaged-bad-offsets.pdf` — two pages; structurally complete, but every xref offset is shifted by +7 bytes, so
   the table is present yet wrong and MuPDF repairs.

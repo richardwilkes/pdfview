@@ -53,9 +53,9 @@ func corpusChars(t *testing.T, file string, pageNumber int) []Char {
 // TestSelectionQuadsMatchSearchQuads is the guard the whole selection model hangs on: highlighting a range must paint
 // exactly what searching for that range's text paints. Both go through segmentQuads, so this pins that Page's line
 // runs and range intersection hand it the same character slices the matcher does — over real corpus geometry, where
-// the line breaks, the oversized-space extent splits, and the rotated runs actually occur. The comparison is exact:
-// these are the same float32 corners the oracle-pinned quad-parity goldens hold search to, so any drift here is drift
-// away from MuPDF too.
+// the line breaks, the oversized-space and raised-character splits, and the rotated runs actually occur. The
+// comparison is exact: these are the same float32 corners the oracle-pinned quad-parity goldens hold search to, so any
+// drift here is drift away from MuPDF too.
 func TestSelectionQuadsMatchSearchQuads(t *testing.T) {
 	for _, tc := range []struct {
 		file    string
@@ -66,9 +66,11 @@ func TestSelectionQuadsMatchSearchQuads(t *testing.T) {
 		{file: "text-std14.pdf", needles: []string{"Hello", "hello world", "brown fox", "QUICK", "Spaced words", "Kerned Text"}},
 		// A dense real-world form: thousands of characters, many repeats of each needle, mixed sizes.
 		{file: "irs-fw9.pdf", needles: []string{"backup withholding", "Taxpayer", "Certification", "Name"}},
-		// The extent-split fixture: "alpha beta" is one line but three quads.
+		// The oversized-space fixture: "alpha beta" is one line but three quads.
 		{file: "hit-quad-split.pdf", needles: []string{"alpha beta", "subject to backup withholding"}},
-		// Non-axis-aligned text, which segmentQuads assembles from the first and last corners instead.
+		// The raised-character fixture: "H2O" is one quad below a 0.1 em rise of the digit and three from there on.
+		{file: "hit-quad-rise.pdf", needles: []string{"H2O"}},
+		// Non-axis-aligned text, which the one merge rule walks into a single first-to-last-corner quad.
 		{file: "rotate90.pdf", needles: []string{"Rotated"}},
 	} {
 		t.Run(tc.file, func(t *testing.T) {

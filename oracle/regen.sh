@@ -51,6 +51,7 @@ dump std14-styles -search handgrip -search boldface -search obliquely -search ch
 dump subst-metrics -search paxo -search qbxo -search rcxo -search sdxo -search texo -search ufxo \
   -search vgxo -search wexo -search xfxo -search ygxo -search zhxo -search aixo
 dump hit-quad-split -search 'backup withholding' -search 'alpha beta'
+dump hit-quad-rise -search H2O
 dump rotate90 -search Rotated
 dump damaged-startxref-zero -search Repaired
 dump damaged-bad-offsets -search Repaired -search Second

@@ -167,27 +167,152 @@ func TestSearchWrappedMatch(t *testing.T) {
 	}
 }
 
-func TestSearchExtentSplit(t *testing.T) {
-	// A 40-pt space amid 20-pt words diverges beyond extentSplitFraction of the quad height, so one single-line match
-	// yields three quads (word, oversized space, word) — the hit-quad-split.pdf behavior.
+// TestSearchQuadMergeVerticalFuzz pins add_quad's vertical fuzz over the shape that first exposed it: an oversized
+// inter-word space. A 40-pt space amid 20-pt words puts its lower-left corner 4 pt below the corner the open quad ends
+// at, which is exactly the space's own quadVFuzzEm (0.1 × 40) and so does NOT merge, and its 40-pt right edge then sits
+// 4 pt from the following 20-pt word against a fuzz of only 2 — so the one single-line match yields three quads (word,
+// oversized space, word), which is the hit-quad-split.pdf behavior.
+func TestSearchQuadMergeVerticalFuzz(t *testing.T) {
 	alpha, endX := mkWord("alpha", 100, 200, 10, 20)
 	space := mkChar(' ', endX, 200, 20, 40)
-	beta, _ := mkWord("beta", endX+20, 200, 10, 20)
+	beta, betaEndX := mkWord("beta", endX+20, 200, 10, 20)
 	chars := append(append(append([]Char(nil), alpha...), space), beta...)
 	got := searchChars(chars, "alpha beta", 100)
 	if len(got) != 3 {
 		t.Fatalf("expected 3 quads, got %d: %+v", len(got), got)
 	}
-	// A same-size space merges instead, keeping the FIRST character's vertical extent for the whole quad.
+	// Each quad covers exactly the characters that merged into it, in stream order.
+	for i, want := range [3][2]float32{{100, endX}, {endX, endX + 20}, {endX + 20, betaEndX}} {
+		if got[i].UL.X != want[0] || got[i].UR.X != want[1] {
+			t.Errorf("quad %d spans %v..%v, want %v..%v", i, got[i].UL.X, got[i].UR.X, want[0], want[1])
+		}
+	}
+	// A same-size space has corners identical to its neighbors', so the whole match merges into one quad.
 	chars = append(append(append([]Char(nil), alpha...), mkChar(' ', endX, 200, 10, 20)), beta...)
 	if got = searchChars(chars, "alpha beta", 100); len(got) != 1 {
-		t.Fatalf("expected 1 quad for uniform extents, got %d", len(got))
+		t.Fatalf("expected 1 quad for uniform extents, got %d: %+v", len(got), got)
+	}
+}
+
+// TestSearchQuadRaisedCharacter brackets the vertical fuzz exactly, over the shape a real page shifts a character
+// with: a text rise putting an exponent, a footnote marker, or a formula's digit on its own baseline. The comparison is
+// strict, so a character shifted by exactly quadVFuzzEm of its em splits the hit while one shifted a hair less does not
+// — the boundary MuPDF lands on, and the one hit-quad-rise.pdf holds the corpus to.
+func TestSearchQuadRaisedCharacter(t *testing.T) {
+	for _, tc := range []struct {
+		want int
+		rise float32
+	}{
+		{rise: 0.05 * 20, want: 1},  // Well inside the fuzz.
+		{rise: 0.09 * 20, want: 1},  // Just inside it.
+		{rise: 0.1 * 20, want: 3},   // Exactly at it: < is strict, so the digit and the O each start a quad.
+		{rise: 0.25 * 20, want: 3},  // Well past it.
+		{rise: -0.1 * 20, want: 3},  // Dropped rather than raised: the distances are absolute.
+		{rise: -0.09 * 20, want: 1}, // And bracketed the same way below the baseline.
+	} {
+		chars, _ := mkWord("H", 100, 200, 10, 20)
+		chars = append(chars, mkChar('2', 110, 200-tc.rise, 10, 20))
+		tail, _ := mkWord("O", 120, 200, 10, 20)
+		if got := searchChars(append(chars, tail...), "H2O", 100); len(got) != tc.want {
+			t.Errorf("rise %v: expected %d quads, got %d: %+v", tc.rise, tc.want, len(got), got)
+		}
+	}
+	// The fuzz scales by the size of the character being merged, not by the size of the run it is joining, so a smaller
+	// character is held to a tighter bound: a 12-pt digit sitting flat on the same baseline as 20-pt letters stands
+	// 6.4 pt off at the top and 1.6 pt off at the bottom, and even the 1.6 is past its own 1.2-pt fuzz.
+	chars, _ := mkWord("H", 100, 200, 10, 20)
+	chars = append(chars, mkChar('2', 110, 200, 6, 12))
+	tail, _ := mkWord("O", 116, 200, 10, 20)
+	if got := searchChars(append(chars, tail...), "H2O", 100); len(got) != 3 {
+		t.Fatalf("small digit: expected 3 quads, got %d: %+v", len(got), got)
+	}
+}
+
+// TestSearchQuadWordGapBridged covers the synthesized space: pdfview records no character for a word-sized TJ gap, so
+// segmentQuads stands one in ahead of the character that closes the gap, exactly as MuPDF's structured-text device puts
+// a real space into the stream there. Without it a gap of quadHFuzzEm or more would split a hit MuPDF reports whole,
+// which is what text-std14's "Kerned Text" needle — a 0.5 em TJ gap standing in for the space — would then do.
+func TestSearchQuadWordGapBridged(t *testing.T) {
+	// A 0.7 em gap: past the 0.5 em horizontal fuzz, yet the hit is one quad reaching from alpha's leading corners to
+	// beta's trailing ones, the gap included.
+	alpha, endX := mkWord("alpha", 100, 200, 10, 20)
+	beta, betaEndX := mkWord("beta", endX+0.7*20, 200, 10, 20)
+	got := searchChars(append(append([]Char(nil), alpha...), beta...), "alpha beta", 100)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 quad across a word gap, got %d: %+v", len(got), got)
+	}
+	want := gfx.Quad{
+		UL: gfx.Point{X: 100, Y: 200 - 0.8*20},
+		UR: gfx.Point{X: betaEndX, Y: 200 - 0.8*20},
+		LL: gfx.Point{X: 100, Y: 200 + 0.2*20},
+		LR: gfx.Point{X: betaEndX, Y: 200 + 0.2*20},
+	}
+	if got[0] != want {
+		t.Fatalf("quad = %+v, want %+v", got[0], want)
+	}
+	// A kerning gap too narrow to read as a word space gets no synthesized space, and add_quad's own horizontal fuzz
+	// absorbs it: the two halves still merge, with no needle space involved at all.
+	kerned, kernedEndX := mkWord("beta", endX+0.15*20, 200, 10, 20)
+	if got = searchChars(append(append([]Char(nil), alpha...), kerned...), "alphabeta", 100); len(got) != 1 {
+		t.Fatalf("expected 1 quad across a kerning gap, got %d: %+v", len(got), got)
+	}
+	if got[0].UL.X != 100 || got[0].UR.X != kernedEndX {
+		t.Fatalf("kerned quad spans %v..%v, want 100..%v", got[0].UL.X, got[0].UR.X, kernedEndX)
+	}
+	// When the vertical test fails AT the gap, the new quad opens on the synthesized space — at the pen the previous
+	// character left behind — so it covers the gap rather than starting at the character past it. Here the 40-pt word's
+	// ascender stands 16 pt above the 20-pt word's against a fuzz of 4.
+	big, bigEndX := mkWord("beta", endX+0.7*20, 200, 20, 40)
+	if got = searchChars(append(append([]Char(nil), alpha...), big...), "alpha beta", 100); len(got) != 2 {
+		t.Fatalf("expected 2 quads across a size change at the gap, got %d: %+v", len(got), got)
+	}
+	if got[1].UL.X != endX || got[1].UR.X != bigEndX {
+		t.Fatalf("second quad spans %v..%v, want %v..%v (from the pen)", got[1].UL.X, got[1].UR.X, endX, bigEndX)
+	}
+	if got[1].UL.Y != 200-0.8*40 {
+		t.Fatalf("second quad's top = %v, want the incoming word's %v", got[1].UL.Y, 200-0.8*40)
+	}
+}
+
+// TestSearchQuadTrailingCorners pins what a merge does to the open quad: it REPLACES the trailing corners with the
+// merged character's own rather than unioning the two, so a quad reaches from the first merged character's leading
+// corners to the last one's trailing corners and carries the last one's height on its right edge. Two words of
+// different sizes on one baseline show the difference, and also show the fuzz scaling by the incoming size.
+func TestSearchQuadTrailingCorners(t *testing.T) {
+	small, endX := mkWord("ab", 100, 200, 10, 20)
+	// 24 pt against 20: the tops stand 3.2 pt apart against the incoming character's fuzz of 2.4, so the words split.
+	big, _ := mkWord("cd", endX, 200, 12, 24)
+	if got := searchChars(append(append([]Char(nil), small...), big...), "abcd", 100); len(got) != 2 {
+		t.Fatalf("24 pt after 20 pt: expected 2 quads, got %d: %+v", len(got), got)
+	}
+	// 22 pt against 20: 1.6 pt at the top and 0.4 pt at the bottom, both inside the incoming fuzz of 2.2, so they
+	// merge — and the merged quad is lopsided, 20 pt tall on the left and 22 pt tall on the right.
+	near, _ := mkWord("cd", endX, 200, 11, 22)
+	got := searchChars(append(append([]Char(nil), small...), near...), "abcd", 100)
+	if len(got) != 1 {
+		t.Fatalf("22 pt after 20 pt: expected 1 quad, got %d: %+v", len(got), got)
+	}
+	last := near[len(near)-1].Quad
+	want := gfx.Quad{UL: small[0].Quad.UL, UR: last.UR, LL: small[0].Quad.LL, LR: last.LR}
+	if got[0] != want {
+		t.Fatalf("quad = %+v, want %+v", got[0], want)
+	}
+	if got[0].UL.Y == got[0].UR.Y {
+		t.Fatalf("quad %+v has a level top edge; a union would, but replacing the trailing corners must not", got[0])
+	}
+	// 22.5 pt against 20 is the case that separates the two possible scalings: the tops stand exactly 2 pt apart, which
+	// is inside the incoming character's fuzz of 2.25 but not inside the 2.0 the preceding character's size would have
+	// given.
+	scaled, _ := mkWord("cd", endX, 200, 11, 22.5)
+	if got = searchChars(append(append([]Char(nil), small...), scaled...), "abcd", 100); len(got) != 1 {
+		t.Fatalf("22.5 pt after 20 pt: expected 1 quad, got %d: %+v", len(got), got)
 	}
 }
 
 func TestSearchMirroredExtent(t *testing.T) {
-	// Vertically-mirrored text has a negative bottom-top extent; the merge threshold must use its magnitude or every
-	// character flushes into its own quad.
+	// Vertically-mirrored text puts the ascender below the descender in y-down space, so its quads run "upside down".
+	// The merge rule needs no case for that — vdist is an absolute perpendicular distance — and a uniform mirrored run
+	// must come back as one quad rather than one per character.
 	chars, endX := mkMirroredWord("alpha", 100, 200, 10, 20)
 	got := searchChars(chars, "alpha", 100)
 	if len(got) != 1 {
@@ -203,7 +328,7 @@ func TestSearchMirroredExtent(t *testing.T) {
 	if got[0] != want {
 		t.Fatalf("quad = %+v, want %+v", got[0], want)
 	}
-	// The extent-split rule still applies in the mirrored orientation: an oversized space yields three quads.
+	// The vertical fuzz still splits in the mirrored orientation: an oversized space yields three quads.
 	space := mkMirroredChar(' ', endX, 200, 20, 40)
 	beta, _ := mkMirroredWord("beta", endX+20, 200, 10, 20)
 	chars = append(append(append([]Char(nil), chars...), space), beta...)
@@ -335,8 +460,9 @@ func TestSearchUnmappedRuneBreaksMatch(t *testing.T) {
 }
 
 func TestSearchRotatedRun(t *testing.T) {
-	// A 90°-rotated run: baseline advances through device y, so the perpendicular line-break test must keep it a single
-	// line, and the non-axis assembly spans first to last corner.
+	// A 90°-rotated run: the baseline advances through device y, so the perpendicular line-break test must keep it a
+	// single line. There is no rotation-specific quad assembly — adjacent characters of a uniform rotated run share
+	// their corners exactly, so the one merge rule walks the run into a single first-to-last-corner quad.
 	chars := make([]Char, 0, 7)
 	x, y := float32(100), float32(400)
 	for _, r := range "Rotated" {

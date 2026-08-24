@@ -91,6 +91,10 @@ func FuzzSelection(f *testing.F) {
 	f.Add([]byte{'G', 2, 0, 'U', 2, 0, 'R', 2, 0, 'P', 2, 0, 'S', 2, 0}, 0, 5, float32(50), float32(50))
 	f.Add([]byte{'b', 2, 0, 'r', 2, 1, 'o', 2, 0, 'w', 9, 2, 'n', 2, 16}, 3, 1, float32(-1e9), float32(1e9))
 	f.Add([]byte{0, 0, 4, 1, 1, 8, ' ', 9, 2}, -7, 1<<30, float32(0), float32(0))
+	// A non-finite coordinate on the character a line takes its advance direction from, followed by word-sized gaps:
+	// the direction comes out NaN, so every one of segmentQuads' merge comparisons is false and each gap's synthesized
+	// space stands as a quad of its own. This is the shape that puts more quads on a page than it has characters.
+	f.Add([]byte("00800A02 020"), 0, 4, float32(50), float32(50))
 	f.Fuzz(func(t *testing.T, layout []byte, start, end int, x, y float32) {
 		page := NewPage(charsFromLayout(layout))
 		n := page.Len()
@@ -101,7 +105,9 @@ func FuzzSelection(f *testing.F) {
 			// Each character contributes at most its own rune plus one separator standing before it.
 			t.Fatalf("Text returned %d runes over a page of %d characters", len([]rune(text)), n)
 		}
-		if quads := page.Quads(start, end); len(quads) > n {
+		// Each character contributes at most its own quad plus the quad of the word space synthesized ahead of it
+		// (see segmentQuads), the same doubling the separator standing before a character allows Text.
+		if quads := page.Quads(start, end); len(quads) > 2*n {
 			t.Fatalf("Quads returned %d quads over a page of %d characters", len(quads), n)
 		}
 		for _, index := range []int{start, end} {

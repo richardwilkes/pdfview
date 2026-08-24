@@ -33,7 +33,7 @@ func TestVectorCorpusPixels(t *testing.T) {
 // encrypted files are text-std14 variants and must render identically to it once authenticated.
 func TestTextCorpusPixels(t *testing.T) {
 	for _, name := range []string{
-		"text-std14", "hit-quad-split",
+		"text-std14", "hit-quad-split", "hit-quad-rise",
 		"encrypted-r2-rc4", "encrypted-r3-rc4", "encrypted-r4-rc4", "encrypted-r4-aes",
 		"encrypted-r6-aes", "encrypted-r6-empty-user",
 		"text-type1", "text-type0-cid2", "text-type0-cid0", "text-type3", "text-trmodes",
