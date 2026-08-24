@@ -7,19 +7,20 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package pdfview renders PDF pages to images and extracts text-search hits, links, the table of contents, and page
-// labels. It also handles password-protected documents.
+// Package pdfview renders PDF pages to images and extracts text-search hits, selectable page text, links, the table of
+// contents, and page labels. It also handles password-protected documents.
 //
 // The package is a pure-Go PDF engine — no cgo, CGO_ENABLED=0 builds — with rasterization delegated to
 // github.com/richardwilkes/canvas. New parses documents (including damaged ones, via a repair scan) and decrypts
 // password-protected ones (standard security handler R2-R6); RenderPage and RenderPageForSize rasterize each page's
 // content — paths, clips, colors, form XObjects, images, fonts and text, shadings, patterns, transparency groups, soft
 // masks, blend modes, and annotation appearance streams — through the content-stream interpreter; text search returns
-// MuPDF-compatible hit rectangles; PageLabel, PageLabels, and PagesWithLabel translate between a page's position in the
-// file and the display label the document gives it (front matter in roman numerals, an appendix that restarts at 1);
-// and DrawPage draws a page's content onto a caller-owned canvas. The engine's behavior is pinned against the
-// MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates exactly, pixels within committed perceptual
-// thresholds. See README.md for the architecture.
+// MuPDF-compatible hit rectangles; TextPage exposes the same extracted text a caller can hit-test, select, and copy,
+// with highlight rectangles in the rendered image's own pixel space; PageLabel, PageLabels, and PagesWithLabel
+// translate between a page's position in the file and the display label the document gives it (front matter in roman
+// numerals, an appendix that restarts at 1); and DrawPage draws a page's content onto a caller-owned canvas. The
+// engine's behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates
+// exactly, pixels within committed perceptual thresholds. See README.md for the architecture.
 //
 // # Platform requirements
 //
@@ -83,6 +84,14 @@ var (
 	// OverallMaxTOCEntries is the maximum number of TOC entries returned. This is here to safeguard against untrusted
 	// input that might otherwise cause an out of memory error.
 	OverallMaxTOCEntries = 1000
+	// OverallMaxTextChars is the maximum number of characters one TextPage records; the rest of the page's text is
+	// dropped, exactly as the hit, link, and TOC walks drop their excess. This is here to safeguard against untrusted
+	// input that might otherwise cause an out of memory error — a page's glyph count is bounded by the interpreter's
+	// work budget, but the extracted records cost roughly 60 bytes each and, unlike a search's hits, a TextPage is
+	// retained by the caller for as long as the text is on screen. The default (1,048,576 characters) is far above the
+	// densest real page, which runs to tens of thousands. Setting it to zero or a negative value restores the engine's
+	// own default rather than disabling extraction.
+	OverallMaxTextChars = 1 << 20
 	// OverallMaxPixels is the maximum number of pixels (width × height) a rendered page image may contain. Requests
 	// that would produce a larger image are rejected rather than attempting a very large allocation, safeguarding
 	// against untrusted input or bad sizing parameters that might otherwise cause an out of memory error. The default
@@ -399,27 +408,37 @@ func (d *Document) RenderPage(pageNumber, dpi, maxHits int, search string) (*Ren
 // bounding boxes of up to maxHits matching text on the page will be returned.
 func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits int, search string) (*RenderedPage, error) {
 	return d.render(pageNumber, maxHits, search, func(pg *page) (renderSpec, error) {
-		if maxWidth <= 0 || maxHeight <= 0 {
-			return renderSpec{}, ErrInvalidPageSize
-		}
-		// The page extents are computed in float32 (the precision the engine's geometry pipeline carries) before being
-		// widened, matching the C float precision the MuPDF-based implementation exposed.
-		w := float64(pg.width)
-		h := float64(pg.height)
-		if w <= 0 || h <= 0 {
-			return renderSpec{}, ErrInvalidPageSize
-		}
-		scale := float64(maxWidth) / w
-		if ratio := float64(maxHeight) / h; ratio < scale {
-			scale = ratio
-		}
-		// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
-		// box. Reject an over-large request here, before doing any rendering work or allocating the pixel buffer.
-		if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
-			return renderSpec{}, ErrImageTooLarge
-		}
-		return renderSpec{scale: scale, maxWidth: maxWidth, maxHeight: maxHeight}, nil
+		return fitSpec(pg, maxWidth, maxHeight)
 	})
+}
+
+// fitSpec is the render spec that fits pg within maxWidth×maxHeight: the scale is the smaller of the two ratios, and
+// the box travels with it so the extents can never exceed what the caller asked to fit within. RenderPageForSize and
+// TextPage.ForSize share it, which is what lets a fit-to-box image and the text labeled for that image be the same
+// pixel space: one computation sizes both, so neither can drift from the other. It rejects a request the way
+// RenderPageForSize documents — ErrInvalidPageSize for a non-positive box or page, ErrImageTooLarge past
+// OverallMaxPixels — before any work is done or any buffer is allocated.
+func fitSpec(pg *page, maxWidth, maxHeight int) (renderSpec, error) {
+	if maxWidth <= 0 || maxHeight <= 0 {
+		return renderSpec{}, ErrInvalidPageSize
+	}
+	// The page extents are computed in float32 (the precision the engine's geometry pipeline carries) before being
+	// widened, matching the C float precision the MuPDF-based implementation exposed.
+	w := float64(pg.width)
+	h := float64(pg.height)
+	if w <= 0 || h <= 0 {
+		return renderSpec{}, ErrInvalidPageSize
+	}
+	scale := float64(maxWidth) / w
+	if ratio := float64(maxHeight) / h; ratio < scale {
+		scale = ratio
+	}
+	// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
+	// box.
+	if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
+		return renderSpec{}, ErrImageTooLarge
+	}
+	return renderSpec{scale: scale, maxWidth: maxWidth, maxHeight: maxHeight}, nil
 }
 
 // render is the shared body of RenderPage and RenderPageForSize. It validates the page number, loads the page, asks
@@ -513,7 +532,8 @@ func unpremultiply(c, a uint8) uint8 {
 
 // pixelSpace is the rendered-image pixel space of one page: the scale page-space coordinates are multiplied by and the
 // image rectangle the results are bounded to. Every coordinate the public API returns is documented to live in one of
-// these — the rendered page's own for search hits and link bounds, the destination page's for a link's DestPoint.
+// these — the rendered page's own for search hits, selection highlights, and link bounds, the destination page's for a
+// link's DestPoint — and a TextPage's points come back in through the same space.
 type pixelSpace struct {
 	bounds image.Rectangle
 	scale  float64
@@ -522,6 +542,18 @@ type pixelSpace struct {
 // rect maps a page-space rectangle into this space, expanded outward to whole pixels and bounded to the image.
 func (s pixelSpace) rect(x0, y0, x1, y1 float64) image.Rectangle {
 	return scaleRect(x0, y0, x1, y1, s.scale).Intersect(s.bounds)
+}
+
+// unscalePoint maps a point of this space back to page space, the direction a hit test runs in. No rounding or
+// bounding is applied on the way back: the result feeds a nearest-boundary search over character geometry, which a
+// sub-point error cannot move, and a point outside the image is a legitimate question there (a drag that left the
+// page still selects to its nearest line). A space with no scale — the zero value, which carries no page either —
+// answers with the origin rather than dividing by zero.
+func (s pixelSpace) unscalePoint(pt image.Point) gfx.Point {
+	if s.scale <= 0 {
+		return gfx.Point{}
+	}
+	return gfx.Point{X: float32(float64(pt.X) / s.scale), Y: float32(float64(pt.Y) / s.scale)}
 }
 
 // point maps a page-space point into this space, floored and bounded to the image.
@@ -915,8 +947,8 @@ func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width
 
 // runPage runs the page's content streams and then its annotation appearance streams through the interpreter against
 // the given device under the page-space→device matrix ctm. It is the one body shared by every consumer of a page's
-// drawn content: rasterize (raster device), search (structured-text device), and DrawPage (raster device wrapped around
-// a caller's canvas).
+// drawn content: rasterize (raster device), search and extractText (both through extractPageText, against the
+// structured-text device), and DrawPage (raster device wrapped around a caller's canvas).
 func (e *engineDocument) runPage(pg *page, ctm gfx.Matrix, dev device.Device) {
 	if data := e.doc.PageContents(pg.number); len(data) > 0 {
 		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
@@ -963,37 +995,76 @@ func renderExtent(extent float32, scale float64) int {
 	return int(v)
 }
 
+// extractPageText runs the page's content and its annotation appearance streams through the interpreter against the
+// given structured-text device at scale 1, which is the one invariant both consumers of extracted text depend on: the
+// characters (and so the quads assembled from them) come back in top-left/y-down page space — the same space MuPDF's
+// fz_search_stext_page reported hits in through the C float funnel — leaving the render scale to be applied afterwards
+// in float64, exactly as the original implementation did. Running the pass at the render scale instead (fanning the
+// rasterize pass out to both devices) would compose every quad corner in scaled float32 and break that funnel.
+// Annotation appearance text is part of MuPDF's structured text (probe-pinned: widget /AP text is searchable), so the
+// pass runs the appearances exactly like the raster pass does. A page whose CTM cannot be read records nothing and
+// reports ErrUnableToLoadPage, which is what rasterize reports for the same page.
+func (e *engineDocument) extractPageText(pg *page, dev *stext.Device) error {
+	ctm, err := e.doc.PageCTM(pg.number, 1)
+	if err != nil {
+		return ErrUnableToLoadPage
+	}
+	e.runPage(pg, ctm, dev)
+	return nil
+}
+
 // search returns the quads of up to maxHits text matches on the page, in the emission order MuPDF's search reports them
 // (the exact-value tests index hits positionally). The page's content runs through the interpreter once more against
-// the structured-text device at scale 1, so the quads come back in top-left/y-down page space — the same space MuPDF's
-// fz_search_stext_page reported them in through the C float funnel — and quadToRect applies the render scale in float64
-// exactly as the original implementation did. Running the pass at the render scale instead (fanning the rasterize pass
-// out to both devices) would compose every quad corner in scaled float32 and break that funnel. A panic provoked by
-// hostile content surfaces as no hits rather than escaping the public API.
+// the structured-text device at the scale extractPageText documents, and quadToRect applies the render scale to what
+// comes back. A panic provoked by hostile content surfaces as no hits rather than escaping the public API.
 func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []quad) {
 	defer func() {
 		if recover() != nil {
 			hits = nil
 		}
 	}()
-	ctm, err := e.doc.PageCTM(pg.number, 1)
-	if err != nil {
+	dev := stext.New()
+	if e.extractPageText(pg, dev) != nil {
 		return nil
 	}
-	dev := stext.New()
-	// Annotation appearance text is part of MuPDF's structured text (probe-pinned: widget /AP text is searchable), so
-	// the stext pass runs the appearances exactly like the raster pass does.
-	e.runPage(pg, ctm, dev)
 	found := dev.Search(needle, maxHits)
 	if len(found) == 0 {
 		return nil
 	}
 	hits = make([]quad, len(found))
 	for i, q := range found {
-		hits[i] = quad{
-			ulX: q.UL.X, ulY: q.UL.Y, urX: q.UR.X, urY: q.UR.Y,
-			llX: q.LL.X, llY: q.LL.Y, lrX: q.LR.X, lrY: q.LR.Y,
-		}
+		hits[i] = quadFromGfx(q)
 	}
 	return hits
+}
+
+// extractText returns the selection model for the page's text, in the page space extractPageText documents. It is the
+// same pass search makes — what is searchable is what is selectable — recording at most OverallMaxTextChars characters
+// because the result outlives the call.
+//
+// The two ways a pass can end short are reported differently, because a caller can act on one and not the other. A
+// page the engine cannot read at all yields the error, so a viewer can tell an unreadable page from a page carrying no
+// text. A panic provoked by hostile content mid-pass yields the characters recorded before it and no error: the device
+// only ever appends completed characters, so its slice is a valid prefix of the page's text at every instant, and text
+// a caller can already select beats an error naming a page it can see.
+func (e *engineDocument) extractText(pg *page) (text *stext.Page, err error) {
+	dev := stext.NewCapped(OverallMaxTextChars)
+	defer func() {
+		if recover() != nil {
+			text, err = stext.NewPage(dev.Chars()), nil
+		}
+	}()
+	if err = e.extractPageText(pg, dev); err != nil {
+		return nil, err
+	}
+	return stext.NewPage(dev.Chars()), nil
+}
+
+// quadFromGfx re-labels a structured-text quad into the seam type. The two carry the same four float32 corners in the
+// same order; the seam keeps its own shape so the public API's coordinate funnel never depends on an internal type.
+func quadFromGfx(q gfx.Quad) quad {
+	return quad{
+		ulX: q.UL.X, ulY: q.UL.Y, urX: q.UR.X, urY: q.UR.Y,
+		llX: q.LL.X, llY: q.LL.Y, lrX: q.LR.X, lrY: q.LR.Y,
+	}
 }

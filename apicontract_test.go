@@ -84,11 +84,68 @@ func TestZeroValueDocument(t *testing.T) {
 			if _, err := doc.RenderPageForSize(0, 800, 800, 0, ""); !errors.Is(err, pdfview.ErrDocumentReleased) {
 				t.Errorf("RenderPageForSize error = %v, want ErrDocumentReleased", err)
 			}
+			if _, err := doc.TextPage(0, 72); !errors.Is(err, pdfview.ErrDocumentReleased) {
+				t.Errorf("TextPage error = %v, want ErrDocumentReleased", err)
+			}
 			if err := doc.DrawPage(surf.Canvas(), 0, geom.IdentityMatrix()); !errors.Is(err, pdfview.ErrDocumentReleased) {
 				t.Errorf("DrawPage error = %v, want ErrDocumentReleased", err)
 			}
 			doc.Release() // Idempotent and safe with nothing behind it.
 			doc.Release()
+		})
+	}
+}
+
+// TestZeroValueTextPage pins the same contract for TextPage that TestZeroValueDocument pins for Document: its zero
+// value and a nil *TextPage answer every method the way a page with no text does rather than dereferencing nil. Both
+// states are reachable through ordinary use — TextPage returns nil alongside an error, and a caller that keeps the
+// result of a failed extraction in a struct field has the nil; the zero value is what an embedding struct starts with.
+func TestZeroValueTextPage(t *testing.T) {
+	for _, tc := range []struct {
+		page *pdfview.TextPage
+		name string
+	}{
+		{name: "zero value", page: &pdfview.TextPage{}},
+		{name: "nil pointer", page: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page := tc.page
+			if got := page.Len(); got != 0 {
+				t.Errorf("Len = %d, want 0", got)
+			}
+			if got := page.IndexAt(image.Pt(10, 10)); got != 0 {
+				t.Errorf("IndexAt = %d, want 0", got)
+			}
+			if start, end := page.WordAt(3); start != 0 || end != 0 {
+				t.Errorf("WordAt = (%d, %d), want (0, 0)", start, end)
+			}
+			if start, end := page.LineAt(3); start != 0 || end != 0 {
+				t.Errorf("LineAt = (%d, %d), want (0, 0)", start, end)
+			}
+			if got := page.Text(0, 10); got != "" {
+				t.Errorf("Text = %q, want an empty string", got)
+			}
+			if got := page.Highlights(0, 10); got != nil {
+				t.Errorf("Highlights = %v, want nil", got)
+			}
+			// Re-labeling a page that carries no page extent cannot name any image: ForSize reports what it reports
+			// for a box it cannot fit, and AtDPI answers as the empty page it re-labels.
+			if _, err := page.ForSize(800, 600); !errors.Is(err, pdfview.ErrInvalidPageSize) {
+				t.Errorf("ForSize error = %v, want ErrInvalidPageSize", err)
+			}
+			scaled := page.AtDPI(150)
+			if got := scaled.Len(); got != 0 {
+				t.Errorf("AtDPI(150).Len = %d, want 0", got)
+			}
+			if got := scaled.Text(0, 10); got != "" {
+				t.Errorf("AtDPI(150).Text = %q, want an empty string", got)
+			}
+			if got := scaled.Highlights(0, 10); got != nil {
+				t.Errorf("AtDPI(150).Highlights = %v, want nil", got)
+			}
+			if got := scaled.IndexAt(image.Pt(10, 10)); got != 0 {
+				t.Errorf("AtDPI(150).IndexAt = %d, want 0", got)
+			}
 		})
 	}
 }

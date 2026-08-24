@@ -12,6 +12,7 @@ package stext
 import (
 	"math"
 	"testing"
+	"unicode"
 
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
@@ -79,4 +80,70 @@ func charsFromLayout(layout []byte) []Char {
 		x += cs * 0.6
 	}
 	return chars
+}
+
+// FuzzSelection drives the selection model over the same hostile synthetic layouts FuzzStext builds for the matcher —
+// NaN and Inf coordinates, zero and doubled sizes, rotation, line breaks, unmapped runes — with fuzzed indices and a
+// fuzzed hit-test point. Nothing may panic, every answer must land inside the page it came from, and the model must
+// stay self-consistent: the line and the word around an index contain that index, and a word never carries the
+// whitespace the geometry would have separated it at.
+func FuzzSelection(f *testing.F) {
+	f.Add([]byte{'G', 2, 0, 'U', 2, 0, 'R', 2, 0, 'P', 2, 0, 'S', 2, 0}, 0, 5, float32(50), float32(50))
+	f.Add([]byte{'b', 2, 0, 'r', 2, 1, 'o', 2, 0, 'w', 9, 2, 'n', 2, 16}, 3, 1, float32(-1e9), float32(1e9))
+	f.Add([]byte{0, 0, 4, 1, 1, 8, ' ', 9, 2}, -7, 1<<30, float32(0), float32(0))
+	f.Fuzz(func(t *testing.T, layout []byte, start, end int, x, y float32) {
+		page := NewPage(charsFromLayout(layout))
+		n := page.Len()
+		if index := page.IndexAt(gfx.Point{X: x, Y: y}); index < 0 || index > n {
+			t.Fatalf("IndexAt = %d, outside [0, %d]", index, n)
+		}
+		if text := page.Text(start, end); len([]rune(text)) > 2*n {
+			// Each character contributes at most its own rune plus one separator standing before it.
+			t.Fatalf("Text returned %d runes over a page of %d characters", len([]rune(text)), n)
+		}
+		if quads := page.Quads(start, end); len(quads) > n {
+			t.Fatalf("Quads returned %d quads over a page of %d characters", len(quads), n)
+		}
+		for _, index := range []int{start, end} {
+			wordStart, wordEnd := page.WordAt(index)
+			if wordStart < 0 || wordEnd > n || wordStart > wordEnd {
+				t.Fatalf("WordAt(%d) = (%d, %d), outside [0, %d]", index, wordStart, wordEnd, n)
+			}
+			lineStart, lineEnd := page.LineAt(index)
+			if lineStart < 0 || lineEnd > n || lineStart > lineEnd {
+				t.Fatalf("LineAt(%d) = (%d, %d), outside [0, %d]", index, lineStart, lineEnd, n)
+			}
+			if n == 0 {
+				continue
+			}
+			// Both ranges are the neighborhood OF an index, so the clamped index has to be inside them, and a word
+			// can never reach outside the line it grew in.
+			clamped := min(max(index, 0), n-1)
+			if clamped < wordStart || clamped >= wordEnd {
+				t.Fatalf("WordAt(%d) = (%d, %d), which does not contain %d", index, wordStart, wordEnd, clamped)
+			}
+			if clamped < lineStart || clamped >= lineEnd {
+				t.Fatalf("LineAt(%d) = (%d, %d), which does not contain %d", index, lineStart, lineEnd, clamped)
+			}
+			if wordStart < lineStart || wordEnd > lineEnd {
+				t.Fatalf("WordAt(%d) = (%d, %d) reaches outside its line (%d, %d)", index, wordStart, wordEnd,
+					lineStart, lineEnd)
+			}
+			// A character that cannot be part of a word is a selection of its own; anything else grows a word, and a
+			// word stops where the matcher would synthesize a space or a line break, so its text carries neither.
+			if !isWordChar(page.chars[clamped]) {
+				if wordStart != clamped || wordEnd != clamped+1 {
+					t.Fatalf("WordAt(%d) = (%d, %d) over a non-word character, want (%d, %d)", index, wordStart,
+						wordEnd, clamped, clamped+1)
+				}
+				continue
+			}
+			for _, r := range page.Text(wordStart, wordEnd) {
+				if unicode.IsSpace(r) {
+					t.Fatalf("WordAt(%d) = (%d, %d) spells %q, which carries whitespace", index, wordStart, wordEnd,
+						page.Text(wordStart, wordEnd))
+				}
+			}
+		}
+	})
 }

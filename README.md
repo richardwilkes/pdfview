@@ -46,6 +46,13 @@ does not beat its scalar form on real silicon stays off.
   height (`RenderPageForSize`).
 - Return the bounding boxes of search-text matches on a rendered page, with MuPDF-compatible search semantics
   (case folding, elastic whitespace, per-line quads).
+- Extract a page's text for hit-testing, selection, and copy (`TextPage`): a caret index for any point of the
+  rendered image (`IndexAt`), the word or line around an index (`WordAt`, `LineAt`), the text of any range (`Text`,
+  carrying the spaces and newlines the page's geometry implies but its characters do not), and the rectangles to
+  paint a selection with (`Highlights`, grouped exactly as search hits are). What is searchable is what is
+  selectable. The extraction is scale-free, so one `TextPage` per page serves every zoom level: `AtDPI` and
+  `ForSize` re-label it for the image `RenderPage` or `RenderPageForSize` produces, taking neither a second pass nor
+  the document lock.
 - Extract a page's links (both external URIs and internal page references with destination points).
 - Extract the document's table of contents.
 - Read the document's page labels — the display numbering a reader shows, such as front matter in roman numerals
@@ -56,8 +63,8 @@ does not beat its scalar form on real silicon stays off.
 - Draw a page's vector content directly onto a caller-owned canvas via `DrawPage` (the one canvas-coupled API; see
   below).
 
-All returned coordinates (search hits, link bounds, TOC positions) are in the pixel space of the rendered image, so
-they line up directly with what you draw.
+All returned coordinates (search hits, selection highlights, link bounds, TOC positions) are in the pixel space of
+the rendered image, so they line up directly with what you draw.
 
 Damaged files are handled the way real viewers handle them: broken or missing xref tables trigger a repair scan,
 corrupt streams degrade to their recoverable prefix, and hostile input is bounded by documented resource caps —
@@ -125,10 +132,11 @@ and optional — the GC reclaims everything — but drops parsed state immediate
 
 ### Resource limits
 
-The package-level `OverallMaxHits`, `OverallMaxLinks`, `OverallMaxTOCEntries`, and `OverallMaxPixels` variables cap
-how much work untrusted input can force; renders that would exceed `OverallMaxPixels` fail with `ErrImageTooLarge`
-before allocation. Internally, documented constant caps bound resolve chains, container nesting, recursion depths,
-filter chains, decompression expansion, and interpreter work, so termination is guaranteed without timeouts.
+The package-level `OverallMaxHits`, `OverallMaxLinks`, `OverallMaxTOCEntries`, `OverallMaxTextChars`, and
+`OverallMaxPixels` variables cap how much work untrusted input can force; renders that would exceed
+`OverallMaxPixels` fail with `ErrImageTooLarge` before allocation. Internally, documented constant caps bound
+resolve chains, container nesting, recursion depths, filter chains, decompression expansion, and interpreter work,
+so termination is guaranteed without timeouts.
 
 ## Architecture
 
@@ -156,8 +164,9 @@ everything else is `internal/`:
 
 The content interpreter emits drawing operations through a `Device` interface; the raster device realizes them on a
 canvas surface, and the structured-text device assembles characters, lines, and search quads from the same calls.
-Search runs its own interpreter pass at scale 1 so hit rectangles reproduce the C-float coordinate funnel of the
-original binding exactly.
+Search and `TextPage` run their own interpreter pass at scale 1 so hit rectangles reproduce the C-float coordinate
+funnel of the original binding exactly; both use the one pass and the one set of line, word, and quad heuristics, so
+a selection and a search hit over the same characters always agree.
 
 The two vendored decoder trees are pure Go and keep their upstream licenses (the repository's MPL-2.0 is
 file-scoped): `internal/jbig2` carries Apache-2.0 plus the PDFium BSD-3 and PDFBox notices its lineage requires,

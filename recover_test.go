@@ -58,6 +58,51 @@ func TestLinksRecoversPanic(t *testing.T) {
 	}
 }
 
+// TestExtractTextRecoversPanic covers the one seam whose safe value is not a nil: TextPage hands its caller a *TextPage
+// whose methods index into this page, so a panic must still produce a usable empty page rather than a nil one — and
+// rather than the panic itself, since a mid-page failure is precisely when the characters recorded so far are worth
+// returning. A panic is reported as no error for that reason, unlike a page the engine cannot read at all, which
+// TestExtractTextReportsAnUnreadablePage covers. doc.PageCTM dereferences the nil document immediately, before
+// anything has been recorded.
+func TestExtractTextRecoversPanic(t *testing.T) {
+	e := &engineDocument{} // doc is nil
+	text, err := e.extractText(&page{number: 0})
+	if err != nil {
+		t.Fatalf("expected no error when the engine panics, got %v", err)
+	}
+	if text == nil {
+		t.Fatal("expected an empty page when the engine panics, got nil")
+	}
+	if got := text.Len(); got != 0 {
+		t.Fatalf("expected no characters when the engine panics, got %d", got)
+	}
+	if got := text.Text(0, 10); got != "" {
+		t.Fatalf("expected no text when the engine panics, got %q", got)
+	}
+	if got := text.Quads(0, 10); got != nil {
+		t.Fatalf("expected no quads when the engine panics, got %+v", got)
+	}
+}
+
+// TestExtractTextReportsAnUnreadablePage pins the other half of that contract: a page whose geometry the engine cannot
+// read is a failure a viewer can act on, not an empty page it would show as having no text. The page number is past
+// the end of a real document, which is what PageCTM refuses.
+func TestExtractTextReportsAnUnreadablePage(t *testing.T) {
+	d := openInternal(t, "text-std14.pdf")
+	text, err := d.eng.extractText(&page{number: 1 << 20})
+	if !errors.Is(err, ErrUnableToLoadPage) {
+		t.Fatalf("error = %v, want ErrUnableToLoadPage", err)
+	}
+	if text != nil {
+		t.Errorf("a failed extraction returned a page as well as its error: %+v", text)
+	}
+	// The public entry point cannot be given such a page number, but it reports the same error when the engine's own
+	// read fails, and it never hands back a half-built TextPage alongside one.
+	if _, err = d.TextPage(1<<20, 72); !errors.Is(err, ErrInvalidPageNumber) {
+		t.Errorf("TextPage error = %v, want ErrInvalidPageNumber", err)
+	}
+}
+
 // TestDrawPageRecoversSetupPanic pins the placement of drawPage's guard. DrawPage's contract is that every failure
 // surfaces as an error, but the setup it runs before drawing anything — wrapping the caller's canvas, reading the page
 // CTM, composing the matrices — can itself panic: a canvas whose surface the caller already released panics inside

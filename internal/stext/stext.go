@@ -9,7 +9,9 @@
 
 // Package stext implements the structured-text device: it records every character the content-stream interpreter emits
 // — through any text verb, in emission order, unclipped — and provides fz_search_stext_page-compatible search over the
-// recorded characters.
+// recorded characters, plus the selection model (Page) that hit-tests, words, lines, text, and highlight quads are
+// read from. Both readers work on the one recorded stream and share the line, word, and quad heuristics below, so what
+// a search matches and what a selection covers can never disagree.
 //
 // The device deliberately ignores clip pushes: MuPDF's structured-text extraction is unclipped, so text scissored away
 // by a clip path is still searchable, and invisible text (render mode 3, arriving through IgnoreText) is recorded too.
@@ -48,7 +50,8 @@ type Char struct {
 
 // Device records the characters of every text run the interpreter emits. It implements device.Device; all non-text
 // operations (paths, images, clips, groups, masks) are ignored via the embedded Null — except the soft-mask brackets,
-// which nothing is drawn for but which delimit replayed content for the run-identity bookkeeping below.
+// which nothing is drawn for but which delimit replayed content for the run-identity bookkeeping below. Build one with
+// New or NewCapped; a directly constructed zero value carries a zero cap and so records nothing.
 type Device struct {
 	device.Null
 	// last is the run recorded most recently at the current soft-mask nesting level. The interpreter delivers one run
@@ -60,11 +63,27 @@ type Device struct {
 	// mask body that shows text lands between a run's fill and stroke deliveries.
 	masks []*device.TextRun
 	chars []Char
+	// limit is this device's own character cap; see the maxChars constant for what a cap is for and NewCapped for why
+	// a caller might want a tighter one than the default.
+	limit int
 }
 
-// New returns an empty structured-text device.
+// New returns an empty structured-text device recording up to the default maxChars characters.
 func New() *Device {
-	return &Device{}
+	return NewCapped(0)
+}
+
+// NewCapped returns an empty structured-text device recording up to limit characters, where a limit of zero or less
+// means the default cap (see maxChars). A caller whose result outlives the pass — an extraction whose Page the
+// application holds on to, rather than a search whose hits are transient — has its own reason to bound what a single
+// page can pin in memory, so it names its own cap here. Any positive limit is used as given, above the default as well
+// as below it: the default is the safe answer for a caller that has not thought about it, not a ceiling on one that
+// has.
+func NewCapped(limit int) *Device {
+	if limit <= 0 {
+		limit = maxChars
+	}
+	return &Device{limit: limit}
 }
 
 // FillText implements device.Device.
@@ -108,19 +127,19 @@ func (d *Device) EndMask() {
 // excess is dropped exactly as the link and outline walks drop theirs: what was recorded stays searchable.
 const maxChars = 1 << 20
 
-// record appends run's characters, once per run regardless of how many verbs delivered it. Characters past maxChars are
-// dropped.
+// record appends run's characters, once per run regardless of how many verbs delivered it. Characters past the
+// device's cap are dropped.
 func (d *Device) record(run *device.TextRun) {
 	if run == d.last {
 		return
 	}
 	d.last = run
-	if len(d.chars) >= maxChars {
+	if len(d.chars) >= d.limit {
 		return
 	}
 	asc, desc := run.Font.Ascender(), run.Font.Descender()
 	for _, g := range run.Glyphs {
-		if len(d.chars) >= maxChars {
+		if len(d.chars) >= d.limit {
 			return
 		}
 		first, rest := expand(g)
@@ -158,7 +177,7 @@ func (d *Device) recordFillers(base *Char, rest []rune) {
 	up := gfx.Point{X: pen.X + upX, Y: pen.Y + upY}
 	down := gfx.Point{X: pen.X + downX, Y: pen.Y + downY}
 	for _, r := range rest {
-		if len(d.chars) >= maxChars {
+		if len(d.chars) >= d.limit {
 			return
 		}
 		d.chars = append(d.chars, Char{
@@ -240,14 +259,23 @@ func (d *Device) Search(needle string, maxQuads int) []gfx.Quad {
 	return searchChars(d.chars, needle, maxQuads)
 }
 
-// Matcher thresholds, in em fractions of the preceding character's size, pinned behaviorally against the oracle: a
-// horizontal gap of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a space there — text-std14's
-// "Kerned Text" needle carries a 0.5 em TJ gap); baseline origins offset by more than lineBreakEm perpendicular to the
-// advance direction are different lines (measured perpendicular so rotated text advancing through device y stays one
-// line).
+// Matcher thresholds, in em fractions of a character's size, pinned behaviorally against the oracle. A horizontal gap
+// of at least gapSpaceEm reads as a word space (MuPDF's stext synthesizes a space there — text-std14's "Kerned Text"
+// needle carries a 0.5 em TJ gap), measured against the preceding character's size.
+//
+// The two line thresholds are MuPDF's own BASE_MAX_DIST and SPACE_MAX_DIST (source/fitz/stext-device.c), which its
+// structured-text device applies together: a character joins the line it follows while it sits within baseMaxDistEm
+// of that line's baseline AND within spaceMaxDistEm along it, and starts a new line as soon as either distance is
+// reached. Both are measured against the size of the character being placed, not the one before it — probing a raised
+// 10-point digit between 20-point letters brackets the cutoff at 0.8 of the digit's em, not of the letters'.
+//
+// The perpendicular measurement is what keeps rotated text that advances through device y on one line. The along-line
+// measurement is what still separates a wrapped line from the one above it: the next line starts far back along the
+// advance direction, which is a break even though its baseline moved by well under one em.
 const (
-	gapSpaceEm  = 0.2
-	lineBreakEm = 0.1
+	gapSpaceEm     = 0.2
+	baseMaxDistEm  = 0.8
+	spaceMaxDistEm = 0.8
 )
 
 // extentSplitFraction is the relative vertical-extent divergence beyond which the oracle starts a new hit quad within
@@ -373,12 +401,25 @@ func advanceDir(c Char) (ux, uy float64) {
 	return dx / n, dy / n
 }
 
-// lineBreakBetween reports whether cur starts a new line: its baseline origin is offset from prev's perpendicular to
-// prev's advance direction.
+// lineBreakBetween reports whether cur starts a new line rather than continuing prev's: either its baseline origin is
+// offset from prev's by baseMaxDistEm perpendicular to the advance direction, or it sits spaceMaxDistEm or further
+// from where prev's advance left the pen along that direction. See the threshold constants for why both distances
+// decide this and why cur's size scales them.
+//
+// The second test is what a wrapped line trips: its first character is barely off the previous baseline but a long way
+// back along it. Without that test a 0.8 em threshold on the baseline alone would swallow the wrap, and a threshold
+// tight enough to catch the wrap would split every superscript off its own line — which is what the search matcher did
+// before, losing hits MuPDF reports.
 func lineBreakBetween(prev, cur Char) bool {
+	// The direction is taken once and used for both distances: gapBetween would compute it a second time, and the
+	// matcher asks this of every character pair it walks.
 	ux, uy := advanceDir(prev)
 	dx, dy := float64(cur.Origin.X-prev.Origin.X), float64(cur.Origin.Y-prev.Origin.Y)
-	return math.Abs(ux*dy-uy*dx) > float64(lineBreakEm*prev.Size)
+	if math.Abs(ux*dy-uy*dx) >= float64(baseMaxDistEm*cur.Size) {
+		return true
+	}
+	gx, gy := float64(cur.Origin.X-prev.End.X), float64(cur.Origin.Y-prev.End.Y)
+	return math.Abs(ux*gx+uy*gy) >= float64(spaceMaxDistEm*cur.Size)
 }
 
 // gapBetween is the signed distance along prev's advance direction from prev's end to cur's origin (negative when
