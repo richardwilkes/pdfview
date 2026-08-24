@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/testrand"
+	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
 // wiring is one dispatch variable and the two implementations it can hold, plus this architecture's verdict on which
@@ -35,8 +36,8 @@ type wiring struct {
 // swap. A refactor cannot silently leave the experiment build running the scalar code the rest of this file compares
 // against, nor silently switch on a kernel that was turned off deliberately.
 func TestSIMDWiring(t *testing.T) {
-	if simd.Emulated() {
-		t.Skip("vector operations are emulated on this target, so init deliberately keeps the scalar dispatch")
+	if !vecmath.KernelsSupported() {
+		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
 	}
 	for name, w := range map[string]wiring{
 		"addRows": {fn: addRowsFn, kernel: addRowsSIMD, scalar: addRowsScalar, prefer: preferAddRows},

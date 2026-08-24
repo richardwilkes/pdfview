@@ -11,14 +11,20 @@
 
 package filter
 
-import "simd"
+import (
+	"simd"
 
-// init swaps the dispatch variables over to the vector kernels this architecture prefers. simd.Emulated is true on a
-// target whose vector operations the toolchain lowers to scalar loops, where every kernel is strictly slower than the
-// portable code it replaces, so the scalar defaults stay in place wholesale there; past that, each kernel is decided
-// on its own benchmarked merits by the constants in simd_prefs_<arch>.go.
+	"github.com/richardwilkes/pdfview/internal/vecmath"
+)
+
+// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
+// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
+// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
+// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
+// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
+// its preference constant says its benchmarks earned it.
 func init() {
-	if simd.Emulated() {
+	if !vecmath.KernelsSupported() {
 		return
 	}
 	if preferAddRows {

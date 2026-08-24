@@ -16,6 +16,8 @@ import (
 	"reflect"
 	"simd"
 	"testing"
+
+	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
 // The kernels have to be bit-identical to the scalar code, not merely close, because a JBIG2 page is a bitmap: one
@@ -48,8 +50,8 @@ var gateSettings = []struct {
 // what makes the benchmarks and the corpus pins measure and cover the vector path in this build. A kernel its
 // architecture declines must leave the scalar function in place, untouched.
 func TestKernelsWiredWithExperiment(t *testing.T) {
-	if simd.Emulated() {
-		t.Skip("vector units are emulated here, so init deliberately leaves the scalar dispatch in place")
+	if !vecmath.KernelsSupported() {
+		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
 	}
 	for _, entry := range []struct {
 		name      string

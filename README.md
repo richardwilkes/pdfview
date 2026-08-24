@@ -35,10 +35,12 @@ against the standard library's `simd` package. The kernels cover:
 - `internal/jpeg2000` — the inverse RCT, the plane clamps, and the wavelet sweeps
 - `internal/render` — the glyph-blit composite, the soft-mask luma plane, and the path finiteness scan
 
-Both build modes give identical output, and equivalence tests check this on every kernel. If the CPU has no usable
-vector unit, the `simd` package reports emulation, and the dispatch keeps the scalar code at run time. Each kernel
-also carries a per-architecture dispatch preference from measured benchmarks (see `simd-bench.sh`), so a kernel that
-does not beat its scalar form on real silicon stays off.
+Both build modes give identical output, and equivalence tests check this on every kernel. The dispatch keeps the scalar
+code at run time wherever the kernels cannot run: where the CPU has no usable vector unit and the `simd` package
+reports emulation, and on amd64 CPUs without AVX2 (Sandy Bridge, Ivy Bridge, AMD's Bulldozer family), which the `simd`
+package drives in hardware even though the broadcasts it emits are AVX2 instructions. Each kernel also carries a
+per-architecture dispatch preference from measured benchmarks (see `simd-bench.sh`), so a kernel that does not beat its
+scalar form on real silicon stays off.
 
 ## Features
 

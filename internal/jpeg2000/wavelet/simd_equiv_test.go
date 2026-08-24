@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/testrand"
+	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
 // simdTestLengths returns the row widths every kernel is swept over: zero, every width inside the first vector, the
@@ -41,9 +42,8 @@ func simdTestLengths() []int {
 // constants say it should: at the vector sweep where the constant is true, and left on the scalar default where it is
 // false. A refactor can then neither drop a sweep that is switched on nor smuggle in one that is switched off.
 func TestSIMDWiring(t *testing.T) {
-	if simd.Emulated() {
-		t.Skip("the simd package is emulating vectors on this target, so init deliberately leaves every scalar " +
-			"default in place")
+	if !vecmath.KernelsSupported() {
+		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
 	}
 	for name, k := range map[string]struct {
 		got, vector, scalar any

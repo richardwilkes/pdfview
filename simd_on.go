@@ -11,13 +11,20 @@
 
 package pdfview
 
-import "simd"
+import (
+	"simd"
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see simd_prefs_arm64.go
-// and its siblings). On hardware with no vector unit the simd package emulates every operation in scalar Go, which is
-// slower than the scalar code it would replace, so nothing is repointed there at all.
+	"github.com/richardwilkes/pdfview/internal/vecmath"
+)
+
+// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
+// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
+// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
+// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
+// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
+// its preference constant says its benchmarks earned it.
 func init() {
-	if simd.Emulated() {
+	if !vecmath.KernelsSupported() {
 		return
 	}
 	if preferUnpremultiply {

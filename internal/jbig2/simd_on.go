@@ -11,15 +11,21 @@
 
 package jbig2
 
-import "simd"
+import (
+	"simd"
 
-// init points the dispatch variables at the kernels below, where the architecture wants them. Emulated lanes are
-// slower than the scalar code they replace, so on a port without vector units nothing is repointed and the package
-// stays exactly as it builds without the experiment; past that, each kernel is installed only where its preference
-// constant says its benchmarks earned it. The equivalence tests call the kernels directly, so they are still proven
-// under emulation and on an architecture that declines them.
+	"github.com/richardwilkes/pdfview/internal/vecmath"
+)
+
+// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
+// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
+// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
+// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
+// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
+// its preference constant says its benchmarks earned it. The equivalence tests call the kernels directly, so they are
+// still proven under emulation and on a machine that declines them.
 func init() {
-	if simd.Emulated() {
+	if !vecmath.KernelsSupported() {
 		return
 	}
 	if preferComposeBytes {

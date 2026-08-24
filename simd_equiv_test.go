@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/richardwilkes/pdfview/internal/testrand"
+	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
 // scalarUnpremultiply returns what unpremultiplyPixelsScalar makes of a copy of pix.
@@ -49,8 +50,8 @@ func diff(got, want []byte) int {
 // it should: at the vector kernel where the kernel is preferred, and at the scalar loop where it is not. Everything
 // else in this file tests the kernel directly, so this is the one check that the kernel is what a render runs.
 func TestUnpremultiplyWiring(t *testing.T) {
-	if simd.Emulated() {
-		t.Skip("vectors are emulated on this machine, so the scalar default is deliberately left in place")
+	if !vecmath.KernelsSupported() {
+		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
 	}
 	got := reflect.ValueOf(unpremultiplyPixelsFn).Pointer()
 	want := reflect.ValueOf(unpremultiplyPixelsScalar).Pointer()

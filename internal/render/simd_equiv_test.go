@@ -19,6 +19,7 @@ import (
 
 	"github.com/richardwilkes/pdfview/internal/gfx"
 	"github.com/richardwilkes/pdfview/internal/testrand"
+	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
 // fillWords overwrites w with pseudorandom premultiplied pixels: each channel is at or below the alpha, which is what
@@ -38,8 +39,8 @@ func fillWords(r *testrand.Rand, w []uint32) {
 // it should: at the vector kernel where that kernel is preferred, and at the scalar implementation where it is not.
 // Everything else in this file tests the kernels directly, so this is the one check that they are what a render runs.
 func TestRenderSIMDWiring(t *testing.T) {
-	if simd.Emulated() {
-		t.Skip("vectors are emulated on this machine, so the scalar defaults are deliberately left in place")
+	if !vecmath.KernelsSupported() {
+		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
 	}
 	for _, c := range []struct {
 		got    any
