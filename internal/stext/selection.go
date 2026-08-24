@@ -320,6 +320,19 @@ func widthless(q gfx.Quad) bool {
 	return q.UL == q.UR && q.LL == q.LR
 }
 
+// Search finds needle in the page's characters and returns the hit quads in emission order, at most maxQuads of them.
+// It is Device.Search over a recorded page rather than over the device still recording it: the two share one matcher,
+// so searching a page after extraction reports exactly what searching during it would have. The matching rules and the
+// shape of the result are documented on Device.Search; in particular a quad with no width is kept here, which is the
+// one place a hit differs from the selection Quads paints over the same characters. A nil or empty page, a needle with
+// no non-space rune, or a non-positive maxQuads returns no hits.
+func (p *Page) Search(needle string, maxQuads int) []gfx.Quad {
+	if p == nil {
+		return nil
+	}
+	return searchChars(p.chars, needle, maxQuads)
+}
+
 // clamp bounds a caller's range to the page and puts it in order, so a backwards drag or an index held over from a
 // longer page names a real selection.
 func (p *Page) clamp(start, end int) (from, to int) {

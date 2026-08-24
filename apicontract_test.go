@@ -126,6 +126,9 @@ func TestZeroValueTextPage(t *testing.T) {
 			if got := page.Highlights(0, 10); got != nil {
 				t.Errorf("Highlights = %v, want nil", got)
 			}
+			if got := page.Search("needle", 10); got != nil {
+				t.Errorf("Search = %v, want nil", got)
+			}
 			// A page with no extent fits no box, so ForSize reports ErrInvalidPageSize; AtDPI re-labels the empty page.
 			if _, err := page.ForSize(800, 600); !errors.Is(err, pdfview.ErrInvalidPageSize) {
 				t.Errorf("ForSize error = %v, want ErrInvalidPageSize", err)
@@ -139,6 +142,9 @@ func TestZeroValueTextPage(t *testing.T) {
 			}
 			if got := scaled.Highlights(0, 10); got != nil {
 				t.Errorf("AtDPI(150).Highlights = %v, want nil", got)
+			}
+			if got := scaled.Search("needle", 10); got != nil {
+				t.Errorf("AtDPI(150).Search = %v, want nil", got)
 			}
 			if got := scaled.IndexAt(image.Pt(10, 10)); got != 0 {
 				t.Errorf("AtDPI(150).IndexAt = %d, want 0", got)

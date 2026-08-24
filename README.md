@@ -48,13 +48,13 @@ scalar form on real silicon stays off.
   height (`RenderPageForSize`).
 - Return the bounding boxes of search-text matches on a rendered page, with MuPDF-compatible search semantics
   (case folding, elastic whitespace, per-line quads).
-- Extract a page's text for hit-testing, selection, and copy (`TextPage`): a caret index for any point of the
-  rendered image (`IndexAt`), the word or line around an index (`WordAt`, `LineAt`), the text of any range (`Text`,
-  carrying the spaces and newlines the page's geometry implies but its characters do not), and the rectangles to
-  paint a selection with (`Highlights`, grouped exactly as search hits are). What is searchable is what is
-  selectable. The extraction is scale-free, so one `TextPage` per page serves every zoom level: `AtDPI` and
-  `ForSize` re-label it for the image `RenderPage` or `RenderPageForSize` produces, taking neither a second pass nor
-  the document lock.
+- Extract a page's text for hit-testing, selection, copy, and search (`TextPage`): a caret index for any point of
+  the rendered image (`IndexAt`), the word or line around an index (`WordAt`, `LineAt`), the text of any range
+  (`Text`, carrying the spaces and newlines the page's geometry implies but its characters do not), the rectangles
+  to paint a selection with (`Highlights`, grouped exactly as search hits are), and the rectangles a needle matches
+  at (`Search`, the same hits a render reports, without rendering). What is searchable is what is selectable. The
+  extraction is scale-free, so one `TextPage` per page serves every zoom level: `AtDPI` and `ForSize` re-label it
+  for the image `RenderPage` or `RenderPageForSize` produces, taking neither a second pass nor the document lock.
 - Extract a page's links (both external URIs and internal page references with destination points).
 - Extract the document's table of contents.
 - Read the document's page labels — the display numbering a reader shows, such as front matter in roman numerals

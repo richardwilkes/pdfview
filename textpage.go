@@ -15,8 +15,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/stext"
 )
 
-// TextPage is one page's extracted text, ready to hit-test, select, and copy: character indices to address positions
-// with, words and lines to snap to, the text of any range, and the rectangles to paint that range with.
+// TextPage is one page's extracted text, ready to hit-test, select, copy, and search: character indices to address
+// positions with, words and lines to snap to, the text of any range, the rectangles to paint that range with, and the
+// rectangles a needle matches at.
 //
 // # Coordinates
 //
@@ -29,14 +30,15 @@ import (
 //
 // # What is extracted
 //
-// Exactly what search sees, because it is the same pass: text is collected unclipped, including text scissored away by
-// a clip path, invisible text (render mode 3), and the text of annotation appearance streams. Characters arrive in the
-// order the content streams draw them, which is reading order for a well-formed document only; nothing re-flows a page
-// into columns or paragraphs. A character the font gives no Unicode mapping for still occupies an index and contributes
-// its geometry to a highlight, but contributes nothing to Text. A glyph that spells more than one character — a
-// ligature, or a one-to-many /ToUnicode mapping — occupies one index per character, so "ﬁ" is two indices reading
-// "fi"; the extra characters carry no advance of their own and sit at the end of the glyph that drew them (IndexAt
-// shares the glyph's width among them, so a caret can still land between them).
+// Exactly what search sees, because it is the same pass — Search runs the render's own matcher over these very
+// characters: text is collected unclipped, including text scissored away by a clip path, invisible text (render mode
+// 3), and the text of annotation appearance streams. Characters arrive in the order the content streams draw them,
+// which is reading order for a well-formed document only; nothing re-flows a page into columns or paragraphs. A
+// character the font gives no Unicode mapping for still occupies an index and contributes its geometry to a highlight,
+// but contributes nothing to Text. A glyph that spells more than one character — a ligature, or a one-to-many
+// /ToUnicode mapping — occupies one index per character, so "ﬁ" is two indices reading "fi"; the extra characters carry
+// no advance of their own and sit at the end of the glyph that drew them (IndexAt shares the glyph's width among them,
+// so a caret can still land between them).
 //
 // # Lifetime and safety
 //
@@ -183,13 +185,13 @@ func (t *TextPage) Text(start, end int) string {
 
 // Highlights returns the rectangles to paint the selection [start, end) with, in the pixel space of the rendered
 // image: one per line the range touches, split further where the text's vertical extent changes sharply within a line.
-// They are grouped and rounded as RenderedPage.SearchHits is, so selecting a word and searching for it paint the same
-// shape.
+// They are grouped and rounded as RenderedPage.SearchHits and Search are, so selecting a word and searching for it
+// paint the same shape.
 //
-// A rectangle enclosing no pixels is dropped, which is the one way this differs from SearchHits. Such rectangles come
-// from the letters a single glyph spells beyond the first: they sit at that glyph's pen with no advance of their own,
-// so there is nothing to paint. MuPDF drops the same quads when it highlights a selection. A range covering no
-// characters, or none that paint anything, returns nil.
+// A rectangle enclosing no pixels is dropped, which is the one way this differs from Search and SearchHits. Such
+// rectangles come from the letters a single glyph spells beyond the first: they sit at that glyph's pen with no
+// advance of their own, so there is nothing to paint. MuPDF drops the same quads when it highlights a selection. A
+// range covering no characters, or none that paint anything, returns nil.
 func (t *TextPage) Highlights(start, end int) []image.Rectangle {
 	if t == nil {
 		return nil
@@ -206,6 +208,36 @@ func (t *TextPage) Highlights(start, end int) []image.Rectangle {
 	}
 	if len(rects) == 0 {
 		return nil
+	}
+	return rects
+}
+
+// Search returns the rectangles of up to maxHits matches of needle on the page, in the pixel space of the rendered
+// image — the same result RenderPage or RenderPageForSize would return in RenderedPage.SearchHits for this page at
+// this labeling, without rendering anything. A viewer holding a TextPage can therefore search a page it is not
+// re-rendering, and re-label the answer for another zoom level with AtDPI or ForSize rather than searching again.
+//
+// The hits come back in the order the matcher finds them, one rectangle per line a match touches, split further where
+// the match's own geometry breaks it up, grouped and rounded exactly as SearchHits and Highlights are. Unlike
+// Highlights, a rectangle enclosing no pixels is kept, because SearchHits keeps it. A nil receiver, an empty needle, a
+// needle holding nothing but whitespace, a maxHits of zero or less, and a page with no match all return nil.
+// OverallMaxHits caps the count however large maxHits is, and a zero or negative OverallMaxHits returns nil.
+//
+// One kind of page can answer differently here than through a render: a TextPage is extracted with a cap of
+// OverallMaxTextChars characters and, when a panic provoked by hostile content cuts the pass short, keeps the prefix
+// recorded up to that point, while a render's search pass is uncapped and reports no hits at all when it is cut short.
+// So on a pathological page the two can disagree; on any ordinary page they are identical.
+func (t *TextPage) Search(needle string, maxHits int) []image.Rectangle {
+	if t == nil || needle == "" || maxHits <= 0 || OverallMaxHits <= 0 {
+		return nil
+	}
+	quads := t.text.Search(needle, min(maxHits, OverallMaxHits))
+	if len(quads) == 0 {
+		return nil
+	}
+	rects := make([]image.Rectangle, len(quads))
+	for i, q := range quads {
+		rects[i] = quadToRect(quadFromGfx(q), t.space)
 	}
 	return rects
 }

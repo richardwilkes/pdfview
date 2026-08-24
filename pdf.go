@@ -15,11 +15,11 @@
 // (standard security handler R2-R6). RenderPage and RenderPageForSize rasterize a page's content — paths, clips,
 // colors, form XObjects, images, fonts and text, shadings, patterns, transparency groups, soft masks, blend modes, and
 // annotation appearance streams. Text search returns MuPDF-compatible hit rectangles. TextPage exposes the same
-// extracted text for hit-testing, selection, and copying, with highlight rectangles in the rendered image's pixel
-// space. PageLabel, PageLabels, and PagesWithLabel translate between a page's position in the file and its display
-// label. DrawPage draws a page onto a caller-owned canvas. The engine's behavior is pinned against the MuPDF-based
-// github.com/richardwilkes/pdf binding it succeeds: coordinates exactly, pixels within committed perceptual thresholds.
-// See README.md for the architecture.
+// extracted text for hit-testing, selection, copying, and searching a page without rendering it (TextPage.Search),
+// with every rectangle in the rendered image's pixel space. PageLabel, PageLabels, and PagesWithLabel translate
+// between a page's position in the file and its display label. DrawPage draws a page onto a caller-owned canvas. The
+// engine's behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates
+// exactly, pixels within committed perceptual thresholds. See README.md for the architecture.
 //
 // # Platform requirements
 //
