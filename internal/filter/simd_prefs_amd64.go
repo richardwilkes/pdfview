@@ -12,6 +12,6 @@
 package filter
 
 // Which kernels this architecture prefers over the scalar code they replace. See simd_prefs_arm64.go for what settles
-// these. Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X): the row add wins 4.3-6.0x
-// in isolation and halves the end-to-end PNG Up predictor time.
+// these. Measured with simd-bench.sh on an Intel Xeon W-2191B (Skylake-X): the row add wins 4.3-6.0x in isolation and
+// halves the end-to-end PNG Up predictor time.
 const preferAddRows = true

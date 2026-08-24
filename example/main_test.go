@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-// emptyPDF has a valid catalog whose page tree holds no pages. It opens successfully and reports a page count of zero.
+// emptyPDF has a valid catalog whose page tree holds no pages, so it opens with a page count of zero.
 const emptyPDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -48,8 +48,8 @@ startxref
 %%EOF
 `
 
-// A document that opens with zero pages must be reported as having nothing to render rather than failing with the
-// "invalid page number" that an unconditional RenderPage(0, ...) produces.
+// A zero-page document must report nothing to render rather than fail with the ErrInvalidPageNumber an unconditional
+// RenderPage(0, ...) produces.
 func TestExtractWithNoPages(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

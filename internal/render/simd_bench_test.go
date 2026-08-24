@@ -20,10 +20,9 @@ import (
 // glyphBoxes are the coverage plane sizes body text actually produces: roughly 9 pt at 96, 200, and 300 dpi.
 var glyphBoxes = [][2]int{{12, 16}, {24, 32}, {40, 50}}
 
-// BenchmarkCompositeMaskSIMD measures the glyph blit through compositeMask, which is what FillText calls per glyph on
-// a warm cache — the row loop, the clipping, and the dispatch variable included. The three coverage patterns are the
-// two the scalar switch has its own arms for and a ramp that mixes every value, since that is what decides how much
-// work the scalar arm actually does.
+// BenchmarkCompositeMaskSIMD measures the glyph blit through compositeMask — the row loop, the clipping, and the
+// dispatch variable included — under the two coverage patterns the scalar switch has arms for and a ramp that mixes
+// every value.
 func BenchmarkCompositeMaskSIMD(b *testing.B) {
 	for _, box := range glyphBoxes {
 		w, h := box[0], box[1]

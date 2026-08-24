@@ -11,14 +11,14 @@
 
 package render
 
-// Which of this package's vector kernels are worth dispatching to on arm64. A kernel whose benchmark does not beat
-// the scalar code it replaces on a given architecture is turned off here rather than deleted, since the same kernel
-// can be the right choice on another one. The values are settled from simd-bench.sh benchstat runs.
+// Which of this package's vector kernels are worth dispatching to on arm64. A kernel whose benchmark does not beat the
+// scalar code on an architecture is turned off here rather than deleted, since it can be the right choice on another.
+// The values come from simd-bench.sh benchstat runs.
 //
-// Settled 2026-08-21 on an Apple M4 Max: the glyph blit wins up to 1.6x on realistic coverage shapes and the
-// finiteness scan wins ~2x, so both stay on. The luminosity plane lost a reproducible 2.5% at 512x512 and 1024x1024 —
-// the scalar LUT gather is half the loop and cannot vectorize, and the scalar weighted sum is already cheap — so it
-// is off here; its kernel, tests, and benchmark stay for a retune on wider vectors.
+// Measured on an Apple M4 Max: the glyph blit wins up to 1.6x on realistic coverage shapes and the finiteness scan wins
+// ~2x, so both stay on. The luminosity plane lost a reproducible 2.5% at 512x512 and 1024x1024 — the scalar LUT gather
+// is half the loop and cannot vectorize, and the scalar weighted sum is already cheap — so it is off; its kernel,
+// tests, and benchmark stay for a retune on wider vectors.
 const (
 	preferCompositeMask = true
 	preferMaskLuma      = false

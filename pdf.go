@@ -10,24 +10,22 @@
 // Package pdfview renders PDF pages to images and extracts text-search hits, selectable page text, links, the table of
 // contents, and page labels. It also handles password-protected documents.
 //
-// The package is a pure-Go PDF engine — no cgo, CGO_ENABLED=0 builds — with rasterization delegated to
-// github.com/richardwilkes/canvas. New parses documents (including damaged ones, via a repair scan) and decrypts
-// password-protected ones (standard security handler R2-R6); RenderPage and RenderPageForSize rasterize each page's
-// content — paths, clips, colors, form XObjects, images, fonts and text, shadings, patterns, transparency groups, soft
-// masks, blend modes, and annotation appearance streams — through the content-stream interpreter; text search returns
-// MuPDF-compatible hit rectangles; TextPage exposes the same extracted text a caller can hit-test, select, and copy,
-// with highlight rectangles in the rendered image's own pixel space; PageLabel, PageLabels, and PagesWithLabel
-// translate between a page's position in the file and the display label the document gives it (front matter in roman
-// numerals, an appendix that restarts at 1); and DrawPage draws a page's content onto a caller-owned canvas. The
-// engine's behavior is pinned against the MuPDF-based github.com/richardwilkes/pdf binding it succeeds: coordinates
-// exactly, pixels within committed perceptual thresholds. See README.md for the architecture.
+// The package is a pure-Go PDF engine (no cgo; CGO_ENABLED=0 builds) with rasterization delegated to
+// github.com/richardwilkes/canvas. New parses documents, repairing damaged ones, and decrypts password-protected ones
+// (standard security handler R2-R6). RenderPage and RenderPageForSize rasterize a page's content — paths, clips,
+// colors, form XObjects, images, fonts and text, shadings, patterns, transparency groups, soft masks, blend modes, and
+// annotation appearance streams. Text search returns MuPDF-compatible hit rectangles. TextPage exposes the same
+// extracted text for hit-testing, selection, and copying, with highlight rectangles in the rendered image's pixel
+// space. PageLabel, PageLabels, and PagesWithLabel translate between a page's position in the file and its display
+// label. DrawPage draws a page onto a caller-owned canvas. The engine's behavior is pinned against the MuPDF-based
+// github.com/richardwilkes/pdf binding it succeeds: coordinates exactly, pixels within committed perceptual thresholds.
+// See README.md for the architecture.
 //
 // # Platform requirements
 //
-// 64-bit platforms only (amd64, arm64, and the other 64-bit GOARCH values). The engine's size, offset, and work-budget
-// arithmetic is written against a 64-bit int, and the documented caps are chosen to sit inside it — a 2^26 pixel image
-// decodes through row strides and sample bit positions that reach 2^35, and a predictor row length reaches 2^34, none
-// of which a 32-bit int can hold. A 32-bit build is rejected at compile time rather than left to wrap silently.
+// 64-bit platforms only. The engine's size, offset, and work-budget arithmetic assumes a 64-bit int, and the documented
+// caps sit inside it: a 2^26 pixel image decodes through row strides and sample bit positions that reach 2^35, and a
+// predictor row length reaches 2^34. A 32-bit build is rejected at compile time.
 package pdfview
 
 import (
@@ -48,18 +46,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
-// This package supports 64-bit platforms only; see the package documentation for why. The constant below is 0 where int
-// is 64 bits and an unrepresentable -1 where it is 32, so a 32-bit build fails to compile ("constant -1 overflows
-// uint") rather than silently producing an engine whose sizing arithmetic can wrap.
+// 64-bit platforms only (see the package documentation): this is 0 where int is 64 bits and an unrepresentable -1
+// where it is 32, so a 32-bit build fails with "constant -1 overflows uint".
 const _ uint = ^uint(0)>>63 - 1
 
 // Possible error values
 var (
 	ErrNotPDFData = errors.New("only PDF documents are supported")
-	// ErrUnableToCreatePDFContext is retained only for source compatibility with the MuPDF-based
-	// github.com/richardwilkes/pdf binding this package succeeds, where it reported a failure to create the library's
-	// fz_context. The pure-Go engine has no such context to establish, so nothing in this package ever returns it: an
-	// open failure is always ErrNotPDFData or ErrUnableToOpenPDF. A branch testing for it can never be taken.
+	// ErrUnableToCreatePDFContext is never returned. It is retained for source compatibility with the MuPDF-based
+	// github.com/richardwilkes/pdf binding, where it reported a failure to create the library's fz_context; an open
+	// failure here is always ErrNotPDFData or ErrUnableToOpenPDF.
 	ErrUnableToCreatePDFContext = errors.New("unable to create PDF context")
 	ErrInternal                 = errors.New("internal error")
 	ErrUnableToOpenPDF          = errors.New("unable to open PDF")
@@ -72,32 +68,25 @@ var (
 	ErrInvalidMatrix            = errors.New("invalid matrix")
 )
 
-// Each of these variables is global and are not safe to modify when other calls to this code are being made. Generally,
-// they should be modified at startup before any other use of this package.
+// These variables are global and not safe to modify while other calls into this package are in progress; set them at
+// startup. The caps guard against untrusted input that would otherwise exhaust memory.
 var (
-	// OverallMaxHits is the maximum number of hits returned, even if the API is called with a larger value. This is
-	// here to safeguard against untrusted input that might otherwise cause an out of memory error.
+	// OverallMaxHits caps the number of search hits returned, whatever maxHits a call asks for.
 	OverallMaxHits = 1000
-	// OverallMaxLinks is the maximum number of links returned. This is here to safeguard against untrusted input that
-	// might otherwise cause an out of memory error.
+	// OverallMaxLinks caps the number of links returned.
 	OverallMaxLinks = 1000
-	// OverallMaxTOCEntries is the maximum number of TOC entries returned. This is here to safeguard against untrusted
-	// input that might otherwise cause an out of memory error.
+	// OverallMaxTOCEntries caps the number of TOC entries returned.
 	OverallMaxTOCEntries = 1000
-	// OverallMaxTextChars is the maximum number of characters one TextPage records; the rest of the page's text is
-	// dropped, exactly as the hit, link, and TOC walks drop their excess. This is here to safeguard against untrusted
-	// input that might otherwise cause an out of memory error — a page's glyph count is bounded by the interpreter's
-	// work budget, but the extracted records cost roughly 60 bytes each and, unlike a search's hits, a TextPage is
-	// retained by the caller for as long as the text is on screen. The default (1,048,576 characters) is far above the
-	// densest real page, which runs to tens of thousands. Setting it to zero or a negative value restores the engine's
-	// own default rather than disabling extraction.
+	// OverallMaxTextChars caps the number of characters one TextPage records; the rest of the page's text is dropped.
+	// A page's glyph count is already bounded by the interpreter's work budget, but each extracted record costs about
+	// 60 bytes and a TextPage is retained by the caller for as long as the text is on screen. The default (1,048,576)
+	// is far above the densest real page, which runs to tens of thousands. Zero or a negative value restores the
+	// engine's own default rather than disabling extraction.
 	OverallMaxTextChars = 1 << 20
-	// OverallMaxPixels is the maximum number of pixels (width × height) a rendered page image may contain. Requests
-	// that would produce a larger image are rejected rather than attempting a very large allocation, safeguarding
-	// against untrusted input or bad sizing parameters that might otherwise cause an out of memory error. The default
-	// (268,435,456 pixels) is the largest image the internal raster surface will allocate: a 1 GiB buffer at the
-	// 4 bytes per pixel it stores. Raising it past that default does not enlarge the images that can be rendered; the
-	// surface allocation then fails instead, reporting ErrUnableToCreateImage rather than ErrImageTooLarge.
+	// OverallMaxPixels caps the pixel count (width × height) of a rendered page image; larger requests are rejected
+	// with ErrImageTooLarge. The default (268,435,456) is the largest image the raster surface will allocate: 1 GiB at
+	// 4 bytes per pixel. Raising it past that does not enlarge the renderable image; the surface allocation then fails
+	// with ErrUnableToCreateImage instead.
 	OverallMaxPixels = render.MaxSurfacePixels
 )
 
@@ -117,11 +106,10 @@ type document struct {
 	lock sync.Mutex
 }
 
-// Document represents PDF document. Page numbers for the exposed API are zero-based. Methods on this are safe to use
-// from multiple goroutines. Calls into the underlying engine are serialized internally, so they execute one at a time.
+// Document is an open PDF document. Page numbers in the API are zero-based. Methods are safe to call from multiple
+// goroutines; calls into the engine are serialized.
 type Document struct {
-	// document is held by pointer so the public wrapper stays a single word and the mutex it contains is shared by
-	// every copy of the wrapper rather than duplicated; Release drops the engine state through this shared pointer.
+	// Held by pointer so every copy of the wrapper shares one mutex and Release drops the engine state for all of them.
 	*document
 }
 
@@ -142,18 +130,16 @@ type PageLink struct {
 	// Bounds is the clickable hot-zone of the link on the page it appears on, in rendered-image pixel space.
 	Bounds image.Rectangle
 	// DestPoint is the point on the destination page (PageNumber) that an internal link targets, in the pixel space of
-	// that page's rendered image — the destination page's own, which under RenderPageForSize is scaled from that
-	// page's bounds and so differs from this page's whenever the two pages differ in size. It is the zero value (0,0)
-	// for external links and for internal links whose destination has no explicit coordinate (such as a /Fit
+	// that page's rendered image, which under RenderPageForSize differs from this page's whenever the two pages differ
+	// in size. It is (0,0) for external links and for internal links with no explicit coordinate (such as a /Fit
 	// destination).
 	DestPoint image.Point
 }
 
 // RenderedPage holds the rendered page.
 type RenderedPage struct {
-	// Image is the rendered page. It is rendered with an alpha channel, and most PDF pages do not paint their own
-	// background, so areas with no content are transparent rather than white. Callers that want an opaque page (for
-	// example, when encoding to a format without alpha) should composite the image onto their desired background color.
+	// Image is the rendered page. Most PDF pages paint no background, so areas with no content are transparent rather
+	// than white; callers that want an opaque page should composite it onto a background color.
 	Image      *image.NRGBA
 	SearchHits []image.Rectangle
 	Links      []*PageLink
@@ -161,7 +147,7 @@ type RenderedPage struct {
 
 // New returns new PDF document from the provided raw bytes. Pass in 0 for maxCacheSize for no limit.
 func New(buffer []byte, maxCacheSize uint64) (*Document, error) {
-	// Allow some garbage to be before the PDF content, as Acrobat and MuPDF itself allow it
+	// Acrobat and MuPDF tolerate leading garbage before the header.
 	if !bytes.Contains(buffer[:min(1024, len(buffer))], []byte("%PDF")) {
 		return nil, ErrNotPDFData
 	}
@@ -177,11 +163,9 @@ func (d *document) released() bool {
 	return d.eng == nil
 }
 
-// usable reports whether the wrapper carries state a method can act on. Document embeds an unexported pointer, so the
-// zero value of the exported type — and a nil *Document — would dereference nil on the very first statement of every
-// method (the mutex lives behind that pointer), contradicting the package's promise that panics never escape the
-// public API. Every entry point checks this first and then returns the same value it documents for a released
-// document, which is the state a wrapper with no engine behind it is indistinguishable from.
+// usable reports whether the wrapper carries state a method can act on. The zero Document and a nil *Document have no
+// embedded pointer, so locking the mutex behind it would dereference nil; every entry point checks this first and then
+// answers as it does for a released document.
 func (d *Document) usable() bool {
 	return d != nil && d.document != nil
 }
@@ -255,9 +239,8 @@ func buildTOCEntries(outline *outlineNode, scale float32, maxAllowed int) (entri
 func sanitizeString(in string) string {
 	sanitized := make([]rune, 0, len(in))
 	for _, ch := range in {
-		// U+FFFD (the Unicode replacement character) stands in for bytes that could not be decoded as valid UTF-8, such
-		// as the unmappable dot-leader glyphs some PDFs place in outline titles. It is printable and non-control, so it
-		// would otherwise survive the filter below; drop it explicitly to keep those spurious characters out.
+		// U+FFFD stands in for bytes that did not decode as UTF-8, such as the unmappable dot-leader glyphs some PDFs
+		// put in outline titles. It is printable and non-control, so it must be dropped explicitly.
 		if ch != unicode.ReplacementChar && !unicode.IsControl(ch) && unicode.IsPrint(ch) {
 			sanitized = append(sanitized, ch)
 		}
@@ -326,27 +309,26 @@ func (d *Document) pageSize(pageNumber int) (*page, error) {
 }
 
 func dpiToScale(dpi int) float64 {
-	// Limit scaling to 10x; some displays report bad EDID data, causing the input DPI from programs to be wildly off.
+	// Cap the scale at 10x: displays with bad EDID data make programs report wildly wrong dpi.
 	return min(float64(max(dpi, 1))/72, 10)
 }
 
 // renderSpec describes how one render sizes its output: scale converts page space to pixels, and maxWidth/maxHeight,
-// when positive, cap the resulting pixel extents. RenderPage leaves the caps zero — its scale places no bound on the
-// image beyond the page's own size. RenderPageForSize sets them because it promises the image fits within them, and
-// its fit scale is computed in float64 while renderExtent redoes the multiply in float32 before ceiling with a fixed
-// 0.001 epsilon: once a target extent exceeds roughly 17,000 px the float32 rounding error outgrows that epsilon and
-// the unclamped extent can land one pixel past the box the caller asked to fit within.
+// when positive, cap the pixel extents. RenderPage leaves the caps zero. RenderPageForSize sets them because it
+// promises the image fits: its fit scale is computed in float64 while renderExtent redoes the multiply in float32
+// before ceiling with a fixed 0.001 epsilon, and past roughly 17,000 px the float32 rounding error outgrows that
+// epsilon, so the unclamped extent can land one pixel past the box.
 type renderSpec struct {
 	scale               float64
 	maxWidth, maxHeight int
 }
 
 // extents returns the pixel dimensions the page renders to under this spec. It is the single authority for those
-// dimensions: rasterize sizes the surface from it, and the search-hit and link coordinates are bounded to it so they
-// honor their documented "pixel space of the rendered image" even though the extent multiply happens in float32 (the
-// engine's geometry precision, which the MuPDF dimension goldens are pinned to) while the coordinate multiply happens
-// in float64 (which the MuPDF coordinate goldens are pinned to). The two scales differ in the last bits, so without
-// this bound a full-page link on a US Letter page at 150 dpi reports a bottom edge one row below the 1650-row image.
+// dimensions: rasterize sizes the surface from it, and search-hit and link coordinates are bounded to it. The extent
+// multiply happens in float32 (the engine's geometry precision, pinned by the MuPDF dimension goldens) while the
+// coordinate multiply happens in float64 (pinned by the MuPDF coordinate goldens); the two differ in the last bits, so
+// without the bound a full-page link on a US Letter page at 150 dpi reports a bottom edge one row below the 1650-row
+// image.
 func (s renderSpec) extents(pg *page) (width, height int) {
 	width = renderExtent(pg.width, s.scale)
 	height = renderExtent(pg.height, s.scale)
@@ -363,11 +345,11 @@ func (s renderSpec) extents(pg *page) (width, height int) {
 // DrawPage). It is enabled by default.
 //
 // Stem darkening dilates fill-mode text outlines by a sub-pixel, size-dependent amount before rasterization, so stems
-// thinner than a pixel keep full ink coverage instead of fading to gray — the same treatment platform rasterizers
-// apply (CoreGraphics "font smoothing", FreeType's CFF stem darkening), tuned here to match macOS Preview's rendered
-// text weight. Disable it for exact analytic-AA area coverage — the geometry-faithful rasterization MuPDF produces,
-// which the package's parity goldens are recorded against. Text painted with mesh-shading or tiling patterns, stroked
-// text, Type 3 glyphs, and text clip paths are never darkened under either setting.
+// thinner than a pixel keep full ink coverage instead of fading to gray — the treatment platform rasterizers apply
+// (CoreGraphics "font smoothing", FreeType's CFF stem darkening), tuned to match macOS Preview's text weight. Disable
+// it for exact analytic-AA area coverage, the rasterization MuPDF produces and the package's parity goldens are
+// recorded against. Text painted with mesh-shading or tiling patterns, stroked text, Type 3 glyphs, and text clip paths
+// are never darkened.
 //
 // Does nothing on a released document.
 func (d *Document) SetStemDarkening(enabled bool) {
@@ -413,17 +395,14 @@ func (d *Document) RenderPageForSize(pageNumber, maxWidth, maxHeight, maxHits in
 }
 
 // fitSpec is the render spec that fits pg within maxWidth×maxHeight: the scale is the smaller of the two ratios, and
-// the box travels with it so the extents can never exceed what the caller asked to fit within. RenderPageForSize and
-// TextPage.ForSize share it, which is what lets a fit-to-box image and the text labeled for that image be the same
-// pixel space: one computation sizes both, so neither can drift from the other. It rejects a request the way
-// RenderPageForSize documents — ErrInvalidPageSize for a non-positive box or page, ErrImageTooLarge past
-// OverallMaxPixels — before any work is done or any buffer is allocated.
+// the box travels with it so the extents can never exceed it. RenderPageForSize and TextPage.ForSize share it, so a
+// fit-to-box image and the text labeled for it are the same pixel space. It rejects a request as RenderPageForSize
+// documents — ErrInvalidPageSize for a non-positive box or page, ErrImageTooLarge past OverallMaxPixels — before
+// any buffer is allocated.
 func fitSpec(pg *page, maxWidth, maxHeight int) (renderSpec, error) {
 	if maxWidth <= 0 || maxHeight <= 0 {
 		return renderSpec{}, ErrInvalidPageSize
 	}
-	// The page extents are computed in float32 (the precision the engine's geometry pipeline carries) before being
-	// widened, matching the C float precision the MuPDF-based implementation exposed.
 	w := float64(pg.width)
 	h := float64(pg.height)
 	if w <= 0 || h <= 0 {
@@ -433,18 +412,15 @@ func fitSpec(pg *page, maxWidth, maxHeight int) (renderSpec, error) {
 	if ratio := float64(maxHeight) / h; ratio < scale {
 		scale = ratio
 	}
-	// The rendered image is scaled to fit within maxWidth×maxHeight, so its pixel count is bounded by the requested
-	// box.
 	if (w*scale)*(h*scale) > float64(OverallMaxPixels) {
 		return renderSpec{}, ErrImageTooLarge
 	}
 	return renderSpec{scale: scale, maxWidth: maxWidth, maxHeight: maxHeight}, nil
 }
 
-// render is the shared body of RenderPage and RenderPageForSize. It validates the page number, loads the page, asks
-// specFor to compute the render spec (which may inspect the page bounds and reject the request), renders, and
-// assembles the result. The document lock is held throughout so all engine work is serialized. specFor is carried into
-// loadLinks as well, which needs it to size the destination page of an internal link.
+// render is the shared body of RenderPage and RenderPageForSize. specFor computes the render spec from the loaded page
+// and may reject the request; it is carried into loadLinks, which needs it to size the destination page of an internal
+// link. The document lock is held throughout.
 func (d *Document) render(pageNumber, maxHits int, search string, specFor func(pg *page) (renderSpec, error)) (*RenderedPage, error) {
 	if !d.usable() {
 		return nil, ErrDocumentReleased
@@ -469,8 +445,7 @@ func (d *Document) render(pageNumber, maxHits int, search string, specFor func(p
 	if err != nil {
 		return nil, err
 	}
-	// The image that came back is the pixel space every coordinate below is documented to be in, so it — not a
-	// recomputed extent — is what those coordinates are bounded to.
+	// Coordinates are bounded to the image that came back, not to a recomputed extent.
 	self := pixelSpace{scale: spec.scale, bounds: img.Rect}
 	return &RenderedPage{
 		Image:      img,
@@ -494,8 +469,7 @@ func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
 	if size <= 0 || len(pix) < size {
 		return nil, ErrUnableToCreateImage
 	}
-	// The engine rasterizes with premultiplied alpha, but image.NRGBA expects non-premultiplied (straight) alpha, so
-	// undo the premultiplication.
+	// The engine rasterizes premultiplied; image.NRGBA is straight alpha.
 	unpremultiplyPixelsFn(pix)
 	return &image.NRGBA{
 		Pix:    pix,
@@ -504,10 +478,9 @@ func (d *Document) renderPage(pg *page, spec renderSpec) (*image.NRGBA, error) {
 	}, nil
 }
 
-// unpremultiplyPixelsScalar converts a premultiplied RGBA byte buffer to straight alpha in place. Fully opaque
-// (a == 255) and fully transparent (a == 0) pixels need no adjustment, and trailing bytes that do not complete a
-// pixel are left alone. It is the default behind unpremultiplyPixelsFn, and the fallback the vector kernel takes for
-// buffers too small to be worth its setup.
+// unpremultiplyPixelsScalar converts a premultiplied RGBA byte buffer to straight alpha in place, leaving a == 0 and
+// a == 255 pixels and any trailing partial pixel untouched. It is the default behind unpremultiplyPixelsFn and the
+// fallback the vector kernel takes for short buffers.
 func unpremultiplyPixelsScalar(pix []byte) {
 	for i := 0; i+3 < len(pix); i += 4 {
 		switch a := pix[i+3]; a {
@@ -531,9 +504,9 @@ func unpremultiply(c, a uint8) uint8 {
 }
 
 // pixelSpace is the rendered-image pixel space of one page: the scale page-space coordinates are multiplied by and the
-// image rectangle the results are bounded to. Every coordinate the public API returns is documented to live in one of
-// these — the rendered page's own for search hits, selection highlights, and link bounds, the destination page's for a
-// link's DestPoint — and a TextPage's points come back in through the same space.
+// image rectangle the results are bounded to. Every coordinate the public API returns lives in one of these — the
+// rendered page's own for search hits, highlights, and link bounds, the destination page's for a link's DestPoint —
+// and a TextPage's points come back in through the same space.
 type pixelSpace struct {
 	bounds image.Rectangle
 	scale  float64
@@ -544,11 +517,10 @@ func (s pixelSpace) rect(x0, y0, x1, y1 float64) image.Rectangle {
 	return scaleRect(x0, y0, x1, y1, s.scale).Intersect(s.bounds)
 }
 
-// unscalePoint maps a point of this space back to page space, the direction a hit test runs in. No rounding or
-// bounding is applied on the way back: the result feeds a nearest-boundary search over character geometry, which a
-// sub-point error cannot move, and a point outside the image is a legitimate question there (a drag that left the
-// page still selects to its nearest line). A space with no scale — the zero value, which carries no page either —
-// answers with the origin rather than dividing by zero.
+// unscalePoint maps a point of this space back to page space, the direction a hit test runs in. Nothing is rounded or
+// bounded: the result feeds a nearest-boundary search over character geometry, and a point outside the image is a
+// legitimate question there (a drag that left the page still selects to its nearest line). The zero value answers with
+// the origin rather than dividing by zero.
 func (s pixelSpace) unscalePoint(pt image.Point) gfx.Point {
 	if s.scale <= 0 {
 		return gfx.Point{}
@@ -578,9 +550,8 @@ func (d *Document) searchPage(pg *page, self pixelSpace, search string, maxHits 
 	return boxes
 }
 
-// quadToRect computes the scaled, axis-aligned bounding rectangle that encloses all four corners of a search-hit quad.
-// Considering every corner (rather than assuming an axis-aligned quad) keeps the box correct for rotated or skewed
-// text.
+// quadToRect returns the scaled, axis-aligned bounding rectangle of all four corners of a quad, which keeps the box
+// correct for rotated or skewed text.
 func quadToRect(q quad, self pixelSpace) image.Rectangle {
 	minX := math.Min(math.Min(float64(q.ulX), float64(q.urX)), math.Min(float64(q.llX), float64(q.lrX)))
 	minY := math.Min(math.Min(float64(q.ulY), float64(q.urY)), math.Min(float64(q.llY), float64(q.lrY)))
@@ -589,8 +560,8 @@ func quadToRect(q quad, self pixelSpace) image.Rectangle {
 	return self.rect(minX, minY, maxX, maxY)
 }
 
-// scaleRect scales an axis-aligned rectangle by scale and converts it to integer pixel space, expanding outward so the
-// box never clips its content: the min corner is floored and the max corner is ceiled.
+// scaleRect scales an axis-aligned rectangle to integer pixel space, flooring the min corner and ceiling the max corner
+// so the box never clips its content.
 func scaleRect(x0, y0, x1, y1, scale float64) image.Rectangle {
 	return image.Rect(
 		clampFloatToInt(math.Floor(x0*scale)),
@@ -600,22 +571,19 @@ func scaleRect(x0, y0, x1, y1, scale float64) image.Rectangle {
 	)
 }
 
-// scaledFloor multiplies v by scale, floors the result, and converts it to an int. A destination that carries no
-// explicit coordinate (e.g. a /Fit destination, in both link targets and TOC entries) is represented as a non-finite
-// value; see clampFloatToInt for why those are mapped to 0.
+// scaledFloor multiplies v by scale, floors the result, and converts it to an int. A destination with no explicit
+// coordinate (a /Fit destination, in link targets and TOC entries) is a non-finite value, which maps to 0.
 func scaledFloor(v, scale float64) int {
 	return clampFloatToInt(math.Floor(v * scale))
 }
 
 // clampFloatToInt converts an already-rounded float to an int, mapping non-finite or out-of-range values to 0. Go's
-// conversion of a non-finite (or out-of-range) float to int is architecture-defined — 0 on arm64 but math.MinInt64 on
-// amd64 — so clamping here keeps the returned coordinates deterministic across architectures.
+// conversion of such a float to int is architecture-defined (0 on arm64, math.MinInt64 on amd64), so clamping keeps
+// the returned coordinates deterministic across architectures.
 func clampFloatToInt(r float64) int {
-	// The safe conversion range is [math.MinInt, math.MaxInt]. float64 represents math.MinInt (−2^63) exactly, so the
-	// lower guard is precise. It cannot represent math.MaxInt (2^63−1), which rounds up to 2^63 — comparing against it
-	// with `>` would let an r of exactly 2^63 slip through to int(r) and overflow. −math.MinInt is 2^63 (representable
-	// exactly for every int width, since math.MinInt is a power of two), so `r >= -float64(math.MinInt)` rejects the
-	// first out-of-range value precisely.
+	// float64 represents math.MinInt (−2^63) exactly but not math.MaxInt (2^63−1), which rounds up to 2^63, so a `>`
+	// test against it would let an r of exactly 2^63 through to int(r). −math.MinInt is exactly 2^63, so `>=` against
+	// it rejects the first out-of-range value precisely.
 	if math.IsNaN(r) || r < math.MinInt || r >= -float64(math.MinInt) {
 		return 0
 	}
@@ -626,9 +594,9 @@ func (d *Document) loadLinks(pg *page, self pixelSpace, specFor func(pg *page) (
 	if OverallMaxLinks < 1 {
 		return nil
 	}
-	// DestPoint is documented to be in the pixel space of the destination page's rendered image, which is not this
-	// page's whenever the two pages differ in size: RenderPageForSize derives its scale per page from that page's own
-	// bounds. The spaces are memoized because a page can carry thousands of links into a handful of pages.
+	// DestPoint is in the pixel space of the destination page's rendered image, which RenderPageForSize scales from
+	// that page's own bounds. The spaces are memoized because a page can carry thousands of links into a handful of
+	// pages.
 	destSpaces := make(map[int]pixelSpace)
 	var links []*PageLink
 	for _, link := range d.eng.links(pg) {
@@ -636,9 +604,8 @@ func (d *Document) loadLinks(pg *page, self pixelSpace, specFor func(pg *page) (
 			PageNumber: -1,
 			Bounds:     self.rect(float64(link.x0), float64(link.y0), float64(link.x1), float64(link.y1)),
 		}
-		// External links keep their URI; internal links carry the engine-resolved 0-based target page — the same
-		// numbering this package's API uses — plus the destination point on that page. Internal links that cannot be
-		// resolved come back as page -1 and, with an empty URI, are dropped by the test below.
+		// Internal links carry the engine-resolved 0-based target page plus the destination point on it. Internal links
+		// that cannot be resolved come back as page -1 with an empty URI and are dropped below.
 		if link.external {
 			pageLink.URI = sanitizeString(link.uri)
 		} else {
@@ -655,11 +622,9 @@ func (d *Document) loadLinks(pg *page, self pixelSpace, specFor func(pg *page) (
 	return links
 }
 
-// destSpace returns the pixel space the given destination page renders into under the same sizing policy this render
-// used, memoizing the answer. A page that cannot be loaded or sized (a target past the end of the document, or one
-// whose fit scale the spec rejects) falls back to the rendered page's own space, which is where the point was reported
-// before and is the best available answer. Under RenderPage every page shares one scale, so this always returns self
-// there.
+// destSpace returns the pixel space the given destination page renders into under this render's sizing policy,
+// memoized in cache. A page that cannot be loaded or sized falls back to the rendered page's own space. Under
+// RenderPage every page shares one scale, so this always returns self there.
 func (d *Document) destSpace(pageNumber int, self pixelSpace, specFor func(pg *page) (renderSpec, error),
 	cache map[int]pixelSpace,
 ) pixelSpace {
@@ -677,9 +642,8 @@ func (d *Document) destSpace(pageNumber int, self pixelSpace, specFor func(pg *p
 	return space
 }
 
-// Release the underlying PDF document, releasing any resources. It is not necessary to call this, as garbage collection
-// will eventually reclaim the memory once the Document is unreachable, however, doing so explicitly drops the engine
-// state (parsed objects, caches, and the copy of the document bytes) immediately.
+// Release drops the engine state (parsed objects, caches, and the copy of the document bytes) immediately. It is
+// optional: garbage collection reclaims the memory once the Document is unreachable.
 func (d *Document) Release() {
 	if !d.usable() {
 		return
@@ -694,32 +658,27 @@ func (d *document) release() {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// Engine seam. Everything below is the boundary between the frozen public API above — validation, budgeting, and
-// coordinate conversion — and the engine in the internal packages. The seam types deliberately carry float32 geometry:
-// every value the original cgo implementation received as a C float must round-trip through float32 before the float64
-// scale/floor/ceil math, or the exact-value tests show off-by-ones.
+// Engine seam. Everything below is the boundary between the public API above — validation, budgeting, and coordinate
+// conversion — and the engine in the internal packages. The seam types carry float32 geometry: every value the
+// original cgo implementation received as a C float must round-trip through float32 before the float64 scale/floor/ceil
+// math, or the exact-value tests show off-by-ones.
 // ------------------------------------------------------------------------------------------------------------------
 
-// engineDocument holds the engine-side state for an open document. It is created by openEngine and discarded by
-// release().
+// engineDocument holds the engine-side state for an open document, created by openEngine and discarded by release().
 type engineDocument struct {
 	doc *doc.Document
-	// store is the maxCacheSize-budgeted resource cache (fonts, decoded images, glyph outlines) shared by all of this
-	// document's renders; New's maxCacheSize argument is its byte budget (0 = unlimited).
+	// store is the resource cache (fonts, decoded images, glyph outlines) shared by all of this document's renders;
+	// New's maxCacheSize is its byte budget (0 = unlimited).
 	store *store.Store
-	// dev is the raster device reused across renders while the output dimensions repeat (the common case: re-rendering
-	// pages of one size at one scale). Reuse avoids allocating and page-faulting a fresh multi-megabyte surface per
-	// render; it is dropped on a dimension change or a render panic. Safe under the document mutex like every other
-	// engine field.
+	// dev is the raster device reused across renders while the output dimensions repeat, which avoids allocating and
+	// page-faulting a fresh multi-megabyte surface per render. It is dropped on a dimension change or a render panic.
 	dev *render.Device
-	// stemDarkening mirrors the public SetStemDarkening switch; openEngine starts it enabled and every render passes it
-	// to the device it draws with.
+	// stemDarkening mirrors SetStemDarkening; openEngine starts it enabled.
 	stemDarkening bool
 }
 
 // page is the engine-side handle for a loaded page: its 0-based number and its displayed extent in PDF points (the
-// effective box after rotation, in float32 per the funnel below). Content (resources, content streams) is fetched from
-// the engine's document by page number when rendering or searching.
+// effective box after rotation). Content is fetched from the engine's document by page number.
 type page struct {
 	width, height float32
 	number        int
@@ -737,26 +696,22 @@ type outlineNode struct {
 }
 
 // quad is a single text quadrilateral in page space, such as a search hit. Text can be rotated or skewed, so a quad is
-// not necessarily axis-aligned; the corners are upper-left, upper-right, lower-left, and lower-right. Coordinates are
-// float32, the precision the engine's geometry pipeline carries (matching the C float precision of the MuPDF-based
-// implementation, which the exact-value tests were baselined against).
+// not necessarily axis-aligned; the corners are upper-left, upper-right, lower-left, and lower-right.
 type quad struct {
 	ulX, ulY, urX, urY, llX, llY, lrX, lrY float32
 }
 
-// pageLinkInfo describes one link annotation on a page, in top-left/y-down page space. Produced by the navigation layer
-// (internal/doc) and consumed by loadLinks to build the public PageLink values.
+// pageLinkInfo describes one link annotation on a page, in top-left/y-down page space, as loadLinks consumes it.
 type pageLinkInfo struct {
-	uri            string  // raw URI for external links; empty for internal links
-	page           int     // internal links: 0-based target page; -1 when external or unresolvable
-	x0, y0, x1, y1 float32 // link rectangle (the clickable hot zone)
-	destX, destY   float32 // internal links: explicit destination point, NaN when none (e.g. a /Fit destination)
+	uri            string  // external links only
+	page           int     // 0-based target page; -1 when external or unresolvable
+	x0, y0, x1, y1 float32 // the clickable hot zone
+	destX, destY   float32 // destination point; NaN when none (e.g. a /Fit destination)
 	external       bool
 }
 
-// openEngine parses the raw PDF bytes into the engine's document state, honoring maxCacheSize as the resource-cache
-// budget (0 = unlimited). Any parse failure — and any panic provoked by hostile input — surfaces as ErrUnableToOpenPDF
-// rather than escaping to the caller.
+// openEngine parses the raw PDF bytes into the engine's document state. Any parse failure, and any panic provoked by
+// hostile input, surfaces as ErrUnableToOpenPDF.
 func openEngine(buffer []byte, maxCacheSize uint64) (eng *engineDocument, err error) {
 	defer func() {
 		if recover() != nil {
@@ -765,8 +720,7 @@ func openEngine(buffer []byte, maxCacheSize uint64) (eng *engineDocument, err er
 		}
 	}()
 	// The engine retains and slices into the document bytes for the life of the Document, so take a private copy;
-	// callers remain free to reuse their buffer, exactly as with the previous MuPDF-based implementation (which copied
-	// into C memory).
+	// callers may reuse their buffer.
 	d, derr := doc.Open(bytes.Clone(buffer))
 	if derr != nil {
 		return nil, ErrUnableToOpenPDF
@@ -779,11 +733,9 @@ func (e *engineDocument) needsPassword() bool {
 	return e.doc.NeedsPassword()
 }
 
-// authenticate attempts to authenticate with the given user or owner password, returning MuPDF-compatible status bits.
-// doc.Authenticate produces them in the same layout as AuthenticationStatus (bit 0 = no authentication required, bit 1
-// = user, bit 2 = owner), so the value maps straight across the seam. doc.Authenticate decrypts and re-parses the page
-// tree on untrusted input; a panic provoked by a malformed encrypted document surfaces as a zero status rather than
-// escaping the public API, matching the guards on the other engine calls.
+// authenticate returns MuPDF-compatible status bits. doc.Authenticate produces them in AuthenticationStatus's layout
+// (bit 0 = no authentication required, bit 1 = user, bit 2 = owner). It decrypts and re-parses the page tree on
+// untrusted input, so a panic surfaces as a zero status rather than escaping the public API.
 func (e *engineDocument) authenticate(password string) (status AuthenticationStatus) {
 	defer func() {
 		if recover() != nil {
@@ -807,11 +759,8 @@ func (e *engineDocument) loadPage(pageNumber int) (*page, error) {
 	return &page{width: w, height: h, number: pageNumber}, nil
 }
 
-// outline returns the root of the document outline, or nil when there is none. The engine hands back its own linked
-// tree in the same shape; this conversion only re-labels it into the seam type. Sibling chains are walked iteratively
-// (their length is engine-capped but can be long); recursion depth equals the outline's nesting depth, which the engine
-// caps far below stack limits. doc.Outline walks the untrusted /Outlines tree resolving destinations; a panic provoked
-// by a malformed tree surfaces as a nil outline rather than escaping the public API.
+// outline returns the root of the document outline, or nil when there is none. doc.Outline walks the untrusted
+// /Outlines tree; a panic provoked by a malformed tree surfaces as a nil outline rather than escaping the public API.
 func (e *engineDocument) outline() (root *outlineNode) {
 	defer func() {
 		if recover() != nil {
@@ -821,18 +770,17 @@ func (e *engineDocument) outline() (root *outlineNode) {
 	return convertOutline(e.doc.Outline())
 }
 
-// maxOutlineConvertDepth bounds convertOutline's recursion. The engine already caps outline depth well below this and
-// returns an acyclic tree, so this only guards against a future invariant slip: it sits above the engine's own cap so
-// legitimate trees are never truncated here.
+// maxOutlineConvertDepth bounds convertOutlineGuarded's recursion. It sits above the engine's own depth cap (64), so
+// legitimate trees are never truncated here; it only guards against an invariant slip.
 const maxOutlineConvertDepth = 128
 
 func convertOutline(item *doc.OutlineItem) *outlineNode {
 	return convertOutlineGuarded(item, 0, make(map[*doc.OutlineItem]bool))
 }
 
-// convertOutlineGuarded re-labels the engine's outline tree into the seam type, walking siblings iteratively. A shared
-// visited set cuts any next/down reference cycle and a depth cap bounds recursion, so the conversion terminates even if
-// the engine's acyclic/depth-capped invariant is ever violated rather than relying on it.
+// convertOutlineGuarded re-labels the engine's outline tree into the seam type, walking siblings iteratively. The
+// visited set cuts any next/down cycle and the depth cap bounds recursion, so conversion terminates even if the
+// engine's acyclic, depth-capped invariant is violated.
 func convertOutlineGuarded(item *doc.OutlineItem, depth int, visited map[*doc.OutlineItem]bool) *outlineNode {
 	if depth > maxOutlineConvertDepth {
 		return nil
@@ -857,10 +805,8 @@ func convertOutlineGuarded(item *doc.OutlineItem, depth int, visited map[*doc.Ou
 	return head
 }
 
-// links returns the link annotations present on the page, in /Annots order, with all geometry already in
-// top-left/y-down page space (the engine's navigation layer maps it). doc.Links resolves the untrusted /Annots array;
-// a panic provoked by malformed link annotations surfaces as no links rather than escaping the public API, matching the
-// guards on rasterize and search that render() also relies on.
+// links returns the page's link annotations in /Annots order, with geometry already in top-left/y-down page space. A
+// panic provoked by malformed annotations surfaces as no links rather than escaping the public API.
 func (e *engineDocument) links(pg *page) (infos []pageLinkInfo) {
 	defer func() {
 		if recover() != nil {
@@ -888,14 +834,11 @@ func (e *engineDocument) links(pg *page) (infos []pageLinkInfo) {
 	return links
 }
 
-// rasterize renders the page at the given scale into premultiplied RGBA pixels (4 bytes per pixel, stride bytes per
-// row): the page's content streams run through the interpreter (internal/content) against the raster device
-// (internal/render), and the surface is read back still premultiplied (renderPage unpremultiplies, keeping the rounding
-// of that conversion under the public API's control for pixel parity). The output extent must round exactly as MuPDF's
-// fz_round_rect does, since the dimension goldens (and TestPDF's stride/bounds literals) were captured from it: the
-// page extent is scaled in float32, then the max corner is ceiled with a small epsilon so float slop just above a whole
-// number does not spill into an extra pixel row (pinned against all recorded corpus dimensions). A panic provoked by
-// hostile content anywhere under the render surfaces as ErrInternal rather than escaping the public API.
+// rasterize renders the page into premultiplied RGBA pixels (4 bytes per pixel, stride bytes per row). The surface is
+// read back still premultiplied; renderPage unpremultiplies, keeping that rounding under the public API's control for
+// pixel parity. The output extent must round exactly as MuPDF's fz_round_rect does, since the dimension goldens (and
+// TestPDF's stride/bounds literals) were captured from it; see renderExtent. A panic provoked by hostile content
+// surfaces as ErrInternal rather than escaping the public API.
 func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width, height, stride int, err error) {
 	defer func() {
 		if recover() != nil {
@@ -921,11 +864,10 @@ func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width
 			return nil, 0, 0, 0, ErrUnableToCreateImage
 		}
 	}
-	// The reused surface is engine state maxCacheSize does not cover, so it is only carried across renders when it
-	// fits inside that budget: a document rendered once at high dpi would otherwise hold width*height*4 bytes (33 MB
-	// for US Letter at 300 dpi) for its whole lifetime no matter how small a cache the caller asked for. An unlimited
-	// budget keeps the surface unconditionally, as before. Retention is decided before the render so a panic mid-run
-	// still finds the device in e.dev to clear.
+	// The reused surface is not covered by maxCacheSize, so it is only kept across renders when it fits that budget: a
+	// document rendered once at high dpi would otherwise hold width*height*4 bytes (33 MB for US Letter at 300 dpi)
+	// for its whole lifetime. Retention is decided before the render so a panic mid-run still finds the device in
+	// e.dev to clear.
 	if budget := e.store.Max(); budget == 0 || surfaceBytes(width, height) <= budget {
 		e.dev = dev
 	} else {
@@ -946,9 +888,7 @@ func (e *engineDocument) rasterize(pg *page, spec renderSpec) (pix []byte, width
 }
 
 // runPage runs the page's content streams and then its annotation appearance streams through the interpreter against
-// the given device under the page-space→device matrix ctm. It is the one body shared by every consumer of a page's
-// drawn content: rasterize (raster device), search and extractText (both through extractPageText, against the
-// structured-text device), and DrawPage (raster device wrapped around a caller's canvas).
+// dev under the page-space→device matrix ctm. It is the one body shared by rasterize, extractPageText, and DrawPage.
 func (e *engineDocument) runPage(pg *page, ctm gfx.Matrix, dev device.Device) {
 	if data := e.doc.PageContents(pg.number); len(data) > 0 {
 		content.Run(e.doc.COS(), e.doc.PageResources(pg.number), data, ctm, dev, e.store)
@@ -956,22 +896,19 @@ func (e *engineDocument) runPage(pg *page, ctm gfx.Matrix, dev device.Device) {
 	e.runAnnots(pg, ctm, dev)
 }
 
-// runAnnots draws the page's annotation appearance streams after the page content, in /Annots order — matching MuPDF's
-// fz_run_page, whose display list the goldens (and search results, since appearance text is searchable) were captured
-// from. internal/doc has already applied the selection gates (flags, subtype, /AS state) and computed each appearance's
-// ISO 32000-2 12.5.5 placement in page space; composing that with the page CTM positions it in device space. Each
-// appearance runs as its own interpreter pass with a fresh default graphics state, inheriting the page's resources when
-// it carries none of its own. The passes share one content.AnnotRun, which is what bounds them as a group: a page may
-// name tens of thousands of annotations, and a per-annotation budget would let them all point at one appearance stream
-// and re-decode it under a full budget each (see AnnotRun's own comment).
+// runAnnots draws the page's annotation appearance streams after the page content, in /Annots order, matching MuPDF's
+// fz_run_page, whose display list the goldens and search results were captured from. internal/doc has already applied
+// the selection gates (flags, subtype, /AS state) and computed each appearance's ISO 32000-2 12.5.5 placement in page
+// space. Each appearance runs as its own interpreter pass with a fresh default graphics state, inheriting the page's
+// resources when it has none. The passes share one content.AnnotRun, which bounds them as a group: a page may name
+// tens of thousands of annotations, and a per-annotation budget would let them all point at one appearance stream and
+// re-decode it under a full budget each.
 func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) {
 	annots := e.doc.Annotations(pg.number)
 	if len(annots) == 0 {
 		return
 	}
-	// The page's resources are resolved once: PageResources re-resolves the page's (possibly indirect) /Resources entry
-	// through the COS layer on every call, the value cannot change during the pass, and a page may name tens of
-	// thousands of annotations.
+	// PageResources re-resolves the /Resources entry through the COS layer on every call, so resolve it once per pass.
 	res := e.doc.PageResources(pg.number)
 	run := content.NewAnnotRun(e.store)
 	for _, a := range annots {
@@ -979,8 +916,8 @@ func (e *engineDocument) runAnnots(pg *page, ctm gfx.Matrix, dev device.Device) 
 	}
 }
 
-// surfaceBytes is the byte size of a width×height raster surface — 4 bytes per pixel, the premultiplied N32 layout the
-// device allocates — which is what retaining the reused device between renders costs.
+// surfaceBytes is the byte size of a width×height raster surface at the 4 bytes per pixel the device allocates: the
+// cost of retaining the reused device between renders.
 func surfaceBytes(width, height int) uint64 {
 	return uint64(width) * uint64(height) * 4
 }
@@ -995,15 +932,13 @@ func renderExtent(extent float32, scale float64) int {
 	return int(v)
 }
 
-// extractPageText runs the page's content and its annotation appearance streams through the interpreter against the
-// given structured-text device at scale 1, which is the one invariant both consumers of extracted text depend on: the
-// characters (and so the quads assembled from them) come back in top-left/y-down page space — the same space MuPDF's
-// fz_search_stext_page reported hits in through the C float funnel — leaving the render scale to be applied afterwards
-// in float64, exactly as the original implementation did. Running the pass at the render scale instead (fanning the
-// rasterize pass out to both devices) would compose every quad corner in scaled float32 and break that funnel.
-// Annotation appearance text is part of MuPDF's structured text (probe-pinned: widget /AP text is searchable), so the
-// pass runs the appearances exactly like the raster pass does. A page whose CTM cannot be read records nothing and
-// reports ErrUnableToLoadPage, which is what rasterize reports for the same page.
+// extractPageText runs the page's content and annotation appearance streams against the given structured-text device
+// at scale 1, the invariant both consumers of extracted text depend on: characters (and so quads) come back in
+// top-left/y-down page space, the space MuPDF's fz_search_stext_page reported hits in through the C float funnel, and
+// the render scale is applied afterwards in float64. Running the pass at the render scale would compose every quad
+// corner in scaled float32 and break that funnel. Appearance text is part of MuPDF's structured text (widget /AP text
+// is searchable), so the pass runs the appearances as the raster pass does. A page whose CTM cannot be read reports
+// ErrUnableToLoadPage, as rasterize does.
 func (e *engineDocument) extractPageText(pg *page, dev *stext.Device) error {
 	ctm, err := e.doc.PageCTM(pg.number, 1)
 	if err != nil {
@@ -1013,10 +948,9 @@ func (e *engineDocument) extractPageText(pg *page, dev *stext.Device) error {
 	return nil
 }
 
-// search returns the quads of up to maxHits text matches on the page, in the emission order MuPDF's search reports them
-// (the exact-value tests index hits positionally). The page's content runs through the interpreter once more against
-// the structured-text device at the scale extractPageText documents, and quadToRect applies the render scale to what
-// comes back. A panic provoked by hostile content surfaces as no hits rather than escaping the public API.
+// search returns the quads of up to maxHits matches on the page, in the order MuPDF's search reports them (the
+// exact-value tests index hits positionally). A panic provoked by hostile content surfaces as no hits rather than
+// escaping the public API.
 func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []quad) {
 	defer func() {
 		if recover() != nil {
@@ -1039,14 +973,12 @@ func (e *engineDocument) search(pg *page, needle string, maxHits int) (hits []qu
 }
 
 // extractText returns the selection model for the page's text, in the page space extractPageText documents. It is the
-// same pass search makes — what is searchable is what is selectable — recording at most OverallMaxTextChars characters
+// same pass search makes — what is searchable is what is selectable — capped at OverallMaxTextChars characters
 // because the result outlives the call.
 //
-// The two ways a pass can end short are reported differently, because a caller can act on one and not the other. A
-// page the engine cannot read at all yields the error, so a viewer can tell an unreadable page from a page carrying no
-// text. A panic provoked by hostile content mid-pass yields the characters recorded before it and no error: the device
-// only ever appends completed characters, so its slice is a valid prefix of the page's text at every instant, and text
-// a caller can already select beats an error naming a page it can see.
+// A page the engine cannot read at all yields the error, so a viewer can tell an unreadable page from an empty one. A
+// panic provoked by hostile content mid-pass yields the characters recorded before it and no error: the device only
+// ever appends completed characters, so its slice is a valid prefix of the page's text at every instant.
 func (e *engineDocument) extractText(pg *page) (text *stext.Page, err error) {
 	dev := stext.NewCapped(OverallMaxTextChars)
 	defer func() {
@@ -1060,8 +992,8 @@ func (e *engineDocument) extractText(pg *page) (text *stext.Page, err error) {
 	return stext.NewPage(dev.Chars()), nil
 }
 
-// quadFromGfx re-labels a structured-text quad into the seam type. The two carry the same four float32 corners in the
-// same order; the seam keeps its own shape so the public API's coordinate funnel never depends on an internal type.
+// quadFromGfx re-labels a structured-text quad into the seam type, so the public API's coordinate funnel never depends
+// on an internal type.
 func quadFromGfx(q gfx.Quad) quad {
 	return quad{
 		ulX: q.UL.X, ulY: q.UL.Y, urX: q.UR.X, urY: q.UR.Y,

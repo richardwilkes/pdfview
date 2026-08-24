@@ -13,8 +13,7 @@ package imaging
 
 // Which kernels this architecture prefers over the scalar code they replace. The values are settled per architecture
 // from simd-bench.sh benchstat results, not from a portable rule: a kernel that loses its benchmark here is turned
-// off here and left on elsewhere, rather than deleted. arm64's values are settled by the coordinator once this area's
-// numbers land.
+// off here and left on elsewhere, rather than deleted.
 //
 // Measured on an Apple M4 Max (128-bit vectors), a page-scale run of each: the JBIG2 polarity flip 5.5x, the DCT
 // stencil threshold 11x against a smooth plane and 85x against noise (the scalar form's branch is what it beats), the

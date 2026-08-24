@@ -17,9 +17,8 @@
 // follows); operators with missing or mistyped operands are skipped likewise; unbalanced q/Q at stream end
 // auto-unwinds; and all work is bounded — graphics-state depth, form recursion (with a cycle set), operand count,
 // container nesting, per-operand element count, and total work (executed operators plus the stream bodies, resource
-// parses, image decodes and device-side shading realizations those operators trigger; see budget.go) are all capped —
-// so hostile input terminates without timeouts. The interpreter guarantees the device's push/pop balance no matter how
-// malformed the content is.
+// parses, image decodes and device-side shading realizations they trigger; see budget.go) are all capped — so hostile
+// input terminates. The interpreter guarantees the device's push/pop balance no matter how malformed the content is.
 package content
 
 import (
@@ -35,29 +34,27 @@ import (
 	"github.com/richardwilkes/pdfview/internal/store"
 )
 
-// Store key types: one dedicated comparable type per cached resource kind (see internal/store's package comment), keyed
-// by the resource entry's object reference. The key is the reference's resolution identity (cos.RefKey), not the whole
-// cos.Ref: a generation the document never consults must not split one object across two cache entries.
+// Store key types: one dedicated comparable type per cached resource kind (see internal/store), keyed by the resource
+// entry's resolution identity (cos.RefKey) rather than the whole cos.Ref, so a generation the document never consults
+// cannot split one object across two cache entries.
 type (
 	fontKey  struct{ ref cos.RefKey }
 	imageKey struct{ ref cos.RefKey }
 )
 
-// Limits. maxQDepth caps q/Q nesting; pushes beyond it are ignored (with their matching Qs ignored too, so pairing
-// survives). maxFormDepth is the XObject recursion cap; the per-page cycle set makes self-referential forms terminate
-// even below it. maxOperands bounds the operand list — when content pushes more, the surplus is dropped, keeping the
-// operands an operator actually consumes. maxDashEntries matches the dash-array truncation MuPDF exhibits. maxTotalOps
-// bounds one Run's total work (across form recursion): operators charge one unit each, and the stream bodies and
-// resource parses they trigger charge by budget.go's cost model — the backstop that keeps pathological streams from
-// turning small inputs into huge work.
+// Limits. maxQDepth caps q/Q nesting; pushes beyond it are ignored, with their matching Qs ignored too, so pairing
+// survives. maxFormDepth is the XObject recursion cap; the cycle set makes self-referential forms terminate below it.
+// maxOperands bounds the operand list; the surplus is dropped, keeping the operands an operator consumes (see exec).
+// maxDashEntries matches the dash-array truncation MuPDF exhibits. maxTotalOps bounds one Run's total work (across form
+// recursion): operators charge one unit each, and the stream bodies and resource parses they trigger charge by
+// budget.go's cost model.
 const (
 	maxQDepth      = 256
 	maxFormDepth   = 12
 	maxOperands    = 64
 	maxDashEntries = 32
 	maxTotalOps    = 1 << 22
-	// maxCachedFonts caps the per-Run font LRU used when no budgeted store is wired (matching maxCachedImages' role
-	// for images); with a store, its byte budget replaces this cap.
+	// maxCachedFonts caps the per-Run font LRU used when no budgeted store is wired, like maxCachedImages for images.
 	maxCachedFonts = 64
 )
 
@@ -73,12 +70,12 @@ type gstate struct {
 	fillSpace   pdfcolor.Space
 	strokeSpace pdfcolor.Space
 	// fillPattern/strokePattern are the selected pattern resources when the respective space is a /Pattern space (nil
-	// until an scn/SCN names one); the *PatCTM matrices are the composed pattern-space→device matrices captured when
-	// the pattern was selected.
+	// until an scn/SCN names one); the *PatCTM matrices are the composed pattern-space→device matrices captured at
+	// selection.
 	fillPattern   *patternRes
 	strokePattern *patternRes
 	// softMask is the active ExtGState soft mask (nil when /SMask is /None or absent); softMaskCTM is the CTM captured
-	// when the gs operator installed it — the mask's anchor space (oracle-pinned; see softmask.go).
+	// when the gs operator installed it, the mask's anchor space (see softmask.go).
 	softMask     *softMaskRes
 	fillComps    []float32
 	strokeComps  []float32
@@ -96,8 +93,8 @@ type gstate struct {
 }
 
 // textParams are the text-state parameters of the graphics state (ISO 32000-2 9.3.1). They persist across BT/ET pairs
-// and are saved/restored by q/Q like the rest of the graphics state; only the text and line matrices (on interp, reset
-// by BT) are scoped to the text object.
+// and q/Q saves and restores them; only the text and line matrices (on interp, reset by BT) are scoped to the text
+// object.
 type textParams struct {
 	font        *font.Font
 	size        float32
@@ -120,15 +117,14 @@ func (g *gstate) clone() gstate {
 
 // maxFrameCacheEntries caps each name-keyed parse cache of one resource frame. The name-keyed layer caches NEGATIVE
 // results too, and content may name any number of resources the dictionary does not define: "/s0 sh /s1 sh ..." costs
-// one budget unit per operator while storing one nil entry apiece (~54 bytes of live heap), so an uncapped map let the
-// maxTotalOps allowance buy millions of entries retained for the frame's lifetime — through cs/CS and scn just as
-// through sh. Past the cap the resolution still happens and the result is still returned, it is simply not remembered:
-// a defined name falls through to the reference-keyed per-Run cache (capped at maxCachedResources for this same
-// reason) and an undefined one re-resolves for free. The cap sits far above the handful of spaces, shadings and
-// patterns a real resource frame names.
+// one budget unit per operator while storing one nil entry apiece, so an uncapped map would let the maxTotalOps
+// allowance buy millions of entries retained for the frame's lifetime, through cs/CS and scn as well as sh. Past the
+// cap the resolution still happens and the result is returned, just not remembered: a defined name falls through to
+// the reference-keyed per-Run cache (capped at maxCachedResources for the same reason) and an undefined one re-resolves
+// for free. The cap sits far above the handful of resources a real frame names.
 const maxFrameCacheEntries = 1 << 10
 
-// cacheByName stores v under name in one of resFrame's name-keyed caches, dropping the store once the cache holds
+// cacheByName stores v under name in one of resFrame's name-keyed caches unless the cache already holds
 // maxFrameCacheEntries. A full cache degrades to re-resolving the name, never to a wrong result.
 func cacheByName[V any](m map[cos.Name]V, name cos.Name, v V) {
 	if len(m) < maxFrameCacheEntries {
@@ -167,14 +163,13 @@ type interp struct {
 	// generations cannot slip past it (cos.RefKey).
 	active map[cos.RefKey]bool
 	// images caches decoded image XObjects (nil for failed decodes) for this Run, an LRU capped at maxCachedImages
-	// entries so a re-used image stays cached rather than being dropped once the cap is reached. It is itself nil when
-	// st is wired, which is the caching path then; child interpreters share whichever the parent has.
+	// entries. It is nil when st is wired, which is the caching path then; child interpreters share the parent's.
 	images *lruCache[cos.RefKey, *imaging.Image]
 	// fonts caches loaded fonts (nil for failed loads) for this Run, keyed by the resource entry's reference; an LRU
-	// capped at maxCachedFonts entries, nil with a store wired, exactly like images.
+	// capped at maxCachedFonts entries, nil with a store wired, like images.
 	fonts *lruCache[cos.RefKey, *font.Font]
 	// caches holds the Run's reference-keyed decoded-body and parsed-resource caches (budget.go); child interpreters
-	// share the set with their parent.
+	// share the parent's.
 	caches *runCaches
 	gs     gstate
 	cur    gfx.Point
@@ -196,8 +191,8 @@ type interp struct {
 	// pattern coordinates (ISO 32000-2 8.7.3.1). exec saves and sets it per stream body.
 	streamCTM gfx.Matrix
 	// t3Shape tracks Type 3 charproc execution: t3None outside procs, t3Colored inside a proc before d0/d1 resolve it,
-	// t3Shape after d1 — which makes the proc a shape mask, so its own color operators are ignored and the caller's
-	// fill color paints (ISO 32000-2 9.6.4).
+	// t3Mask after d1, which makes the proc a shape mask: its own color operators are ignored and the caller's fill
+	// color paints (ISO 32000-2 9.6.4).
 	t3Shape uint8
 	// suppressColor blocks the color operators for the whole interpreter: set on the child interpreter that replays an
 	// uncolored tiling pattern's cell, whose content is a stencil painted with the pattern color (ISO 32000-2 8.7.3.3).
@@ -216,9 +211,9 @@ const (
 
 // Run interprets a content stream against dev. resources is the page's resource dictionary (nil when the page has
 // none); ctm maps user space to device space; st is the document's budgeted resource store (nil degrades to per-Run
-// caching only — correct, just re-parsing across runs). Malformed content degrades — operators are skipped, never
-// escalated — so Run does not fail; panics from truly hostile input are the caller's concern (the public API wraps
-// rendering in a recover guard).
+// caching only, re-parsing across runs). Malformed content degrades (operators are skipped, never escalated), so Run
+// does not fail; panics from truly hostile input are the caller's concern (the public API wraps rendering in a recover
+// guard).
 func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev device.Device, st *store.Store) {
 	in := newInterp(d, resources, ctm, dev, st)
 	in.exec(data)
@@ -230,16 +225,14 @@ func Run(d *cos.Document, resources cos.Dict, data []byte, ctm gfx.Matrix, dev d
 }
 
 // AnnotRun is one page's annotation appearance pass: every appearance the page draws runs through the same AnnotRun, so
-// they share one work budget and one set of reference-keyed caches instead of getting a fresh full budget each.
+// they share one work budget and one set of reference-keyed caches instead of each getting a fresh full budget.
 //
 // The sharing is the bound, not an optimization. A page's /Annots may name up to internal/doc's cap (65536) of
-// annotations, and internal/doc hands each one its appearance stream — commonly the SAME stream, since nothing stops
-// every annotation from pointing at one appearance object. Run per annotation, each pass would re-decode that stream
-// (through internal/filter's max(64 MB, 256x input) inflation allowance) and re-execute it against a full maxTotalOps
-// budget, so a few kilobytes of crafted file would buy tens of thousands of decodes and interpretations — exactly the
-// "small input, huge work" the package comment's bounded-work contract rules out. With one budget across the page, the
-// appearances together cost what a single Run costs; with one body cache, the second annotation naming a stream reuses
-// the first's decoded bytes.
+// annotations, each with an appearance stream — commonly the SAME stream. Run per annotation, each pass would re-decode
+// that stream (through internal/filter's max(64 MB, 256x input) inflation allowance) and re-execute it against a full
+// maxTotalOps budget, so a few kilobytes of crafted file would buy tens of thousands of decodes and interpretations.
+// With one budget across the page, the appearances together cost what a single Run costs; with one body cache, the
+// second annotation naming a stream reuses the first's decoded bytes.
 type AnnotRun struct {
 	caches *runCaches
 	images *lruCache[cos.RefKey, *imaging.Image]
@@ -267,12 +260,11 @@ func NewAnnotRun(st *store.Store) *AnnotRun {
 
 // Annot interprets one annotation appearance stream (a form XObject) against dev, charging r's shared budget. ctm must
 // already compose the ISO 32000-2 12.5.5 placement matrix (internal/doc's Annot.Transform) with the page CTM; the
-// form's own /Matrix and /BBox clip apply inside, exactly as for a form invoked by Do. pageResources is the page's
-// resource dictionary: an appearance stream without /Resources of its own inherits it (probe-pinned). Malformed content
-// degrades exactly as in Run.
+// form's own /Matrix and /BBox clip apply inside, as for a form invoked by Do. An appearance stream without /Resources
+// of its own inherits pageResources (probe-pinned). Malformed content degrades as in Run.
 func (r *AnnotRun) Annot(d *cos.Document, pageResources cos.Dict, raw cos.Object, stream *cos.Stream, ctm gfx.Matrix, dev device.Device) {
 	if r.budget < 0 {
-		return // The page's appearances have spent the shared budget; the rest draw nothing, like an exhausted Run.
+		return // The shared budget is spent; the rest draw nothing, like an exhausted Run.
 	}
 	in := baseInterp(d, pageResources, ctm, dev, r.st)
 	in.active = r.active
@@ -295,8 +287,8 @@ func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.D
 	in := baseInterp(d, resources, ctm, dev, st)
 	in.active = make(map[cos.RefKey]bool)
 	if st == nil {
-		// The two LRUs are the no-store fallback only: with a store wired, every image and font lookup goes to it and
-		// these are never consulted, so they are not built (a nil cache reports a miss and discards puts).
+		// The two LRUs are the no-store fallback only; with a store wired they are never consulted (a nil cache reports
+		// a miss and discards puts).
 		in.images = newLRUCache[cos.RefKey, *imaging.Image](maxCachedImages)
 		in.fonts = newLRUCache[cos.RefKey, *font.Font](maxCachedFonts)
 	}
@@ -307,8 +299,8 @@ func newInterp(d *cos.Document, resources cos.Dict, ctm gfx.Matrix, dev device.D
 
 // newChild builds the interpreter that executes one tiling pattern cell against dev. It shares the parent's cycle set,
 // parse caches, image/font LRUs, and remaining work budget (the caller folds the child's leftover budget back), and
-// enters one form level deeper. The sharing is not just consistency: a single fill replays up to maxReplayTiles cells,
-// so allocating a cycle set, a runCaches set, and two LRUs per cell — only to drop them — is pure garbage per cell.
+// enters one form level deeper. A single fill replays up to maxReplayTiles cells, so allocating those per cell would be
+// pure garbage.
 func (in *interp) newChild(resources cos.Dict, ctm gfx.Matrix, dev device.Device) *interp {
 	child := baseInterp(in.doc, resources, ctm, dev, in.st)
 	child.active = in.active
@@ -370,10 +362,8 @@ func (in *interp) exec(data []byte) {
 	for in.budget >= 0 {
 		tok, ok := lex.Next()
 		if !ok {
-			// Lexical error: the position advanced, so scanning terminates regardless, but it is charged like an
-			// operator anyway. Without the charge a stream of pure garbage would be scanned end to end no matter how
-			// little budget remained, and the package's "all work is bounded by maxTotalOps" contract would hold only
-			// via the stream length.
+			// A lexical error is charged like an operator; otherwise a stream of pure garbage would be scanned end to
+			// end no matter how little budget remained, bounded only by the stream length.
 			in.budget--
 			continue
 		}
@@ -393,10 +383,9 @@ func (in *interp) exec(data []byte) {
 			continue
 		}
 		if obj, objOK := parseTopOperand(lex, tok); objOK {
-			// The list keeps the OLDEST maxOperands operands, discarding everything past the cap: operators consume from
-			// its start, so the retained prefix is exactly what any operator would read, and the cap is invisible to
-			// every one of them. Keeping the newest instead would shift an operator's operands by the flood's length —
-			// after 70 stray numbers, cm would read pushes #7-#12 rather than #1-#6.
+			// The list keeps the OLDEST maxOperands operands: operators consume from its start, so the retained prefix
+			// is exactly what any operator would read. Keeping the newest instead would shift an operator's operands by
+			// the flood's length.
 			if len(in.operands) >= maxOperands {
 				continue
 			}
@@ -492,8 +481,8 @@ func (in *interp) leadingFloats(maxN int) []float32 {
 	return out
 }
 
-// resource resolves /Resources[category][name], returning the raw (possibly Ref) entry so callers can use reference
-// identity, plus whether the entry exists.
+// resource looks up /Resources[category][name], returning the raw (possibly Ref) entry so callers can use reference
+// identity.
 func (in *interp) resource(category, name cos.Name) (cos.Object, bool) {
 	top := in.res[len(in.res)-1]
 	if top == nil {
@@ -527,7 +516,7 @@ func (in *interp) colorSpace(name cos.Name) (pdfcolor.Space, bool) {
 		cacheByName(cache, name, nil)
 		return nil, false
 	}
-	// Negative entries are cached too (here and in parseSpace): repeated failures must not repeat the work.
+	// Negative entries are cached too: repeated failures must not repeat the work.
 	space := in.parseSpace(obj)
 	cacheByName(cache, name, space)
 	return space, space != nil

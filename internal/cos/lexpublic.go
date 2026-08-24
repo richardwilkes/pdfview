@@ -10,9 +10,9 @@
 package cos
 
 // This file exports the package's lexer for the other consumers of PDF's surface syntax: content streams
-// (internal/content) and PostScript-calculator function programs (internal/function). Both share COS's lexical rules
-// exactly (ISO 32000-2 7.2) but assemble tokens differently from the object parser — content streams have operators and
-// no indirect references — so they consume tokens, not parsed objects.
+// (internal/content), PostScript-calculator function programs (internal/function), and embedded CMaps (internal/font).
+// All share COS's lexical rules (ISO 32000-2 7.2) but assemble tokens differently from the object parser — content
+// streams have operators and no indirect references — so they consume tokens, not parsed objects.
 
 // TokenKind identifies the lexical class of a Token.
 type TokenKind uint8
@@ -54,8 +54,8 @@ func NewLexer(data []byte, pos int) *Lexer {
 	return &Lexer{lex: lexer{data: data, pos: pos}}
 }
 
-// Next returns the next token. At end of input it returns a TokenEOF token with ok true. Lexical errors — an
-// unterminated string, a stray delimiter — report ok false with the position already advanced past the offending input,
+// Next returns the next token. At end of input it returns a TokenEOF token with ok true. Lexical errors (an
+// unterminated string, a stray delimiter) report ok false with the position already advanced past the offending input,
 // so a lenient caller can simply continue scanning: the position never sticks, guaranteeing forward progress.
 func (l *Lexer) Next() (tok Token, ok bool) {
 	t, err := l.lex.next()
@@ -88,8 +88,7 @@ func (l *Lexer) SetPos(pos int) {
 	l.lex.pos = pos
 }
 
-// publicKind maps the internal token kinds to the exported ones. The internal set is a superset in ordering only; map
-// explicitly so neither enum constrains the other.
+// publicKind maps internal token kinds to exported ones explicitly, so neither enum's ordering constrains the other.
 func publicKind(k tokenKind) TokenKind {
 	switch k {
 	case tkInt:

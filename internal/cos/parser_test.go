@@ -38,11 +38,9 @@ func countElements(obj Object) int {
 	}
 }
 
-// TestContainerElementBudget covers the per-object element cap. Nesting depth was bounded but container width was not,
-// and the payload an object is built from is not bounded by the file: an object stream decodes through internal/filter's
-// max(64 MB, 256x input) allowance, so a 39 KB file could hold a single 20M-element array. That is worse than the same
-// flood in a content stream because the result lands in Document.objCache and stays live for the whole Document —
-// measured at >1.3 GB RSS with ~364 MB still live after the render returned.
+// TestContainerElementBudget covers the per-object element cap (see maxContainerElements). Without it a 39 KB file
+// could hold a single 20M-element array that stays live in Document.objCache: measured at >1.3 GB RSS with ~364 MB
+// still live after the render returned.
 func TestContainerElementBudget(t *testing.T) {
 	t.Run("array at the cap parses", func(t *testing.T) {
 		p := newParser([]byte("["+strings.Repeat("1 ", maxContainerElements)+"]"), 0)
@@ -97,12 +95,9 @@ func TestContainerElementBudget(t *testing.T) {
 	})
 }
 
-// TestRefGenerationIdentityAndBound pins the two things a parsed generation number must satisfy. First, it takes no
-// part in a reference's identity: object lookup keys on the number alone, so "4 0 R" and "4 1 R" resolve to the same
-// object and their RefKeys have to be equal — anything keyed by reference (the interpreter's form-cycle set, every
-// reference-keyed cache) would otherwise treat one object as two, letting a form that alternates generations slip past
-// its cycle guard. Second, an absurd generation must not reach Ref.Gen: anything past the largest generation ISO
-// 32000-2 defines is clamped rather than rejected, so the object the reference names is still reachable.
+// TestRefGenerationIdentityAndBound pins two properties of a parsed generation: it takes no part in a reference's
+// identity ("4 0 R" and "4 1 R" have equal RefKeys, so a form that alternates generations cannot slip past a cycle
+// guard), and an absurd generation is clamped rather than rejected, so the object the reference names stays reachable.
 func TestRefGenerationIdentityAndBound(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -175,12 +170,10 @@ func indirectLengthPDF(lengthRef, obj4Body string) []byte {
 	return buf.Bytes()
 }
 
-// TestIndirectStreamLength covers the /Length form ISO 32000-2 7.3.8.2 permits and every single-pass writer emits: an
-// indirect reference, since the payload's size is unknown when the dictionary is written. Honoring only a direct
-// /Length silently truncated any such stream at the first "endstream" its own bytes contained, with no error reported.
-// The resolution stays a proposal — an "endstream" keyword must follow the payload it describes — so every reference
-// that names something other than a plainly stored integer lands back on the scan, including one pointing at the very
-// stream being parsed, which resolves without recursing at all.
+// TestIndirectStreamLength covers the indirect /Length ISO 32000-2 7.3.8.2 permits and every single-pass writer emits.
+// Honoring only a direct /Length silently truncated such a stream at the first "endstream" its own bytes contained. The
+// resolution stays a proposal ("endstream" must follow the payload it describes), so every reference naming something
+// other than a plainly stored integer lands back on the scan, including one pointing at the stream being parsed.
 func TestIndirectStreamLength(t *testing.T) {
 	const (
 		lengthObjRef = "4 0 R" // The stream's own /Length object.

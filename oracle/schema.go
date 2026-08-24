@@ -10,14 +10,14 @@
 package main
 
 // This file defines the truth.json schema. internal/testsupport in the root module mirrors these types read-side (the
-// two modules deliberately share no code, so the library never depends on this module); keep the two in sync. Struct
-// field order here is the key order truth.json is emitted with (encoding/json marshals fields in declaration order), so
+// two modules share no code, so the library never depends on this module); keep the two in sync. Struct field order
+// here is the key order truth.json is emitted with (encoding/json marshals fields in declaration order), so
 // fieldalignment is suppressed rather than allowed to scramble the committed goldens; the testsupport mirror carries
-// the alignment-optimized ordering.
+// the alignment-optimized order.
 //
-// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left origin,
-// y-down, in PDF points, after the page's /Rotate and MediaBox/CropBox handling have been folded in by MuPDF. All other
-// geometry is in rendered-image pixel space for the DPI it is keyed under, produced by the public API of
+// Coordinate spaces: "raw" values are unscaled page-space floats exactly as MuPDF reports them: top-left origin,
+// y-down, in PDF points, after MuPDF has folded in the page's /Rotate and MediaBox/CropBox handling. All other geometry
+// is in rendered-image pixel space for the DPI it is keyed under, produced by the public API of
 // github.com/richardwilkes/pdf (the behavioral contract pdfview must match). Floats that MuPDF reports as non-finite (a
 // destination with no explicit coordinate, such as /Fit) are encoded as JSON null.
 
@@ -64,7 +64,7 @@ type TOCRawEntry struct { //nolint:govet // Field order is truth.json's emitted 
 	Title    string         `json:"title"`
 	URI      string         `json:"uri,omitempty"`
 	Page     int            `json:"page"`
-	X        *float32       `json:"x"` // null when MuPDF reports a non-finite coordinate
+	X        *float32       `json:"x"`
 	Y        *float32       `json:"y"`
 	Children []*TOCRawEntry `json:"children,omitempty"`
 }

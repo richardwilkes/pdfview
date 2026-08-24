@@ -16,9 +16,8 @@ import (
 	"testing"
 )
 
-// TestUnpremultiplyWiringScalar checks that the default build renders through the scalar loop and nothing else. The
-// vector kernels are not even compiled into this build, so what this really guards is the dispatch variable itself:
-// it must start at the scalar implementation, since nothing here ever reassigns it.
+// TestUnpremultiplyWiringScalar pins that a build without the simd experiment dispatches to the scalar loop: the vector
+// kernels are not compiled in, so nothing may repoint unpremultiplyPixelsFn.
 func TestUnpremultiplyWiringScalar(t *testing.T) {
 	got := reflect.ValueOf(unpremultiplyPixelsFn).Pointer()
 	if want := reflect.ValueOf(unpremultiplyPixelsScalar).Pointer(); got != want {

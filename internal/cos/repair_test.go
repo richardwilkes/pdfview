@@ -34,10 +34,8 @@ func newRepairableDoc() *Document {
 }
 
 // TestRepairDeferredWhileObjStmLoading checks that a failed load nested inside an object-stream parse does not trigger
-// the document-wide repair scan. Repair replaces the cross-reference table and drops every cache while those frames are
-// still parsing against the old one, and its own loadObjStm sweep would re-enter a stream whose parse is suspended
-// further down the stack. The deferral must not be permanent: d.repaired stays false, so the next failing load reached
-// from the top level still repairs.
+// the repair scan (see loadObject), and that the deferral is not permanent: d.repaired stays false, so the next failing
+// load from the top level still repairs.
 func TestRepairDeferredWhileObjStmLoading(t *testing.T) {
 	d := newRepairableDoc()
 	d.objStmLoading[5] = true // As if object stream 5's own header keys were being resolved.
@@ -64,12 +62,9 @@ func TestRepairDeferredWhileObjStmLoading(t *testing.T) {
 	}
 }
 
-// TestRepairDeferredWhileLoadingXref checks the same deferral for the other in-flight state: a load reached from
-// loadXref. Repair there replaces the cross-reference table and trailer that loadXref is still filling in, so its
-// entries go into the discarded map and its final mergeTrailers overwrites the repaired trailer with one assembled from
-// the broken chain — while d.repaired, now set, makes Open skip the retry that would have used the repaired data. The
-// failure is not cached either: it was decided against a table that was still incomplete, so the object stays loadable
-// once the table is whole.
+// TestRepairDeferredWhileLoadingXref checks the same deferral for a load reached from loadXref (see
+// Document.xrefLoading), and that the failure is not cached: it was decided against an incomplete table, so the object
+// stays loadable once the table is whole.
 func TestRepairDeferredWhileLoadingXref(t *testing.T) {
 	d := newRepairableDoc()
 	d.xrefLoading = true // As if a cross-reference stream's own /Filter were being resolved.
@@ -95,10 +90,8 @@ func TestRepairDeferredWhileLoadingXref(t *testing.T) {
 	}
 }
 
-// TestClearCachesKeepsInFlightObjStmLoads checks that clearCaches leaves objStmLoading alone. That map is not a cache
-// but the set of loadObjStm frames currently on the stack; replacing it strands their markers in the discarded map and
-// disarms the re-entrancy guard for the rest of the recursion, letting a stream be re-entered while it is still being
-// parsed.
+// TestClearCachesKeepsInFlightObjStmLoads checks that clearCaches and repair leave objStmLoading alone, so the
+// re-entrancy guard stays armed for frames still on the stack.
 func TestClearCachesKeepsInFlightObjStmLoads(t *testing.T) {
 	d := newRepairableDoc()
 	d.objStmLoading[9] = true
@@ -173,9 +166,8 @@ func TestRepairFindsObjectAfterFailedParse(t *testing.T) {
 }
 
 // TestRepairAcceptsZeroPaddedObjectNumbers checks that the repair sweep recovers an object whose header number is
-// zero-padded ("0000000012 0 obj"), which writers that reserve a fixed-width field emit. The cheap digit-count
-// rejection is there to skip numbers too large to be real, so it has to count the SIGNIFICANT digits: counting the
-// token's whole length made padding alone — not magnitude — hide an object well inside maxObjectNumber.
+// zero-padded ("0000000012 0 obj"), as writers reserving a fixed-width field emit: the digit-count rejection must count
+// significant digits, not the token's length.
 func TestRepairAcceptsZeroPaddedObjectNumbers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -218,11 +210,9 @@ func TestRepairAcceptsZeroPaddedObjectNumbers(t *testing.T) {
 	}
 }
 
-// TestRepairReplacesDeadRoot covers the trailer a damaged file usually leaves behind: one that survived intact but
-// names an object the file no longer defines. Substituting the swept catalog only when the /Root key was absent left
-// such a file unopenable with a good catalog already in hand — and with d.repaired set, Open would not retry. A /Root
-// that does resolve is authoritative and must be kept, even when the sweep found some other (superseded) catalog later
-// in the file.
+// TestRepairReplacesDeadRoot covers the trailer a damaged file usually leaves: intact but naming an object the file no
+// longer defines. The swept catalog must replace a /Root that is absent or dead, while one that resolves is kept even
+// when the sweep found a later (superseded) catalog.
 func TestRepairReplacesDeadRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -263,11 +253,9 @@ func TestRepairReplacesDeadRoot(t *testing.T) {
 	}
 }
 
-// TestRepairKeepsUnresolvedRootWhenEncrypted checks the one case the resolve test must not judge: an encrypted document
-// whose /Root sits in an object stream. Nothing at this layer can decode that stream until the security handler is
-// built and authenticated above it, so a /Root that does not resolve yet says nothing about the reference — while a
-// substituted catalog would outlive the decryptor's arrival, since a resolvable-but-superseded root never fails a later
-// check.
+// TestRepairKeepsUnresolvedRootWhenEncrypted checks that an encrypted document's unresolved /Root is kept: it may sit
+// in an object stream this layer cannot decode yet, and a substituted catalog would outlive the decryptor's arrival
+// (see installRepairedRoot).
 func TestRepairKeepsUnresolvedRootWhenEncrypted(t *testing.T) {
 	var b bytes.Buffer
 	b.WriteString(pdfPrefix)
@@ -288,13 +276,9 @@ func TestRepairKeepsUnresolvedRootWhenEncrypted(t *testing.T) {
 	}
 }
 
-// TestRepairSweepIsBounded checks that the repair scan does not amplify hostile input. Both the object sweep and the
-// trailer sweep used to build a fresh parser at every candidate offset and, on failure, advance the cursor by only a
-// few bytes — while the failed parse itself had already read toward end of input through an unterminated string. That
-// is quadratic: measured through the public API, a body of repeated "1 0 obj <" cost 0.19 s at 50 KB, 0.66 s at 100 KB
-// and 2.49 s at 200 KB, putting a 4 MB file at roughly a quarter hour. The limit here is enormously larger than the
-// repaired cost (milliseconds) and far below the pre-fix cost of about a minute for this size, so it is a
-// denial-of-service regression alarm rather than a benchmark.
+// TestRepairSweepIsBounded is a denial-of-service regression alarm, not a benchmark: a quadratic sweep (one resuming a
+// few bytes past each failed candidate; see repair) costs about a minute at this size, the linear one milliseconds, so
+// the limit is far from both.
 func TestRepairSweepIsBounded(t *testing.T) {
 	const (
 		size  = 1 << 20

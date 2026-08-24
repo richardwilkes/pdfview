@@ -37,7 +37,6 @@ func TestParseDPIs(t *testing.T) {
 }
 
 func TestParseDPIsRejectsDuplicates(t *testing.T) {
-	// A duplicate DPI would collapse under a shared strconv.Itoa key and silently discard one dump; it must be rejected.
 	for _, csv := range []string{"72,72", "72,100,72", "150, 150"} {
 		if _, err := parseDPIs(csv); err == nil {
 			t.Errorf("parseDPIs(%q) = nil error, want duplicate rejection", csv)
@@ -76,8 +75,6 @@ func TestValidateNeedles(t *testing.T) {
 }
 
 func TestClampHits(t *testing.T) {
-	// A hit count from MuPDF indexes the Go quad buffer directly, so anything outside [0, len(quads)] must be pulled
-	// back into range rather than panicking the dump.
 	for _, tc := range []struct {
 		name  string
 		hits  int

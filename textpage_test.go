@@ -46,8 +46,8 @@ func textPage(t *testing.T, name string, dpi int) *pdfview.TextPage {
 	return tp
 }
 
-// findText returns the first character index whose text reads exactly s, or -1. Indices count characters rather than
-// runes or bytes, so this holds only for text a page spells one character per rune — which every needle below is.
+// findText returns the first character index whose text reads exactly s, failing the test when there is none. Indices
+// count characters, so this holds only for text spelled one character per rune, as every needle here is.
 func findText(t *testing.T, tp *pdfview.TextPage, s string) int {
 	t.Helper()
 	n := len([]rune(s))
@@ -85,7 +85,7 @@ func TestTextPageText(t *testing.T) {
 		t.Errorf("the kerned line holds %d characters, want %d — the space must be synthesized, not recorded", n,
 			len("KernedText"))
 	}
-	// The word the caret sits in stops at the synthesized space just as a search for it would.
+	// WordAt stops at the synthesized space, as a search would.
 	if start, end := tp.WordAt(lineStart); tp.Text(start, end) != "Kerned" {
 		t.Errorf("WordAt at the start of the kerned line selected %q, want %q", tp.Text(start, end), "Kerned")
 	}
@@ -113,14 +113,13 @@ func TestTextPageLigature(t *testing.T) {
 	if hits := tp.Highlights(start, end); len(hits) != 1 {
 		t.Errorf("highlighting the whole word produced %d rectangles, want 1: %v", len(hits), hits)
 	}
-	// A word selection over the ligature covers the letters it spells, so a double-click copies "flower" whole.
+	// A word selection over the ligature covers the letters it spells.
 	if s, e := tp.WordAt(start); tp.Text(s, e) != "flower" {
 		t.Errorf("WordAt on the ligature selected %q, want %q", tp.Text(s, e), "flower")
 	}
-	// The caret lands as the glyph's shape suggests: the ligature shares its width between the letters it spells, so
-	// a click in its leading part sits before "f", one at its center between "f" and "l", and one at its trailing
-	// edge after both. The fillers' own geometry — all of it at the pen — would put that last click between "f" and
-	// "l" too, and a drag from the glyph's edge would then take half of it along.
+	// The ligature shares its width between the letters it spells: a click in its leading part sits before "f", at
+	// its center between "f" and "l", at its trailing edge after both. The fillers' own geometry (all at the pen)
+	// would put the last click between "f" and "l" too.
 	glyph := tp.Highlights(start, start+2)
 	if len(glyph) != 1 {
 		t.Fatalf("the ligature highlighted as %d rectangles, want 1: %v", len(glyph), glyph)
@@ -141,12 +140,10 @@ func TestTextPageLigature(t *testing.T) {
 	}
 }
 
-// TestTextPageIndexAtRoundTrip pins the two directions against each other: the point at the middle of a character's
-// own highlight must resolve to a caret position within the shape that highlight paints, never somewhere else on the
-// page. For an ordinary character that shape is the character, so the caret lands on one side of it or the other. For
-// a glyph spelling several letters it is the whole glyph — the letters after the first paint nothing of their own —
-// so the caret may land at any boundary the glyph's own width is shared among. It runs at more than one dpi because
-// the point makes the trip through the pixel space both ways.
+// TestTextPageIndexAtRoundTrip pins the two directions against each other: the center of a character's own highlight
+// must resolve to a caret within the shape that highlight paints. For a glyph spelling several letters that shape is
+// the whole glyph, so the caret may land at any boundary the glyph's width is shared among. It runs at more than one
+// dpi because the point makes the trip through the pixel space both ways.
 func TestTextPageIndexAtRoundTrip(t *testing.T) {
 	for _, name := range []string{"text-std14.pdf", "text-type1.pdf", "text-ligature.pdf"} {
 		for _, dpi := range []int{72, 150} {
@@ -192,10 +189,9 @@ func TestTextPageIndexAtRoundTrip(t *testing.T) {
 	}
 }
 
-// findAllFold returns the start index of every character range whose text equals s under simple case folding — the
-// folding the matcher itself uses. It stands in for a search over the same page: a needle with no space in it makes
-// the two rules identical, because the only things that separate them (a synthesized space, a line break) would put
-// bytes into Text that the comparison then rejects.
+// findAllFold returns the start of every character range equal to s under simple case folding, the folding the matcher
+// uses. For a needle with no space in it this is the same rule as search, since only a synthesized space or a line
+// break could separate the two.
 func findAllFold(tp *pdfview.TextPage, s string) []int {
 	var out []int
 	n := len([]rune(s))
@@ -207,11 +203,10 @@ func findAllFold(tp *pdfview.TextPage, s string) []int {
 	return out
 }
 
-// TestTextPageForSizeMatchesRenderPageForSize pins what ForSize exists for: a fit-to-box image and the text labeled
-// for it are the same pixel space, exactly. RenderPageForSize scales by min(maxWidth/width, maxHeight/height), which
-// is no whole dpi, so no TextPage made from a dpi can name a pixel of that image. The comparison is against that
-// render's own SearchHits — the same rectangles, in the same order — because search and selection paint the same
-// characters and both funnel through quadToRect, so nothing weaker would catch the two sizing paths drifting apart.
+// TestTextPageForSizeMatchesRenderPageForSize pins that a fit-to-box image and the text labeled for it are the same
+// pixel space exactly. RenderPageForSize scales by min(maxWidth/width, maxHeight/height), which is no whole dpi, so no
+// TextPage made from a dpi can name a pixel of that image. The comparison is against the render's own SearchHits, the
+// same rectangles in the same order, since search and selection both funnel through quadToRect.
 func TestTextPageForSizeMatchesRenderPageForSize(t *testing.T) {
 	const needle = "Taxpayer"
 	doc := openCorpus(t, "irs-fw9.pdf")
@@ -250,7 +245,7 @@ func TestTextPageForSizeMatchesRenderPageForSize(t *testing.T) {
 					rendered.SearchHits[i])
 			}
 		}
-		// The image the caller gets back is the space every one of those rectangles is documented to live in.
+		// Every rectangle lives in the image the caller gets back.
 		for _, hit := range fitted.Highlights(0, fitted.Len()) {
 			if !hit.In(rendered.Image.Rect) {
 				t.Fatalf("box %v: highlight %v is not inside the %v image", box, hit, rendered.Image.Rect)
@@ -302,9 +297,9 @@ func TestTextPageForSizeRejectsWhatRenderPageForSizeRejects(t *testing.T) {
 	}
 }
 
-// TestTextPageAtDPIMatchesAFreshExtraction pins that re-labeling is not an approximation of extracting at that dpi but
-// the identical answer, character for character and pixel for pixel. That equality is the whole license for a viewer
-// to hold one TextPage per page instead of one per zoom level.
+// TestTextPageAtDPIMatchesAFreshExtraction pins that re-labeling is the identical answer to extracting at that dpi,
+// character for character and pixel for pixel: the license for a viewer to hold one TextPage per page instead of one
+// per zoom level.
 func TestTextPageAtDPIMatchesAFreshExtraction(t *testing.T) {
 	doc := openCorpus(t, "irs-fw9.pdf")
 	base, err := doc.TextPage(0, 72)
@@ -351,8 +346,7 @@ func TestTextPageAtDPIMatchesAFreshExtraction(t *testing.T) {
 }
 
 // TestTextPageRelabelSurvivesRelease pins that neither re-labeling method needs the document: they take no lock and
-// touch no engine state, so a viewer can zoom a page whose document it has already released — and, more to the point
-// for a live one, can zoom without blocking a render on the same document.
+// touch no engine state, so a viewer can zoom after Release and without blocking a render.
 func TestTextPageRelabelSurvivesRelease(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", "text-std14.pdf"))
 	if err != nil {
@@ -472,7 +466,6 @@ func TestTextPageInvisibleTextIncluded(t *testing.T) {
 	if text := tp.Text(0, tp.Len()); !strings.Contains(text, "Ghost words") {
 		t.Fatalf("the invisible line is missing from the extracted text: %q", text)
 	}
-	// It is a line like any other: it can be hit-tested and highlighted.
 	start, end := tp.LineAt(findText(t, tp, "Ghost words"))
 	if got := tp.Text(start, end); got != "Ghost words" {
 		t.Errorf("the invisible line reads %q, want %q", got, "Ghost words")
@@ -482,10 +475,9 @@ func TestTextPageInvisibleTextIncluded(t *testing.T) {
 	}
 }
 
-// TestTextPageHighlightsWithinImage pins the documented contract that every rectangle lives in the pixel space of the
-// image RenderPage produces at the same dpi. The extents are sized by a float32 multiply while the coordinates are
-// scaled in float64, so the two disagree in the last bits; a highlight on a page-edge character would otherwise name
-// a row the image does not have.
+// TestTextPageHighlightsWithinImage pins that every rectangle lives in the pixel space of the image RenderPage produces
+// at the same dpi: extents are sized in float32 and coordinates scaled in float64, so a page-edge character would
+// otherwise name a row the image does not have.
 func TestTextPageHighlightsWithinImage(t *testing.T) {
 	doc := openCorpus(t, "irs-f1040.pdf")
 	for _, dpi := range []int{72, 150, 432} {
@@ -585,9 +577,8 @@ func TestTextPageRangeClamping(t *testing.T) {
 	}
 }
 
-// TestTextPageSurvivesRelease pins the documented lifetime: a TextPage holds no reference to the document it came
-// from, so releasing the document — which drops the parsed objects, the caches, and the copy of the file's bytes —
-// leaves the extracted text working exactly as it did before.
+// TestTextPageSurvivesRelease pins the documented lifetime: a TextPage holds no reference to its document, so releasing
+// the document leaves the extracted text working.
 func TestTextPageSurvivesRelease(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", "text-std14.pdf"))
 	if err != nil {
@@ -626,16 +617,15 @@ func TestTextPageSurvivesRelease(t *testing.T) {
 			t.Errorf("after Release: highlight %d = %v, want %v", i, got[i], hits[i])
 		}
 	}
-	// A further extraction from the released document reports the documented error rather than panicking.
+	// Extraction from the released document reports an error rather than panicking.
 	if _, err = doc.TextPage(0, 72); err == nil {
 		t.Error("TextPage on a released document returned no error")
 	}
 }
 
-// TestOverallMaxTextChars pins that the retained-text cap is honored and that what it keeps stays usable: the excess
-// is dropped the way the hit, link, and TOC walks drop theirs, leaving a shorter but coherent page rather than an
-// error. The variable is global and this package's tests do not run in parallel, so it is saved and restored around
-// the check exactly as the OverallMaxPixels tests do.
+// TestOverallMaxTextChars pins that the retained-text cap is honored and what it keeps stays usable: the excess is
+// dropped, leaving a shorter but coherent page rather than an error. The global is saved and restored, as the
+// OverallMaxPixels tests do.
 func TestOverallMaxTextChars(t *testing.T) {
 	doc := openCorpus(t, "irs-f1040.pdf")
 	full, err := doc.TextPage(0, 72)

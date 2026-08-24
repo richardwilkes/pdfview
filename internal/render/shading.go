@@ -33,7 +33,7 @@ import (
 // repeating image shader, the rasterized cell cached in the document store (see tileImage).
 
 // Limits: caps on the offscreen resolutions hostile content can request. A function-based shading evaluates its
-// function once per grid cell (shading.MaxGridDim/MaxGridArea bound that work — they live beside the shading because
+// function once per grid cell (shading.MaxGridDim/MaxGridArea bound that work; they live beside the shading because
 // the interpreter charges its work budget against the same grid); a tiling cell rasterizes at the pattern's device
 // scale (maxTileDim/maxTileArea bound the surface), degrading to a coarser tile beyond them. maxExtendFactor bounds the
 // parametric gradient extension search. maxTileCopies bounds how many neighbor-cell copies replay into one tile when
@@ -64,11 +64,10 @@ func (d *Device) preparePaint(p device.Paint, ctm *gfx.Matrix) (*canvas.Paint, b
 		local = local.Mul(gfx.Translate(-0.5, 0.5))
 	}
 	// toDevice is the pattern/shading space → DEVICE map; local is that same map carried back into the space the draw
-	// runs in, which is what canvas needs for the shader (it composes the local matrix with the draw's own CTM). Every
-	// decision about how big something must be to cover the surface — a gradient's extension factor, a function
-	// shading's evaluation grid — belongs to toDevice: the drawing CTM cancels out of the composition, so measuring
-	// against local scales those decisions by its inverse (see coverageCorners and functionShader). tileShader already
-	// works this way, taking its device scale from patCTM.
+	// runs in, which is what canvas composes with the draw's own CTM for the shader. Every decision about how big
+	// something must be to cover the surface — a gradient's extension factor, a function shading's grid — belongs to
+	// toDevice: the drawing CTM cancels out of the composition, so measuring against local would scale those decisions
+	// by its inverse (see coverageCorners and functionShader).
 	toDevice := local
 	if ctm != nil {
 		inv, ok := ctm.Invert()
@@ -126,12 +125,12 @@ func (d *Device) shadingShader(sh *shading.Shading, local, toDevice gfx.Matrix) 
 // gradientRamp converts sampled stops to the canvas color/position arrays, extending the parametric span by e0 before
 // offset 0 and e1 after offset 1 (in units of the original span) with duplicated boundary colors.
 //
-// The offsets map in float64 and come back through rampPos, which forces the array non-decreasing within [0, 1]. A large
-// one-sided extension (the factors are clamped only at maxExtendFactor) compresses the whole original span into ~1e-6 of
-// the ramp, below float32's resolution there, so the mapped offsets collapse onto each other and the float32 rounding of
-// a monotonic sequence is no longer guaranteed to stay ordered; a non-finite stop offset would otherwise cross into
-// canvas untouched as well. The visual result of such an extension is a hard boundary either way — this only keeps the
-// arrays handed to shaders.NewLinearGradient/NewTwoPointConicalGradient inside the contract they document.
+// The offsets map in float64 and come back through rampPos, which forces the array non-decreasing within [0, 1]: a
+// large one-sided extension (clamped only at maxExtendFactor) compresses the original span into ~1e-6 of the ramp,
+// below float32's resolution there, so float32 rounding of the mapped offsets is no longer guaranteed to stay ordered,
+// and a non-finite stop offset would otherwise cross into canvas untouched. This only keeps the arrays inside the
+// contract shaders.NewLinearGradient/NewTwoPointConicalGradient document; the visual result is a hard boundary either
+// way.
 func gradientRamp(stops []shading.Stop, e0, e1 float32) (colors []colorcore.Color, pos []float32) {
 	if len(stops) == 0 {
 		return nil, nil
@@ -176,11 +175,9 @@ func rampPos(p float64, prev float32) float32 {
 }
 
 // coverageCorners maps the device surface's corners into the shading's target space, for sizing gradient extensions.
-// toDevice is the shading target space → device map, NOT the shader's local matrix: the extension has to be big enough
-// to cover the surface's own pixels, so the corners must come back through the full map. Inverting local instead would
-// carry the device corners through the drawing CTM first, sizing the extension by ctm(deviceCorners) — too small
-// wherever the drawing CTM shrinks relative to the pattern CTM, which leaves part of the surface unpainted (it is exact
-// only at scale 1, where the y-flip of the usual page CTM is an involution).
+// toDevice is the shading target space → device map, NOT the shader's local matrix: inverting local would carry the
+// device corners through the drawing CTM first, sizing the extension too small wherever the drawing CTM shrinks
+// relative to the pattern CTM and leaving part of the surface unpainted.
 func (d *Device) coverageCorners(toDevice gfx.Matrix) ([4]gfx.Point, bool) {
 	inv, ok := toDevice.Invert()
 	if !ok {
@@ -246,13 +243,11 @@ func (d *Device) axialShader(sh *shading.Shading, local, toDevice gfx.Matrix) sh
 	return shaders.NewLinearGradient(p0, p1, colors, pos, tile, &lm)
 }
 
-// axialSpan returns the parametric range the surface's corners occupy along the p0 + t*(dx, dy) axis, clamped to
-// include the gradient's own [0, 1] span. The projections run in float64 on purpose: the inputs are finite float32s,
-// but a float32 difference of two large opposite-sign coordinates overflows to ±Inf, and Inf*0 — the ordinary case for
-// an axis-aligned gradient, where dx or dy is exactly 0 — is NaN, which Go's min/max propagate into the extension
-// factors, from there into the extended endpoints and the ramp's stop offsets, and on into canvas. In float64 no
-// difference or product of finite float32s can overflow, so with lenSq already known positive and finite every
-// projection is finite, and the results stay in the range the caller's maxExtendFactor clamp bounds.
+// axialSpan returns the parametric range the surface's corners occupy along the p0 + t*(dx, dy) axis, widened to
+// include the gradient's own [0, 1] span. The projections run in float64: the inputs are finite float32s, but a float32
+// difference of two large opposite-sign coordinates overflows to ±Inf, and Inf*0 — the ordinary case for an
+// axis-aligned gradient, where dx or dy is exactly 0 — is NaN, which min/max would propagate into the extension factors
+// and on into canvas. No difference or product of finite float32s overflows in float64.
 func axialSpan(p0 geom.Point, dx, dy, lenSq float32, corners [4]gfx.Point) (sMin, sMax float64) {
 	sMin, sMax = 0, 1
 	for _, c := range corners {
@@ -306,13 +301,8 @@ func (d *Device) radialShader(sh *shading.Shading, local, toDevice gfx.Matrix) s
 
 // radialExtension finds the parametric extension factor (in units of the t span) that either covers every corner with
 // the extended circle or reaches the radius-zero cutoff PDF prescribes (ISO 32000-2 8.7.4.5.4: extension continues
-// until the circles cover the area or the radius becomes 0).
-//
-// The search runs in float64 for the reason axialSpan does: every input is a finite float32, but their float32
-// differences and products can overflow to ±Inf and produce NaN (Inf-Inf in a center delta, Inf*0 in a
-// coincident-center gradient), which would flow out as a NaN factor and put NaN circles in front of canvas. In float64
-// nothing formed from finite float32s overflows, and the result is bounded by maxExtendFactor, so it converts back
-// exactly.
+// until the circles cover the area or the radius becomes 0). The search runs in float64 for the reason axialSpan does;
+// the result is bounded by maxExtendFactor, so it converts back exactly.
 func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atStart bool) float32 {
 	dr := float64(r1) - float64(r0)
 	// The factor at which the extended radius reaches zero, when it shrinks in this direction.
@@ -356,30 +346,26 @@ func radialExtension(c0, c1 gfx.Point, r0, r1 float32, corners [4]gfx.Point, atS
 // domain at roughly device resolution (shading.GridSize caps it), and the image is placed by the domain-to-device
 // mapping with decal tiling so points outside the domain stay unpainted.
 //
-// The grid is sized from toDevice, not from the shader's local matrix: "device resolution" means device PIXELS, and
-// local carries the drawing CTM's inverse, so sizing from it scales the grid by the inverse of the drawing CTM — a
-// magnifying cm renders the shading blocky, and a shrinking one inflates the grid toward shading.MaxGridArea while
-// internal/content charged the work budget from the pattern CTM (see budget.go's shadingPaintCost). Both packages have
-// to size from the same numbers, which is why the caps live in internal/shading; content uses the pattern CTM, so this
-// does too.
+// The grid is sized from toDevice, not from the shader's local matrix: local carries the drawing CTM's inverse, so
+// sizing from it would render the shading blocky under a magnifying cm and inflate the grid toward shading.MaxGridArea
+// under a shrinking one, while internal/content charged the work budget from the pattern CTM (budget.go's
+// shadingPaintCost). Both packages size from the same numbers, which is why the caps live in internal/shading.
 func (d *Device) functionShader(sh *shading.Shading, local, toDevice gfx.Matrix) shaders.Shader {
 	w, h, ok := sh.GridSize(toDevice)
 	if !ok {
 		return nil
 	}
 	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
-	// Image pixel -> domain -> /Matrix -> target space. The per-cell extents are formed in float64 for the reason
-	// axialSpan runs there: each /Domain entry is individually finite, but the float32 difference of two far-apart
-	// bounds (a /Domain of [-3e38 3e38 0 1]) overflows to +Inf, which would scale the whole placement by infinity.
+	// Image pixel -> domain -> /Matrix -> target space. The per-cell extents are formed in float64: each /Domain entry
+	// is finite, but the float32 difference of two far-apart bounds (a /Domain of [-3e38 3e38 0 1]) overflows to +Inf.
 	toDomain := gfx.Matrix{
 		A: float32((float64(x1) - float64(x0)) / float64(w)),
 		D: float32((float64(y1) - float64(y0)) / float64(h)),
 		E: x0,
 		F: y0,
 	}
-	// Only finite geometry crosses into canvas — the same gate axialShader applies to its own placement. Checked before
-	// the grid is realized, since canvas drops a fill with a non-finite local matrix and the up-to-MaxGridArea function
-	// evaluations behind it would be spent painting nothing.
+	// Only finite geometry crosses into canvas. Checked before the grid is realized, since canvas drops a fill with a
+	// non-finite local matrix and the up-to-MaxGridArea function evaluations would be spent painting nothing.
 	full := toDomain.Mul(sh.Matrix.Mul(local))
 	if !full.IsFinite() {
 		return nil
@@ -394,9 +380,8 @@ func (d *Device) functionShader(sh *shading.Shading, local, toDevice gfx.Matrix)
 }
 
 // funcGridKey identifies one realized function-based shading grid: the parsed shading (immutable after shading.Parse,
-// and the interpreter hands out one instance per shading reference, so the pointer IS the content identity — the same
-// reasoning glyphMaskKey keys on a *font.Font) plus the grid size it was evaluated at. Distinct store key type per the
-// store's kind-separation rule.
+// and the interpreter hands out one instance per shading reference, so the pointer IS the content identity) plus the
+// grid size it was evaluated at. Distinct store key type per the store's kind-separation rule.
 type funcGridKey struct {
 	sh   *shading.Shading
 	w, h int
@@ -411,10 +396,7 @@ const maxCachedFuncGrids = 8
 
 // functionImage returns sh's domain grid realized at w×h, evaluating the shading's function once per cell on first use.
 // The realization depends only on the shading and that grid size — where it lands on the surface lives in the shader's
-// matrix, not in the image — so it is cached and reused by every later draw of the same shading at the same size.
-// Without the cache each painting operation re-evaluated the whole grid (up to shading.MaxGridArea function evaluations
-// for a 1 MB image), which is why the interpreter charges its budget per painting operation and not per parse: a
-// repeated sh costs one operator unit apiece, and a type 4 /Function's evaluations are bounded but far from free.
+// matrix — so it is cached and reused by every later draw of the same shading at the same size.
 func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
 	key := funcGridKey{sh: sh, w: w, h: h}
 	if d.store != nil {
@@ -433,9 +415,7 @@ func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
 		d.funcGrids = make(map[funcGridKey]*imagecore.Image)
 	}
 	if len(d.funcGrids) >= maxCachedFuncGrids {
-		// Dropping the map, rather than refusing further entries, for the reason glyphMask does it: refusing would retire
-		// the cache for the rest of the render, so every later draw would re-evaluate its grid with no prospect of a hit.
-		// Retention is invisible to output — a hit reproduces the grid a miss would have evaluated, sample for sample.
+		// Dropped rather than refused, for the reason glyphMask gives.
 		clear(d.funcGrids)
 	}
 	d.funcGrids[key] = img
@@ -446,8 +426,7 @@ func (d *Device) functionImage(sh *shading.Shading, w, h int) *imagecore.Image {
 // centers, and wraps the samples as an opaque RGBA image. nil (a cached failure) when the image cannot be created.
 func (d *Device) realizeFunctionGrid(sh *shading.Shading, w, h int) *imagecore.Image {
 	x0, x1, y0, y1 := sh.Domain[0], sh.Domain[1], sh.Domain[2], sh.Domain[3]
-	// Cell extents in float64, matching functionShader: the float32 difference of two far-apart finite domain bounds
-	// overflows to +Inf and would place every sample of the grid at the same infinite domain point.
+	// Cell extents in float64, matching functionShader.
 	dx := (float64(x1) - float64(x0)) / float64(w)
 	dy := (float64(y1) - float64(y0)) / float64(h)
 	pix := make([]byte, w*h*4)
@@ -472,12 +451,11 @@ func (d *Device) realizeFunctionGrid(sh *shading.Shading, w, h int) *imagecore.I
 	return imagecore.NewRasterData(info, pix, w*4)
 }
 
-// clampDim converts a pixel extent to a grid dimension in [1, maxV]. The bounds are applied in float space on purpose:
-// Go leaves a float→int conversion implementation-defined when the value does not fit, and the platforms disagree —
-// amd64 saturates to math.MinInt64, which an int-space clamp reads as "too small" and rounds UP to 1 (a shading
-// rendered as one flat color, a tiling pattern as a 1×1 tile), while arm64 saturates to math.MaxInt64. A shading
-// /Matrix that blows the domain up to a 1e30 device extent, or an XStep×scale product that overflows to +Inf, must
-// therefore never reach the conversion unclamped.
+// clampDim converts a pixel extent to a grid dimension in [1, maxV]. The bounds are applied in float space: Go leaves
+// an out-of-range float→int conversion implementation-defined, and the platforms disagree — amd64 yields
+// math.MinInt64, which an int-space clamp would round UP to 1 (a shading rendered as one flat color, a tiling pattern
+// as a 1×1 tile), while arm64 saturates to math.MaxInt64. A /Matrix that blows the domain up to a 1e30 device extent,
+// or an XStep×scale product that overflows to +Inf, must never reach the conversion unclamped.
 func clampDim(v float32, maxV int) int {
 	if !(v >= 1) { // Catches NaN along with everything under a pixel.
 		return 1
@@ -506,9 +484,9 @@ func (d *Device) tileShader(t *device.Tiling, local, patCTM gfx.Matrix) shaders.
 		w = max(w/2, 1)
 		h = max(h/2, 1)
 	}
-	// Pattern-space window [X0, X0+XStep] x [Y0, Y0+YStep] maps to the tile image with y flipped (image rows grow
+	// The pattern-space window [X0, X0+XStep] x [Y0, Y0+YStep] maps to the tile image with y flipped (image rows grow
 	// downward while pattern y grows upward under the usual page CTM; patCTM's own flip is applied when the shader
-	// samples, so the window mapping keeps pattern orientation).
+	// samples).
 	fw := float32(w) / t.XStep
 	fh := float32(h) / t.YStep
 	window := gfx.Matrix{A: fw, D: -fh, E: -t.BBox.X0 * fw, F: (t.BBox.Y0 + t.YStep) * fh}
@@ -537,10 +515,9 @@ type tileCellKey struct {
 func tileImageSize(w, h int) uint64 { return 4*uint64(w)*uint64(h) + 128 }
 
 // tileImage returns the pattern's cell rasterized at w×h, rendering it on first use. The result depends only on the
-// cell content and that pixel size — window is derived from both, and the pattern's rotation and placement live in the
-// shader's matrix, not in the tile — so with a store wired the image is cached there and shared by every later draw of
-// the pattern at the same scale, across pages. Failures cache too (they are a property of the same inputs). Without a
-// store every call rasterizes.
+// cell content and that pixel size (window is derived from both; rotation and placement live in the shader's matrix),
+// so with a store wired the image is cached there and shared by every later draw of the pattern at the same scale,
+// across pages. Failures cache too. Without a store every call rasterizes.
 func (d *Device) tileImage(t *device.Tiling, window gfx.Matrix, w, h int) *imagecore.Image {
 	key := tileCellKey{pattern: t.Key, w: w, h: h}
 	cacheable := t.Key != nil && d.store != nil
@@ -566,8 +543,8 @@ func (d *Device) rasterizeTile(t *device.Tiling, window gfx.Matrix, w, h int) *i
 	// Cells whose box exceeds the steps spill into neighbors' windows; replay the necessary neighbor copies.
 	nx := spillCopies(t.BBox.X1-t.BBox.X0, t.XStep)
 	ny := spillCopies(t.BBox.Y1-t.BBox.Y0, t.YStep)
-	// Corner form: the extents X1-X0/Y1-Y0 overflow to +Inf for a box spanning more than float32's range, and the
-	// non-finite corners that yields clip the whole cell away (buildPath's guard would drop the path outright).
+	// Corner form: the extents X1-X0/Y1-Y0 overflow to +Inf for a box spanning more than float32's range, and
+	// buildPath would then drop the clip path outright.
 	bboxPath := &gfx.Path{}
 	bboxPath.RectCorners(t.BBox.X0, t.BBox.Y0, t.BBox.X1, t.BBox.Y1)
 	for i := -nx; i <= 0; i++ {
@@ -587,11 +564,8 @@ func spillCopies(extent, step float32) int {
 	if !(extent > step) {
 		return 0
 	}
-	// The cap is applied in float space, as every other conversion in this package does (clampDim, rectInterior,
-	// maskBounds, renderGlyphMask, fillTilingInto's lattice bounds, blitTextRun's origin clamp): extent is a float32
-	// difference of two validated /BBox corners, so it reaches +Inf for a box spanning more than float32's range, and
-	// int(+Inf) is implementation-defined (amd64 wraps to MinInt64, arm64 saturates to MaxInt64). Bounding first keeps
-	// the result from depending on that. The comparison also rejects NaN.
+	// The cap is applied in float space (see clampDim): extent is a float32 difference of two validated /BBox corners,
+	// so it reaches +Inf for a box spanning more than float32's range. The comparisons also reject NaN.
 	n := math.Ceil(float64(extent/step)) - 1
 	if !(n > 0) {
 		return 0
@@ -607,8 +581,8 @@ func spillCopies(extent, step float32) int {
 const maxReplayTiles = 4096
 
 // fillTilingInto paints a tiling pattern into the device-space path by replaying the cell content once per lattice
-// position at full device resolution — the fidelity MuPDF gets by replaying tiles — rather than resampling one
-// rasterized tile. Falls back to the image-shader path when the fill would need an unbounded number of replays.
+// position at full device resolution, as MuPDF does, rather than resampling one rasterized tile. Falls back to the
+// image-shader path when the fill would need too many replays.
 func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	t := p.Tiling
 	inv, ok := p.PatternCTM.Invert()
@@ -632,29 +606,27 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 	if !(t.XStep > 0) || !(t.YStep > 0) || !isFinite32(t.XStep) || !isFinite32(t.YStep) {
 		return
 	}
-	// The lattice bounds are computed in float64 and validated BEFORE the int conversions: a hostile step (a denormal
-	// /YStep, say) overflows the float32 division to ±Inf, and Go's out-of-range float→int conversion saturates — j0 ==
-	// j1 == MaxInt64 passes an nx*ny cap yet `for j := j0; j <= j1; j++` never terminates (j++ wraps). Found by the
-	// veraPDF soak; anything outside a sane index range takes the shader fallback.
+	// The lattice bounds are validated BEFORE the int conversions: a hostile step (a denormal /YStep, say) overflows the
+	// float32 division to ±Inf, and an out-of-range float→int conversion can saturate — j0 == j1 == MaxInt64 passes an
+	// nx*ny cap yet `for j := j0; j <= j1; j++` never terminates (j++ wraps).
 	fi0 := math.Floor(float64((px0 - t.BBox.X1) / t.XStep))
 	fi1 := math.Ceil(float64((px1 - t.BBox.X0) / t.XStep))
 	fj0 := math.Floor(float64((py0 - t.BBox.Y1) / t.YStep))
 	fj1 := math.Ceil(float64((py1 - t.BBox.Y0) / t.YStep))
-	const maxLatticeIndex = 1 << 30 // far beyond any real lattice; NaN/Inf fail these comparisons too
+	const maxLatticeIndex = 1 << 30 // Far beyond any real lattice; NaN/Inf fail these comparisons too.
 	replayable := fi0 >= -maxLatticeIndex && fi1 <= maxLatticeIndex && fj0 >= -maxLatticeIndex && fj1 <= maxLatticeIndex
 	i0, i1 := int(fi0), int(fi1)
 	j0, j1 := int(fj0), int(fj1)
 	nx, ny := i1-i0+1, j1-j0+1
 	if !replayable || nx <= 0 || ny <= 0 || nx > maxReplayTiles || ny > maxReplayTiles || nx*ny > maxReplayTiles {
-		// Too many tiles for replay: use the repeating-image shader instead (the path is device space, so the shader
-		// anchors directly).
+		// The path is device space, so the shader anchors directly.
 		if cpaint, okPaint := d.preparePaint(p, nil); okPaint {
 			d.c.DrawPath(devicePath, cpaint)
 		}
 		return
 	}
-	// The per-tile clips and layer below are canvas state the device's clip tracking does not see, and Replay re-enters
-	// the device with them active; keep the direct glyph blits off for the duration.
+	// The per-tile clips and layer below are canvas state the clip tracking does not see, and Replay re-enters the
+	// device with them active; keep the direct glyph blits off for the duration.
 	d.untrackedState++
 	defer func() { d.untrackedState-- }()
 	count := d.c.Save()
@@ -666,11 +638,10 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 		layerPaint.BlendMode = blendModes[p.Blend]
 		d.c.SaveLayer(nil, layerPaint)
 	}
-	// One scratch path, rewound and rebuilt per cell, serves every cell of every fill: a fill replays up to
-	// maxReplayTiles of them and each needs only a transformed copy of the same five-point box, so cloning per cell was
-	// this loop's whole allocation cost. ClipPath rasterizes the path into clip runs before returning and retains no
-	// reference to it, and the scratch is rebuilt from t.BBox at the top of every iteration, so a nested tiling fill
-	// re-entering the device through Replay cannot leave stale contents behind.
+	// One scratch path, rewound and rebuilt per cell, serves every cell of every fill (a fill replays up to
+	// maxReplayTiles of them). ClipPath rasterizes the path into clip runs before returning and retains no reference to
+	// it, and the scratch is rebuilt from t.BBox at the top of every iteration, so a nested tiling fill re-entering the
+	// device through Replay cannot leave stale contents behind.
 	if d.tileScratch == nil {
 		d.tileScratch = path.New()
 		d.tileScratch.SetVolatile(true) // Its contents change per cell; nothing downstream should cache them.
@@ -687,10 +658,9 @@ func (d *Device) fillTilingInto(devicePath *path.Path, p device.Paint) {
 			ry := float32(math.Floor(float64(sy)))
 			ctm := p.PatternCTM.Mul(gfx.Translate(rx, ry))
 			// Both factors of the offset are validated, their product is not: a finite matrix and a finite step still
-			// multiply past float32's range, and the ctm built from that is what Replay takes as a child interpreter's
-			// INITIAL CTM — the one precondition drawpage.go rejects its caller's matrix up front to preserve, since cm
-			// and a form's /Matrix only check the products they compute. A cell that far out cannot touch the surface
-			// anyway, so it is skipped rather than replayed under a poisoned matrix and an empty clip.
+			// multiply past float32's range, and Replay takes the ctm as a child interpreter's INITIAL CTM, which must be
+			// finite (cm and a form's /Matrix only check the products they compute). A cell that far out cannot touch the
+			// surface anyway, so it is skipped.
 			if !isFinite32(sx) || !isFinite32(sy) || !ctm.IsFinite() ||
 				!rectFiniteUnder(t.BBox.X0, t.BBox.Y0, t.BBox.X1, t.BBox.Y1, ctm) {
 				continue
@@ -723,10 +693,9 @@ func (d *Device) withShadingBBox(p device.Paint, draw func()) {
 		draw()
 		return
 	}
-	// Through buildPath's seam, in corner form: shading.rectFrom validated the four /BBox entries individually, exactly
-	// as content.rectFrom does for a form's box, and exactly as there that validation does not survive the mapping into
-	// the space the box is clipped in. A box that maps past float32's range covers the whole surface — it clips nothing
-	// — so the draw goes out unclipped, where clipping to the ±Inf corners paints nothing at all.
+	// Corner form: shading.rectFrom validated the four /BBox entries individually, and that validation does not survive
+	// the mapping into the space the box is clipped in. A box that maps past float32's range covers the whole surface,
+	// so the draw goes out unclipped rather than clipped to ±Inf corners, which paints nothing.
 	var box gfx.Path
 	box.RectCorners(sh.BBox.X0, sh.BBox.Y0, sh.BBox.X1, sh.BBox.Y1)
 	bb, ok := buildPathIn(&box, false, p.PatternCTM)
@@ -758,13 +727,9 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 	paint.AntiAlias = false
 	paint.BlendMode = blendModes[blend]
 	// One scratch path, rewound per triangle, serves every triangle of every draw: a mesh carries up to maxTriangles of
-	// them and the whole loop re-runs for each fill, stroke, image mask or sh operator that uses the shading (the
-	// tessellation is cached on the *shading.Shading; the rasterization cannot be — each triangle carries its own flat
-	// color and lands under a different matrix — which is why the interpreter charges its work budget per painting
-	// operation for the triangles a draw rasterizes, see content's shadingPaintCost), so a fresh path each time was the
-	// dominant allocation here. Rewind keeps the verb/point storage, leaving the per-triangle cost at three points.
-	// The scratch cannot be shared out from under itself: drawMesh only calls into canvas, never back into the device,
-	// and a tiling replay that paints a mesh does so on its own cell device (rasterizeTile).
+	// them and the whole loop re-runs for each painting operation that uses the shading, so a fresh path each time was
+	// the dominant allocation here. The scratch cannot be shared out from under itself: drawMesh only calls into canvas,
+	// never back into the device, and a tiling replay that paints a mesh does so on its own cell device (rasterizeTile).
 	if d.meshScratch == nil {
 		d.meshScratch = path.New()
 		d.meshScratch.SetVolatile(true) // Its contents change on every draw; nothing downstream should cache them.
@@ -785,8 +750,7 @@ func (d *Device) drawMesh(sh *shading.Shading, patCTM gfx.Matrix, alpha float64,
 }
 
 // fillMeshInto clips to the device-space path and draws the mesh through it. A nil path means the caller's region does
-// not fit float32 once mapped into device space, which is a region covering everything: the mesh then draws unclipped
-// rather than through the ±Inf-cornered path canvas would turn into an empty clip.
+// not fit float32 once mapped into device space, a region covering everything: the mesh then draws unclipped.
 func (d *Device) fillMeshInto(devicePath *path.Path, p device.Paint) {
 	count := d.c.Save()
 	if devicePath != nil {

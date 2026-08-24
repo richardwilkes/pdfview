@@ -18,8 +18,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// maxContentStreams caps how many entries of a /Contents array are examined, bounding the decode work a hostile page can
-// demand (each stream's own decode is already capped by internal/filter).
+// maxContentStreams caps how many entries of a /Contents array are examined, bounding the decode work a hostile page
+// can demand (each stream's own decode is already capped by internal/filter).
 const maxContentStreams = 8192
 
 // PageResources returns the given 0-based page's resolved (inheritable) /Resources dictionary, or nil when it has none.
@@ -37,10 +37,9 @@ func (d *Document) PageResources(pageNumber int) cos.Dict {
 // returns partial output for corrupt-but-decodable input) or nothing; a page with no usable content returns an empty
 // slice, which renders blank.
 //
-// The array form's concatenation is truncated at filter.MaxDecodedSize of the array's total raw byte count. Each
-// stream's own decode is capped individually, but nothing stops one small compression bomb from being listed hundreds
-// of times, so the aggregate needs its own budget; the per-stream allowance applied to the sum leaves legitimate
-// multi-part content streams untouched.
+// The array form's concatenation is truncated at filter.MaxDecodedSize of the array's total raw byte count: each
+// stream's own decode is capped, but one small compression bomb can be listed hundreds of times, so the aggregate needs
+// its own budget. The per-stream allowance applied to the sum leaves legitimate multi-part content untouched.
 func (d *Document) PageContents(pageNumber int) []byte {
 	page, err := d.Page(pageNumber)
 	if err != nil {
@@ -59,7 +58,7 @@ func (d *Document) PageContents(pageNumber int) []byte {
 		return nil
 	}
 	streams := make([]*cos.Stream, 0, min(len(arr), maxContentStreams))
-	var raw int64 // Accumulated as an int64 so at most maxContentStreams lengths cannot overflow the sum.
+	var raw int64 // int64 so the sum of maxContentStreams lengths cannot overflow.
 	for i, entry := range arr {
 		if i >= maxContentStreams {
 			break
@@ -93,7 +92,7 @@ func (d *Document) PageContents(pageNumber int) []byte {
 
 // PageCTM returns the matrix mapping the given 0-based page's PDF user space to rendered-image space at the given
 // scale: the page's effective box maps to [0, w×scale] × [0, h×scale] with the top-left/y-down orientation and /Rotate
-// applied — the same mapping toTopLeft pins against MuPDF, expressed as a matrix and composed with the scale.
+// applied — the mapping toTopLeft pins against MuPDF, as a matrix composed with the scale.
 func (d *Document) PageCTM(pageNumber int, scale float32) (gfx.Matrix, error) {
 	if pageNumber < 0 || pageNumber >= len(d.geoms) {
 		return gfx.Matrix{}, errNoSuchPage

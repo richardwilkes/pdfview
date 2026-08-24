@@ -64,12 +64,9 @@ func (d *Document) Links(pageNumber int) []Link {
 }
 
 // linkRect extracts the annotation's /Rect normalized in PDF space. A missing or malformed rectangle degrades to the
-// empty rectangle at the origin rather than dropping the link, mirroring MuPDF's lenient pdf_to_rect.
-//
-// rectFromObj's ok is deliberately discarded rather than merely ignored: unlike the box and appearance callers, a link
-// has no use for a non-empty extent, and a degenerate /Rect such as [100 700 300 700] is a hairline link that still
-// belongs where its coordinates put it. rectFromObj returns those coordinates with ok == false, so taking rect
-// unconditionally is what keeps a flat link off the page corner.
+// empty rectangle at the origin rather than dropping the link, mirroring MuPDF's lenient pdf_to_rect. rectFromObj's ok
+// is deliberately discarded: a degenerate /Rect such as [100 700 300 700] is a hairline link that still belongs where
+// its coordinates put it, and rectFromObj returns those coordinates with ok == false.
 func (d *Document) linkRect(annot cos.Dict) [4]float32 {
 	rect, _ := d.rectFromObj(annot["Rect"])
 	return rect
@@ -117,8 +114,8 @@ func (d *Document) linkFromAnnot(annot cos.Dict) (link Link, ok bool) {
 		}
 		return internalLink(d.resolveURIFragment(text)), true
 	case "GoToR", "Launch":
-		// Remote and launch targets degrade to their file specification; without an embedded scheme the public API will
-		// drop them (best effort — the corpus has none to pin exact behavior against).
+		// Remote and launch targets degrade to their file specification; without an embedded scheme the public API drops
+		// them. Best effort: the corpus has none to pin against.
 		file := d.fileSpecString(action["F"])
 		if file == "" {
 			return link, false
@@ -131,7 +128,6 @@ func (d *Document) linkFromAnnot(annot cos.Dict) (link Link, ok bool) {
 	}
 }
 
-// internalLink builds the Link for a resolved internal destination.
 func internalLink(dest Dest) Link {
 	return Link{Page: dest.Page, DestX: dest.X, DestY: dest.Y}
 }

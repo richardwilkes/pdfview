@@ -7,20 +7,19 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package filter implements the non-image PDF stream filters needed to decode document data — FlateDecode, LZWDecode,
-// ASCIIHexDecode, ASCII85Decode, and RunLengthDecode — together with the PNG and TIFF predictor transforms and bounded
-// chain application. The image-only filters (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode) are handled by
-// internal/imaging at rasterization time and are rejected here, as is the Crypt filter (internal/cos strips Identity
-// crypt filters before building a chain and rejects named ones; document-level encryption is undone at parse time by
-// internal/crypt).
+// Package filter implements the non-image PDF stream filters (FlateDecode, LZWDecode, ASCIIHexDecode, ASCII85Decode,
+// and RunLengthDecode), the PNG and TIFF predictor transforms, and bounded chain application. The image-only filters
+// (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode) belong to internal/imaging and are rejected here, as is the Crypt
+// filter (internal/cos drops Identity crypt filters before building a chain and rejects named ones; document-level
+// encryption is undone at parse time by internal/crypt).
 //
-// Decoding enforces two caps so hostile input cannot force unbounded work: a chain may apply at most MaxChainLength
-// filters, and each stage's output may not exceed MaxDecodedSize(len(input)) bytes. Termination is guaranteed by these
-// caps; there are no timeouts.
+// Two caps keep hostile input from forcing unbounded work: a chain may apply at most MaxChainLength filters, and each
+// stage's output may not exceed MaxDecodedSize(len(input)) bytes. These caps guarantee termination; there are no
+// timeouts.
 //
-// Decoding is otherwise deliberately fault-tolerant, matching the warn-and-continue behavior of widely deployed PDF
-// readers: corrupt input that still yields some output returns that partial output without an error. Resource-limit
-// violations are always hard errors.
+// Decoding is otherwise fault-tolerant, matching the warn-and-continue behavior of widely deployed readers: corrupt
+// input that still yields some output returns that partial output without an error. Resource-limit violations are
+// always hard errors.
 package filter
 
 import (
@@ -114,11 +113,10 @@ func MaxDecodedSize(inputLen int) int {
 }
 
 // DecodeChain applies each filter in specs to data in order, enforcing MaxChainLength and capping every stage's output
-// at MaxDecodedSize(len(data)) bytes. It returns the fully decoded bytes and the number of bytes the chain PRODUCED —
-// the work it performed, summed over its stages. A caller charging a work budget cannot infer that from the result: a
-// chain that fails returns no bytes at all, yet a stage that reports ErrTooLarge inflated the entire MaxDecodedSize
-// allowance before saying so, so a 64 KB zip bomb reports ~64 MB of work alongside its error. data is never modified;
-// the result may alias it only when specs is empty.
+// at MaxDecodedSize(len(data)) bytes. It returns the decoded bytes and the number of bytes the chain PRODUCED, summed
+// over its stages, which a caller charging a work budget cannot infer from the result: a failed chain returns no bytes,
+// yet a stage that reports ErrTooLarge inflated the entire MaxDecodedSize allowance first, so a 64 KB zip bomb reports
+// ~64 MB of work alongside its error. data is never modified; the result may alias it only when specs is empty.
 func DecodeChain(specs []Spec, data []byte) (out []byte, decoded int, err error) {
 	if len(specs) > MaxChainLength {
 		return nil, 0, ErrChainTooLong
@@ -126,9 +124,8 @@ func DecodeChain(specs []Spec, data []byte) (out []byte, decoded int, err error)
 	budget := MaxDecodedSize(len(data))
 	for i := range specs {
 		if out, err = Decode(specs[i], data, budget); err != nil {
-			// The failing stage produced bytes even though it returns none: ErrTooLarge means it produced the whole
-			// allowance (readCapped reads one byte past the cap to detect the overrun), and every other failure stopped
-			// after producing at most as much as it was handed.
+			// The failing stage produced bytes even though it returns none: the whole allowance for ErrTooLarge
+			// (readCapped reads one byte past the cap), at most its input for anything else.
 			if errors.Is(err, ErrTooLarge) {
 				decoded = addDecoded(decoded, budget)
 			} else {
@@ -142,9 +139,8 @@ func DecodeChain(specs []Spec, data []byte) (out []byte, decoded int, err error)
 	return data, decoded, nil
 }
 
-// addDecoded adds n to a running production total, saturating at math.MaxInt. MaxDecodedSize hands back math.MaxInt
-// itself for a large enough input, and a wrapped total would report the most expensive decode there is as no work at
-// all.
+// addDecoded adds n to a running production total, saturating at math.MaxInt: MaxDecodedSize itself returns
+// math.MaxInt for a large enough input, and a wrapped total would report the most expensive decode as no work at all.
 func addDecoded(total, n int) int {
 	if n > math.MaxInt-total {
 		return math.MaxInt
@@ -189,9 +185,8 @@ func Decode(spec Spec, data []byte, maxSize int) ([]byte, error) {
 // cap. A read error after at least one byte of output is swallowed and the partial output returned, matching the fault
 // tolerance described in the package comment; an error before any output is reported.
 func readCapped(r io.Reader, maxSize int) ([]byte, error) {
-	// Widen before adding the overshoot byte, and skip the addition entirely at the top of the range: a maxSize of
-	// math.MaxInt would otherwise wrap the limit negative, and io.LimitReader treats a negative N as immediate EOF —
-	// silently returning an empty stream instead of decoding or reporting ErrTooLarge.
+	// Widen before adding the overshoot byte, and skip the addition at the top of the range: int64(math.MaxInt)+1 wraps
+	// negative, and io.LimitReader treats a negative N as immediate EOF, silently returning an empty stream.
 	limit := int64(maxSize)
 	if limit < math.MaxInt64 {
 		limit++
@@ -328,8 +323,8 @@ func runLengthDecode(data []byte, maxSize int) ([]byte, error) {
 			if len(out)+count > maxSize {
 				return nil, ErrTooLarge
 			}
-			// Grow once and fill the tail in place. bytes.Repeat here would allocate a throwaway slice per run — up to
-			// one allocation per two input bytes on RLE-heavy streams — just to copy it straight into out.
+			// Fill the grown tail in place: bytes.Repeat would allocate a throwaway slice per run, up to one per two
+			// input bytes on RLE-heavy streams.
 			base := len(out)
 			out = slices.Grow(out, count)[:base+count]
 			tail := out[base:]

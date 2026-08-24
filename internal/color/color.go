@@ -7,11 +7,10 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package color implements PDF color spaces (ISO 32000-2 8.6) to the depth the engine requires: the device spaces
-// (Gray/RGB/CMYK, matched byte-for-byte to the oracle's observed ICC-backed conversions — see convert.go),
-// CalGray/CalRGB (approximated by their device analogs), ICCBased (N-component fallback to the matching device space),
-// Indexed, and Separation/DeviceN with their tint transforms (internal/function). Everything converts to the rendered
-// RGB space via ToNRGBA. Lab and the full CalGray/CalRGB math are deliberately omitted.
+// Package color implements the PDF color spaces (ISO 32000-2 8.6) the engine needs: the device spaces (Gray/RGB/CMYK,
+// matched byte for byte to the oracle's ICC-backed conversions; see convert.go), CalGray/CalRGB (approximated by their
+// device analogs), ICCBased (mapped to the device space with the same component count), Indexed, and Separation/DeviceN
+// with their tint transforms (internal/function). Every space converts to rendered RGB via ToNRGBA. Lab is unsupported.
 package color
 
 import (
@@ -22,8 +21,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/function"
 )
 
-// maxSpaceDepth caps color-space nesting (Indexed bases, ICC alternates, Separation alternates), guaranteeing
-// termination on hostile self-referential spaces.
+// maxSpaceDepth caps color-space nesting (Indexed bases, ICC and Separation alternates) so a self-referential space
+// terminates.
 const maxSpaceDepth = 8
 
 // maxComponents caps DeviceN component counts; the standard's own limit is 32.
@@ -88,11 +87,10 @@ func comp(comps []float32, i int) float32 {
 	return 0
 }
 
-// Indexed is an /Indexed color space: a single index component looking up base-space components in a table. The whole
-// palette is resolved to device colors at parse time — hival caps it at 256 entries — so lookups are a single indexed
-// read with no per-call allocation and no repeated base-space conversion (a /Separation or /DeviceN base would
-// otherwise re-evaluate its tint transform for every pixel of a 16-bpc image, which internal/imaging's single-component
-// LUT does not cover).
+// Indexed is an /Indexed color space: one index component selecting base-space components from a table. The palette is
+// resolved to device colors at parse time (hival caps it at 256 entries), so a lookup is one indexed read with no
+// allocation and no base-space conversion; a /Separation or /DeviceN base would otherwise re-run its tint transform per
+// pixel of a 16-bpc image, which internal/imaging's single-component LUT does not cover.
 type Indexed struct {
 	palette []color.NRGBA
 }
@@ -103,21 +101,17 @@ func (x *Indexed) NComponents() int { return 1 }
 // Initial implements Space.
 func (x *Indexed) Initial() []float32 { return []float32{0} }
 
-// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival]; the palette entry it
-// selects was built by buildPalette, where table bytes map linearly onto [0, 1] per base component — exact for the
-// device-family bases this package supports.
+// ToNRGBA implements Space. The index is truncated to an integer and clamped to [0, hival].
 func (x *Indexed) ToNRGBA(comps []float32) color.NRGBA {
 	return x.palette[clampIndex(comp(comps, 0), len(x.palette)-1)]
 }
 
-// buildPalette resolves every index in [0, hival] to its device color once, at parse time. Missing table bytes read as
-// 0, matching a short or absent lookup string.
+// buildPalette resolves every index in [0, hival] to its device color. Table bytes past the end of lookup read as 0.
 func buildPalette(base Space, lookup []byte, hival int) []color.NRGBA {
 	n := base.NComponents()
 	palette := make([]color.NRGBA, hival+1)
 	for idx := range palette {
-		// A fresh slice per entry: the base's conversion may hand its input to a tint transform, and nothing here
-		// promises the callee does not hold onto it.
+		// A fresh slice per entry: the base may hand it to a tint transform that retains it.
 		baseComps := make([]float32, n)
 		for j := range n {
 			if off := idx*n + j; off < len(lookup) {
@@ -129,15 +123,14 @@ func buildPalette(base Space, lookup []byte, hival int) []color.NRGBA {
 	return palette
 }
 
-// clampIndex truncates a palette index to an int in [0, maxV]. The bounds are applied in float space on purpose: Go
-// leaves a float→int conversion implementation-defined when the value does not fit, and the platforms disagree —
-// arm64 saturates (+Inf → math.MaxInt64) while amd64 wraps (+Inf → math.MinInt64), so an int-space clamp would pull
-// the same index to opposite ends of the palette on the two architectures and render different pixels for one file.
-// A non-finite index is reachable: an /Indexed space used as the alternate of a /Separation or /DeviceN whose tint
-// transform is a type-2 function without /Range hands the raw math.Pow result — possibly ±Inf or NaN — straight to
-// ToNRGBA, as do shading.parseGradient and shading.parseFunctionBased.
+// clampIndex truncates a palette index to an int in [0, maxV]. The bounds are applied in float space because Go leaves
+// an out-of-range float→int conversion implementation-defined and the platforms disagree: arm64 saturates (+Inf →
+// math.MaxInt64) while amd64 wraps (+Inf → math.MinInt64), so an int-space clamp would send one index to opposite ends
+// of the palette on the two architectures. A non-finite index is reachable: a /Separation or /DeviceN with an /Indexed
+// alternate and a type-2 tint transform without /Range hands the raw math.Pow result (possibly ±Inf or NaN) to ToNRGBA,
+// as do shading.parseGradient and shading.parseFunctionBased.
 func clampIndex(v float32, maxV int) int {
-	if !(v > 0) { // Catches NaN along with zero and every negative.
+	if !(v > 0) { // Also catches NaN.
 		return 0
 	}
 	if v >= float32(maxV) { // Also catches +Inf.
@@ -176,12 +169,10 @@ func (s *Separation) ToNRGBA(comps []float32) color.NRGBA {
 	return s.alt.ToNRGBA(s.tint.Eval(comps))
 }
 
-// RunsFunction reports whether converting a single color through s evaluates a PDF function. Only /Separation and
-// /DeviceN do: their ToNRGBA runs the tint transform on every call. Every other space this package builds converts with
-// fixed arithmetic (the device families) or a table resolved once at parse time (/Indexed, whose palette already folded
-// any tint transform away), and a /Separation /None never converts at all. Callers that convert colors in bulk — a mesh
-// shading resolves one per vertex or patch corner, from a count the stream itself declares — use this to decide whether
-// that loop needs a budget of its own rather than pricing every space as if it were free.
+// RunsFunction reports whether converting one color through s evaluates a PDF function. Only a marking /Separation or
+// /DeviceN does; every other space converts with fixed arithmetic or a palette resolved at parse time. Bulk callers (a
+// mesh shading converts one color per vertex or patch corner, from a count the stream declares) use this to decide
+// whether their loop needs its own budget.
 func RunsFunction(s Space) bool {
 	sep, ok := s.(*Separation)
 	return ok && !sep.none
@@ -210,8 +201,8 @@ func (p *Pattern) Initial() []float32 { return nil }
 // ToNRGBA implements Space; a pattern has no intrinsic color, so this reports transparent (never marks).
 func (p *Pattern) ToNRGBA([]float32) color.NRGBA { return color.NRGBA{} }
 
-// Parse parses obj (a name or array, resolving references) as a color space. It fails with an error for the space kinds
-// this package does not support yet; callers fall back per their own policy.
+// Parse parses obj (a name or array, resolving references) as a color space. Unsupported kinds return an error; callers
+// fall back per their own policy.
 func Parse(d *cos.Document, obj cos.Object) (Space, error) {
 	return parseSpace(d, obj, 0)
 }
@@ -245,7 +236,7 @@ func spaceForName(name cos.Name) (Space, error) {
 	}
 }
 
-//nolint:gocyclo // A flat dispatch over the color-space family names; splitting it would obscure the correspondence to ISO 32000-2 8.6.
+//nolint:gocyclo // A flat dispatch over the color-space families of ISO 32000-2 8.6.
 func parseSpaceArray(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	if len(arr) == 0 {
 		return nil, errBadSpace
@@ -258,9 +249,9 @@ func parseSpaceArray(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	case "DeviceGray", "G", "DeviceRGB", "RGB", "DeviceCMYK", "CMYK":
 		return spaceForName(family)
 	case "CalGray":
-		return DeviceGray, nil // Approximated; the white-point/gamma refinement is deferred.
+		return DeviceGray, nil
 	case "CalRGB":
-		return DeviceRGB, nil // Approximated likewise.
+		return DeviceRGB, nil
 	case "ICCBased":
 		return parseICCBased(d, arr, depth)
 	case "Indexed", "I":
@@ -273,17 +264,16 @@ func parseSpaceArray(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 		}
 		base, err := parseSpace(d, arr[1], depth+1)
 		if err != nil {
-			return &Pattern{}, nil //nolint:nilerr // A broken base leaves a colorless pattern space, still usable for pattern names.
+			return &Pattern{}, nil //nolint:nilerr // A broken base still leaves a usable colorless pattern space.
 		}
 		return &Pattern{Base: base}, nil
 	default:
-		// Lab and anything unrecognized are unsupported.
 		return nil, errUnsupportedSpace
 	}
 }
 
-// parseICCBased maps an ICC profile stream to the device space matching its component count (the profile itself is
-// deliberately not interpreted). /N is authoritative; a parseable /Alternate is used when /N is absent or nonsensical.
+// parseICCBased maps an ICC profile stream to the device space with its component count; the profile itself is not
+// interpreted. /N is authoritative; /Alternate is used only when /N is absent or not 1, 3, or 4.
 func parseICCBased(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	if len(arr) < 2 {
 		return nil, errBadSpace
@@ -323,10 +313,9 @@ func parseIndexed(d *cos.Document, arr cos.Array, depth int) (Space, error) {
 	if !ok {
 		return nil, errBadSpace
 	}
-	// The spec caps /hival at 255 (ISO 32000-2 8.6.6.3), but a producer that miscounts a 256-entry palette writes 256,
-	// and rejecting the space is far worse than clamping it: the interpreter's fallback for an unresolvable space is
-	// DeviceGray, so every sc/scn operand is then read as a gray level and index 200 paints near-white instead of
-	// palette entry 200. MuPDF clamps here too.
+	// ISO 32000-2 8.6.6.3 caps /hival at 255, but a producer that miscounts a 256-entry palette writes 256, and rejecting
+	// the space is far worse than clamping: the interpreter's fallback for an unresolvable space is DeviceGray, so every
+	// sc/scn operand would then read as a gray level. MuPDF clamps too.
 	hival = min(max(hival, 0), 255)
 	var lookup []byte
 	switch table := d.Resolve(arr[3]).(type) {

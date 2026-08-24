@@ -18,10 +18,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// TestSnapPageBox pins the outward whole-pixel snapping the page-box clip depends on. The snapped rectangle must be
-// exactly the pixels a page-sized surface covers — ceil for the far edge with the same 0.001 epsilon renderExtent
-// applies, so float slop just above a whole number does not claim an extra row — and the snapping must decline any map
-// that takes the box off the pixel axes, where no pixel-aligned answer exists.
+// TestSnapPageBox pins the outward whole-pixel snapping the page-box clip depends on: the snapped rectangle must be
+// exactly the pixels a page-sized surface covers (the far edge ceiled with the same 0.001 epsilon renderExtent
+// applies), and the snapping must decline any map that takes the box off the pixel axes.
 func TestSnapPageBox(t *testing.T) {
 	rotate90 := gfx.Matrix{B: 1, C: -1} // Quarter turn: still axis-preserving, but through the B/C entries.
 	skew := gfx.Matrix{A: 1, B: 0.5, C: 0, D: 1}
@@ -78,9 +77,8 @@ func TestSnapPageBox(t *testing.T) {
 	}
 }
 
-// TestClipPageBoxBoundsDrawing pins that ClipPageBox actually confines drawing, both on the snapped axis-aligned path
-// and on the transformed-path fallback a rotation takes. A page box of 40x40 on an 80x80 surface must leave the far
-// half untouched either way.
+// TestClipPageBoxBoundsDrawing pins that ClipPageBox confines drawing under every map snapPageBox accepts, the quarter
+// turn included. A 40x40 page box on an 80x80 surface must leave the rest untouched.
 func TestClipPageBoxBoundsDrawing(t *testing.T) {
 	var wide gfx.Path
 	wide.Rect(-100, -100, 400, 400) // Covers the whole surface, so only the clip can keep it off.
@@ -121,8 +119,7 @@ func TestClipPageBoxBoundsDrawing(t *testing.T) {
 }
 
 // TestClipPageBoxSkewedFallback covers the branch snapPageBox declines: a skewed map has no pixel-aligned box, so the
-// exact transformed parallelogram is pushed as a clip path instead. The corner beyond the sheared box must stay clear
-// while the box's own origin corner is painted.
+// exact transformed parallelogram is pushed as a clip path instead.
 func TestClipPageBoxSkewedFallback(t *testing.T) {
 	var wide gfx.Path
 	wide.Rect(-100, -100, 400, 400)

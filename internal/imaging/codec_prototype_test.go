@@ -11,11 +11,10 @@ package imaging
 
 import "testing"
 
-// TestJBIG2CorpusDecode decodes the arithmetic generic-region corpus file and checks that both of its images come back
-// at their dictionary dimensions carrying real ink. The bit polarity is the load-bearing part: the codec's set pixels
-// are black marks and the glue inverts them so /DeviceGray renders ink black, so a page that decoded but inverted
-// would still be "non-blank". The corpus bitmaps are marks on white (testfiles/corpus/README.md), which makes the ink
-// the minority of the page and catches that inversion.
+// TestJBIG2CorpusDecode decodes the arithmetic generic-region corpus file and checks that both images come back at
+// their dictionary dimensions carrying real ink. The bit polarity is the load-bearing part: the corpus bitmaps are
+// marks on white (testfiles/corpus/README.md), so ink must be the minority of the page, which an inverted decode
+// fails.
 func TestJBIG2CorpusDecode(t *testing.T) {
 	d, streams := corpusImageStreams(t, "images-jbig2-generic.pdf")
 	if len(streams) != 2 {
@@ -55,10 +54,9 @@ func TestJBIG2CorpusDecode(t *testing.T) {
 	}
 }
 
-// TestJBIG2CorpusStencil decodes the same payload in its ImageMask role. images-jbig2-stencil.pdf carries the byte-
-// identical arithmetic generic payload images-jbig2-generic.pdf renders through /DeviceGray, so the stencil must mark
-// exactly the pixels that render black there — the one relationship that pins the default /Decode [0 1] against the
-// glue's bit polarity.
+// TestJBIG2CorpusStencil decodes the same payload in its ImageMask role: images-jbig2-stencil.pdf carries the
+// byte-identical payload images-jbig2-generic.pdf renders through /DeviceGray, so the stencil must mark exactly the
+// pixels that render black there, which pins the default /Decode [0 1] against the glue's bit polarity.
 func TestJBIG2CorpusStencil(t *testing.T) {
 	grayDoc, grayStreams := corpusImageStreams(t, "images-jbig2-generic.pdf")
 	gray, err := DecodeXObject(grayDoc, grayStreams[0], nil)

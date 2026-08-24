@@ -8,19 +8,19 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Command colorprobe regenerates internal/color's behavioral conversion tables by rendering flat-patch probe PDFs
-// through github.com/richardwilkes/pdf (MuPDF via cgo) and sampling the resulting pixels — run-only behavioral
-// observation (the clean-room rule: observe rendered output, never read MuPDF source). Like the golden dumps, it is a
-// local development tool: rerun it (and review the diffs) when the oracle's MuPDF build moves.
+// through github.com/richardwilkes/pdf (MuPDF via cgo) and sampling the resulting pixels: run-only behavioral
+// observation of rendered output, never MuPDF source. Like the golden dumps, it is a local development tool: rerun it
+// (and review the diffs) when the oracle's MuPDF build moves.
 //
 // Usage:
 //
 //	go run ./colorprobe [-out ../internal/color/data]
 //
 // It samples DeviceGray at i/1020 and DeviceCMYK on the 17^4 grid, validates that internal/color's evaluation
-// strategies reproduce fresh off-grid observations — DeviceRGB as trunc(v×255) per channel exactly, and the CMYK grid
-// under multilinear interpolation within a small tolerance — and only then writes gray1021.bin and cmyk17.bin.gz, so a
-// failed run leaves the committed tables untouched. Validation failure means MuPDF's conversion behavior changed shape,
-// not just values — internal/color then needs rework, not just new tables.
+// strategies reproduce fresh off-grid observations (DeviceRGB as trunc(v×255) per channel exactly, the CMYK grid under
+// multilinear interpolation within a small tolerance), and only then writes gray1021.bin and cmyk17.bin.gz, so a
+// failed run leaves the committed tables untouched. Validation failure means MuPDF's conversion changed shape, not
+// just values; internal/color then needs rework, not new tables.
 package main
 
 import (
@@ -70,9 +70,8 @@ func main() {
 	}
 }
 
-// generate runs every probe and validation, then writes the table files. Nothing touches disk until all validation has
-// passed, so a failure leaves the committed tables exactly as they were rather than replacing them with tables that
-// internal/color can't evaluate.
+// generate runs every probe and validation, then writes the table files; nothing touches disk until all validation has
+// passed.
 func generate(out string, s steps) error {
 	grayTable := s.probeGray()
 	if err := s.verifyRGB(); err != nil {

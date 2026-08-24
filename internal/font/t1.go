@@ -25,7 +25,7 @@ type t1Info struct {
 	font *type1.Font
 	// nameGID inverts font.Names once (Names[gid] = name).
 	nameGID map[string]uint32
-	// advances lazily built at Load only for /Widths-less fonts (codes 0-255 through the encoding).
+	// advances holds hsbw advances by GID, built at Load only for /Widths-less fonts (buildAdvances).
 	advances map[uint32]float32
 	// matrix is the FontMatrix mapping glyph units to em space at size 1.
 	matrix [6]float32
@@ -123,10 +123,10 @@ func (t *t1Info) buildAdvances(enc *[256]string) {
 			continue
 		}
 		if adv, advOK := t.font.Advance(name); advOK {
-			// Only the finite product is kept, like every other width source: a charstring can reach hsbw with a ±Inf
-			// width (div composes stack values without bound), and the FontMatrix scale can push a legal one out of
-			// range. An unusable advance is simply not recorded, so the glyph falls back to the missing-width path
-			// rather than handing ±Inf to Font.Width and on to the glyph quads the structured-text device builds.
+			// Only a finite product is kept, like every other width source: a charstring can reach hsbw with a ±Inf
+			// width (div composes stack values without bound) and the FontMatrix scale can push a legal one out of
+			// range. An unrecorded advance falls back to the missing-width path instead of handing ±Inf to Font.Width
+			// and on to the structured-text device's glyph quads.
 			if scaled := adv * t.matrix[0]; isFiniteF(scaled) {
 				t.advances[gid] = scaled
 			}

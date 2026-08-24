@@ -26,20 +26,17 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// The veraPDF corpus soak: opens and renders EVERY file of an external corpus, asserting that the engine never panics,
-// never hangs (each file must complete within soakFileTimeout — the internal caps guarantee termination, so a timeout
-// is a bug), and fails only with the public sentinel errors. It is local-only: CI never has the files. Fetch the corpus
-// with testfiles/external/fetch-verapdf.sh and run
+// The veraPDF corpus soak opens and renders every file of an external corpus, asserting that the engine never panics,
+// never hangs, and fails only with the public sentinel errors. It is local-only: CI never has the files. Fetch the
+// corpus with testfiles/external/fetch-verapdf.sh and run
 //
 //	PDFVIEW_SOAK_DIR=testfiles/external/veraPDF-corpus go test -run TestExternalCorpusSoak -v -timeout 60m .
 //
-// Optionally set PDFVIEW_SOAK_ORACLE to a JSON file produced by `oracle soak` to also compare open-success and
-// PageCount against the cgo/MuPDF oracle (mismatches are reported and counted, and only fail the test when a file MuPDF
-// opens fails to open here).
+// PDFVIEW_SOAK_ORACLE may name a JSON file produced by `oracle soak`; open success and PageCount are then compared
+// against the MuPDF oracle, and a file MuPDF opens that fails to open here fails the test.
 const (
-	// soakFileTimeout bounds one file's full pipeline (open + auth probe + TOC + render page 0 + search). The internal
-	// operator/recursion/allocation caps mean every file terminates; this exists to turn a would-be hang into a test
-	// failure naming the file.
+	// soakFileTimeout bounds one file's full pipeline. The internal caps mean every file terminates, so a timeout is a
+	// bug; this turns it into a failure naming the file.
 	soakFileTimeout = 60 * time.Second
 	// soakCacheSize is the per-document maxCacheSize used during the soak, exercising the budgeted store.
 	soakCacheSize = 32 << 20

@@ -9,14 +9,13 @@
 
 // Package store implements the document-scoped, byte-budgeted resource cache (the fz-store analog): parsed fonts,
 // decoded images, and converted glyph paths register here with byte-size estimates, and least-recently-used entries
-// evict when a New(maxCacheSize) budget would be exceeded. A zero budget means unlimited (nothing ever evicts),
-// matching the public API's documented maxCacheSize semantics.
+// evict when a New(maxCacheSize) budget would be exceeded. A zero budget means unlimited, matching the public API's
+// maxCacheSize semantics.
 //
-// The store is a pure cache: eviction only drops the store's reference, never invalidates values still held by callers
-// (Go's GC keeps them alive), and a cache of any size — including one too small to hold anything — must not change
-// rendering output, only the amount of re-parsing work. It carries its own small mutex so it is safe under any use; in
-// the engine it additionally sits behind the document's public-API mutex, which serializes all rendering work per
-// document.
+// The store is a pure cache: eviction drops only the store's reference, never invalidates values callers still hold,
+// and a budget of any size, even one too small to hold anything, changes only the amount of re-parsing work, never
+// rendering output. It carries its own mutex; in the engine it additionally sits behind the document's public-API
+// mutex, which serializes all rendering work per document.
 package store
 
 import (
@@ -29,12 +28,11 @@ import (
 type Store struct {
 	entries map[any]*list.Element
 	lru     *list.List // Front = most recently used.
-	max     uint64     // Immutable after New; read lock-free (e.g. by Max). Do not add a setter without taking mu.
+	max     uint64     // Immutable after New, so Max reads it without mu.
 	used    uint64
 	mu      sync.Mutex
 }
 
-// entry is one cached value with its byte estimate.
 type entry struct {
 	key  any
 	val  any
@@ -50,11 +48,10 @@ func New(maxBytes uint64) *Store {
 	}
 }
 
-// Get returns the cached value for key, asserted to V, and marks it most recently used. The second result
-// distinguishes a cached nil (negative caching: parse failures are cacheable) from a miss: a cached nil — typed or
-// untyped — is a hit that returns V's zero value. A cached value that is not a V reports a miss so the caller
-// re-derives and re-puts, but keys are dedicated per resource kind (see Store), so a consistently instantiated Get
-// never sees one.
+// Get returns the cached value for key, asserted to V, and marks it most recently used. A cached nil, typed or untyped,
+// is a hit that returns V's zero value (negative caching: parse failures are cacheable). A cached value that is not a V
+// reports a miss so the caller re-derives and re-puts; keys are dedicated per resource kind (see Store), so a
+// consistently instantiated Get never sees one.
 func (s *Store) Get[V any](key any) (V, bool) {
 	var zero V
 	if s == nil {
@@ -67,7 +64,7 @@ func (s *Store) Get[V any](key any) (V, bool) {
 		return zero, false
 	}
 	e, ok := el.Value.(*entry)
-	if !ok { // Unreachable: only Put creates elements. Miss rather than panic if it ever isn't.
+	if !ok { // Only Put creates elements; miss rather than panic if that ever changes.
 		return zero, false
 	}
 	if e.val == nil { // An untyped-nil negative entry would fail the assertion below, yet it is a hit.
@@ -75,7 +72,7 @@ func (s *Store) Get[V any](key any) (V, bool) {
 		return zero, true
 	}
 	v, ok := e.val.(V)
-	if !ok { // A value of another type under this key: miss rather than panic, without disturbing the LRU order.
+	if !ok { // Miss rather than panic, and leave the LRU order alone.
 		return zero, false
 	}
 	s.lru.MoveToFront(el)
@@ -92,9 +89,8 @@ func (s *Store) Put(key, val any, size uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.max != 0 && size > s.max {
-		// A value larger than the whole budget is never retained. If the key already holds an entry, drop it here
-		// rather than fall through to the re-put branch, which would replace-then-evict every other (useful) entry
-		// before finally evicting this oversized one.
+		// Drop any existing entry for key here: the re-put branch below would evict every other entry before finally
+		// evicting this oversized one.
 		if el, ok := s.entries[key]; ok {
 			s.lru.Remove(el)
 			if e, isEntry := el.Value.(*entry); isEntry {
@@ -148,8 +144,7 @@ func (s *Store) Used() uint64 {
 	return s.used
 }
 
-// Max returns the configured budget (0 = unlimited). No lock is taken: max is immutable after New (see its field
-// comment), so this read is race-free even when called concurrently with Get/Put.
+// Max returns the configured budget (0 = unlimited).
 func (s *Store) Max() uint64 {
 	if s == nil {
 		return 0

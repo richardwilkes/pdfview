@@ -22,8 +22,8 @@ import (
 // Patterns (ISO 32000-2 8.7.3-4). scn with a /Pattern color space selects a pattern resource: a shading pattern
 // (PatternType 2) becomes a Paint.Shading payload, a tiling pattern (PatternType 1) a Paint.Tiling payload whose Replay
 // closure re-enters the interpreter for one cell's content. Pattern space is anchored to the default space of the
-// content stream that selected the pattern — the /Matrix composed with the CTM in effect at that stream's start
-// (streamCTM) — so the pattern stays put while the drawing CTM changes.
+// content stream that selected the pattern (the /Matrix composed with streamCTM), so the pattern stays put while the
+// drawing CTM changes.
 
 // namePattern is the /Pattern name, shared by the color-space switch and the resource lookups.
 const namePattern cos.Name = "Pattern"
@@ -47,9 +47,9 @@ type tilingRes struct {
 	uncolored bool // PaintType 2: the cell content is a stencil painted with the scn-supplied color
 }
 
-// patternFor resolves the pattern selected by an scn/SCN operator: the trailing name operand looked up in the current
-// /Pattern resources. It returns the pattern and the composed pattern-space→device matrix. A non-pattern space, a
-// missing name, or an unusable pattern yields nil (the paint will not mark).
+// patternFor resolves the pattern selected by an scn/SCN operator (the trailing name operand, looked up in the current
+// /Pattern resources) and returns it with the composed pattern-space→device matrix. A non-pattern space, a missing
+// name, or an unusable pattern yields nil (the paint will not mark).
 func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	if _, isPattern := space.(*pdfcolor.Pattern); !isPattern {
 		return nil, gfx.Matrix{}
@@ -65,10 +65,9 @@ func (in *interp) patternFor(space pdfcolor.Space) (*patternRes, gfx.Matrix) {
 	if pat == nil {
 		return nil, gfx.Matrix{}
 	}
-	// Guard the composed matrix's finiteness (like cm/Do/Tm): numbers6 validates the six /Matrix entries individually,
-	// but finite operands can still multiply to a NaN/Inf matrix, which the device receives as Paint.PatternCTM and
-	// passes on unchecked to the /BBox clip transform and the shader's local matrix. An unusable pattern space cannot
-	// be painted, so the pattern is dropped and the paint does not mark.
+	// Finite /Matrix entries can still multiply to a NaN/Inf matrix, which the device would pass on unchecked as
+	// Paint.PatternCTM. An unusable pattern space cannot be painted, so the pattern is dropped and the paint does not
+	// mark.
 	m := pat.matrix.Mul(in.streamCTM)
 	if !m.IsFinite() {
 		return nil, gfx.Matrix{}
@@ -170,9 +169,8 @@ func (in *interp) parseTiling(raw cos.Object, stream *cos.Stream) *tilingRes {
 
 // stepValue reads a tile step, degrading zero, missing, or non-finite values to the cell extent (the leniency viewers
 // apply) and folding negative steps to their magnitude (spacing is a distance). The fallback gets the same finiteness
-// test as the supplied value: the cell extent is a float32 subtraction of two validated /BBox entries, so a box
-// spanning more than float32's range makes it +Inf — which every step consumer rejects, leaving the pattern painting
-// nothing. A non-finite fallback degrades to 1, a step the renderer can act on.
+// test: the cell extent is a float32 subtraction of two validated /BBox entries, so a box spanning more than float32's
+// range makes it +Inf, which every step consumer rejects; it degrades to 1, a step the renderer can act on.
 func stepValue(d *cos.Document, dict cos.Dict, key cos.Name, fallback float32) float32 {
 	if !isFinitePt(fallback, 0) {
 		fallback = 1
@@ -196,8 +194,8 @@ func (in *interp) applyPattern(p *device.Paint, space pdfcolor.Space, pat *patte
 	p.PatternCTM = patCTM
 	if pat.sh != nil {
 		p.Shading = pat.sh
-		// One shading-pattern fill or stroke realizes the shading exactly as sh does, so it is charged the same way: this
-		// runs once per painting operator, since fillPaint/strokePaint build the paint per operation.
+		// A shading-pattern fill or stroke realizes the shading as sh does, so it is charged the same way, once per
+		// painting operator (fillPaint/strokePaint build the paint per operation).
 		in.charge(shadingPaintCost(pat.sh, patCTM))
 		return
 	}
@@ -228,8 +226,8 @@ type tilingCellKey struct {
 }
 
 // tileKey returns the cache identity for the cell tilingReplay would paint, or nil when that content must not be
-// cached: without a reference there is nothing stable to key on, and a pattern that is already active in this replay
-// stack (or that is at the recursion cap) paints NOTHING, which must never be retained as if it were the cell.
+// cached: without a reference there is nothing stable to key on, and a pattern already active in this replay stack (or
+// at the recursion cap) paints NOTHING, which must never be retained as if it were the cell.
 func (in *interp) tileKey(tile *tilingRes, cellColor color.NRGBA) any {
 	if !tile.hasRef || in.active[tile.ref] || in.formDepth >= maxFormDepth {
 		return nil
@@ -239,8 +237,8 @@ func (in *interp) tileKey(tile *tilingRes, cellColor color.NRGBA) any {
 
 // tilingReplay builds the Replay closure for one tiling pattern: it runs the cell content through a child interpreter
 // against the given device, sharing this interpreter's recursion guards and work budget so cyclic or hostile patterns
-// terminate. For uncolored patterns the cell's own color operators are suppressed and everything paints with cellColor
-// (ISO 32000-2 8.7.3.3).
+// terminate. For an uncolored pattern the cell's own color operators are suppressed and everything paints with
+// cellColor (ISO 32000-2 8.7.3.3).
 func (in *interp) tilingReplay(tile *tilingRes, cellColor color.NRGBA) func(device.Device, gfx.Matrix) {
 	return func(dev device.Device, ctm gfx.Matrix) {
 		if in.formDepth >= maxFormDepth {
@@ -278,8 +276,7 @@ func (in *interp) opShading() {
 	if sh == nil {
 		return
 	}
-	// The device realizes the shading for THIS operator (see shadingPaintCost); sh is the operator that can force the
-	// most device work per unit, so it charges before emitting.
+	// The device realizes the shading per operator (see shadingPaintCost), so each sh charges before emitting.
 	in.charge(shadingPaintCost(sh, in.gs.ctm))
 	in.masked(in.gs.fillAlpha, func() {
 		in.dev.FillShading(sh, in.gs.ctm, device.Paint{Alpha: in.gs.fillAlpha, Blend: in.gs.blend})

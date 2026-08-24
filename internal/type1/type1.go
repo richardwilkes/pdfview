@@ -10,10 +10,9 @@
 // Package type1 parses Adobe Type 1 font programs (the FontFile stream of a PDF font dictionary): the PFA/PFB
 // container, eexec decryption, the built-in /Encoding, /FontMatrix and /FontBBox from the clear-text portion, and the
 // /Subrs and /CharStrings charstrings (decrypted with r=4330 and their lenIV bytes stripped) from the private portion.
-// Charstrings execute through go-text's psinterpreter (whose Type1Charstring context supplies the number parsing and
-// subroutine machinery); this package contributes only the operator handler — see charstring.go. The format authority
-// is Adobe's published "Adobe Type 1 Font Format" specification; the eexec and charstring encryption algorithm (r=55665
-// / r=4330, c1=52845, c2=22719) is printed there in full.
+// Charstrings execute through go-text's psinterpreter; this package contributes only the operator handler in
+// charstring.go. The format authority is Adobe's "Adobe Type 1 Font Format" specification, which prints the eexec and
+// charstring encryption algorithm (r=55665 / r=4330, c1=52845, c2=22719) in full.
 //
 // Hostile input never panics Parse or Glyph: both recover into errors, and all counts and lengths are capped.
 package type1
@@ -118,9 +117,8 @@ func splitProgram(data []byte) (clearPart, encPart []byte, err error) {
 	}
 	clearPart = data[:idx]
 	pos := idx + len("eexec")
-	// The encrypted portion begins after the whitespace following the keyword (FreeType-compatible: skip all
-	// immediately following whitespace bytes; the first ciphertext byte is effectively random, so a ciphertext byte is
-	// mistaken for whitespace with negligible probability — and hex form tolerates it regardless).
+	// Skipping every whitespace byte after the keyword is FreeType-compatible: the first ciphertext byte is effectively
+	// random, so one is mistaken for whitespace with negligible probability, and hex form tolerates it regardless.
 	for pos < len(data) && isWhite(data[pos]) {
 		pos++
 	}
@@ -161,10 +159,8 @@ func joinPFB(data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// indexToken finds a keyword at a token boundary (not inside a longer name), returning its byte offset or -1. The scan
-// runs through bytes.Index rather than comparing at every position: the whole font program is searched for "eexec", and
-// a large embedded program should not pay a per-byte comparison (nor the string conversion of each candidate) to find
-// it.
+// indexToken finds a keyword at a token boundary (not inside a longer name), returning its byte offset or -1.
+// bytes.Index does the scanning so a large program does not pay a per-byte comparison to find "eexec".
 func indexToken(data []byte, word string) int {
 	needle := []byte(word)
 	for at := 0; at+len(word) <= len(data); {
@@ -389,12 +385,9 @@ func (f *Font) parseSubrs(s *scanner, lenIV int) {
 		return
 	}
 	subrs := make([][]byte, count)
-	// Two iterations per entry plus slack for the surrounding boilerplate (array, noaccess, ...). One entry usually
-	// costs a single iteration — dup, its operands and payload, then skipKeyword eats the terminator — but the
-	// terminator's name is font-defined, and a font that spells it "noaccess put" instead of the "NP" shorthand leaves
-	// "put" to burn the next iteration. At count+8 any such font with more than a handful of subroutines silently lost
-	// the tail of its /Subrs array (those slots stay nil and CallSubroutine on one draws nothing), corrupting outlines
-	// with no error.
+	// Two iterations per entry plus slack for the surrounding boilerplate (array, noaccess, ...): an entry usually costs
+	// one iteration, but the terminator's name is font-defined, and "noaccess put" instead of "NP" leaves "put" to burn
+	// a second. TestParseSubrsTerminatorSpellings pins it.
 	for range 2*count + 8 {
 		save := s.pos
 		tok, ok2 := s.next()
@@ -606,29 +599,23 @@ func (s *scanner) integer() (int64, bool) {
 }
 
 // toInt64 truncates a scanned number toward zero, reporting failure for anything that does not fit in an int64. The
-// bound is applied in float space on purpose: Go leaves a float→int conversion implementation-defined when the value
-// does not fit, and the platforms disagree — amd64 wraps every out-of-range value (and NaN) to math.MinInt64 while
-// arm64 saturates to the nearest bound and maps NaN to 0. The scanner's numbers come from strconv.ParseFloat, which
-// accepts "1e300", "inf" and "nan", so a hostile program can write a charstring length, /Subrs count, dup code, or
-// lenIV that would otherwise reach the callers' range checks as an architecture-dependent value. Failing here makes
-// the rejection identical everywhere.
+// bound is applied in float space because Go leaves an out-of-range float-to-int conversion implementation-defined and
+// the platforms disagree (amd64 wraps every out-of-range value and NaN to math.MinInt64; arm64 saturates and maps NaN
+// to 0). The scanner's numbers come from strconv.ParseFloat, which accepts "1e300", "inf" and "nan", so a hostile
+// program could otherwise write a charstring length, /Subrs count, dup code, or lenIV that reaches the callers' range
+// checks as an architecture-dependent value.
 func toInt64(v float64) (int64, bool) {
-	// float64 represents math.MinInt64 (−2^63) exactly, so the lower guard is precise. It cannot represent
-	// math.MaxInt64 (2^63−1), which rounds up to 2^63 — comparing against it with `>` would let a v of exactly 2^63
-	// slip through to int64(v) and overflow. −math.MinInt64 is 2^63 (representable exactly, since math.MinInt64 is a
-	// power of two), so `v >= -float64(math.MinInt64)` rejects the first out-of-range value precisely.
+	// float64 represents math.MinInt64 (-2^63) exactly, but math.MaxInt64 rounds up to 2^63, so comparing against it
+	// with `>` would let exactly 2^63 through to int64(v). -math.MinInt64 is exactly 2^63, so `>=` rejects it.
 	if math.IsNaN(v) || v < math.MinInt64 || v >= -float64(math.MinInt64) {
 		return 0, false
 	}
 	return int64(v), true
 }
 
-// toFloat32 narrows a scanned number to float32, reporting failure for anything that does not survive as a finite
-// value. It is the float counterpart of toInt64's guard: scanner.next classifies with strconv.ParseFloat, which accepts
-// "inf", "nan" and over-long digit strings, so /FontMatrix and /FontBBox would otherwise be stored non-finite with
-// HasMatrix/HasBBox set. Consumers divide by them (the FontBBox-over-upem metrics), multiply outline points through
-// them, and rasterize the result, so rejecting at this shared source closes both paths at once. A finite float64 too
-// large for float32 becomes ±Inf in the conversion and is caught by the same test.
+// toFloat32 narrows a scanned number to float32, reporting failure when the result is not finite (NaN, ±Inf, or a
+// finite float64 beyond float32's range). Without it /FontMatrix and /FontBBox would be stored non-finite with
+// HasMatrix/HasBBox set, and consumers divide by them and transform outline points through them.
 func toFloat32(v float64) (float32, bool) {
 	f := float32(v)
 	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {

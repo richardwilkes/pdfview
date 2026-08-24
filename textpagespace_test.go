@@ -31,11 +31,10 @@ func openInternal(t *testing.T, name string) *Document {
 	return d
 }
 
-// TestTextPageSpaceMatchesTheRenderSpec pins the agreement the public ForSize test can only observe where text
-// happens to reach: a TextPage's pixel space is the one renderSpec.extents hands the render, scale and bounds both.
-// The bounds matter beyond the scale because a fit spec carries the caller's box and extents clamps to it — a clamp
-// that bites only when the float32 extent multiply rounds past the box, which no rectangle on these pages is near
-// enough to the edge to reveal from the outside.
+// TestTextPageSpaceMatchesTheRenderSpec pins that a TextPage's pixel space is the one renderSpec.extents hands the
+// render, scale and bounds both. The bounds matter because a fit spec clamps to the caller's box, a clamp that bites
+// only when the float32 extent multiply rounds past the box, which no rectangle on these pages is near enough to the
+// edge to reveal from outside.
 func TestTextPageSpaceMatchesTheRenderSpec(t *testing.T) {
 	for _, tc := range []struct {
 		name                string
@@ -47,9 +46,8 @@ func TestTextPageSpaceMatchesTheRenderSpec(t *testing.T) {
 		{name: "height-limited", file: "irs-fw9.pdf", maxWidth: 813, maxHeight: 611},
 		{name: "width-limited", file: "text-std14.pdf", maxWidth: 500, maxHeight: 999},
 		{name: "larger than the page", file: "text-std14.pdf", maxWidth: 1000, maxHeight: 999},
-		// Past roughly 17,000 px the float32 extent multiply outgrows renderExtent's 0.001 epsilon (see renderSpec),
-		// so the unclamped height lands one row past the box the caller asked to fit within. Extraction is scale-free,
-		// so labeling for an image this size costs nothing and allocates nothing.
+		// Past roughly 17,000 px the float32 extent multiply outgrows renderExtent's epsilon (see renderSpec), so the
+		// unclamped height lands one row past the box. Extraction is scale-free, so this size costs nothing.
 		{name: "the clamp bites", file: "rotate90.pdf", maxWidth: 19205, maxHeight: 19205, clamps: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

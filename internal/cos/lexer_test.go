@@ -51,7 +51,7 @@ func TestLexNumbers(t *testing.T) {
 		{"-.002", token{kind: tkReal, f: -0.002}},
 		{".5", token{kind: tkReal, f: 0.5}},
 		{"--5", token{kind: tkInt, i: 5}}, // Lenient: doubled signs cancel.
-		// Integers above the old (1<<62)/10 guard but within int64 must stay exact tkInt, not be perturbed as tkReal.
+		// Integers near math.MaxInt64 must stay exact tkInt, not become tkReal.
 		{"922337203685477580", token{kind: tkInt, i: 922337203685477580}},
 		{"5000000000000000000", token{kind: tkInt, i: 5000000000000000000}},
 		{"9223372036854775807", token{kind: tkInt, i: 9223372036854775807}}, // math.MaxInt64
@@ -264,7 +264,7 @@ func TestParseIndirectWithStream(t *testing.T) {
 
 func TestParseIndirectEmptyStream(t *testing.T) {
 	// A zero-length payload whose post-stream EOL directly abuts endstream must not underflow the EOL trim (found by
-	// FuzzOpen; the input is preserved under testdata/fuzz).
+	// FuzzOpen; the input is preserved under internal/doc/testdata/fuzz).
 	for _, src := range []string{
 		"0 0obj<<>>stream\nendstream0",
 		"1 0 obj << >> stream\nendstream endobj",
@@ -342,10 +342,9 @@ func TestLexLargeIntegerOverflow(t *testing.T) {
 	}
 }
 
-// TestLexNumbersBeyondFloat64Range checks that a magnitude strconv.ParseFloat reports as out of range still lexes to the
-// value it hands back — the correctly-signed infinity — rather than to the arbitrary truncated prefix accumulated before
-// the integer overflow was detected. An infinity is rejected by the downstream finiteness guards (isFinitePt,
-// Matrix.IsFinite, numbers6); a bogus finite coordinate is not.
+// TestLexNumbersBeyondFloat64Range checks that a magnitude strconv.ParseFloat reports as out of range lexes to the
+// infinity it hands back, which the downstream finiteness guards (isFinitePt, Matrix.IsFinite, numbers6) reject, rather
+// than to a bogus finite prefix.
 func TestLexNumbersBeyondFloat64Range(t *testing.T) {
 	huge := strings.Repeat("9", 400)
 	for _, tc := range []struct {
@@ -520,9 +519,8 @@ func TestAsIntRealRange(t *testing.T) {
 }
 
 func TestCaptureRawStreamHugeLength(t *testing.T) {
-	// A large-but-valid Integer /Length near math.MaxInt64 used to overflow the pos+length bound to a negative value,
-	// pass the guard, and then index the buffer with a negative offset. The overflow-safe bound must reject it and fall
-	// back to the endstream scan instead of panicking.
+	// A large-but-valid Integer /Length near math.MaxInt64 must not overflow the pos+length bound to a negative value
+	// and index the buffer with it; the overflow-safe bound rejects it and falls back to the endstream scan.
 	dict := Dict{"Length": Integer(9223372036854775800)}
 	data := []byte("stream\nabcde\nendstream rest")
 	pos := len("stream\n")
@@ -533,9 +531,8 @@ func TestCaptureRawStreamHugeLength(t *testing.T) {
 }
 
 func TestRepairManyBareStreams(t *testing.T) {
-	// Many "N 0 obj << >> stream" headers with no endstream anywhere used to cost O(n²): each header scanned to EOF.
-	// The repair endstream bound makes each miss constant-time. This checks the pathological input still repairs into a
-	// usable document (with a real trailer/catalog appended) rather than hanging.
+	// Many "N 0 obj << >> stream" headers with no endstream anywhere must repair into a usable document (with a real
+	// trailer and catalog appended) in linear time: the repair endstream bound makes each miss constant-time.
 	var b bytes.Buffer
 	for i := 2; i < 4000; i++ {
 		fmt.Fprintf(&b, "%d 0 obj\n<< /Length 10 >>\nstream\n", i)

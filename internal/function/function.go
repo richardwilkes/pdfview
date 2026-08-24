@@ -26,10 +26,10 @@ import (
 
 // Limits. maxInputs bounds type 0 multilinear interpolation (2^m corner samples per evaluation); real functions rarely
 // exceed 2 inputs. maxNesting bounds type 3 subfunction and type 4 procedure nesting. maxProgramOps bounds a parsed
-// calculator program's total instruction count and, as a per-Parse budget, the total number of function nodes parsed
-// across a whole graph (so branching cannot multiply with depth). maxExecSteps bounds one evaluation's executed
-// instructions (if/ifelse can re-run instructions; loops do not exist in the calculator language, but the cap also
-// hardens against implementation slips). psStackLimit is the standard's own limit (ISO 32000-2 7.10.5.1).
+// calculator program's instruction count and, as a per-Parse budget, the total number of function nodes parsed across a
+// whole graph (so branching cannot multiply with depth). maxExecSteps bounds one evaluation's executed instructions;
+// the calculator language has no loops, so it only hardens against implementation slips. psStackLimit is the
+// standard's own limit (ISO 32000-2 7.10.5.1).
 const (
 	maxInputs     = 8
 	maxOutputs    = 64
@@ -123,14 +123,14 @@ const decodeCostShift = 10
 // parseState is what one Parse shares across the whole function graph it walks: the node budget, and the functions
 // already parsed from an indirect reference.
 type parseState struct {
-	// seen memoizes by reference so a graph naming the SAME function repeatedly parses it once. A type 3 stitching
-	// function whose /Functions array repeats one reference otherwise re-inflated that node's stream on every entry —
-	// thousands of times over from a single cs or sh operator, which is charged for one resource parse.
+	// seen memoizes by reference so a graph naming the same function repeatedly parses it once. A type 3 /Functions
+	// array that repeats one reference would otherwise re-inflate that node's stream on every entry, thousands of times
+	// from a single cs or sh operator that is charged for one resource parse.
 	seen map[cos.RefKey]Func
-	// budget caps the total number of function nodes parsed across the whole graph, not just its depth, plus the bytes
-	// their streams decode (see decodeCostShift). maxNesting bounds depth alone, so a chain of stitching functions whose
-	// /Functions arrays fan out to shared references could otherwise force exponential (branching^depth) parse work from
-	// a tiny file. The shared budget makes total work linear in the file's declared node count.
+	// budget caps the total number of function nodes parsed across the whole graph, plus the bytes their streams decode
+	// (see decodeCostShift). maxNesting bounds depth alone, so a chain of stitching functions whose /Functions arrays
+	// fan out to shared references could otherwise force branching^depth parse work from a tiny file; the shared budget
+	// makes total work linear in the file's declared node count.
 	budget int
 }
 
@@ -143,9 +143,9 @@ func (st *parseState) spend(n int) {
 	st.budget -= n
 }
 
-// spendDecoded debits the budget for the bytes a stream-backed node's decode produced (cos.Document.DecodeWork's delta
-// across it). The shift is applied in uint64 and the result capped at the whole budget — no decode, however large, can
-// charge more than the budget itself.
+// spendDecoded debits the budget for the bytes a stream-backed node's decode produced (the delta in
+// cos.Document.DecodeWork across it). The shift is applied in uint64 and the result capped at the whole budget, so no
+// decode, however large, charges more than the budget itself.
 func (st *parseState) spendDecoded(n uint64) {
 	st.spend(int(min(n>>decodeCostShift, uint64(maxProgramOps))))
 }
@@ -221,9 +221,8 @@ func parseNode(d *cos.Document, obj cos.Object, depth int, st *parseState) (Func
 }
 
 // parseStream runs one stream-backed node's parse and charges the shared budget for what its decode produced, whether
-// or not the parse itself succeeded — a failed parse may have inflated the whole allowance before reporting. Once the
-// budget is gone the node is reported as too complex, which stops the surrounding graph the way any other exhaustion
-// does.
+// or not the parse succeeded: a failed parse may have inflated the whole allowance before reporting. Once the budget is
+// gone the node is reported as too complex, which stops the surrounding graph like any other exhaustion.
 func parseStream(d *cos.Document, st *parseState, parseIt func() (Func, error)) (Func, error) {
 	before := d.DecodeWork()
 	fn, err := parseIt()
@@ -252,12 +251,12 @@ func numbers(d *cos.Document, dict cos.Dict, key cos.Name, maxLen int) ([]float3
 	return narrowAll(d, arr)
 }
 
-// narrowAll converts every entry to float32, rejecting the array unless all of them are finite *after* the narrowing: a
-// legal PDF number beyond float32's range (1 followed by 39 zeros) is a finite float64 but ±Inf here, and these arrays
-// are /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size. An infinite domain makes interpolate yield NaN,
-// a type 2 function (whose /Range is optional, so nothing clamps it) would return ±Inf from Eval in contradiction of
-// Func.Eval's contract. A /Size entry goes on to a float→int conversion, which parseSampled bounds in float space
-// itself — being finite is not enough to make int(v) architecture-independent — so the two guards are complementary.
+// narrowAll converts every entry to float32 and rejects the array unless all are finite after the narrowing: a legal
+// PDF number beyond float32's range (1 followed by 39 zeros) is a finite float64 but ±Inf here, and these arrays are
+// /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size. An infinite domain makes interpolate yield NaN, and
+// a type 2 function's optional /Range leaves nothing to clamp ±Inf out of Eval's result, contradicting Func.Eval's
+// contract. /Size goes on to a float→int conversion that parseSampled bounds in float space itself, since finite is
+// not enough to make int(v) architecture-independent.
 func narrowAll(d *cos.Document, arr cos.Array) ([]float32, bool) {
 	out := make([]float32, len(arr))
 	for i, entry := range arr {

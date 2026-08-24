@@ -245,7 +245,7 @@ func TestLoadSimpleFont(t *testing.T) {
 		t.Errorf("Symbol width('a') = %v, want 0.631", got)
 	}
 
-	// Unsupported subtypes degrade, malformed dictionaries error.
+	// An unsupported configuration and a malformed dictionary both fail Load.
 	if _, err = loadFromDict(t, `<< /Type /Font /Subtype /Type0 /BaseFont /X >>`); err == nil {
 		t.Error("Type0 should not load yet")
 	}
@@ -416,11 +416,10 @@ func TestType0DispatchByFontFile(t *testing.T) {
 	}
 }
 
-// TestType0FallsThroughToNextFontFile guards the composite-font counterpart of TestSimpleFallsThroughToNextFontFile: a
+// TestType0FallsThroughToNextFontFile is the composite-font counterpart of TestSimpleFallsThroughToNextFontFile: a
 // descendant descriptor carrying an unparseable FontFile2 alongside a usable FontFile3 must try the remaining entry
-// before giving up on the embedded program. Dispatching on which entry is merely *present* left info.sfnt nil and
-// substituted Liberation shapes for a font whose real glyphs sit in the CFF. The /CIDToGIDMap describes the TrueType
-// program's glyph order, so a fall-through must not route CIDs through it either.
+// before giving up on the embedded program. The /CIDToGIDMap describes the TrueType program's glyph order, so a
+// fall-through must not route CIDs through it either.
 func TestType0FallsThroughToNextFontFile(t *testing.T) {
 	// A CFF carrying FontBBox [-166 -214 1076 952] (so top.metrics() resolves and the font counts as embedded) plus
 	// loadable charstrings (so it is the glyph source too).
@@ -463,10 +462,9 @@ func TestType0FallsThroughToNextFontFile(t *testing.T) {
 	}
 }
 
-// TestSimpleFallsThroughToNextFontFile is the simple-font counterpart of TestType0DispatchByFontFile: a descriptor
-// carrying an unparseable FontFile2 alongside a usable FontFile3 must try the remaining entries before giving up on the
-// embedded program. Stopping at the first entry that is merely *present* renders Liberation stand-ins for a font whose
-// real glyphs are right there.
+// TestSimpleFallsThroughToNextFontFile pins the simple-font dispatch: a descriptor carrying an unparseable FontFile2
+// alongside a usable FontFile3 must try the remaining entries before giving up on the embedded program, instead of
+// substituting Liberation stand-ins for a font whose real glyphs are present.
 func TestSimpleFallsThroughToNextFontFile(t *testing.T) {
 	// A CFF carrying FontBBox [-166 -214 1076 952] (so top.metrics() resolves and the font counts as embedded) plus
 	// loadable charstrings (so it is the glyph source too).
@@ -601,7 +599,7 @@ func TestType3NonStandardFontMatrixWidths(t *testing.T) {
 	if got := f.Width(65, 1); got != 5 {
 		t.Errorf("Width(65) = %v, want 5 (/Widths through the FontMatrix)", got)
 	}
-	// A raw /MissingWidth of 321 scaled by matrix[0]=0.01 yields 3.21; before the fix this returned the raw 0.321.
+	// A raw /MissingWidth of 321 scaled by matrix[0]=0.01 yields 3.21.
 	if got := f.Width(66, 1); got < 3.209 || got > 3.211 {
 		t.Errorf("Width(66) = %v, want ≈3.21 (/MissingWidth through the FontMatrix)", got)
 	}
@@ -609,9 +607,9 @@ func TestType3NonStandardFontMatrixWidths(t *testing.T) {
 
 // TestType0SubstitutesWhenTheEmbeddedProgramHasNoGlyphs covers the composite-font substitution gate. A FontFile3 whose
 // header and Top DICT parse — yielding a usable /FontBBox — but whose program go-text's cff.Parse rejects (there are no
-// charstrings here at all) leaves the font with metrics and no glyph source whatsoever. Deciding substitution on
-// "metrics were recovered" rather than "a glyph source exists" left every glyph of such a font invisible while its
-// widths still advanced; loadSimple substitutes in the identical situation.
+// charstrings here at all) leaves the font with metrics and no glyph source. Substitution must key on "a glyph source
+// exists", not "metrics were recovered", or every glyph of such a font is invisible while its widths still advance;
+// loadSimple substitutes in the identical situation.
 func TestType0SubstitutesWhenTheEmbeddedProgramHasNoGlyphs(t *testing.T) {
 	// FontBBox [-166 -214 1076 952] and nothing else: top.metrics() resolves, parseCFFGlyphs finds no CharStrings.
 	cff := buildCFF([]byte{

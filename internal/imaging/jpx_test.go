@@ -39,9 +39,9 @@ func TestJPXNormalize(t *testing.T) {
 		{name: "12-bit min", precision: 12, sample: -2048, want: 0},
 		{name: "12-bit mid", precision: 12, sample: 0, want: 128},
 		{name: "12-bit max", precision: 12, sample: 2047, want: 255},
-		// 2063 >> 4 is 128; rounding the discarded bits would give 129 and rescaling 4095ths onto 255ths would give 129.
+		// 2063 >> 4 is 128; rounding the discarded bits would give 129.
 		{name: "12-bit truncates low bits", precision: 12, sample: 15, want: 128},
-		// 4079 >> 4 is 254, where rescaling would reach 255: the 12-bit maximum is the only value that renders white.
+		// 4079 >> 4 is 254; rounding would give 255.
 		{name: "12-bit near max truncates", precision: 12, sample: 2031, want: 254},
 		{name: "16-bit min", precision: 16, sample: -32768, want: 0},
 		{name: "16-bit mid", precision: 16, sample: 0, want: 128},
@@ -84,8 +84,7 @@ func TestJPXNormalizeIgnoresSignedness(t *testing.T) {
 }
 
 // TestJPXGrayPlaneMean pins the soft-mask reduction of a three-component payload as the plain mean of the three,
-// truncated. The oracle uses no luminance weighting here: against images-jpx-smask.pdf a 77/150/28 model misses by mean
-// 9.4 and max 60 of 255, and it would read the first case below as 1 only by accident of its weights.
+// truncated, not a luminance weighting (see jpxGrayPlane).
 func TestJPXGrayPlaneMean(t *testing.T) {
 	for _, tc := range []struct {
 		rgb  [3]byte

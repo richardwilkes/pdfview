@@ -26,17 +26,14 @@ do
   esac
 done
 
-# Build the code
 echo -e "\033[33mBuilding...\033[0m"
 go build -v ./...
 
-# The SIMD kernels live behind //go:build goexperiment.simd, so the default build above never compiles them. Build
-# again with the experiment on to keep that arm honest. GOEXPERIMENT is a per-command prefix everywhere in this
-# script, never exported: the oracle module's cgo lint at the end must not inherit it.
+# The SIMD kernels are behind //go:build goexperiment.simd, so the default build never compiles them. GOEXPERIMENT stays
+# a per-command prefix, never exported: the oracle module's cgo lint at the end must not inherit it.
 echo -e "\033[33mBuilding with goexperiment.simd...\033[0m"
 GOEXPERIMENT=simd go build ./...
 
-# Run the tests
 if [ "$TEST"x == "1x" ]; then
   if [ -n "$RACE" ]; then
     echo -e "\033[33mTesting with -race enabled...\033[0m"
@@ -48,7 +45,6 @@ if [ "$TEST"x == "1x" ]; then
   GOEXPERIMENT=simd go test $RACE ./...
 fi
 
-# Run the linters
 if [ "$LINT"x == "1x" ]; then
   GOLANGCI_LINT_VERSION=$(curl --head -s https://github.com/golangci/golangci-lint/releases/latest | grep -i location: | sed 's/^.*v//' | tr -d '\r\n' )
   TOOLS_DIR=$(go env GOPATH)/bin
@@ -61,7 +57,6 @@ if [ "$LINT"x == "1x" ]; then
   "$TOOLS_DIR/golangci-lint" run ./...
   echo -e "\033[33mLinting with goexperiment.simd...\033[0m"
   GOEXPERIMENT=simd "$TOOLS_DIR/golangci-lint" run ./...
-  # Do not force CGO_ENABLED=0 in the environment when running this script: the oracle module wraps the cgo MuPDF
-  # binding, and its lint pass needs a working cgo toolchain to typecheck.
+  # The oracle module wraps MuPDF through cgo, so its lint pass needs cgo: do not run this script with CGO_ENABLED=0.
   (cd oracle; "$TOOLS_DIR/golangci-lint" run -c ../.golangci.yml ./...)
 fi

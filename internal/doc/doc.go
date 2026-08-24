@@ -7,12 +7,10 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package doc implements document-level PDF semantics on top of the COS layer: the page tree (opening a document builds
-// the flat page list, honoring the tree structure with cycle and depth guards, that PageCount and Page answer from),
-// encryption setup, and navigation: page geometry (the effective box and rotation, and the top-left/y-down coordinate
-// space derived from them), destinations (explicit arrays and named, via both the old-style /Dests dictionary and the
-// /Names name tree), the document outline, link annotations, and page labels (the /PageLabels number tree, flattened
-// to one display label per page).
+// Package doc implements document-level PDF semantics on top of the COS layer: the page tree (flattened at open into
+// the page list PageCount and Page answer from), encryption setup, page geometry (the effective box and rotation, and
+// the top-left/y-down space derived from them), destinations (explicit arrays and named, via the old-style /Dests
+// dictionary and the /Names name tree), the document outline, link annotations, and page labels.
 package doc
 
 import (
@@ -22,17 +20,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/crypt"
 )
 
-// Page-tree walk guards: depth is capped, reference cycles and duplicated subtrees are cut by a visited set shared
-// across the whole walk, and the total number of leaves collected is capped so a hostile tree cannot balloon memory —
-// matching the caps the outline (maxOutlineNodes) and link/annotation (maxPageLinks) walks apply. maxPages is far above
-// any real document's page count; a file that hits it is malformed or hostile, and the pages past the cap are dropped.
+// Page-tree walk guards: depth is capped, a visited set shared across the walk cuts reference cycles and duplicated
+// subtrees, and the leaf count is capped so a hostile tree cannot balloon memory (as maxOutlineNodes and maxPageLinks
+// cap the outline and link walks). maxPages is far above any real page count; the pages past it are dropped.
 const (
 	maxPageTreeDepth = 64
 	maxPages         = 65536
 )
 
-// Authentication-status bits, in the same layout as the public API's AuthenticationStatus so the root package maps an
-// AuthResult across the engine seam without reinterpreting it.
+// Authentication-status bits, in the same layout as the root package's AuthenticationStatus, which converts the byte
+// directly.
 const (
 	// AuthNoneRequired means the document is not encrypted; any password "succeeds".
 	AuthNoneRequired byte = 1 << iota
@@ -47,24 +44,20 @@ var errNoSuchPage = errors.New("no such page")
 // Document is one open PDF document.
 type Document struct {
 	cos *cos.Document
-	// crypt is the standard security handler when the document is encrypted with a scheme we support; nil otherwise
-	// (unencrypted, or encrypted with an unsupported handler).
+	// crypt is the standard security handler when the document is encrypted with a supported scheme; nil otherwise.
 	crypt *crypt.Handler
-	// pageIndex maps each page's indirect reference to its 0-based page number; destination arrays name their target
-	// page by reference, and this is how those references resolve to page numbers. It keys on the reference's
-	// resolution identity (cos.RefKey), so a destination naming the page with a different generation still finds it.
+	// pageIndex maps each page's indirect reference to its 0-based page number, which is how destination arrays resolve
+	// their target page. It keys on cos.RefKey, so a reference with a different generation still finds the page.
 	pageIndex map[cos.RefKey]int
 	// destIndex is the catalog's /Names → /Dests name tree flattened to name → destination pairs, built on the first
-	// named-destination lookup and reused by every later one (see lookupNamedDest). It is nil until then; an empty
-	// non-nil map means the document has no name tree and none will be walked again. A successful Authenticate resets
-	// it to nil: an index flattened before the file key arrived is keyed on ciphertext.
+	// named-destination lookup (see lookupNamedDest). It is nil until then; an empty non-nil map means the document has no
+	// name tree. A successful Authenticate resets it: an index built before the file key arrived is keyed on the
+	// ciphertext DecryptString passed through, and would miss every name for the life of the document.
 	destIndex map[string]cos.Object
-	// pageLabels is the catalog's /PageLabels number tree expanded to one display label per page, decoded but not
-	// sanitized, built on the first page-label query and reused by every later one (see PageLabels). It is nil until
-	// then and non-nil afterward — including the empty slice a zero-page document builds — so a document without the
-	// tree walks it once and never again. A successful Authenticate resets it to nil: /P prefixes are strings, so
-	// labels built before the file key arrived carry ciphertext, and buildPageList re-runs, so the page count itself
-	// can change.
+	// pageLabels is the /PageLabels number tree expanded to one unsanitized label per page, built on the first page-label
+	// query (see PageLabels). It is nil until then and non-nil afterward, even for a zero-page document. A successful
+	// Authenticate resets it: /P prefixes decoded before the file key arrived are ciphertext, and buildPageList re-runs,
+	// so the page count can change.
 	pageLabels []string
 	// pages holds the leaf dictionaries of the page tree, in document order.
 	pages []cos.Dict
@@ -78,17 +71,16 @@ type Document struct {
 	resources []cos.Object
 	// encrypted records whether the trailer carried an /Encrypt dictionary, even if its handler is unsupported.
 	encrypted bool
-	// pageLabelsPresent records whether the pageLabels build found at least one usable range, which is the only thing
-	// that distinguishes a document that labels its pages "1", "2", "3" from one that carries no /PageLabels tree at
-	// all and got the same labels from the decimal fallback. It is meaningful only once pageLabels is non-nil.
+	// pageLabelsPresent records whether the pageLabels build found at least one range (see HasPageLabels). It is
+	// meaningful only once pageLabels is non-nil.
 	pageLabelsPresent bool
 }
 
 // Open parses data as a PDF document, sets up decryption if it is encrypted, and builds its page list. The COS layer
-// runs its repair scan automatically when the file's cross-reference data is broken; Open fails only when no usable
-// document root can be found at all. A document whose catalog has no usable page tree opens with zero pages. An
-// encrypted document opens whether or not a password is available: its page tree (dictionaries, names, and references)
-// is never encrypted, so PageCount works before authentication.
+// repairs broken cross-reference data automatically; Open fails only when no usable document root exists. A catalog
+// without a usable page tree opens with zero pages. An encrypted document opens whether or not a password is available:
+// dictionaries stored directly in the file are not encrypted, so PageCount works before authentication unless the page
+// tree sits in an object stream.
 func Open(data []byte) (*Document, error) {
 	c, err := cos.Open(data)
 	if err != nil {
@@ -96,11 +88,10 @@ func Open(data []byte) (*Document, error) {
 	}
 	d := &Document{cos: c}
 	d.setupEncryption()
-	// cos.Open defers its root check for an encrypted document, because nothing below this line could have decrypted a
-	// catalog stored in an object stream. Run it now that the decryptor is installed — but only for a document that is
-	// actually readable: one still waiting for a password cannot resolve that catalog yet and must open locked, exactly
-	// as an encrypted document whose catalog sits directly in the file already does. Authenticate rebuilds the page list
-	// once the key arrives.
+	// cos.Open defers its root check for an encrypted document, since a catalog stored in an object stream cannot be read
+	// before the decryptor is installed. Run it now, but only for a readable document: one still waiting for a password
+	// cannot resolve that catalog yet and must open locked, as an encrypted document whose catalog sits directly in the
+	// file already does. Authenticate rebuilds the page list once the key arrives.
 	if c.Encrypted() && !d.NeedsPassword() {
 		if err = c.ValidateRoot(); err != nil {
 			return nil, err
@@ -110,9 +101,9 @@ func Open(data []byte) (*Document, error) {
 	return d, nil
 }
 
-// setupEncryption builds the security handler from the trailer's /Encrypt dictionary (if any) and installs it as the
-// COS layer's decryptor, trying the empty password so documents that need none become immediately usable. An /Encrypt
-// dictionary the handler cannot parse leaves the document flagged encrypted but locked.
+// setupEncryption builds the security handler from the trailer's /Encrypt dictionary, if any, and installs it as the
+// COS layer's decryptor; crypt.New tries the empty password, so documents that need none are immediately usable. An
+// /Encrypt dictionary the handler cannot parse leaves the document flagged encrypted but locked.
 func (d *Document) setupEncryption() {
 	encDict, ok := cos.AsDict(d.cos.Resolve(d.cos.Trailer()["Encrypt"]))
 	if !ok {
@@ -136,15 +127,15 @@ func (d *Document) IsEncrypted() bool {
 // false for unencrypted documents and for encrypted documents the empty password already unlocked.
 func (d *Document) NeedsPassword() bool {
 	if d.crypt == nil {
-		return d.encrypted // Encrypted with an unsupported handler: unusable without support.
+		return d.encrypted // An unsupported handler stays locked.
 	}
 	return d.crypt.NeedsPassword()
 }
 
 // Authenticate tries password against the document and returns the status bits (AuthNoneRequired / AuthUser /
 // AuthOwner), matching MuPDF's fz_authenticate_password. An unencrypted document reports AuthNoneRequired for any
-// password. A successful authentication drops the object cache so objects read before the file key was available are
-// reparsed and decrypted.
+// password. A success drops the object cache so objects read before the file key was available are reparsed and
+// decrypted.
 func (d *Document) Authenticate(password string) byte {
 	if !d.encrypted {
 		return AuthNoneRequired
@@ -161,23 +152,11 @@ func (d *Document) Authenticate(password string) byte {
 		status |= AuthOwner
 	}
 	if status != 0 {
-		// The file key is now available: drop objects cached without it and rewalk the page tree so its dictionaries
-		// are recaptured decrypted. Re-run the deferred root check first — a catalog stored in an object stream was
-		// unreadable until this moment, and a repair sweep provoked while the payload was still ciphertext rebuilt the
-		// cross-reference table without any of the objects inside it, which no later load failure would notice (an
-		// absent entry resolves to Null, not an error). Its own failure is not fatal: a document left with no usable
-		// root simply reports no pages, exactly as it did before authenticating.
-		//
-		// destIndex is dropped for the same reason the object caches are. Nothing gates named-destination lookups on
-		// authentication (the root package permits TableOfContents and Links on a locked document), and a name tree
-		// flattened before the key arrived keyed itself on the ciphertext DecryptString passed through untouched. Left
-		// in place, every /GoTo and outline destination naming a name would probe the decrypted name against ciphertext
-		// keys, miss, and resolve to page -1 for the life of the document.
-		//
-		// pageLabels is dropped on both counts: a /P prefix is a string, so labels built while locked carry the raw
-		// ciphertext the decryptor passed through untouched, and the buildPageList below can change the page count the
-		// cached slice is sized to. Nothing gates page labels on authentication either, so a locked document can well
-		// have been asked for them already.
+		// The file key is now available: drop everything cached without it (nothing gates named-destination or page-label
+		// queries on authentication, so destIndex and pageLabels may hold ciphertext) and rewalk the page tree so its
+		// dictionaries are recaptured decrypted. Re-run the deferred root check first: a catalog stored in an object stream
+		// was unreadable until now, and a repair sweep provoked while its payload was ciphertext rebuilt the cross-reference
+		// table without the objects inside it, which no later load notices (an absent entry resolves to Null, not an error).
 		d.cos.DropCaches()
 		d.destIndex = nil
 		d.pageLabels = nil
@@ -215,12 +194,9 @@ func (d *Document) PageRef(pageNumber int) (cos.Ref, error) {
 	return d.pageRefs[pageNumber], nil
 }
 
-// buildPageList walks the page tree from the catalog, collecting leaves in document order. The walk counts actual leaf
-// nodes rather than trusting /Count entries, which repair-recovered and hostile files get wrong. A global visited set
-// skips reference cycles and duplicated subtrees (each page has a single parent, so a legitimate tree never revisits a
-// node), depth is capped by maxPageTreeDepth, and the number of pages collected is capped by maxPages. It is
-// idempotent: it resets its output first, so it can be re-run after a successful authentication to recapture page
-// dictionaries that were first parsed without the file key.
+// buildPageList walks the page tree from the catalog, collecting leaves in document order. It counts actual leaves
+// rather than trusting /Count, which repair-recovered and hostile files get wrong, and resets its output first so it
+// can be re-run after a successful authentication.
 func (d *Document) buildPageList() {
 	d.pages = nil
 	d.pageRefs = nil
@@ -252,8 +228,8 @@ func (d *Document) walkPageTree(node cos.Dict, ref cos.Ref, depth int, visited m
 	attrs = attrs.override(node)
 	typ, _ := d.cos.GetName(node, "Type")
 	kids, hasKids := d.cos.GetArray(node, "Kids")
-	// An explicit /Type /Page is a leaf even if it (incorrectly) carries /Kids; a node with kids is an interior node; a
-	// node with neither is treated as a page (leniency for repair-recovered trees with missing /Type).
+	// An explicit /Type /Page is a leaf even with a stray /Kids; a node with neither /Kids nor /Type /Pages is a page too,
+	// since repair-recovered trees lose /Type.
 	if typ == "Page" || (!hasKids && typ != "Pages") {
 		if ref != (cos.Ref{}) {
 			d.pageIndex[ref.Key()] = len(d.pages)

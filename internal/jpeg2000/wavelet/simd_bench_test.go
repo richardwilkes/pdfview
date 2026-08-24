@@ -49,11 +49,11 @@ func BenchmarkInverse53VerticalSIMD(b *testing.B) {
 	}
 }
 
-// BenchmarkInverse97VerticalSIMD measures the 9/7 vertical half: two scaling sweeps (vectorized) and four lifting
-// sweeps (scalar; see liftRow97SIMD for why). Unlike the 5/3 case the buffer must be restored between iterations —
-// the scaling sweeps multiply by K and 1/K, so repeated application would run the coefficients out to infinity and
-// down into the denormal range, and denormal arithmetic would dominate the measurement. The restore happens with
-// the timer stopped so it is not attributed to the transform.
+// BenchmarkInverse97VerticalSIMD measures the 9/7 vertical half: two scaling sweeps (which have a kernel) and four
+// lifting sweeps (scalar; see liftRow97SIMD for why). Unlike the 5/3 case the buffer must be restored between
+// iterations: the scaling sweeps multiply by K and 1/K, so repeated application would run the coefficients out to
+// infinity and down into the denormal range, where denormal arithmetic would dominate the measurement. The restore
+// happens with the timer stopped.
 func BenchmarkInverse97VerticalSIMD(b *testing.B) {
 	for _, w := range benchVerticalWidths {
 		b.Run("W="+strconv.Itoa(w), func(b *testing.B) {
@@ -108,8 +108,8 @@ func BenchmarkSynthesize97SIMD(b *testing.B) {
 }
 
 // BenchmarkInverse53VerticalSIMDBelowGate runs a row width one element short of the 5/3 gates, where the vector
-// sweeps hand the work straight back to the scalar sweeps. It is the drop rule's regression check: the vector build
-// must not lose measurable time on the inputs it deliberately declines to vectorize.
+// sweeps hand the work straight back to the scalar sweeps: the vector build must not lose measurable time on inputs
+// it declines.
 func BenchmarkInverse53VerticalSIMDBelowGate(b *testing.B) {
 	w := sub53RowMin - 1
 	rnd := testrand.Rand(17)

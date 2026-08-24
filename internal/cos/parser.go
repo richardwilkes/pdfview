@@ -29,13 +29,12 @@ const maxObjectNumber = 1 << 24
 // parseIndirectAtBounded gives a nonsensical header generation.
 const maxGenerationNumber = 0xffff
 
-// maxContainerElements caps how many array elements and dictionary entries one parsed object may hold, in total across
-// its whole object tree. Nesting depth is not a bound on size, and the payload an object can be built from is not
-// bounded by the file: a /Type /ObjStm decodes through internal/filter's max(64 MB, 256x input) allowance, so a small
-// file can hold one array of tens of millions of elements. That matters more here than in a content stream, because the
-// result is stored in Document.objCache, which has no size budget and is only dropped by clearCaches — the memory stays
-// live for the whole Document rather than for one render. The cap is orders of magnitude above the largest containers
-// real files carry (a CJK CIDFont's /W array, a flat page tree's /Kids).
+// maxContainerElements caps how many array elements and dictionary entries one parsed object may hold across its whole
+// tree. Nesting depth does not bound size, and an object's payload is not bounded by the file: an object stream decodes
+// through internal/filter's max(64 MB, 256x input) allowance, so a small file can hold an array of tens of millions of
+// elements. The result lives in Document.objCache, which has no size budget and is dropped only by clearCaches, so the
+// memory stays live for the whole Document. The cap is orders of magnitude above the largest real containers (a CJK
+// CIDFont's /W array, a flat page tree's /Kids).
 const maxContainerElements = 1 << 20
 
 var (
@@ -80,9 +79,8 @@ func (p *parser) push(t token) {
 }
 
 // resumePos returns the offset of the first byte this parser has not consumed: the start of the next pushed-back token
-// when lookahead was returned to the stack (token positions survive pushback), and the raw lexer position otherwise. The
-// repair sweep uses it to restart past a failed attempt instead of nudging the cursor forward a few bytes and re-lexing
-// the same span, which is what makes the sweep linear rather than quadratic on hostile input.
+// when lookahead was returned to the stack, and the raw lexer position otherwise. The repair sweep restarts past a
+// failed attempt from it instead of re-lexing the same span, which keeps the sweep linear on hostile input.
 func (p *parser) resumePos() int {
 	if n := len(p.stack); n > 0 {
 		return p.stack[n-1].pos
@@ -250,11 +248,9 @@ func (p *parser) expectInt() (int64, error) {
 }
 
 // parseIndirectAt parses the indirect object "num gen obj ... [stream ... endstream]" at offset off within data. When
-// wantNum is non-negative, the header's object number must match it (detecting stale or wrong xref offsets). It returns
-// the object, the object's generation number (which the standard security handler folds into the per-object decryption
-// key), and the offset just past it (past endstream for streams), which the repair scanner uses to skip stream
-// payloads. An indirect /Length is not resolved (there is no document to resolve it against); see
-// Document.parseIndirectObjectAt for the path that does.
+// wantNum is non-negative the header's object number must match it, detecting stale xref offsets. It returns the
+// object, its generation number, and the offset just past it (past endstream for streams). An indirect /Length is not
+// resolved; see Document.parseIndirectObjectAt for the path that does.
 func parseIndirectAt(data []byte, off int64, wantNum int) (obj Object, gen int, end int64, err error) {
 	return parseIndirectAtBounded(data, off, wantNum, len(data), nil)
 }
@@ -273,16 +269,14 @@ func (d *Document) parseIndirectObjectAt(off int64, wantNum int) (obj Object, ge
 }
 
 // resolveStreamLength returns the value of a stream's indirect /Length. It reads the referenced object directly — the
-// header at its cross-reference offset followed by one integer — rather than going through loadObject, deliberately:
-// this runs in the middle of parsing another object, where the object cache, the failure cache, and the repair scan
-// loadObject drives all either recurse (a /Length reference to the very stream being parsed) or replace state the
-// in-flight parse is standing on. Reading one integer at a known offset does neither and costs a handful of tokens, so
-// no hostile file can turn a page's worth of stream parses into repeated file-sized work.
+// header at its cross-reference offset followed by one integer — rather than through loadObject: this runs mid-parse,
+// where the caches and the repair scan loadObject drives would either recurse (a /Length reference to the very stream
+// being parsed) or replace state the in-flight parse stands on. Reading one integer at a known offset costs a handful
+// of tokens, so no hostile file can turn a page's worth of stream parses into repeated file-sized work.
 //
-// A reference that does not name a plainly stored integer — a free or absent object, one held in an object stream, a
-// stale offset whose header names a different number, a non-integer value — yields ok == false and leaves the caller on
-// the fallback scan, which is where every such stream already was. Integers are never encrypted, so the decryptor
-// (which may not be installed yet) plays no part.
+// A reference that does not name a plainly stored integer (free or absent, held in an object stream, a stale offset, a
+// non-integer value) yields ok == false and leaves the caller on the fallback scan. Integers are never encrypted, so
+// the decryptor (which may not be installed yet) plays no part.
 func (d *Document) resolveStreamLength(ref Ref) (int64, bool) {
 	entry, ok := d.xref[ref.Num]
 	if !ok || entry.kind != xrefInFile || entry.offset < 0 || entry.offset >= int64(len(d.data)) {
@@ -306,17 +300,14 @@ func (d *Document) resolveStreamLength(ref Ref) (int64, bool) {
 	return length, true
 }
 
-// parseIndirectAtBounded is parseIndirectAt with an upper bound (exclusive) on where the fallback "endstream" scan may
-// look. The repair sweep passes the offset just past the file's last "endstream" so that a swept stream header with no
-// matching endstream fails its recovery scan immediately instead of scanning to end of input on every such header
-// (O(n²) on hostile input full of bare stream keywords). All other callers pass len(data), preserving prior behavior.
+// parseIndirectAtBounded is parseIndirectAt with an exclusive upper bound on the fallback "endstream" scan. The repair
+// sweep passes the offset just past the file's last "endstream" so a swept stream header with no matching endstream
+// fails immediately instead of scanning to end of input (O(n²) on input full of bare stream keywords); other callers
+// pass len(data).
 //
-// On failure end is not zero but the offset the attempt stopped reading at (see parser.resumePos), so a caller sweeping
-// the buffer can charge itself for the work already done and continue past it. Every other caller ignores end when err
-// is non-nil.
-//
-// resolveLength, when non-nil, supplies the value of an indirect /Length; a nil one (the repair sweep, which is
-// rebuilding the very table such a reference would be resolved against) leaves those streams on the fallback scan.
+// On failure end is the offset the attempt stopped reading at (see parser.resumePos), so a sweeping caller can continue
+// past the work already done. resolveLength, when non-nil, supplies the value of an indirect /Length; the repair sweep
+// passes nil, since it is rebuilding the table such a reference would resolve against.
 func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int, resolveLength lengthResolver,
 ) (obj Object, gen int, end int64, err error) {
 	if off < 0 || off >= int64(len(data)) {
@@ -343,10 +334,9 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int,
 	if obj, err = p.parseObject(); err != nil {
 		return nil, 0, int64(p.resumePos()), err
 	}
-	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty here for any
-	// dictionary object (parseDict consumes through its closing >>), so the lexer position is authoritative for the
-	// stream payload; for other object types, the next token's recorded start position yields the object extent even
-	// when lookahead tokens were pushed back.
+	// A stream keyword after the object turns a dictionary into a stream. The pushback stack is empty after a dictionary
+	// (parseDict consumes through its closing >>), so the lexer position is authoritative for the payload; for other
+	// types the next token's recorded position gives the object extent even after lookahead pushback.
 	tok, err := p.next()
 	if err != nil {
 		return obj, int(genNum), int64(p.lex.pos), nil //nolint:nilerr // The object parsed; trailing junk is ignored.
@@ -367,10 +357,9 @@ func parseIndirectAtBounded(data []byte, off int64, wantNum, endstreamLimit int,
 }
 
 // captureRawStream slices the raw stream payload that begins after the stream keyword at pos. When the dictionary
-// carries a plausible /Length — the payload fits and is followed by "endstream" — that length is used; otherwise
-// (missing, unresolvable, or wrong /Length) the data is scanned for the next "endstream" keyword and any final
-// end-of-line marker before it is trimmed, mirroring the recovery behavior of deployed readers. The returned end offset
-// is just past the endstream keyword.
+// carries a plausible /Length (the payload fits and is followed by "endstream") that length is used; otherwise the data
+// is scanned for the next "endstream" keyword and the end-of-line marker before it is trimmed, as deployed readers
+// recover. The returned end offset is just past the endstream keyword.
 func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict, resolveLength lengthResolver,
 ) (raw []byte, end int64, err error) {
 	// Per ISO 32000-2 7.3.8.1 the stream keyword is followed by CRLF or LF; a lone CR and a missing break are
@@ -414,10 +403,9 @@ func captureRawStream(data []byte, pos, endstreamLimit int, dict Dict, resolveLe
 }
 
 // streamLength returns the stream's declared /Length. A direct integer is taken as written; an indirect reference —
-// which ISO 32000-2 7.3.8.2 explicitly permits, and which every single-pass writer emits, since the payload's size is
-// unknown when the dictionary is written — is handed to resolveLength when the caller supplied one. Whatever comes back
-// is still only a proposal: captureRawStream requires an "endstream" keyword to follow the payload it describes before
-// using it, so a stale or hostile value costs nothing beyond falling back to the scan.
+// permitted by ISO 32000-2 7.3.8.2 and emitted by every single-pass writer, since the payload's size is unknown when
+// the dictionary is written — goes to resolveLength when supplied. The result is only a proposal: captureRawStream
+// requires "endstream" to follow the payload it describes, so a stale or hostile value costs nothing beyond the scan.
 func streamLength(dict Dict, resolveLength lengthResolver) (int64, bool) {
 	if length, ok := AsInt(dict["Length"]); ok {
 		return length, true

@@ -17,12 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
-// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
-// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
-// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
-// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
-// its preference constant says its benchmarks earned it.
+// init points the dispatch variables at the kernels this architecture prefers (see simd_prefs_<arch>.go). Nothing is
+// repointed unless vecmath.KernelsSupported says the machine can run them: it is false where the simd package emulates
+// lanes in scalar Go, which is slower than the scalar code the kernels replace, and on an amd64 CPU with AVX but not
+// AVX2, where the kernels' broadcasts would fault.
 func init() {
 	if !vecmath.KernelsSupported() {
 		return
@@ -76,13 +74,13 @@ func scale97SweepSIMD(out []float64, W, hlv, hhv int) {
 }
 
 // sub53RowSIMD is one row of the 5/3 update sweep: e[x] -= (hl[x]+hr[x]+2)>>2 for every x in e. hl and hr are at
-// least as long as e and neither overlaps it — inverse53VerticalCas0 only ever pairs an even (low) output row with
-// odd (high) output rows, and hl and hr are the same row when the symmetric extension folds them together, which the
-// kernel does not care about because it only reads them.
+// least as long as e and neither overlaps it: inverse53VerticalCas0 pairs an even (low) output row only with odd
+// (high) rows. hl and hr are the same row where the symmetric extension folds them together, which is harmless
+// because the kernel only reads them.
 //
-// Int32s.Add wraps exactly like Go's int32 addition and Int32s.ShiftAllRight replicates the sign bit, so the
-// floor-division the reversible transform is specified in terms of carries over unchanged. Both facts are pinned by
-// internal/vecmath's tests.
+// Int32s.Add wraps exactly like Go's int32 addition and Int32s.ShiftAllRight replicates the sign bit, so the floor
+// division the reversible transform is specified in carries over unchanged. Both are pinned by internal/vecmath's
+// tests.
 func sub53RowSIMD(e, hl, hr []int32) {
 	var probe simd.Int32s
 	lanes := probe.Len()
@@ -143,21 +141,18 @@ func scaleRow97SIMD(r []float64, k float64) {
 
 // liftRow97SIMD is the vector form of a 9/7 vertical lifting sweep: dst[x] -= c*(a[x]+b[x]) for every x in dst.
 //
-// IT IS DELIBERATELY NOT WIRED INTO inverse97VerticalCas0, AND MUST NOT BE WITHOUT A DECISION ON THE POLICY BELOW.
-// There is no dispatch variable for it and no init line; it is kept, and pinned by the equivalence tests against the
-// unfused scalar form, so the measurement and the decision have something concrete to sit on.
+// It is deliberately not wired into inverse97VerticalCas0: there is no dispatch variable for it and no init line. It
+// is kept, pinned by the equivalence tests against the unfused scalar form, so a future decision has something
+// concrete to measure.
 //
-// The scalar loop it would replace is a subtract of a product, which Go's compiler is free to contract into a single
-// fused multiply-add. On arm64 it does: the four lifting sweeps in wavelet97.go compile to FMSUBD, one rounding for
-// the whole expression. This kernel is a separate Mul and Sub — two roundings — so on a target whose scalar code
-// fuses, roughly a quarter of the lanes come out one ulp away from the scalar result. That is a real difference in
-// decoded output, and internal/jpeg2000's decode vectors are held to OpenJPEG's bytes, so pdfview's policy for this
-// package is that a vector kernel must be bit-identical to the scalar code it replaces.
+// The scalar loop it would replace is a subtract of a product, which the compiler is free to contract into a fused
+// multiply-add. On arm64 it does: the four lifting sweeps in wavelet97.go compile to FMSUBD, one rounding for the
+// whole expression. This kernel is a separate Mul and Sub — two roundings — so on a target whose scalar code fuses,
+// roughly a quarter of the lanes come out one ulp from the scalar result. The decode vectors are held to OpenJPEG's
+// bytes, and the policy for this package is that a kernel must be bit-identical to the scalar code it replaces.
 //
-// The fix would be a fused Float64s.MulAdd, which reproduces FMSUBD exactly — but that is the very operation the
-// area's ground rules forbid, because on a target whose scalar code does NOT fuse (amd64 below GOAMD64=v3) MulAdd
-// would be the arm of the pair that diverges. Either way the correct form is target-dependent, so the kernel stays
-// out of the pipeline until that is settled.
+// A fused Float64s.MulAdd would reproduce FMSUBD exactly, but on a target whose scalar code does not fuse (amd64 below
+// GOAMD64=v3) MulAdd would be the arm that diverges. The correct form is target-dependent, so the kernel stays out.
 func liftRow97SIMD(dst, a, b []float64, c float64) {
 	var probe simd.Float64s
 	lanes := probe.Len()

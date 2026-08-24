@@ -18,9 +18,8 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// pageLabelsPDF builds a document of pages blank US Letter pages whose catalog carries the given /PageLabels /Nums
-// array. An empty nums omits /PageLabels entirely, which is the unlabeled document the fallback cases need. No xref is
-// supplied (startxref 0) so the engine rebuilds it, exactly as in letterLinkPDF.
+// pageLabelsPDF builds pages blank US Letter pages under a catalog carrying the given /PageLabels /Nums array; an empty
+// nums omits /PageLabels entirely. startxref 0 makes the engine rebuild the xref.
 func pageLabelsPDF(nums string, pages int) string {
 	var sb strings.Builder
 	labels := ""
@@ -43,9 +42,8 @@ func pageLabelsPDF(nums string, pages int) string {
 	return sb.String()
 }
 
-// frontMatterNums labels a six-page document the way a book does: pages 0-3 are front matter numbered in lowercase
-// roman (i, ii, iii, iv) and pages 4-5 restart the numbering in decimal (1, 2). It is the shape the whole page-label
-// API exists for, since it is exactly the case where a page's label is not its position.
+// frontMatterNums labels a six-page document the way a book does: pages 0-3 in lowercase roman (i-iv) and pages 4-5
+// restarting in decimal (1, 2), so a page's label is not its position.
 const frontMatterNums = "0 << /S /r >> 4 << /S /D >>"
 
 // openPageLabelsDoc opens a document built by pageLabelsPDF and arranges for its release.
@@ -75,7 +73,7 @@ func TestPageLabels(t *testing.T) {
 			t.Errorf("PageLabel(%d) = %q, want %q", pageNumber, got, label)
 		}
 	}
-	// A page number outside the document answers with the empty string rather than panicking or wrapping around.
+	// An out-of-range page number answers with the empty string.
 	for _, pageNumber := range []int{-1, 6, 1 << 30} {
 		if got := doc.PageLabel(pageNumber); got != "" {
 			t.Errorf("PageLabel(%d) = %q, want an empty string", pageNumber, got)
@@ -98,8 +96,7 @@ func TestPagesWithLabel(t *testing.T) {
 		{name: "whitespace padded", query: "  iv\t\n", want: []int{3}},
 		{name: "decimal range", query: "2", want: []int{5}},
 		{name: "miss", query: "xiv", want: nil},
-		// A page's ordinal is not its label here, so the physical numbering must not answer for the labels: page 3 is
-		// labeled "iv", and nothing in the document is labeled "4".
+		// Page 3 is labeled "iv" and nothing is labeled "4", so the ordinal must not answer for the label.
 		{name: "ordinal is not a label", query: "4", want: nil},
 		{name: "empty", query: "", want: nil},
 		{name: "whitespace only", query: " \t ", want: nil},
@@ -112,9 +109,8 @@ func TestPagesWithLabel(t *testing.T) {
 	}
 }
 
-// TestPagesWithLabelReportsEveryMatch pins that a repeated label reports all of its pages, ascending. Two ranges that
-// both number from 1 — the appendix-restarts-at-1 shape real documents have — put the same label on two pages, and a
-// caller resolving a label to a page needs to see both rather than whichever one the walk happened to reach first.
+// TestPagesWithLabelReportsEveryMatch pins that a repeated label reports all of its pages, ascending: two ranges that
+// both number from 1 (an appendix restarting at 1) put the same label on two pages.
 func TestPagesWithLabelReportsEveryMatch(t *testing.T) {
 	doc := openPageLabelsDoc(t, "0 << /S /D >> 3 << /S /D >>", 6)
 	want := []string{"1", "2", "3", "1", "2", "3"}
@@ -134,9 +130,8 @@ func TestPagesWithLabelReportsEveryMatch(t *testing.T) {
 	}
 }
 
-// TestPageLabelsFallBackToOrdinals pins the fallback for a document that defines no /PageLabels at all: every page is
-// labeled with its own decimal ordinal, those labels take part in the reverse lookup like any other, and HasPageLabels
-// is what tells the caller the labels came from the fallback rather than the document.
+// TestPageLabelsFallBackToOrdinals pins the fallback for a document with no /PageLabels: every page is labeled with its
+// decimal ordinal, those labels take part in the reverse lookup, and HasPageLabels reports false.
 func TestPageLabelsFallBackToOrdinals(t *testing.T) {
 	doc := openPageLabelsDoc(t, "", 3)
 	if doc.HasPageLabels() {
@@ -154,9 +149,8 @@ func TestPageLabelsFallBackToOrdinals(t *testing.T) {
 	}
 }
 
-// TestPageLabelsCopiesTheEngineCache pins that PageLabels hands out a fresh slice every call. The engine builds the
-// labels once and caches them for the life of the document, so returning that slice would let a caller who sorts or
-// rewrites its copy change what every later call — and every PagesWithLabel lookup — reports.
+// TestPageLabelsCopiesTheEngineCache pins that PageLabels returns a fresh slice each call: the engine caches the labels
+// for the life of the document, so a caller mutating the cached slice would change every later lookup.
 func TestPageLabelsCopiesTheEngineCache(t *testing.T) {
 	doc := openPageLabelsDoc(t, frontMatterNums, 6)
 	first := doc.PageLabels()

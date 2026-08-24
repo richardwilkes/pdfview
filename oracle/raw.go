@@ -9,10 +9,10 @@
 
 package main
 
-// This file extracts the raw, unscaled values that the public API of github.com/richardwilkes/pdf never exposes
-// (page-space floats for outline destinations, link rectangles, and search quads, plus the MuPDF version), by calling
-// MuPDF directly through the same vendored headers and static libraries the binding uses. The wrapper pattern (run
-// every throwing MuPDF call inside fz_try/fz_catch) is adapted from that binding's own preamble.
+// This file extracts the raw, unscaled values the public API of github.com/richardwilkes/pdf never exposes (page-space
+// floats for outline destinations, link rectangles, and search quads, plus the MuPDF version) by calling MuPDF directly
+// through the vendored headers and static libraries the binding uses. Every throwing MuPDF call runs inside
+// fz_try/fz_catch, as in the binding's own preamble.
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../pdf/include
@@ -209,7 +209,7 @@ import (
 	"unsafe"
 )
 
-// rawSearchMax caps the number of quads a single raw search can return, mirroring the binding's OverallMaxHits default.
+// rawSearchMax caps the quads one raw search can return, mirroring the binding's OverallMaxHits.
 const rawSearchMax = 1000
 
 // mupdfVersion returns the FZ_VERSION string of the linked MuPDF build.
@@ -285,8 +285,8 @@ func (r *rawDoc) outlineTree() []*TOCRawEntry {
 	return convertOutline(outline)
 }
 
-// maxOutlineDepth bounds convertOutline's recursion so a mis-formed (cyclic or pathologically deep) fz_outline tree
-// cannot overflow the stack. MuPDF is trusted to return acyclic, shallow trees, so this is only a defensive backstop.
+// maxOutlineDepth bounds convertOutline's recursion so a cyclic or pathologically deep fz_outline tree cannot overflow
+// the stack. MuPDF is trusted to return acyclic, shallow trees; this is only a backstop.
 const maxOutlineDepth = 128
 
 func convertOutline(outline *C.fz_outline) []*TOCRawEntry {
@@ -294,7 +294,7 @@ func convertOutline(outline *C.fz_outline) []*TOCRawEntry {
 }
 
 // convertOutlineGuarded walks the fz_outline sibling chain with a shared visited set (cutting next/down cycles) and a
-// depth cap (bounding recursion), so a cyclic or over-deep tree terminates instead of looping or exhausting memory.
+// depth cap, so a cyclic or over-deep tree terminates.
 func convertOutlineGuarded(outline *C.fz_outline, depth int, visited map[*C.fz_outline]bool) []*TOCRawEntry {
 	if depth > maxOutlineDepth {
 		return nil
@@ -411,8 +411,8 @@ func finiteOrNull(v float32) *float32 {
 	return &v
 }
 
-// finite32 maps non-finite values to 0 so they can be marshaled; rectangle and quad geometry from MuPDF is expected to
-// always be finite, this is only a safeguard.
+// finite32 maps non-finite values to 0 so they can be marshaled. MuPDF rectangle and quad geometry is expected to be
+// finite; this is only a safeguard.
 func finite32(v float32) float32 {
 	if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0

@@ -9,9 +9,8 @@
 
 // Package render is the raster device: the only package that imports github.com/richardwilkes/canvas (canvas/gpu is
 // never imported, keeping the build cgo- and purego-free). It draws the interpreter's device calls onto a premultiplied
-// N32 raster surface and hands the premultiplied pixels back through Pixels; the root package's unpremultiply loop
-// converts them to the straight alpha image.NRGBA the public API promises (reading back premultiplied is deliberate,
-// keeping the unpremultiply rounding under the root package's control for pixel parity).
+// N32 raster surface and hands the premultiplied pixels back through Pixels; the root package unpremultiplies them into
+// the straight-alpha image.NRGBA the public API promises, keeping that rounding under its control for pixel parity.
 //
 // The device covers path fills, strokes (with dashing), and clips; images (RGBA draws and Alpha8 stencil tinting under
 // the image CTM); text — glyph outlines cached in glyph space and filled/stroked/clipped under each glyph's Trm;
@@ -45,8 +44,8 @@ import (
 var ErrSurface = errors.New("unable to create raster surface")
 
 // MaxSurfacePixels is the largest pixel count (width × height) New will allocate a surface for: a 1 GiB buffer at the
-// 4 bytes per pixel a premultiplied N32 surface uses. The root package's OverallMaxPixels defaults to this same value
-// so an over-large request is rejected by the documented public sentinel rather than failing here.
+// 4 bytes per pixel a premultiplied N32 surface uses. The root package's OverallMaxPixels is this same value, so an
+// over-large request is rejected by the documented public sentinel rather than failing here.
 const MaxSurfacePixels = 1 << 30 / 4
 
 // Device rasterizes device calls onto a canvas surface. Create one per render with New; it is not safe for concurrent
@@ -59,8 +58,8 @@ type Device struct {
 	store *store.Store
 	// glyphPaths caches converted glyph-space outlines for this render (see glyphPath).
 	glyphPaths map[glyphKey]*path.Path
-	// glyphMasks caches rendered glyph coverage planes when the document store is not the backing for them (no store
-	// wired, or one with an unlimited budget — see maskStore); glyphMaskBytes below is the live plane bytes it holds.
+	// glyphMasks caches rendered glyph coverage planes when the document store is not their backing (no store wired,
+	// or one with an unlimited budget — see maskStore).
 	glyphMasks map[glyphMaskKey]*glyphMask
 	// funcGrids caches realized function-based shading grids for this render when no store is wired (shading.go).
 	funcGrids map[funcGridKey]*imagecore.Image
@@ -92,10 +91,8 @@ type Device struct {
 	untrackedState int
 	width          int
 	height         int
-	// stemDarkening dilates fill-mode text outlines by a sub-pixel stroke so thin stems keep full ink coverage at
-	// small sizes, matching platform rasterizers (CoreGraphics font smoothing, FreeType CFF darkening); see
-	// stemDarkenWidth in glyphmask.go. Off by default at this level so the device's raw output stays pinned to the
-	// MuPDF-parity goldens; the public engine layer opts in per document.
+	// stemDarkening dilates fill-mode text outlines by a sub-pixel stroke (see glyphmask.go). Off by default so the
+	// device's raw output stays pinned to the MuPDF-parity goldens; the public engine layer opts in per document.
 	stemDarkening bool
 }
 
@@ -103,17 +100,16 @@ type Device struct {
 // to document scope.
 func (d *Device) SetStore(st *store.Store) { d.store = st }
 
-// SetStemDarkening enables or disables stem darkening for the text this device renders from here on (see the Device
-// field). Cached glyph coverage planes carry the setting in their key, so toggling between renders on a reused device
-// or store can never serve a plane rasterized under the other setting.
+// SetStemDarkening enables or disables stem darkening for the text this device renders from here on. Cached glyph
+// coverage planes carry the setting in their key, so toggling between renders can never serve a plane rasterized under
+// the other setting.
 func (d *Device) SetStemDarkening(on bool) { d.stemDarkening = on }
 
 // Size reports the surface dimensions in pixels, for the caller's reuse check (see Reset).
 func (d *Device) Size() [2]int { return [2]int{d.width, d.height} }
 
 // sizeAllowed reports whether a width×height surface may be allocated. The pixel product is computed in int64 so it
-// cannot overflow, making the cap exactly MaxSurfacePixels for every aspect ratio; the root package's OverallMaxPixels
-// guard rejects the same requests first, with its documented sentinel.
+// cannot overflow.
 func sizeAllowed(width, height int) bool {
 	return width > 0 && height > 0 && int64(width)*int64(height) <= MaxSurfacePixels
 }
@@ -133,10 +129,10 @@ func New(width, height int) (*Device, error) {
 // Wrap returns a device that draws onto the caller's canvas instead of an owned raster surface (the public DrawPage
 // API). The device never touches the canvas's surface lifecycle — Pixels and Reset are unavailable — and FillText's
 // glyph-coverage blit fast path is disabled (it composites straight into an owned surface's pixmap), so text renders
-// through the pinned merged-outline path, which transforms correctly under any state the caller's canvas carries.
-// Soft-mask spans still render to their own offscreen surfaces, sized from the canvas's base device so mask coverage
-// spans the whole canvas and carrying the canvas's matrix so mask and masked content register (mask.go); the sh
-// operator's surface-wide coverage rectangle compensates for that matrix the same way (FillShading).
+// through the merged-outline path, which transforms correctly under any state the caller's canvas carries. Soft-mask
+// spans still render to their own offscreen surfaces, sized from the canvas's base device and carrying the canvas's
+// matrix so mask and masked content register (mask.go); FillShading's surface-wide coverage rectangle compensates for
+// that matrix the same way.
 func Wrap(c *canvas.Canvas) (*Device, error) {
 	if c == nil {
 		return nil, ErrSurface
@@ -153,12 +149,12 @@ func Wrap(c *canvas.Canvas) (*Device, error) {
 }
 
 // Pixels reads back the rendered image as premultiplied RGBA bytes (4 per pixel), row-major with the returned stride.
-// The alpha stays premultiplied by design; the caller unpremultiplies (see the package comment). The pixels are read
-// straight from the surface's pixmap — byte-identical to the premul→premul ReadPixels copy (the pixmap's word layout is
-// R | G<<8 | B<<16 | A<<24, i.e. RGBA8888 byte order) — deliberately NOT through MakeImageSnapshot: a snapshot would
-// share the backing store and force a copy-on-write allocation on the next draw, defeating Reset's surface reuse.
+// The alpha stays premultiplied; the caller unpremultiplies (see the package comment). The pixels are read straight
+// from the surface's pixmap (word layout R | G<<8 | B<<16 | A<<24, i.e. RGBA8888 byte order), NOT through
+// MakeImageSnapshot: a snapshot would share the backing store and force a copy-on-write allocation on the next draw,
+// defeating Reset's surface reuse.
 func (d *Device) Pixels() (pix []byte, stride int, err error) {
-	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) has no surface of its own to read.
+	if d.surf == nil { // A Wrap device has no surface of its own to read.
 		return nil, 0, ErrSurface
 	}
 	stride = d.width * 4
@@ -178,31 +174,26 @@ func (d *Device) Pixels() (pix []byte, stride int, err error) {
 }
 
 // Reset returns the device to its just-created state — canvas state unwound, pixels cleared to transparent, per-render
-// caches dropped — so one surface can serve a document's successive renders at the same size (fresh multi-megabyte
-// surfaces per render made the page-fault cost of faulting them in a top profile entry). Store-backed caches survive:
-// their keys hold the *font.Font and *shading.Shading pointers they reference, so entries can never collide with a
-// later font or shading instance. The per-render maps are dropped because without a store nothing keeps those keyed
-// pointers alive across renders.
+// caches dropped — so one surface can serve a document's successive renders at the same size (faulting in a fresh
+// multi-megabyte surface per render was a top profile entry). Store-backed caches survive: their keys hold the
+// *font.Font and *shading.Shading pointers they reference, so entries can never collide with a later instance.
 func (d *Device) Reset() {
-	if d.surf == nil { // A device wrapping a caller's canvas (Wrap) must never unwind or clear that canvas.
+	if d.surf == nil { // A Wrap device must never unwind or clear the caller's canvas.
 		return
 	}
-	// Put the surface's own canvas back first. A render that ended with a soft-mask span still open left d.c pointing
-	// at that span's offscreen canvas (BeginMask swaps it; EndMask swaps it back), and everything below would then
-	// unwind and clear the MASK surface while the reused device kept drawing into it — Pixels would hand back the
-	// previous page's untouched pixels. The interpreter's balanced Begin/End/Pop pairing and pdf.go's e.dev = nil on a
-	// recovered panic keep that unreachable today; EndMask's ended guard and PopMask's !ended guard already defend the
-	// same invariant from the other side, and this closes it here.
+	// Put the surface's own canvas back first: a render that ended with a soft-mask span still open left d.c pointing at
+	// that span's offscreen canvas, and everything below would otherwise unwind and clear the MASK surface while the
+	// reused device kept drawing into it. The interpreter's balanced Begin/End/Pop pairing and pdf.go's e.dev = nil on a
+	// recovered panic keep that unreachable today; this closes it from this side.
 	d.c = d.surf.Canvas()
 	d.c.RestoreToCount(1)
 	d.c.ResetMatrix()
 	d.c.Clear(colorcore.Transparent)
 	d.glyphPaths = nil
 	if d.store == nil {
-		// Without a store nothing keeps the *font.Font pointers these keys hold alive across renders. With one wired,
-		// the coverage planes are kept: this map is their backing under an unlimited budget (maskStore), and a
-		// re-render at the same size — the warm protocol the blit path exists for — hits every one of them. Its own
-		// byte cap bounds what carrying them over can hold.
+		// Without a store nothing keeps the *font.Font pointers these keys hold alive across renders. With one wired the
+		// planes are kept: this map is their backing under an unlimited budget (maskStore), and a re-render at the same
+		// size hits every one of them. Its own byte cap bounds what carrying them over can hold.
 		d.glyphMasks = nil
 		d.glyphMaskBytes = 0
 	}
@@ -224,21 +215,19 @@ func matrix(m gfx.Matrix) geom.Matrix {
 }
 
 // FromGeom extracts the affine part of a canvas geom.Matrix (Skia layout: scaleX, skewX, transX, skewY, scaleY,
-// transY, perspective row) into the engine's PDF-style row-vector matrix. It is the exact inverse of matrix above;
-// perspective entries have no PDF counterpart and are dropped (PDF content is affine).
+// transY, perspective row) into the engine's PDF-style row-vector matrix, the inverse of matrix. Perspective entries
+// have no PDF counterpart and are dropped.
 func FromGeom(m geom.Matrix) gfx.Matrix {
 	a9 := m.As9()
 	return gfx.Matrix{A: a9[0], B: a9[3], C: a9[1], D: a9[4], E: a9[2], F: a9[5]}
 }
 
 // buildPath converts a gfx.Path to a canvas path with the given fill rule. It is the single seam every gfx.Path crosses
-// into canvas through — fills, strokes, clips, glyph outlines and mesh triangles all funnel here — so it is also where
-// non-finite geometry stops: producers validate their own coordinates, but a value derived from validated ones (a
-// rectangle's X1-X0 extent, say) can still overflow, and ±Inf/NaN coordinates are not geometry a rasterizer can act on.
-// Such a path is dropped whole rather than partially built, which would fabricate segments the producer never described
-// (the same policy internal/shading's meshBuilder.emit applies to its own output). The guarantee covers the coordinates
-// as given: a caller that goes on to transform the result needs buildPathIn, which re-establishes it in the space the
-// path actually reaches canvas in.
+// into canvas through, so it is also where non-finite geometry stops: producers validate their own coordinates, but a
+// value derived from validated ones (a rectangle's X1-X0 extent, say) can still overflow, and ±Inf/NaN coordinates are
+// not geometry a rasterizer can act on. Such a path is dropped whole rather than partially built, which would fabricate
+// segments the producer never described (the policy internal/shading's meshBuilder.emit applies to its own output). The
+// guarantee covers the coordinates as given: a caller that goes on to transform the result needs buildPathIn.
 func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 	out := path.New()
 	if evenOdd {
@@ -282,10 +271,9 @@ func buildPath(p *gfx.Path, evenOdd bool) *path.Path {
 	return out
 }
 
-// allFiniteScalar reports whether every coordinate of every point is finite. buildPath drops a path with any
-// non-finite coordinate whole rather than partially building it (see there), so this one answer decides the whole
-// path. It is the default behind allFiniteFn, and the fallback the vector kernel takes for short point runs and for a
-// machine whose vectors are wider than that kernel's reduction buffer.
+// allFiniteScalar reports whether every coordinate of every point is finite. It is the default behind allFiniteFn and
+// the vector kernel's fallback for short point runs and for a machine whose vectors are wider than that kernel's
+// reduction buffer.
 func allFiniteScalar(pts []gfx.Point) bool {
 	for _, pt := range pts {
 		if !isFinite32(pt.X) || !isFinite32(pt.Y) {
@@ -295,13 +283,11 @@ func allFiniteScalar(pts []gfx.Point) bool {
 	return true
 }
 
-// buildPathIn converts a gfx.Path to a canvas path already mapped into the space ctm describes. buildPath establishes
-// its finiteness guarantee over the coordinates a producer wrote, and every caller then transforms the result, so the
-// guarantee lasts exactly one line: a path whose own coordinates are finite still lands on ±Inf under a
-// large-but-finite CTM. Re-establishing it against the transformed coordinates is what this does. ok is false when it
-// cannot be — the region the path describes is then larger than float32 can express, and what that means is the
-// caller's to decide. For a clip it means a region that selects everything, so the honest answer there is to skip the
-// clip rather than intersect with the empty one canvas builds from ±Inf corners.
+// buildPathIn converts a gfx.Path to a canvas path already mapped into the space ctm describes, re-establishing
+// buildPath's finiteness guarantee over the transformed coordinates: a path whose own coordinates are finite still
+// lands on ±Inf under a large-but-finite CTM. ok is false when it cannot — the region is then larger than float32 can
+// express, and what that means is the caller's to decide. For a clip it means a region that selects everything, so the
+// caller skips the clip rather than intersect with the empty one canvas builds from ±Inf corners.
 func buildPathIn(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) (cp *path.Path, ok bool) {
 	for _, pt := range p.Points {
 		if x, y := ctm.ApplyXY(pt.X, pt.Y); !isFinite32(x) || !isFinite32(y) {
@@ -315,9 +301,8 @@ func buildPathIn(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) (cp *path.Path, ok b
 }
 
 // rectFiniteUnder reports whether the axis-aligned box maps to finite coordinates under m. An affine map is monotone in
-// each coordinate, so its extremes over the box are reached at the corners: those four tests bound every point the box
-// contains. It serves the callers holding a box rather than a gfx.Path — the tiling cell clip, which rebuilds its box
-// into a reused scratch path, and a glyph outline, whose points live in canvas already.
+// each coordinate, so its extremes over the box are reached at the corners. It serves the callers holding a box rather
+// than a gfx.Path: the tiling cell clip and a glyph outline, whose points live in canvas already.
 func rectFiniteUnder(x0, y0, x1, y1 float32, m gfx.Matrix) bool {
 	for _, c := range [4][2]float32{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}} {
 		if x, y := m.ApplyXY(c[0], c[1]); !isFinite32(x) || !isFinite32(y) {
@@ -423,12 +408,9 @@ func dashIntervals(dash []float32) []float32 {
 func (d *Device) FillPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix, paint device.Paint) {
 	mesh := isMesh(paint)
 	if mesh || paint.Tiling != nil {
-		// These two branches hand canvas a path already in device space, which is one line past what buildPath
-		// guarantees — its finiteness covers the coordinates as given, and a path whose own coordinates are finite
-		// still lands on ±Inf under a large-but-finite CTM — so the transform goes through buildPathIn, which
-		// re-establishes the guarantee in the space the path actually reaches canvas in. A region float32 cannot
-		// express selects everything: the mesh's clip degrades to no clip, the way ClipPath and withShadingBBox
-		// already degrade, while a tiling fill has no such reading and is skipped.
+		// These branches hand canvas a path already in device space, so the transform goes through buildPathIn. A region
+		// float32 cannot express selects everything: the mesh's clip degrades to no clip, the way ClipPath and
+		// withShadingBBox degrade, while a tiling fill has no such reading and is skipped.
 		devicePath, ok := buildPathIn(p, evenOdd, ctm)
 		switch {
 		case mesh:
@@ -488,9 +470,8 @@ func (d *Device) ClipPath(p *gfx.Path, evenOdd bool, ctm gfx.Matrix) {
 	d.pushClipRect(p, ctm)
 	cp, ok := buildPathIn(p, evenOdd, ctm)
 	if !ok {
-		// The clip region does not fit float32 once transformed, which means it covers the whole surface: leave the
-		// level open (so PopClip stays balanced) but push no clip. Intersecting with the ±Inf-cornered path instead
-		// empties the clip, and everything drawn under it vanishes.
+		// The clip region does not fit float32 once transformed, so it covers the whole surface: leave the level open
+		// (so PopClip stays balanced) but push no clip.
 		return
 	}
 	d.c.ClipPath(cp, raster.ClipIntersect, true)
@@ -508,21 +489,20 @@ const pageBoxEpsilon = 0.001
 
 // ClipPageBox confines drawing to a page's box — the width×height rectangle at the origin of the space ctm maps from —
 // so a page that paints past its own box cannot reach the rest of the surface. A device rendering into its own surface
-// gets that bound for free, because the surface is exactly the page's size; a device wrapping a caller's canvas (Wrap)
-// does not, and no other clip covers it: the interpreter pushes /BBox clips for forms and patterns but nothing for the
-// page itself.
+// gets that bound for free, because the surface is exactly the page's size; a Wrap device does not, and no other clip
+// covers it: the interpreter pushes /BBox clips for forms and patterns but nothing for the page itself.
 //
 // Whenever the composed page-to-device map keeps the box on the pixel axes, the bound is snapped outward to whole
 // device pixels with the same epsilon-ceiling the surface extent uses, so the clipped region is exactly the pixels a
-// page-sized surface would have covered. That matters twice over: the edge composites identically instead of picking
-// up a partial-coverage fringe where the page's extent falls mid-pixel, and a whole-pixel rectangle stays in the
-// rasterizer's black-and-white clip representation, where an antialiased one would convert every later draw onto the
-// AA-clip blitter and shift interior pixels by a unit. A rotated or skewed map has no pixel-aligned answer; there the
-// exact transformed box is pushed as an ordinary antialiased clip path.
+// page-sized surface would have covered: the edge composites identically instead of picking up a partial-coverage
+// fringe where the page's extent falls mid-pixel, and a whole-pixel rectangle stays in the rasterizer's black-and-white
+// clip representation, where an antialiased one would convert every later draw onto the AA-clip blitter and shift
+// interior pixels by a unit. A skewed map has no pixel-aligned answer; there the exact transformed box is pushed as an
+// ordinary antialiased clip path.
 //
-// The clip is deliberately not recorded on the tracked clip stack: it is an outer bound established before the
-// interpreter runs, and the interpreter's balanced PopClip calls must never be able to reach it. The caller unwinds it
-// through the canvas save it took before calling.
+// The clip is not recorded on the tracked clip stack: it is an outer bound established before the interpreter runs,
+// and the interpreter's balanced PopClip calls must never reach it. The caller unwinds it through the canvas save it
+// took before calling.
 func (d *Device) ClipPageBox(width, height float32, ctm gfx.Matrix) {
 	total := d.c.TotalMatrix()
 	if box, ok := snapPageBox(width, height, ctm.Mul(FromGeom(total))); ok {
@@ -536,8 +516,7 @@ func (d *Device) ClipPageBox(width, height float32, ctm gfx.Matrix) {
 	page.Rect(0, 0, width, height)
 	cp, ok := buildPathIn(&page, false, ctm)
 	if !ok {
-		// The box does not fit float32 once transformed, which means it covers the whole surface; pushing the
-		// ±Inf-cornered path instead would empty the clip and everything drawn under it would vanish.
+		// The box does not fit float32 once transformed, so it covers the whole surface: push no clip.
 		return
 	}
 	d.untrackedState++
@@ -545,15 +524,14 @@ func (d *Device) ClipPageBox(width, height float32, ctm gfx.Matrix) {
 }
 
 // snapPageBox maps the width×height page box through toDevice and returns it as a device-pixel rectangle snapped
-// outward to whole pixels. It reports false when the map rotates or skews the box off the pixel axes — there is no
-// pixel-aligned answer then — or when the result is not a rectangle a rasterizer can act on.
+// outward to whole pixels. It reports false when the map takes the box off the pixel axes or the result is not finite.
 func snapPageBox(width, height float32, toDevice gfx.Matrix) (geom.Rect, bool) {
 	// Both forms map an axis-aligned rectangle to an axis-aligned rectangle: no rotation, or a quarter turn.
 	onAxes := (toDevice.B == 0 && toDevice.C == 0) || (toDevice.A == 0 && toDevice.D == 0)
 	if !onAxes || !toDevice.IsFinite() {
 		return geom.Rect{}, false
 	}
-	// Under either form these two corners span the mapped box; the other two only repeat their coordinates.
+	// Under either form these two corners span the mapped box.
 	x0, y0 := toDevice.ApplyXY(0, 0)
 	x1, y1 := toDevice.ApplyXY(width, height)
 	if x1 < x0 {
@@ -583,8 +561,8 @@ func (d *Device) PopClip() {
 }
 
 // clipRect is one level of the rectangular-clip interior tracking: the cumulative pixel-aligned region fully inside
-// every clip pushed so far, valid only while every open level was an axis-aligned rectangle. It lets the glyph blit
-// fast path (glyphmask.go) composite directly under the ubiquitous page/form rectangle clips; any non-rectangular clip
+// every clip pushed so far, valid only while every open level is an axis-aligned rectangle. It lets the glyph blit
+// fast path (glyphmask.go) composite directly under the ubiquitous page/form rectangle clips; a non-rectangular clip
 // level poisons the tracking (rect false) until it pops. x1/y1 are exclusive.
 type clipRect struct {
 	x0, y0, x1, y1 int
@@ -617,7 +595,7 @@ func (d *Device) clipInterior() clipRect {
 }
 
 // rectInterior reports the pixel-aligned interior of a path that is a single axis-aligned rectangle after
-// transformation (the re-operator expansion under a rectilinear matrix — the shape of virtually every W-n page and form
+// transformation (the re-operator expansion under a rectilinear matrix — the shape of virtually every page and form
 // /BBox clip). A pixel is inside only when the rectangle covers it fully, so antialiased clip edges never affect blits
 // that stay within the reported region.
 func rectInterior(p *gfx.Path, ctm gfx.Matrix) (x0, y0, x1, y1 int, ok bool) {
@@ -684,10 +662,7 @@ func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
 		d.glyphPaths = make(map[glyphKey]*path.Path)
 	}
 	if len(d.glyphPaths) >= maxCachedGlyphPaths {
-		// Dropping the map rather than refusing the entry, for the reason glyphMask spells out: refusing retires the
-		// cache for the rest of the render, so every later glyph re-converts its outline and throws it away with no
-		// prospect of a hit, while dropping keeps the cap on live entries and lets the page go on caching what it draws
-		// next. Retention is invisible to output — a hit returns the path a miss would have converted.
+		// Dropped rather than refused, for the reason glyphMask gives.
 		clear(d.glyphPaths)
 	}
 	d.glyphPaths[key] = p
@@ -699,9 +674,8 @@ func (d *Device) glyphPath(f *font.Font, gid uint32) *path.Path {
 const maxCachedGlyphPaths = 4096
 
 // textOutline merges a run's glyph outlines into one device-space path: each glyph's cached glyph-space outline is
-// appended under its Trm. Glyph fills use the non-zero winding rule (glyph contours are wound for it; PDF's even-odd
-// text mode does not exist). under, when non-nil, maps the accumulated result to another space (used by StrokeText to
-// build the path in user space instead).
+// appended under its Trm. Glyph fills use the non-zero winding rule (glyph contours are wound for it). under, when
+// non-nil, maps the result to another space (StrokeText builds the path in user space).
 func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path {
 	out := path.New()
 	for i := range run.Glyphs {
@@ -718,8 +692,7 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 			continue
 		}
 		// A finite Trm does not make the outline finite under it: an em-normalized glyph still overflows once Trm's
-		// scale or translation nears float32's maximum, and one such glyph would otherwise poison the whole merged
-		// path — which is also this run's stroke path and its contribution to the accumulated text clip.
+		// scale or translation nears float32's maximum, and one such glyph would poison the whole merged path.
 		if b := gp.Bounds(); !rectFiniteUnder(b.Left, b.Top, b.Right, b.Bottom, trm) {
 			continue
 		}
@@ -730,14 +703,12 @@ func (d *Device) textOutline(run *device.TextRun, under *gfx.Matrix) *path.Path 
 }
 
 // FillText implements device.Device: fill the run's merged outline (already in device space via the Trms) with the
-// non-zero winding rule, antialiased, matching the oracle's glyph rasterization. Plain solid fills — the overwhelmingly
-// common case — go through the glyph coverage cache instead (glyphmask.go), which blits each glyph's cached analytic-AA
-// coverage at its exact subpixel position. Stem darkening, when enabled, dilates both routes identically (see
-// stemDarkenWidth); mesh- and tiling-painted text keeps the exact fill, since those routes build their own coverage
-// from the undilated outline.
+// non-zero winding rule, antialiased, matching the oracle's glyph rasterization. Plain solid fills — the common case —
+// go through the glyph coverage cache instead (glyphmask.go). Stem darkening, when enabled, dilates both routes
+// identically; mesh- and tiling-painted text keeps the exact fill, since those routes build their own coverage from the
+// undilated outline.
 func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
-	// The coverage-blit fast path composites into the device's own surface at pixel-space positions; a device wrapping
-	// a caller's canvas (Wrap) has neither, so it always fills merged outlines.
+	// The coverage-blit fast path composites into the device's own surface, which a Wrap device lacks.
 	if d.surf != nil && d.blitTextRun(run, paint) {
 		return
 	}
@@ -757,9 +728,8 @@ func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
 	if !ok {
 		return
 	}
-	// The glyphs of a run share their Trm linear part (only the origin advances within one show-text operator), so one
-	// run-level dilation width reproduces exactly what the blit path applies per glyph — TestGlyphBlitMatchesDirectFill
-	// holds under darkening because of this.
+	// The glyphs of a run share their Trm linear part, so one run-level dilation width reproduces exactly what the blit
+	// path applies per glyph (TestStemDarkenedBlitMatchesDirectFill).
 	applyStemDarkening(cpaint, d.runStemDarkenWidth(run))
 	d.withShadingBBox(paint, func() {
 		d.c.DrawPath(p, cpaint)
@@ -768,7 +738,7 @@ func (d *Device) FillText(run *device.TextRun, paint device.Paint) {
 
 // StrokeText implements device.Device. Stroke parameters are user-space quantities: the pen applies under the run's CTM
 // alone, not under the text matrix or font size (ISO 32000-2 9.3.6), so the merged outline is built in user space
-// (Trm·CTM⁻¹) and stroked exactly like a user-space path. A degenerate CTM draws nothing (there is no meaningful pen).
+// (Trm·CTM⁻¹) and stroked like a user-space path. A degenerate CTM draws nothing.
 func (d *Device) StrokeText(run *device.TextRun, sp *gfx.StrokeParams, paint device.Paint) {
 	inv, ok := run.CTM.Invert()
 	if !ok {
@@ -813,8 +783,8 @@ func (d *Device) ClipText(run *device.TextRun) {
 }
 
 // EndTextClip implements device.Device: push the text clip accumulated by ClipText since the last EndTextClip as one
-// clip level. A text object whose clip accumulation produced no outlines clips everything away, per the text-clip
-// semantics (the region is the union of the shown glyphs).
+// clip level. A text object that produced no outlines clips everything away (the region is the union of the shown
+// glyphs).
 func (d *Device) EndTextClip() {
 	d.clipStack = append(d.clipStack, d.c.Save())
 	d.pushOpaqueClip()
@@ -830,9 +800,9 @@ func (d *Device) EndTextClip() {
 func (d *Device) IgnoreText(*device.TextRun) {}
 
 // rasterImage wraps a decoded image's pixels as a canvas image: straight-alpha RGBA for images carrying alpha (the
-// sampling pipeline premultiplies — both canvas lanes honor AlphaTypeUnpremul as of canvas v0.2.1, whose sprite
-// blitter fix this depends on), opaque RGBA for the rest, Alpha8 for stencils (which the pipeline tints with the paint
-// color — exactly PDF's image-mask semantics). Returns nil for empty or inconsistent pixel data.
+// sampling pipeline premultiplies; TestMaskedOutSamplesDoNotTintTheBackground pins the sprite lane), opaque RGBA for
+// the rest, Alpha8 for stencils (which the pipeline tints with the paint color — PDF's image-mask semantics). Returns
+// nil for empty or inconsistent pixel data.
 func rasterImage(img *imaging.Image) *imagecore.Image {
 	if img == nil || img.Width <= 0 || img.Height <= 0 {
 		return nil
@@ -856,10 +826,9 @@ func rasterImage(img *imaging.Image) *imagecore.Image {
 }
 
 // drawImage draws ci across the unit square of the ctm's source space: PDF image space puts the first sample row at the
-// top of that square (ISO 32000-2 8.9.5.2), so the image's pixel grid is flipped into the square before the ctm
-// applies. /Interpolate selects linear sampling; without it the sample boundaries still blend across the narrow
-// magnification band blendsSamples describes, and stay unfiltered (nearest) everywhere else, the mapping calibrated
-// against the oracle's renders.
+// top of that square (ISO 32000-2 8.9.4), so the image's pixel grid is flipped into the square before the ctm applies.
+// /Interpolate selects linear sampling; without it the sample boundaries still blend across the magnification band
+// blendsSamples describes and stay nearest-sampled everywhere else.
 func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matrix, paint *canvas.Paint) {
 	w, h := float32(img.Width), float32(img.Height)
 	ctm = gridfit(ctm)
@@ -878,11 +847,11 @@ func (d *Device) drawImage(ci *imagecore.Image, img *imaging.Image, ctm gfx.Matr
 }
 
 // blendsSamples reports whether an image of w x h samples drawn through the already-grid-fitted ctm has its sample
-// boundaries blended rather than reproduced hard. The oracle turns interpolation on once the image's unit square covers
-// more device pixels than it has samples on either axis, then turns it back off past twice that on either axis, so only
-// the band between 1x and 2x magnification blends (measured against the oracle at 1.83x and 1.92x, which blend, and
-// 2.00x and 2.04x, which do not). Minification never blends here: the oracle resamples the pixel grid down before
-// painting instead, a filter this engine does not reproduce.
+// boundaries blended rather than reproduced hard. MuPDF (fz_paint_image_imp) turns interpolation on once the image's
+// unit square covers more device pixels than it has samples on either axis, and back off once either axis exceeds
+// twice its sample count, so only the band from 1x through 2x magnification blends (both comparisons strict; measured
+// at 1.83x and 1.92x, which blend, and 2.04x, which does not). Minification never blends here: the oracle resamples
+// the pixel grid down before painting instead, a filter this engine does not reproduce.
 //
 // The per-axis extents are the device lengths of the unit square's edges, so a rotated or skewed transform measures the
 // magnification it actually applies. They are computed in float64 because squaring a large but finite float32 component
@@ -900,8 +869,7 @@ func blendsSamples(ctm gfx.Matrix, w, h float32) bool {
 // gridfit snaps a rectilinear image transform outward to whole device pixels — the unit square's device extent becomes
 // floor(min)…ceil(max) per axis — reproducing the oracle's hard, pixel-aligned image edges (pinned against the image
 // goldens at fractional scales: a 425.0 edge computed as 424.99997 in float32 snaps to 424, a 154.166 max edge to 155).
-// Skew and rotation pass through untouched: only axis-aligned transforms (in either axis order) can snap without
-// shearing, matching the oracle's behavior of antialiasing rotated images' edges.
+// Skew and rotation pass through untouched, matching the oracle's antialiased edges on rotated images.
 func gridfit(m gfx.Matrix) gfx.Matrix {
 	switch {
 	case m.B == 0 && m.C == 0 && m.A != 0 && m.D != 0:
@@ -918,12 +886,10 @@ func gridfit(m gfx.Matrix) gfx.Matrix {
 // snapSpan snaps one axis of a rectilinear transform: the interval [off, off+extent] (in either direction) expands to
 // floor(min)…ceil(max), keeping the extent's sign.
 //
-// The interval arithmetic runs in float64 for the reason axialSpan and radialExtension do: both inputs are finite
-// float32s, but their float32 sum overflows to ±Inf for large components (a `2e38 0 0 2e38 2e38 2e38 cm` image CTM),
-// which would make the snapped extent Inf or NaN. In float64 no sum or difference of finite float32s overflows, but the
-// snapped span itself can still exceed float32's range on the way back (an interval spanning ±3e38 has an extent of
-// 6e38), so a result that is not finite falls back to the unsnapped input: the caller has already validated the CTM as
-// finite, and grid-fitting a span that large changes nothing visible anyway.
+// The arithmetic runs in float64 for the reason axialSpan does: both inputs are finite float32s, but their float32 sum
+// overflows to ±Inf for large components (a `2e38 0 0 2e38 2e38 2e38 cm` image CTM). The snapped span can still exceed
+// float32's range on the way back (an interval spanning ±3e38 has an extent of 6e38), so a non-finite result falls back
+// to the unsnapped input; grid-fitting a span that large changes nothing visible.
 func snapSpan(extent, off float32) (newExtent, newOff float32) {
 	lo, hi := float64(off), float64(off)+float64(extent)
 	if lo > hi {
@@ -963,9 +929,8 @@ func (d *Device) FillImage(img *imaging.Image, ctm gfx.Matrix, p device.Paint) {
 }
 
 // FillImageMask implements device.Device: the stencil's Alpha8 pixels are tinted by the fill paint's color (with its
-// folded alpha), PDF's image-mask stencil semantics. A pattern paint tints through its shader instead (an alpha-only
-// image samples the paint's shader, exactly PDF's pattern-stenciling semantics); mesh-shading patterns composite
-// through the stencil's coverage in a layer.
+// folded alpha), PDF's image-mask semantics. A pattern paint tints through its shader instead (an alpha-only image
+// samples the paint's shader); mesh-shading patterns composite through the stencil's coverage in a layer.
 func (d *Device) FillImageMask(img *imaging.Image, ctm gfx.Matrix, paint device.Paint) {
 	ci := rasterImage(img)
 	if ci == nil {
@@ -1020,10 +985,10 @@ func (d *Device) FillShading(sh *shading.Shading, ctm gfx.Matrix, paint device.P
 	full.LineTo(float32(d.width), float32(d.height))
 	full.LineTo(0, float32(d.height))
 	full.Close()
-	// The rectangle is the device surface in pixels, but the draw runs under the canvas's own matrix, which a Wrapped
-	// device's caller may have set to anything; pull it back into that local space so the painted area still covers
-	// exactly the surface. Only the covered area moves — the shader is anchored by its own local matrix (preparePaint
-	// was handed a nil ctm, so it maps pattern space into the space the draw runs in).
+	// The rectangle is the device surface in pixels, but the draw runs under the canvas's own matrix, which a Wrap
+	// device's caller may have set; pull it back into that local space so the painted area still covers exactly the
+	// surface. Only the covered area moves — the shader is anchored by its own local matrix (preparePaint was handed a
+	// nil ctm, so it maps pattern space into the space the draw runs in).
 	if m := d.c.TotalMatrix(); !m.IsIdentity() {
 		inv, invertible := m.Invert()
 		if !invertible {

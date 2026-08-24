@@ -15,15 +15,15 @@ import (
 	"testing"
 )
 
-// The two vendored codecs are the engine's most expensive decoders, and neither has a corpus payload large enough to
-// measure: every JBIG2 and JPX image in testfiles/corpus decodes to under 14 thousand pixels, sized for golden pixel
-// comparison rather than for cost. The fixtures under testdata/bench are page-scale instead — a 300 dpi US Letter
-// bilevel scan and a megapixel continuous-tone image — so the numbers here are the per-page decode cost a real
-// document pays. Provenance, encoder versions, and the exact commands are in testdata/bench/README.md.
+// The two vendored codecs are the engine's most expensive decoders, and no corpus payload is large enough to measure:
+// every JBIG2 and JPX image in testfiles/corpus decodes to under 14 thousand pixels. The fixtures under testdata/bench
+// are page-scale instead — a 300 dpi US Letter bilevel scan and a megapixel continuous-tone image — so the numbers
+// here are the per-page decode cost a real document pays. Provenance and the exact commands are in
+// testdata/bench/README.md.
 //
-// Every benchmark decodes through the same entry point production reaches (decodeJBIG2Plane, jpxRasterFor), which is
-// also what the fuzz targets drive, so the payload caps, the segment/SIZ guards, and the panic recovery are all inside
-// the measurement. Each iteration is a full cold decode: nothing is cached between them.
+// Every benchmark decodes through the entry point production reaches (decodeJBIG2Plane, jpxRasterFor), which the fuzz
+// targets also drive, so the payload caps, the segment/SIZ guards, and the panic recovery are inside the measurement.
+// Each iteration is a full cold decode.
 
 // benchJBIG2Height is the dictionary /Height the JBIG2 plane is produced at. It matches the fixture's own page height,
 // so the measurement is the decode rather than the crop-and-white-fill path a mismatched height would exercise.
@@ -47,16 +47,11 @@ func benchFixture(b *testing.B, name string) []byte {
 }
 
 // BenchmarkJBIG2Decode measures a cold decode of a 2550x3300 bilevel page whose symbol dictionary is shared across
-// thousands of text-region placements — the shape a scanned page takes, where nearly all the cost is the text region
-// rather than the dictionary.
-//
-// The reported MB/s is megapixels per second: b.SetBytes is given the decoded pixel count, not a byte count, since the
-// payload byte count says nothing comparable across codecs at these compression ratios.
-//
-// The decode also has to fit maxPixelsFor(len(payload)), the budget decodeJBIG2Plane derives from the payload's own
-// size. That is the tight constraint for this codec rather than a formality: symbol reuse compresses a text page far
-// past what the cap's CCITT-derived rationale assumes, so the fixture spends a real fraction of its allowance and the
-// check below is what would catch a future payload that no longer fits.
+// thousands of text-region placements, the shape a scanned page takes. The reported MB/s is megapixels per second:
+// b.SetBytes is given the decoded pixel count, since payload bytes say nothing comparable across codecs at these
+// compression ratios. The decode also has to fit maxPixelsFor(len(payload)): symbol reuse compresses a text page far
+// past what the cap's CCITT-derived rationale assumes, so the fixture spends a real fraction of its allowance, and the
+// check below would catch a future payload that no longer fits.
 func BenchmarkJBIG2Decode(b *testing.B) {
 	payload := benchFixture(b, "scanned-text.jbig2")
 	plane, cols, err := decodeJBIG2Plane(payload, nil, benchJBIG2Height)
@@ -96,10 +91,8 @@ func BenchmarkJBIG2Decode(b *testing.B) {
 // BenchmarkJPXDecode measures cold decodes of a megapixel RGB payload under both wavelets: "53" is the reversible 5/3
 // lossless path (the integer transform plus the reversible color transform) and "97" the irreversible 9/7 lossy one
 // (the floating-point transform, dequantization, and the irreversible color transform). The lossy payload is also 2.5x
-// smaller, so the two figures separate transform cost from coefficient-decoding cost.
-//
-// As above, the reported MB/s is megapixels per second: b.SetBytes is given the decoded pixel count. Component samples
-// are three per pixel here, so the sample rate is triple the reported figure.
+// smaller, so the two figures separate transform cost from coefficient-decoding cost. As above, MB/s is megapixels per
+// second; samples are three per pixel here.
 func BenchmarkJPXDecode(b *testing.B) {
 	for _, tc := range []struct{ name, file string }{
 		{name: "53", file: "rgb-53.jp2"},
@@ -107,8 +100,7 @@ func BenchmarkJPXDecode(b *testing.B) {
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			payload := benchFixture(b, tc.file)
-			// false is the /Indexed verdict every ordinary color image reaches jpxRasterFor with; under true a JP2
-			// container's palette machinery would be skipped, which is not what a three-component payload measures.
+			// false is the /Indexed verdict an ordinary color image reaches jpxRasterFor with.
 			raster, err := jpxRasterFor(payload, false)
 			if err != nil {
 				b.Fatal(err)

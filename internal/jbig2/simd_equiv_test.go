@@ -20,15 +20,14 @@ import (
 	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
-// The kernels have to be bit-identical to the scalar code, not merely close, because a JBIG2 page is a bitmap: one
-// wrong bit is a visible speck, and the corpus pins in pdfview_test.go compare whole pages byte for byte.
+// The kernels have to be bit-identical to the scalar code, because a JBIG2 page is a bitmap: one wrong bit is a
+// visible speck, and the corpus pins in pdfview_test.go compare whole pages byte for byte.
 //
-// Rather than reimplement the scalar path as a reference — where a shared misreading would agree with itself — every
-// test here runs the same entry point twice on identical input, once with the dispatch variables holding their
-// scalar defaults and once with them holding the kernels, and requires the same bytes out. Each comparison is run at
-// three gate settings: open, so the kernels take every run they can legally take, including lengths the shipping
-// gates would never hand them; the shipping values; and closed, which proves the fallback each kernel takes below
-// its own gate.
+// Rather than reimplement the scalar path as a reference, where a shared misreading would agree with itself, the
+// whole-placement tests run the same entry point twice on identical input, once with the dispatch variables on their
+// scalar defaults and once on the kernels, and require the same bytes out. Each comparison runs at three gate
+// settings: open, so the kernels take every run they legally can, including lengths the shipping gates never hand
+// them; shipped; and closed, which proves the fallback below each gate.
 //
 // These tests call the kernels whether or not init installed them, so a machine with emulated lanes still proves
 // them — that is where a lane-order or spill-mask mistake shows up.
@@ -212,9 +211,9 @@ func TestRealignBytesMatchesScalarShift(t *testing.T) {
 			}
 			checkRealign(t, shift, a, b, out)
 		}
-		// A three-clause loop, not "for range 32". This function names a vector type, so the compiler clones it per
-		// vector width, and go1.27's cloner dereferences a nil left-hand side when it deep-copies a range clause
-		// that declares no variable — an internal compiler error, not a diagnostic.
+		// A three-clause loop, not "for range 32": this function names a vector type, so the compiler clones it per
+		// vector width, and go1.27's cloner crashes (an internal compiler error) on a range clause that declares no
+		// variable.
 		for trial := 0; trial < 32; trial++ {
 			rng.fill(a)
 			rng.fill(b)

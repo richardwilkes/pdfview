@@ -8,15 +8,14 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package testrand holds the splitmix64 generator the SIMD equivalence tests and benchmarks share. The tests need
-// reproducible bytes and coefficients, not randomness: math/rand is off the table in this repository (gosec G404),
-// and the standard library's generators are not guaranteed to stay byte-stable across releases. The package carries
-// no build tag and never imports the simd package, so the same generator compiles into the default build and the
-// GOEXPERIMENT=simd build alike. internal/jbig2 keeps its own private copy on purpose: it is vendored third-party
-// code that imports nothing else from this repository (see its PROVENANCE.md).
+// reproducible bytes and coefficients: gosec G404 bars math/rand in this repository, and the standard library's
+// generators are not guaranteed to stay byte-stable across releases. The package carries no build tag and never
+// imports the simd package, so the same generator compiles into the default and GOEXPERIMENT=simd builds alike.
+// internal/jbig2 keeps its own copy on purpose: it is vendored third-party code that imports nothing else from this
+// repository (see its PROVENANCE.md).
 package testrand
 
-// Rand is a splitmix64 generator: four lines of arithmetic whose state is the value itself, so Rand(seed) is ready
-// to use.
+// Rand is a splitmix64 generator whose state is the value itself, so Rand(seed) is ready to use.
 type Rand uint64
 
 // Next returns the next value in the sequence.

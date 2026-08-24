@@ -272,11 +272,10 @@ func TestLiftRow97SIMDMatchesUnfusedScalar(t *testing.T) {
 	}
 }
 
-// TestLiftRow97ScalarFusionReport records, for whatever target the suite is running on, whether the compiler
-// contracts `dst -= c*(a+b)` into a single fused multiply-add. That single fact decides whether liftRow97SIMD could
-// be wired into inverse97VerticalCas0 as written (no fusion: the kernel's separate Mul and Sub match) or would need
-// a fused Float64s.MulAdd instead (fusion: they do not). It asserts nothing — both answers are legitimate — but it
-// leaves the answer in the test log where the next person to look at the 9/7 path will find it.
+// TestLiftRow97ScalarFusionReport logs, for the target the suite runs on, whether the compiler contracts
+// `dst -= c*(a+b)` into a fused multiply-add. That decides whether liftRow97SIMD could be wired into
+// inverse97VerticalCas0 as written (no fusion: its separate Mul and Sub match) or would need a fused Float64s.MulAdd
+// (fusion: they do not). It asserts nothing; both answers are legitimate.
 func TestLiftRow97ScalarFusionReport(t *testing.T) {
 	rnd := testrand.Rand(0x5EED1009)
 	a := rnd.Float64s(4096)

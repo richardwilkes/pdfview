@@ -11,16 +11,15 @@
 
 package render
 
-// Which of this package's vector kernels are worth dispatching to on amd64. A kernel whose benchmark does not beat
-// the scalar code it replaces on a given architecture is turned off here rather than deleted, since the same kernel
-// can be the right choice on another one. The values are settled from simd-bench.sh benchstat runs.
+// Which of this package's vector kernels are worth dispatching to on amd64. A kernel whose benchmark does not beat the
+// scalar code on an architecture is turned off here rather than deleted, since it can be the right choice on another.
+// The values come from simd-bench.sh benchstat runs.
 //
-// Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X). The finiteness scan wins
-// 3.2-3.7x. The glyph blit passes on the grid's geomean (1.15x): 40x50 glyphs win 1.4-1.7x and ramp-heavy coverage
-// wins at every size, but pure zero/full spans on 12x16 glyphs regress 18-26% — body-text rows mix zero, ramp, and
-// full inside one span, which lands nearer the ramp column, so it stays on; flip it if profiles of small-text pages
-// disagree. The luminosity plane ran with its constant already false in that dataset, so its on-state has no amd64
-// measurement; it stays off.
+// Measured on an Intel Xeon W-2191B (Skylake-X). The finiteness scan wins 3.2-3.7x. The glyph blit passes on the grid's
+// geomean (1.15x): 40x50 glyphs win 1.4-1.7x and ramp-heavy coverage wins at every size, but pure zero/full spans on
+// 12x16 glyphs regress 18-26% — body-text rows mix zero, ramp, and full inside one span, which lands nearer the ramp
+// column, so it stays on; flip it if profiles of small-text pages disagree. The luminosity plane's on-state has no
+// amd64 measurement, so it stays off.
 const (
 	preferCompositeMask = true
 	preferMaskLuma      = false

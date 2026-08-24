@@ -22,11 +22,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestTextQuadParity is the pre-scale half of the search-parity bar: it runs each corpus page's content through the
-// interpreter against the production structured-text device (internal/stext) at scale 1, searches for every needle the
-// goldens record, and requires the hit quads to match MuPDF's recorded raw page-space quads POSITIONALLY — same count,
-// same emission order — with every corner within quadTolerance points. The post-scale half lives in TestParity, which
-// compares the public API's scaled integer hit rectangles against the goldens at every recorded DPI.
+// TestTextQuadParity is the pre-scale half of the search-parity bar: it runs each corpus page through the interpreter
+// against the structured-text device at scale 1, searches for every recorded needle, and requires the hit quads to
+// match MuPDF's raw page-space quads positionally (same count, same order) with every corner within quadTolerance
+// points. TestParity is the post-scale half, comparing the public API's scaled hit rectangles at every recorded DPI.
 func TestTextQuadParity(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -43,8 +42,8 @@ func TestTextQuadParity(t *testing.T) {
 	}
 }
 
-// quadTolerance is the pre-scale corner tolerance: 0.01 page-space points. (The measured worst across the corpus is
-// glaive at 0.0022 pt, so the production gate holds this tight bound comfortably.)
+// quadTolerance is the pre-scale corner tolerance in page-space points; the measured worst across the corpus is glaive
+// at 0.0022 pt.
 const quadTolerance = 0.01
 
 // diffGoldenQuads compares one golden's recorded search quads against the structured-text device's search results,
@@ -127,8 +126,8 @@ func extractText(t *testing.T, document *doc.Document, pageNumber int) *stext.De
 	if data := document.PageContents(pageNumber); len(data) > 0 {
 		content.Run(document.COS(), document.PageResources(pageNumber), data, ctm, dev, nil)
 	}
-	// Annotation appearance text is part of MuPDF's structured text; the engine's search seam runs the appearances
-	// after the page content, and so does this capture.
+	// Appearance text is part of MuPDF's structured text, so this capture runs the appearances after the page content
+	// as the engine's search seam does.
 	annots := content.NewAnnotRun(nil)
 	for _, a := range document.Annotations(pageNumber) {
 		annots.Annot(document.COS(), document.PageResources(pageNumber), a.Raw, a.Stream, a.Transform.Mul(ctm), dev)

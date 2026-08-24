@@ -21,11 +21,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// A minimal CFF (Compact Font Format) container reader, written against Adobe TN5176. go-text's cff package provides
-// charstring interpretation and glyph loading but does not expose the Top DICT's FontBBox or FontMatrix, which the
-// engine needs because FreeType — and therefore the oracle's MuPDF build — takes a bare CFF font's ascender/descender
-// from its FontBBox (see internal/font's package comment). The INDEX and DICT walkers here are also the base for the
-// CID-keyed charset/FDSelect reader Type0 support uses.
+// A minimal CFF (Compact Font Format) container reader, written against Adobe TN5176. go-text's cff package interprets
+// charstrings and loads glyphs but does not expose the Top DICT's FontBBox or FontMatrix, which the engine needs
+// because FreeType, and so the oracle's MuPDF build, takes a bare CFF font's ascender/descender from its FontBBox (see
+// the package comment). The INDEX and DICT walkers are also the base for the CID-keyed charset/FDSelect reader Type0
+// support uses.
 
 var errBadCFF = errors.New("malformed CFF data")
 
@@ -94,12 +94,11 @@ func parseCFFTopDict(data []byte) (*cffTop, error) {
 	return top, nil
 }
 
-// cffNarrow narrows the leading DICT operands into out, reporting failure unless every one survives as a finite float32
-// (an all-or-nothing list, like type1's numbers, so a partial /FontMatrix never mixes narrowed and default entries).
-// parseCFFFloat only rejects a non-finite float64: a packed-BCD real such as 1e300 is a perfectly finite float64 that
-// becomes ±Inf in the narrowing, and while cffTop.metrics guards its own use of the bbox and matrix[3], the same matrix
-// is copied into cffInfo.matrix, where Font.GlyphPath builds a gfx.Matrix from it and every emitted outline point comes
-// back non-finite. Rejecting here closes both paths at their shared source, as type1.toFloat32 does for these two keys.
+// cffNarrow narrows the leading DICT operands into out, all or nothing (like type1's numbers), so a partial /FontMatrix
+// never mixes narrowed and default entries. parseCFFFloat rejects only a non-finite float64: a packed-BCD real such as
+// 1e300 is finite there but ±Inf as float32, and while cffTop.metrics guards its own use of the bbox and matrix[3],
+// the same matrix reaches cffInfo.matrix, where Font.GlyphPath builds a gfx.Matrix from it and every outline point
+// comes back non-finite. Rejecting here closes both paths at their source, as type1.toFloat32 does for these keys.
 func cffNarrow(operands []float64, out []float32) bool {
 	for i := range out {
 		f := float32(operands[i])
@@ -119,9 +118,8 @@ func clampDictOffset(v float64) int {
 	return int(v)
 }
 
-// cffCID is the CID→GID view of a CID-keyed CFF program, read from its charset per Adobe TN5176 section 13 (go-text's
-// cff package parses CID programs for glyph loading but does not expose the charset). For CID fonts the charset maps
-// each GID to its CID; the engine needs the inverse.
+// cffCID is the CID→GID view of a CID-keyed CFF program, the inverse of the GID→CID map its charset stores (Adobe
+// TN5176 section 13), which go-text's cff package does not expose.
 type cffCID struct {
 	cidToGID map[uint32]uint32
 	nGlyphs  int
@@ -232,9 +230,9 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 		yMin, yMax = yMax, yMin
 	}
 	asc, desc = yMax/upem, yMin/upem
-	// The quotient gets the same treatment as the upem above: both operands are finite (cffNarrow and type1's scanner
-	// reject anything else), but a /FontMatrix implying a tiny upem still divides a large yMax past float32's range,
-	// and a non-finite ascender/descender reaching stext would place every character quad at the page origin.
+	// Both operands are finite (cffNarrow and type1's scanner reject anything else), but a /FontMatrix implying a tiny
+	// upem still divides a large yMax past float32's range, and a non-finite ascender/descender reaching stext would
+	// place every character quad at the page origin.
 	if !isFiniteF(asc) || !isFiniteF(desc) {
 		return 0, 0, false
 	}
@@ -243,9 +241,8 @@ func (t *cffTop) metrics() (asc, desc float32, ok bool) {
 
 // cffIndex reads an INDEX at pos, returning up to maxEntries entry slices and the offset just past the INDEX. An INDEX
 // is: count (Card16), offSize (Card8, 1-4), count+1 offsets (1-based), then the data. pos arrives from clampDictOffset
-// (up to MaxInt32) and an offSize-4 entry offset spans the full uint32 range; every sum of them below stays well inside
-// the 64-bit int this engine requires, so no bound here can be slipped past by a wrap. This package's contract is that
-// a hostile program never panics.
+// (up to MaxInt32) and an offSize-4 entry offset spans the full uint32 range; every sum of them below stays inside the
+// 64-bit int this engine requires, so no bound here can be slipped past by a wrap.
 func cffIndex(data []byte, pos, maxEntries int) (entries [][]byte, next int, err error) {
 	if pos < 0 || pos+2 > len(data) {
 		return nil, 0, errBadCFF
@@ -422,15 +419,15 @@ func parseCFFTopFromStream(d *cos.Document, s *cos.Stream) *cffTop {
 }
 
 // cffInfo is a bare CFF (Type1C) program prepared for glyph work: go-text's parsed font for the charstrings and the
-// charset, the name→GID map swept from that charset, the subroutine arrays the repo's own budgeted Type 2 interpreter
-// needs (cff_charstring.go), and the FontMatrix that carries charstring space to em space.
+// charset, the name→GID map swept from that charset, the subroutine arrays the budgeted Type 2 interpreter needs
+// (cff_charstring.go), and the FontMatrix that carries charstring space to em space.
 type cffInfo struct {
 	font *cff.CFF
 	// names maps charset glyph names to GIDs (go-text exposes name-per-GID; the sweep inverts it once).
 	names map[string]uint32
 	// subrs holds the global and local subroutine arrays a charstring may call, read from the same bytes go-text
-	// parsed. It is nil when the container walk could not recover them, which leaves subroutine calls failing (and so
-	// the glyph blank) rather than running unbudgeted.
+	// parsed; nil when the container walk could not recover them, which leaves subroutine calls failing (and so the
+	// glyph blank) rather than running unbudgeted.
 	subrs *cffSubrs
 	// matrix is the Top DICT FontMatrix (charstring units → em space at size 1).
 	matrix [6]float32
@@ -457,8 +454,8 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 	}()
 	f, err := cff.Parse(raw)
 	if err != nil || f == nil {
-		// A rejected program may only be carrying a deprecated Private DICT operator, which costs a copy of the whole
-		// program to rewrite — hence the retry rather than sanitizing every font up front.
+		// A rejected program may only be carrying a deprecated Private DICT operator, and the rewrite costs a copy of the
+		// whole program, hence the retry rather than sanitizing every font up front.
 		sanitized := sanitizeCFFPrivateDicts(raw, top)
 		if sanitized == nil {
 			return nil
@@ -466,8 +463,8 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 		if f, err = cff.Parse(sanitized); err != nil || f == nil {
 			return nil
 		}
-		// The rewrite is byte-for-byte in place, so every offset still holds; the walks below read the sanitized copy
-		// anyway, so they and go-text can never disagree about what the container says.
+		// The rewrite is byte-for-byte in place, so every offset still holds; the walks below read the sanitized copy so
+		// they and go-text never disagree about what the container says.
 		raw = sanitized
 	}
 	dict := top
@@ -496,10 +493,9 @@ func parseCFFGlyphBytes(raw []byte, top *cffTop) (info *cffInfo) {
 
 // Deprecated Private DICT operators, dropped between CFF specification 1.0 and 1.1 but still emitted by Adobe
 // Distiller-era producers. go-text's Private DICT parser accepts only the 1.1 operator set and fails the entire font on
-// anything else, where FreeType — and so MuPDF — skips what it does not recognize; a program carrying one of these is
-// otherwise perfectly good, and rejecting it costs every glyph in the font to substitution. Both take a single operand,
-// as does initialRandomSeed, which go-text accepts and ignores, so overwriting the escaped operator's second byte
-// removes the obstruction without moving a byte or changing any value the renderer consumes.
+// anything else, where FreeType, and so MuPDF, skips what it does not recognize. Both take a single operand, as does
+// initialRandomSeed, which go-text accepts and ignores, so overwriting the escaped operator's second byte removes the
+// obstruction without moving a byte or changing any value the renderer consumes.
 const (
 	cffOpForceBoldThreshold = 15 // Escaped operator 12 15.
 	cffOpLenIV              = 16 // Escaped operator 12 16.
@@ -507,11 +503,10 @@ const (
 )
 
 // sanitizeCFFPrivateDicts returns a copy of a CFF program with the deprecated operators above rewritten in every
-// Private DICT it declares, or nil when there was nothing to rewrite (in which case the caller has no reason to parse
-// again). raw is never written to: it aliases cached stream data the rest of the engine still reads.
-//
-// top may be nil, and is re-read here when it is; the copy is taken before the walk rather than after a detection pass
-// because this runs only once a parse has already failed.
+// Private DICT it declares, or nil when there was nothing to rewrite (so the caller has no reason to parse again). raw
+// is never written to: it aliases cached stream data the rest of the engine still reads. top may be nil, in which case
+// it is re-read here. The copy is taken before the walk rather than after a detection pass because this runs only
+// once a parse has already failed.
 func sanitizeCFFPrivateDicts(raw []byte, top *cffTop) []byte {
 	if top == nil {
 		parsed, err := parseCFFTopDict(raw)
@@ -522,8 +517,8 @@ func sanitizeCFFPrivateDicts(raw []byte, top *cffTop) []byte {
 	}
 	out := bytes.Clone(raw)
 	changed := rewriteCFFPrivateDict(out, top.privOff, top.privSize)
-	// A CID-keyed program keeps a Private DICT per FDArray entry (TN5176 section 18), and one built by the same tooling
-	// carries the same deprecated operators there; go-text parses all of them, so any single one still fails the font.
+	// A CID-keyed program keeps a Private DICT per FDArray entry (TN5176 section 18), built by the same tooling and
+	// carrying the same deprecated operators; go-text parses all of them, so any single one still fails the font.
 	if top.fdArrayOff > 0 {
 		if fontDicts, _, err := cffIndex(out, top.fdArrayOff, maxCFFFontDicts); err == nil {
 			for _, dict := range fontDicts {

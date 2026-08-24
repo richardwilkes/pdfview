@@ -9,7 +9,7 @@
 
 // This file is pdfview-authored (MPL-2.0), not upstream code. It adds the two container-level entry points the PDF
 // image pipeline needs and that upstream never exposed: raw per-component planes from a JP2 (upstream's container path
-// only reaches image.Image, which has already consumed the palette and colour boxes) and a header-only report of the
+// only reaches image.Image, which has already consumed the palette and color boxes) and a header-only report of the
 // container metadata alongside the codestream's own component geometry.
 
 package jp2
@@ -40,8 +40,8 @@ type (
 )
 
 // maxComponents is the SIZ component-count ceiling of ISO/IEC 15444-1 Table A.9. Csiz is a 16-bit field, so a hostile
-// header can declare far more components than the standard allows; the per-component triples must also be present in
-// the segment, which is what actually bounds the allocation below.
+// header can declare far more than the standard allows; the per-component triples must also fit in the segment, which
+// is what bounds the allocation below.
 const maxComponents = 16384
 
 // maxPrecision is the component precision ceiling of ISO/IEC 15444-1 Table A.11. It matches the codestream decoder's
@@ -68,26 +68,26 @@ type ComponentInfo struct {
 // interpret the decoded components. It is what a caller reads to decide whether, and how, to decode the pixels; nothing
 // here costs an allocation proportional to the image.
 //
-// The colour-interpretation fields are reported, never applied — see [DecodeComponents].
+// The color-interpretation fields are reported, never applied — see [DecodeComponents].
 type Info struct {
 	// Width and Height are the image's size on the reference grid, from SIZ: Xsiz-XOsiz by Ysiz-YOsiz. They are the
 	// full-resolution dimensions, so a decode reducing resolution levels produces a smaller result.
 	Width, Height int
-	// EnumCS is the `colr` box enumerated colour space (16 = sRGB, 17 = greyscale, 18 = sYCC), or -1 when the box gives
+	// EnumCS is the `colr` box enumerated color space (16 = sRGB, 17 = grayscale, 18 = sYCC), or -1 when the box gives
 	// an ICC profile instead of an enumerated value.
 	EnumCS int
 	// Components describes each codestream component, from SIZ, in codestream order. Never empty.
 	Components []ComponentInfo
-	// ICCProfile is the raw profile of a `colr` box with METH==2, or nil when the colour space is enumerated instead.
+	// ICCProfile is the raw profile of a `colr` box with METH==2, or nil when the color space is enumerated instead.
 	ICCProfile []byte
 	// Palette is the `pclr` box lookup table, or nil when the image is not indexed. An indexed image's codestream
-	// carries palette indices, not colour.
+	// carries palette indices, not color.
 	Palette *Palette
 	// CMap holds the `cmap` box entries, one per output channel, or nil when the box is absent. Each entry names the
 	// component an output channel reads and whether it passes through a palette column.
 	CMap []CMapEntry
-	// Channels holds the `cdef` box entries, or nil when the box is absent. They give each channel its role (colour,
-	// opacity, premultiplied opacity) and the colour it belongs to.
+	// Channels holds the `cdef` box entries, or nil when the box is absent. They give each channel its role (color,
+	// opacity, premultiplied opacity) and the color it belongs to.
 	Channels []ChannelDef
 	// CIELab carries the explicit range and offset parameters of an enumerated CIELab `colr` box (EnumCS 14). It is nil
 	// when the box is absent or is not CIELab, in which case the CIELab defaults apply.
@@ -98,15 +98,15 @@ type Info struct {
 // reduced) resolution, the container analog of [j2k.DecodeComponents]. Samples are in the signed domain described by
 // [j2k.Component].
 //
-// It deliberately applies none of the container's colour machinery — no palette expansion, no `cdef` channel
-// reordering, no enumerated colour-space conversion, no CIELab, no ICC profile. The planes come back exactly as the
-// codestream carries them, because that is what the PDF image pipeline consumes: under an /Indexed override each sample
-// is a palette index rather than a colour, and a PDF /ColorSpace entry can displace the container's own space entirely.
-// Read the metadata separately with [DecodeInfo] and apply whichever parts survive the PDF layer's rules. Use [Decode]
-// or [DecodeWithOptions] instead to get the container's own rendering as an image.Image.
+// It applies none of the container's color machinery — no palette expansion, no `cdef` channel reordering, no
+// enumerated color-space conversion, no CIELab, no ICC profile. The planes come back as the codestream carries them,
+// which is what the PDF image pipeline consumes: under an /Indexed override each sample is a palette index rather than
+// a color, and a PDF /ColorSpace entry can displace the container's own space entirely. Read the metadata with
+// [DecodeInfo] and apply whichever parts survive the PDF layer's rules; [Decode] and [DecodeWithOptions] give the
+// container's own rendering as an image.Image.
 //
-// The codestream's own multiple-component transform is not container machinery and still applies: a reversible or
-// irreversible MCT is part of reconstructing the samples the encoder wrote, so the planes are post-transform.
+// The codestream's own multiple-component transform is not container machinery and still applies, so the planes are
+// post-transform.
 //
 // Like the rest of this package it sizes its buffers from the declared dimensions with no cap of its own, so a caller
 // holding untrusted input should weigh [DecodeInfo] against its own budget first.
@@ -129,14 +129,13 @@ func DecodeComponents(r io.Reader, opts j2k.Options) ([]j2k.Component, error) {
 // decoded and no coefficient buffer is allocated, so this is the cheap way to learn what a payload declares before
 // committing to [DecodeComponents].
 //
-// It reads SIZ directly rather than running the codestream decoder's own header pass, which allocates tile bookkeeping
-// proportional to the declared tile grid before any pixel is asked for. What this does still allocate is bounded by the
-// input: the container parse buffers the `jp2c` box body, and the per-component slice needs its triples to be present.
+// It reads SIZ directly rather than running the codestream decoder's header pass, which allocates tile bookkeeping
+// proportional to the declared tile grid. What it does allocate is bounded by the input: the container parse buffers
+// the `jp2c` box body, and the per-component slice needs its triples to be present.
 //
-// The header is validated only far enough that every field returned is usable — a component with zero subsampling or
+// The header is validated only far enough that every field returned is usable: a component with zero subsampling or
 // an out-of-range precision is rejected, since a caller would divide by the one and size buffers from the other.
-// Decode cost is not bounded here: a caller gating untrusted input must weigh the dimensions, component count, and its
-// own budget before decoding.
+// Decode cost is not bounded here.
 func DecodeInfo(r io.Reader) (*Info, error) {
 	container, err := box.ParseJP2(r)
 	if err != nil {
@@ -156,8 +155,8 @@ func DecodeInfo(r io.Reader) (*Info, error) {
 }
 
 // parseSIZ reads the image geometry and per-component declarations out of a codestream's SIZ marker segment. ISO/IEC
-// 15444-1 A.4.1 places SIZ immediately after SOC; only the reserved delimiter markers 0xFF30 through 0xFF3F, which
-// carry no segment of their own, may sit between the two, and the codestream decoder skips those in the same place.
+// 15444-1 A.5.1 places SIZ immediately after SOC; the reserved markers 0xFF30 through 0xFF3F carry no segment and are
+// skipped between the two, as the codestream decoder skips them.
 func parseSIZ(cs []byte) (*Info, error) {
 	if len(cs) < 2 || cs[0] != 0xff || cs[1] != 0x4f {
 		return nil, errors.New("jp2: codestream does not start with SOC")

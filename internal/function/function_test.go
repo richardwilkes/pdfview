@@ -95,7 +95,7 @@ func TestStitching(t *testing.T) {
 	fn := parseObj1(t, d)
 	near(t, evalOne(t, fn, 0), 0)
 	near(t, evalOne(t, fn, 0.25), 0.5) // first half encodes [0,0.5) onto [0,1]
-	near(t, evalOne(t, fn, 0.5), 1)    // second subfunction starts at its bound: 1-0=1 at encoded 0... C0=1
+	near(t, evalOne(t, fn, 0.5), 1)    // x at the bound selects the second subfunction at its encoded 0, where C0 = 1
 	near(t, evalOne(t, fn, 0.75), 0.5)
 	near(t, evalOne(t, fn, 1), 0)
 }
@@ -151,8 +151,8 @@ func TestStitchingRangeMustMatchSubfunctions(t *testing.T) {
 // TestStitchingGraphMemoized pins the per-reference memo. A chain of stitching functions whose /Functions arrays each
 // reference the next object twice fans out multiplicatively: object k would be parsed 2^(k-1) times, so 16 levels force
 // >2^16 parse calls from a tiny file. maxNesting caps depth alone (the leaf sits at depth 16, within the limit), so the
-// memo is what must collapse the branching^depth blowup — to one parse per distinct object, which the node budget then
-// bounds. The graph is legal, so it must parse rather than being rejected as too complex.
+// memo must collapse the blowup to one parse per distinct object, which the node budget then bounds. The graph is
+// legal, so it must parse rather than be rejected as too complex.
 func TestStitchingGraphMemoized(t *testing.T) {
 	const levels = 16
 	var sb strings.Builder
@@ -191,9 +191,8 @@ func TestFunctionNodeBudget(t *testing.T) {
 }
 
 // TestSampledStreamDecodedOnce pins that a graph naming the same type 0 function repeatedly inflates its stream once.
-// Counting nodes alone did not bound that work: cos.Document caches parsed objects but not decoded stream data, so a
-// stitching function repeating one reference re-inflated the stream per entry — up to maxProgramOps times, from a
-// single cs or sh operator charged for one resource parse.
+// cos.Document caches parsed objects but not decoded stream data, so without the memo a stitching function repeating
+// one reference re-inflates the stream per entry, up to maxProgramOps times from a single cs or sh operator.
 func TestSampledStreamDecodedOnce(t *testing.T) {
 	const repeats = 64
 	const samples = 1 << 12
@@ -237,9 +236,9 @@ func TestSampledStreamDecodedOnce(t *testing.T) {
 	}
 }
 
-// TestSampledStreamChargedForDecodedBytes pins the other half of that bound: a node budget counting only nodes let each
-// distinct stream-backed node inflate internal/filter's whole max(64 MB, 256x input) allowance for one unit, so the
-// budget is charged for the bytes a decode produces and a graph whose streams inflate past the allowance is rejected.
+// TestSampledStreamChargedForDecodedBytes pins the other half of that bound: a budget counting only nodes would let
+// each distinct stream-backed node inflate internal/filter's whole max(64 MB, 256x input) allowance for one unit, so
+// the budget is charged per decoded byte and a graph whose streams inflate past the allowance is rejected.
 func TestSampledStreamChargedForDecodedBytes(t *testing.T) {
 	payload := flateOf(t, make([]byte, 1<<20))
 	d := docWithStream(t, fmt.Sprintf("/FunctionType 0 /Domain [0 1] /Range [0 1] /Size [%d] /BitsPerSample 8 "+
@@ -272,8 +271,8 @@ func flateOf(t *testing.T, data []byte) string {
 	return buf.String()
 }
 
-// TestStitchingLinearChainParses guards against the budget over-rejecting: a straight (non-branching) chain of stitching
-// functions right up to the nesting limit is a handful of nodes and must still parse.
+// TestStitchingLinearChainParses guards against the budget over-rejecting: a straight chain of stitching functions
+// right up to the nesting limit is a handful of nodes and must still parse.
 func TestStitchingLinearChainParses(t *testing.T) {
 	const levels = maxNesting
 	var sb strings.Builder
@@ -317,12 +316,9 @@ func TestSampledMultiOut4Bit(t *testing.T) {
 	near(t, evalOne(t, fn, 0.5), 0.5, 0.5)
 }
 
-// TestSampledSizeBoundedBeforeConversion verifies parseSampled applies its per-dimension /Size bound in float space,
-// before the value reaches int(v). narrowAll establishes only that a /Size entry is a FINITE float32: "1" followed by
-// 30 zeros is finite there and far outside int64's range, where Go leaves the conversion implementation-defined and the
-// platforms disagree (amd64 wraps to math.MinInt64, arm64 saturates to math.MaxInt64) — the two ends happening to fail
-// an int-space range test on both is an accident, not a guarantee. The rejection must be the same everywhere, and the
-// in-range spellings on either side of the bound must still behave as before.
+// TestSampledSizeBoundedBeforeConversion pins parseSampled's float-space /Size bound: "1" followed by 30 zeros is a
+// finite float32 but past int64, where amd64 wraps to math.MinInt64 and arm64 saturates to math.MaxInt64, so the
+// rejection must be the same everywhere. The in-range spellings on either side of the bound must still parse as before.
 func TestSampledSizeBoundedBeforeConversion(t *testing.T) {
 	for _, size := range []string{
 		"1" + strings.Repeat("0", 30),             // finite as a float32, past int64
@@ -347,9 +343,9 @@ func TestSampledSizeBoundedBeforeConversion(t *testing.T) {
 }
 
 // TestSampledBitsPerSampleValidatedBeforeNarrowing pins the /BitsPerSample check to the int64 cos.AsInt returns: only
-// the widths the standard lists are accepted, and a declared width far outside int range is rejected before anything
-// narrows or sizes from it. Each value below is illegal but has legal low 32 bits, so it would look plausible to a
-// check that inspected only part of it.
+// the widths the standard lists are accepted, and a width far outside int range is rejected before anything narrows
+// it. Each value below is illegal but has legal low 32 bits, so it would look plausible to a check that inspected only
+// part of it.
 func TestSampledBitsPerSampleValidatedBeforeNarrowing(t *testing.T) {
 	for _, bps := range []int64{
 		1<<32 + 1, 1<<32 + 8, 1<<32 + 32, // legal low words
@@ -430,9 +426,8 @@ func TestCalculatorBitshift(t *testing.T) {
 	near(t, evalOne(t, fn, 0), 0)
 }
 
-// TestCalculatorIntConversionClamps pins the float→int conversions the calculator's integer operators depend on. Go
-// leaves an out-of-range float→int conversion implementation-defined and the architectures disagree (arm64 saturates,
-// amd64 wraps to the sentinel), so the bounds must be applied in float space to keep results identical everywhere.
+// TestCalculatorIntConversionClamps pins psToInt32 and psToStackCount, whose float-space bounds keep out-of-range
+// operands identical across architectures (see psToInt32).
 func TestCalculatorIntConversionClamps(t *testing.T) {
 	for _, tc := range []struct {
 		in   float64
@@ -538,7 +533,7 @@ func TestCalculatorEqTypeAware(t *testing.T) {
 func TestCalculatorDivZeroClamps(t *testing.T) {
 	d := docWithStream(t, "/FunctionType 4 /Domain [0 1] /Range [0 1]", "{ 0 div }")
 	fn := parseObj1(t, d)
-	got := evalOne(t, fn, 0.5) // 0.5/0 = +Inf, clamped to range top... clamp maps NaN/over to bounds
+	got := evalOne(t, fn, 0.5) // +Inf clamps to a range bound
 	if got[0] != 1 && got[0] != 0 {
 		t.Fatalf("division by zero produced %v", got)
 	}
@@ -570,11 +565,11 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
-// TestOverRangeNumbersRejected covers numberPairs/numbers, which tested NaN/Inf on the float64 and then narrowed to the
-// float32 the arrays are stored in: "1" followed by 39 zeros is a legal PDF integer and a finite float64, but ±Inf once
-// narrowed. That reached /Domain, /Range, /C0, /C1, /Encode, /Decode, /Bounds, and /Size — an infinite domain makes
-// interpolate yield NaN and a type 2 function has no required /Range to clamp its output. (A /Size entry goes on to a
-// float→int conversion, which parseSampled bounds in float space itself; see TestSampledSizeBoundedBeforeConversion.)
+// TestOverRangeNumbersRejected pins narrowAll's post-narrowing finiteness check: "1" followed by 39 zeros is a legal
+// PDF integer and a finite float64 but ±Inf as a float32, and these arrays reach /Domain, /Range, /C0, /C1, /Encode,
+// /Decode, /Bounds, and /Size. An infinite domain makes interpolate yield NaN, and a type 2 function has no required
+// /Range to clamp its output. (/Size is also bounded in float space by parseSampled; see
+// TestSampledSizeBoundedBeforeConversion.)
 func TestOverRangeNumbersRejected(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39)
 	for _, tc := range []struct {
@@ -600,9 +595,8 @@ func TestOverRangeNumbersRejected(t *testing.T) {
 		}
 	})
 	// The optional arrays (/Range, /C0, /C1) are lenient: an unusable one falls back to the default rather than failing
-	// the parse. What must not happen is storing ±Inf, which for a type 2 function — whose /Range is optional, so
-	// nothing clamps the output — would put ±Inf/NaN in Eval's result, contradicting Func.Eval's contract that
-	// malformed data yields clamped or zero values.
+	// the parse. What must not happen is storing ±Inf, which for a type 2 function, whose optional /Range leaves nothing
+	// to clamp the output, would put ±Inf/NaN in Eval's result.
 	for _, tc := range []struct {
 		name string
 		body string

@@ -70,10 +70,9 @@ func (p *Path) Rect(x, y, w, h float32) {
 }
 
 // RectCorners appends the axis-aligned rectangle spanning the two corners as a complete closed subpath, in the same
-// order Rect emits. It exists because the corner form is the safe one: a caller holding a validated /BBox that computes
-// Rect(X0, Y0, X1-X0, Y1-Y0) reintroduces the overflow the validation removed — the extents are a float32 subtraction
-// that reaches ±Inf whenever the box spans more than float32's range, and Rect then adds the origin back to produce
-// non-finite corners for a box whose own corners were finite.
+// order Rect emits. A caller holding a validated /BBox must use it: Rect(X0, Y0, X1-X0, Y1-Y0) computes extents as a
+// float32 subtraction that reaches ±Inf when the box spans more than float32's range, so Rect produces non-finite
+// corners for a box whose own corners are finite.
 func (p *Path) RectCorners(x0, y0, x1, y1 float32) {
 	p.MoveTo(x0, y0)
 	p.LineTo(x1, y0)

@@ -146,9 +146,8 @@ func loadCFFInfo(t *testing.T, raw []byte) *cffInfo {
 	return info
 }
 
-// assertMatchesGoText checks that the budgeted interpreter reproduces exactly what go-text's own loader produces. The
-// budget exists to stop hostile programs, and the outlines of every valid one must be untouched by it; the handler
-// drives the same psi.CharstringReader operators for precisely this reason.
+// assertMatchesGoText checks that the budgeted interpreter reproduces exactly what go-text's own loader produces: the
+// budget exists to stop hostile programs and must leave every valid outline untouched.
 func assertMatchesGoText(t *testing.T, info *cffInfo, gid uint32) {
 	t.Helper()
 	want, _, err := info.font.LoadGlyph(tables.GlyphID(gid))
@@ -174,8 +173,7 @@ func TestCFFCharstringMatchesGoText(t *testing.T) {
 }
 
 // TestCFFLocalSubrOutline drives the outline through a local subroutine, which only resolves when the Private DICT and
-// its Subrs INDEX were recovered from the container. A font whose local subroutines went missing would draw nothing —
-// real Type1C programs put most of their outline work in exactly these.
+// its Subrs INDEX were recovered from the container. Real Type1C programs put most of their outline work there.
 func TestCFFLocalSubrOutline(t *testing.T) {
 	raw := cffLayout(nil, nil,
 		[][]byte{{csEndchar}, {csInt(-107), csCallSub, csEndchar}},
@@ -199,10 +197,9 @@ func TestCFFGlobalSubrOutline(t *testing.T) {
 	assertMatchesGoText(t, info, 1)
 }
 
-// TestCFFDotsectionIsNoOp covers the deprecated dotsection operator (escaped 12 0), a Type 1 hint that Type1C
-// conversions of Adobe-era fonts keep right before the dot of letters like 'i' and 'j' (Banestorm.pdf's NewAster-Italic
-// does exactly this). go-text's loader rejects it, dropping the whole glyph; FreeType — and so MuPDF — runs it as a
-// no-op, so the outline must match the same charstring with the operator removed.
+// TestCFFDotsectionIsNoOp covers the deprecated dotsection operator (escaped 12 0), a Type 1 hint Type1C conversions of
+// Adobe-era fonts keep before the dot of 'i' and 'j' (Banestorm.pdf's NewAster-Italic does). go-text rejects it and
+// drops the glyph; FreeType, and so MuPDF, runs it as a no-op, so the outline must match the operator-free charstring.
 func TestCFFDotsectionIsNoOp(t *testing.T) {
 	stem := boxOutline(50)
 	dot := []byte{csInt(0), csInt(60), csRmoveto, csInt(10), csInt(0), csRlineto, csInt(0), csInt(10), csRlineto, csEndchar}
@@ -222,9 +219,8 @@ func TestCFFDotsectionIsNoOp(t *testing.T) {
 }
 
 // TestCFFArithmeticOutlines drives the arithmetic, storage, and conditional operators (TN5177 sections 4.4-4.5, all
-// rejected by go-text's handler) through charstrings that must reproduce boxCharstring(100)'s outline exactly: every
-// computed operand lands on the stack for the geometry operator that consumes it, so any drift in operand order,
-// stack discipline, or arithmetic shows up as a wrong coordinate.
+// rejected by go-text's handler) through charstrings that must reproduce boxCharstring(100)'s outline exactly, so any
+// drift in operand order, stack discipline, or arithmetic shows up as a wrong coordinate.
 func TestCFFArithmeticOutlines(t *testing.T) {
 	want, ok := loadCFFInfo(t, cffLayout(nil, nil, [][]byte{{csEndchar}, boxCharstring(100)}, nil, nil)).glyphSegments(1)
 	if !ok || len(want) == 0 {
@@ -298,7 +294,7 @@ func TestCFFArithmeticHostile(t *testing.T) {
 
 // TestCFFRandomOperator pins the two properties random (12 23) must hold: values in (0,1] as TN5177 demands, and
 // bit-identical results on every run, because a page must raster the same everywhere and the renderer caches glyph
-// paths — an environmental generator would make renders unreproducible.
+// paths.
 func TestCFFRandomOperator(t *testing.T) {
 	cs := []byte{12, 23, 12, 23, csRmoveto, csInt(10), csInt(0), csRlineto, csEndchar}
 	raw := cffLayout(nil, nil, [][]byte{{csEndchar}, cs}, nil, nil)
@@ -333,10 +329,10 @@ func translatedSegments(segs []opentype.Segment, dx, dy float32) []opentype.Segm
 }
 
 // TestCFFSeacEndcharComposes covers the deprecated four-operand endchar (TN5177 Appendix C): adx ady bchar achar name
-// two StandardEncoding glyphs — codes 65 "A" and 194 "acute" here, resolved through the charset to GIDs — drawn as
-// base plus accent displaced by (adx, ady). go-text ignores the operands and returns an EMPTY outline for these
-// glyphs, so accented Latin glyphs in Type1C conversions silently vanish without this. Both argument counts are
-// exercised, since the five-operand form leads with the width endchar always may carry.
+// two StandardEncoding glyphs (codes 65 "A" and 194 "acute" here, resolved through the charset to GIDs), drawn as base
+// plus accent displaced by (adx, ady). go-text returns an empty outline for these glyphs, so accented Latin glyphs in
+// Type1C conversions vanish without this. Both argument counts are exercised: the five-operand form leads with the
+// width endchar may carry.
 func TestCFFSeacEndcharComposes(t *testing.T) {
 	seac := []byte{csInt(10), csInt(20), csInt(65), 247, 86, csEndchar} // 247,86 encodes 194.
 	raw := cffLayoutCharset(nil, nil,
@@ -374,13 +370,11 @@ func TestCFFSeacNestingRejected(t *testing.T) {
 	}
 }
 
-// TestCFFSubroutineBombIsBudgeted is the whole point of owning the interpreter. psi.Machine caps subroutine NESTING at
-// 10 but nothing caps BRANCHING, so nine global subroutines that each call the next eight times cost 8^8 ≈ 16.7M
-// operator dispatches for one glyph — measured at ~2.5 s through go-text's unbudgeted loader, and exactly exponential
-// in the branch factor, so a slightly wider program never returns at all. The whole bomb is 100-odd bytes and
-// compresses to nothing, so a page can name it once per glyph shown.
-//
-// The budget must stop it promptly and the glyph must degrade to no outline, never to a hung render.
+// TestCFFSubroutineBombIsBudgeted is the whole point of owning the interpreter. psi.Machine caps subroutine nesting at
+// 10 but nothing caps branching, so nine global subroutines that each call the next eight times cost 8^8 ≈ 16.7M
+// operator dispatches for one glyph: seconds through go-text's unbudgeted loader, and exponential in the branch
+// factor, so a slightly wider program never returns. The whole bomb is 100-odd bytes and compresses to nothing, so a
+// page can name it once per glyph shown. The budget must stop it promptly and the glyph must draw nothing.
 func TestCFFSubroutineBombIsBudgeted(t *testing.T) {
 	const (
 		levels = 9
@@ -406,14 +400,14 @@ func TestCFFSubroutineBombIsBudgeted(t *testing.T) {
 	if ok || segs != nil {
 		t.Error("the exponential charstring was interpreted to completion instead of tripping the work budget")
 	}
-	// Unbudgeted this call takes seconds; budgeted it stops after maxCFFHandlerOps dispatches, which is milliseconds.
+	// Budgeted, this stops after maxCFFHandlerOps units: milliseconds, not seconds.
 	if elapsed > time.Second {
 		t.Errorf("budgeted interpretation took %v, so the branch amplification is still running", elapsed)
 	}
 }
 
 // TestCFFSegmentFloodIsBudgeted covers the other amplification a charstring can reach: rlineto emits one segment per
-// operand pair and the argument stack holds 513 of them, so a modest program repeated through subroutine calls can
+// operand pair and the argument stack holds 513 operands, so a modest program repeated through subroutine calls can
 // pile up outline segments far past anything a real glyph draws.
 func TestCFFSegmentFloodIsBudgeted(t *testing.T) {
 	// A subroutine that draws 40 line segments and returns, called 200 times by the charstring: 8000 segments, still
@@ -500,13 +494,13 @@ func cidCFFLayout(charstrings [][]byte, fdLocalSubrs [][][]byte, fdSelect, privD
 }
 
 // TestCFFCIDLocalSubrsFollowFDSelect pins the CID-keyed half of the subroutine walk. Each glyph's local subroutines
-// come from the Private DICT of the font DICT its FDSelect entry names, so a walk that read the wrong one — or none —
+// come from the Private DICT of the font DICT its FDSelect entry names, so a walk that read the wrong one, or none,
 // would leave the glyph blank or draw another FD's shape.
 func TestCFFCIDLocalSubrsFollowFDSelect(t *testing.T) {
 	subrA := boxSubr(40)
 	subrB := boxSubr(120)
 	callSubr := []byte{csInt(-107), csCallSub, csEndchar}
-	// Format 0 FDSelect: one byte per glyph. Glyph 0 (.notdef) and glyph 1 use FD 0; glyph 2 uses FD 1.
+	// In both FDSelect formats, glyphs 0 and 1 use FD 0 and glyph 2 uses FD 1.
 	for _, fdSelect := range [][]byte{
 		{0, 0, 0, 1},                      // format 0
 		{3, 0, 2, 0, 0, 0, 0, 2, 1, 0, 3}, // format 3: [0,2) → FD 0, [2,3) → FD 1, sentinel 3
@@ -586,9 +580,8 @@ func simpleOpenTypeFont(t *testing.T, program []byte) *Font {
 	return f
 }
 
-// TestOpenTypeCFFOutlineMatchesFace pins the swap on the sfnt arm: a CFF-flavored OpenType program's outlines now come
-// from the budgeted interpreter instead of go-text's Face, and the two must agree glyph for glyph — the budget is
-// there to stop hostile programs, not to change any valid one.
+// TestOpenTypeCFFOutlineMatchesFace pins the sfnt arm: a CFF-flavored OpenType program's outlines come from the
+// budgeted interpreter rather than go-text's Face, and the two must agree glyph for glyph.
 func TestOpenTypeCFFOutlineMatchesFace(t *testing.T) {
 	f := simpleOpenTypeFont(t, openTypeCFF(t, cffLayout(nil, nil,
 		[][]byte{boxCharstring(0), boxCharstring(100)}, nil, nil), 2))
@@ -614,9 +607,9 @@ func TestOpenTypeCFFOutlineMatchesFace(t *testing.T) {
 	}
 }
 
-// TestOpenTypeCFFBombIsBudgeted is the same exponential charstring reached through the other call site the unbudgeted
-// loader backed: Face.GlyphDataOutline tries the 'CFF ' table first, so a CFF-flavored OpenType program hangs a render
-// exactly as a bare CFF one does.
+// TestOpenTypeCFFBombIsBudgeted is the same exponential charstring reached through the sfnt arm: Face.GlyphDataOutline
+// tries the 'CFF ' table first, so an unbudgeted CFF-flavored OpenType program hangs a render exactly as a bare CFF
+// one does.
 func TestOpenTypeCFFBombIsBudgeted(t *testing.T) {
 	const (
 		levels = 9

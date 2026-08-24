@@ -17,16 +17,14 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Traversal guards: hostile documents cannot force unbounded work because name-tree recursion is depth-capped, node
-// count-capped, and reference cycles are skipped via a visited set, and a chain of destinations that keeps indirecting
-// (name → dictionary → name ...) is cut off after maxDestChain steps.
+// Traversal guards: name-tree recursion is depth-capped and node-capped, a visited set skips reference cycles, and a
+// destination chain that keeps indirecting (name → dictionary → name ...) is cut after maxDestChain steps.
 const (
 	maxNameTreeDepth = 64
 	maxDestChain     = 8
-	// maxNameTreeNodes and maxNamedDests bound the flattened /Names → /Dests index: how many tree nodes one build
-	// visits, and how many name → destination pairs it retains. Both sit far above any real document (deployed files
-	// carry thousands of named destinations, not hundreds of thousands); past them the remaining names simply do not
-	// resolve, which is what an unknown name already does.
+	// maxNameTreeNodes and maxNamedDests bound the flattened /Names → /Dests index: tree nodes visited per build and name
+	// → destination pairs retained. Both sit far above any real document; past them the remaining names do not resolve, as
+	// an unknown name already does not.
 	maxNameTreeNodes = 1 << 16
 	maxNamedDests    = 1 << 18
 )
@@ -50,9 +48,9 @@ func unresolvedDest() Dest {
 	return Dest{X: nan32(), Y: nan32(), Page: -1}
 }
 
-// resolveDest resolves a destination object — an explicit array, a name or byte string naming a destination, or a
-// dictionary wrapping one in /D (both the old-style /Dests values and /GoTo actions use that shape) — to a page and
-// point. It always returns a usable Dest; failures come back as unresolvedDest (page -1), which the public API drops.
+// resolveDest resolves a destination object — an explicit array, a name or byte string naming one, or a dictionary
+// wrapping one in /D (old-style /Dests values and /GoTo actions share that shape) — to a page and point. Failures come
+// back as unresolvedDest (page -1), which the public API drops.
 func (d *Document) resolveDest(obj cos.Object) Dest {
 	for range maxDestChain {
 		obj = d.cos.Resolve(obj)
@@ -73,10 +71,10 @@ func (d *Document) resolveDest(obj cos.Object) Dest {
 }
 
 // destFromArray interprets an explicit destination array (ISO 32000-2 12.3.2.2): the target page (an indirect reference
-// to a page object, or — as some writers produce — a 0-based page index), the fit kind, and the kind's coordinate
-// operands. Coordinates the kind does not define, null/absent slots, and non-numeric operands are NaN. The extracted
-// PDF-space point is mapped into the target page's top-left space, exactly as MuPDF reports destination points (pinned
-// by probes for /XYZ, /FitH, /FitV, /FitR, and null slots).
+// to a page object or, as some writers produce, a 0-based page index), the fit kind, and the kind's coordinate
+// operands. Coordinates the kind does not define, null/absent slots, and non-numeric operands are NaN. The PDF-space
+// point is mapped into the target page's top-left space, as MuPDF reports destination points (probe-pinned for /XYZ,
+// /FitH, /FitV, /FitR, and null slots).
 func (d *Document) destFromArray(arr cos.Array) Dest {
 	if len(arr) == 0 {
 		return unresolvedDest()
@@ -110,7 +108,7 @@ func (d *Document) destFromArray(arr cos.Array) Dest {
 			x = d.destCoord(arr, 2)
 			y = d.destCoord(arr, 5) // /FitR left bottom right top: the point is (left, top).
 		}
-		// /Fit and /FitB carry no coordinate; unknown kinds are treated the same way.
+		// /Fit, /FitB, and unknown kinds carry no coordinate.
 	}
 	u, v := d.geoms[page].toTopLeft(x, y)
 	return Dest{X: u, Y: v, Page: page}
@@ -132,18 +130,15 @@ func (d *Document) destCoord(arr cos.Array, index int) float32 {
 	return nan32()
 }
 
-// lookupNamedDest finds the destination a name or byte string refers to, trying the old-style /Dests dictionary in the
-// catalog (PDF 1.1) first and the /Names → /Dests name tree (PDF 1.2+) second. Both stores accept both key flavors — a
-// name's text and a byte string's bytes compare identically — since real files mix them. It returns nil (null) when the
-// name is unknown.
+// lookupNamedDest finds the destination a name or byte string refers to, trying the catalog's old-style /Dests
+// dictionary (PDF 1.1) first and the /Names → /Dests name tree (PDF 1.2+) second. Both stores accept both key flavors,
+// since real files mix them. It returns nil (null) for an unknown name.
 //
-// The name tree is flattened into a map once per document rather than searched per lookup. A per-lookup search made
-// every MISS cost a full tree scan, and the callers are per-node: walkOutline resolves a destination for each of up to
-// maxOutlineNodes items and Links for each of up to maxPageLinks annotations, none of which shares work with the next.
-// A file pairing a few hundred thousand leaf pairs with 65536 outline items naming destinations that do not exist
-// therefore bought ~10^10 resolve-and-compare steps — minutes to hours — from one TableOfContents call, and the public
-// OverallMaxTOCEntries/OverallMaxLinks caps do not help because the engine-side walk finishes before they truncate.
-// Flattened, the whole document's lookups cost one bounded walk plus a map probe each, and a miss costs nothing.
+// The name tree is flattened into a map once per document rather than searched per lookup: the callers are per-node
+// (walkOutline resolves up to maxOutlineNodes destinations, Links up to maxPageLinks), and a per-lookup search made
+// every miss a full tree scan, so a file pairing a few hundred thousand leaf pairs with 65536 outline items naming
+// absent destinations cost ~10^10 compare steps from one TableOfContents call. The public OverallMaxTOCEntries and
+// OverallMaxLinks caps do not help: the engine-side walk finishes before they truncate.
 func (d *Document) lookupNamedDest(key []byte) cos.Object {
 	root, ok := d.cos.GetDict(d.cos.Trailer(), "Root")
 	if !ok {
@@ -254,7 +249,7 @@ func (d *Document) resolveURIFragment(uri string) Dest {
 				dest.Page = n - 1
 			}
 		} else if zoomStr, isZoom := strings.CutPrefix(part, "zoom="); isZoom {
-			// zoom=z,x,y — the zoom factor itself is not part of the public contract and is ignored.
+			// zoom=z,x,y; the zoom factor is ignored.
 			comps := strings.Split(zoomStr, ",")
 			if len(comps) >= 2 {
 				dest.X = parseFloat32(comps[1])

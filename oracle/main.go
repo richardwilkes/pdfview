@@ -8,9 +8,9 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Command oracle dumps the observable behavior of github.com/richardwilkes/pdf (MuPDF via cgo) for a corpus PDF into a
-// golden directory that the pure-Go pdfview engine is tested against. It is a development tool: it requires cgo and a
-// checkout of the binding at ../../pdf, is never imported by the library, and never runs in CI — the goldens it
-// produces are committed. Run regen.sh to regenerate every golden from the corpus.
+// golden directory the pure-Go pdfview engine is tested against. It is a development tool: it requires cgo and a
+// checkout of the binding at ../../pdf, is never imported by the library, and never runs in CI; the goldens it
+// produces are committed. regen.sh regenerates every golden from the corpus.
 //
 // Usage:
 //
@@ -18,8 +18,8 @@
 //
 // The output directory is wiped and recreated with one truth.json (see schema.go) plus one losslessly encoded PNG per
 // page per DPI. Output is deterministic for a given corpus file, MuPDF build, and Go release: truth.json is
-// stable-marshaled (sorted map keys, shortest float32 round-trip formatting) and PNGs are encoded with a pinned
-// compression level, so a re-run that produces any diff signals a real behavior change to review.
+// stable-marshaled (sorted map keys, shortest float32 round-trip formatting) and PNGs use a pinned compression level,
+// so any diff on a re-run is a real behavior change to review.
 package main
 
 import (
@@ -41,8 +41,7 @@ import (
 	"github.com/richardwilkes/pdf"
 )
 
-// invalidPassword is deliberately attempted against every corpus file so the goldens pin how authentication failure is
-// reported.
+// invalidPassword is attempted against every corpus file so the goldens pin how authentication failure is reported.
 const invalidPassword = "invalid-password"
 
 type stringList []string
@@ -99,8 +98,8 @@ func parseDPIs(csv string) ([]int, error) {
 		if err != nil || dpi < 1 {
 			return nil, fmt.Errorf("invalid dpi %q", part)
 		}
-		// Duplicate DPIs would collapse under a shared strconv.Itoa(dpi) map key (truth.TOC, page Renders), silently
-		// discarding one dump, so reject them instead of letting the second write win.
+		// Duplicate DPIs would collapse under one strconv.Itoa(dpi) map key (truth.TOC, page Renders) and silently
+		// discard a dump.
 		if slices.Contains(dpis, dpi) {
 			return nil, fmt.Errorf("duplicate dpi %d", dpi)
 		}
@@ -112,8 +111,8 @@ func parseDPIs(csv string) ([]int, error) {
 	return dpis, nil
 }
 
-// validateNeedles rejects duplicate search needles. Each needle is a key in the per-render Search map, so a repeated
-// needle would overwrite the earlier entry and silently discard one dump rather than being caught.
+// validateNeedles rejects duplicate search needles, which would collapse under one Search map key and silently discard
+// a dump.
 func validateNeedles(needles []string) error {
 	for i, needle := range needles {
 		if slices.Contains(needles[:i], needle) {
@@ -137,8 +136,7 @@ func dump(in, out string, dpis []int, passwords, needles []string) error {
 		Needles: needles,
 	}
 
-	// Record the authentication table: every attempt runs against its own fresh document so no attempt can influence
-	// another (a successful authentication changes document state).
+	// Every auth attempt runs against its own fresh document, since a successful authentication changes document state.
 	for _, password := range authAttemptPasswords(passwords) {
 		doc, docErr := pdf.New(data, 0)
 		if docErr != nil {
@@ -148,7 +146,6 @@ func dump(in, out string, dpis []int, passwords, needles []string) error {
 		doc.Release()
 	}
 
-	// The main document everything else is dumped from.
 	doc, err := pdf.New(data, 0)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
@@ -180,7 +177,6 @@ func dump(in, out string, dpis []int, passwords, needles []string) error {
 		truth.TOC = toc
 	}
 
-	// The raw MuPDF view: unscaled page-space floats the public API never exposes.
 	raw, err := openRaw(data, truth.AuthPassword)
 	if err != nil {
 		return err
@@ -209,8 +205,8 @@ func dump(in, out string, dpis []int, passwords, needles []string) error {
 	return os.WriteFile(filepath.Join(out, "truth.json"), append(encoded, '\n'), 0o644)
 }
 
-// authAttemptPasswords is the auth table's password list: the empty password, every provided password, and a
-// deliberately invalid one, deduplicated preserving order.
+// authAttemptPasswords is the auth table's password list: the empty password, every provided password, and
+// invalidPassword, deduplicated in order.
 func authAttemptPasswords(passwords []string) []string {
 	attempts := make([]string, 0, len(passwords)+2)
 	for _, password := range slices.Concat([]string{""}, passwords, []string{invalidPassword}) {
@@ -299,8 +295,7 @@ func dumpRender(doc *pdf.Document, out string, pageNumber, dpi int, needles []st
 			render.Search[needle] = convertHits(again.SearchHits)
 		}
 	}
-	// A pinned compression level keeps the encoded bytes deterministic for a given Go release; the pixel data itself is
-	// lossless either way (image.NRGBA round-trips exactly through 8-bit RGBA PNG).
+	// The level is pinned for byte-deterministic output; image.NRGBA round-trips exactly through 8-bit RGBA PNG.
 	encoder := png.Encoder{CompressionLevel: png.BestCompression}
 	var buffer bytes.Buffer
 	if err = encoder.Encode(&buffer, rendered.Image); err != nil {
@@ -320,8 +315,8 @@ func convertHits(hits []image.Rectangle) [][4]int {
 	return converted
 }
 
-// clampHits bounds a hit count returned by MuPDF to the number of quads rawSearch actually handed to it. MuPDF honors
-// hit_max, so this should never alter the value; it exists so that a bad count cannot index past the buffer.
+// clampHits bounds a MuPDF hit count to the number of quads rawSearch handed it. MuPDF honors hit_max, so this should
+// never alter the value; it only keeps a bad count from indexing past the buffer.
 func clampHits(hits, limit int) int {
 	return min(max(hits, 0), limit)
 }

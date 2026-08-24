@@ -23,13 +23,11 @@ import (
 )
 
 func TestPDF(t *testing.T) {
-	// Load the data we are going to use
 	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Parse the data as a PDF document
 	var doc *pdfview.Document
 	doc, err = pdfview.New(data, 0)
 	if err != nil {
@@ -37,30 +35,26 @@ func TestPDF(t *testing.T) {
 	}
 	defer doc.Release()
 
-	// Count the pages
 	if pageCount := doc.PageCount(); pageCount != 2 {
 		t.Fatalf("expected 2 pages, got %d", pageCount)
 	}
 
-	// Load the table of contents
 	toc := doc.TableOfContents(100)
 	if len(toc) != 66 {
 		t.Fatalf("expected 66 TOC entries, got %d", len(toc))
 	}
 
-	// This particular PDF has ridiculously long TOC headings, so just spot-check a few
+	// The TOC headings are very long, so spot-check a few.
 	checkTOCEntry(t, toc, 0, "GLAIVE Mini (GMi) ", 0, 69, 163)
 	checkTOCEntry(t, toc, 12, "Semibalanced: A new ", 0, 81, 680)
 	checkTOCEntry(t, toc, 60, "What's that odd ", 1, 446, 691)
 
-	// Render the first page
 	var page *pdfview.RenderedPage
 	page, err = doc.RenderPage(0, 100, 20, "GURPS")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify the search hits match expectations
 	if len(page.SearchHits) != 9 {
 		t.Fatalf("expected 9 search hits, got %d", len(page.SearchHits))
 	}
@@ -80,7 +74,6 @@ func TestPDF(t *testing.T) {
 		}
 	}
 
-	// Verify the links match expectations
 	if len(page.Links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(page.Links))
 	}
@@ -101,7 +94,6 @@ func TestPDF(t *testing.T) {
 		}
 	}
 
-	// Verify the image
 	if page.Image == nil {
 		t.Fatal("expected image data, got nil")
 	}
@@ -113,7 +105,7 @@ func TestPDF(t *testing.T) {
 		t.Errorf("expected an image bounds of %v, got %v", expectedBounds, page.Image.Rect)
 	}
 
-	// A negative page number must be rejected before it reaches the engine
+	// A negative page number is rejected before it reaches the engine.
 	if _, err = doc.RenderPage(-1, 100, 20, ""); !errors.Is(err, pdfview.ErrInvalidPageNumber) {
 		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
 	}
@@ -121,7 +113,7 @@ func TestPDF(t *testing.T) {
 		t.Errorf("expected ErrInvalidPageNumber for a negative page, got %v", err)
 	}
 
-	// A search with maxHits <= 0 must not panic and must yield no hits
+	// A search with maxHits <= 0 must not panic and yields no hits.
 	page, err = doc.RenderPage(0, 100, 0, "GURPS")
 	if err != nil {
 		t.Fatal(err)
@@ -132,8 +124,8 @@ func TestPDF(t *testing.T) {
 }
 
 func TestMalformedPDF(t *testing.T) {
-	// A buffer with a valid %PDF prefix but garbage contents passes the prefix check and then fails in the parser.
-	// This must surface as ErrUnableToOpenPDF rather than escaping as a panic.
+	// A valid %PDF prefix over garbage passes the prefix check and fails in the parser; that must surface as
+	// ErrUnableToOpenPDF, not a panic.
 	if _, err := pdfview.New([]byte("%PDF-1.7\nnot a real pdf"), 0); !errors.Is(err, pdfview.ErrUnableToOpenPDF) {
 		t.Fatalf("expected ErrUnableToOpenPDF for a malformed document, got %v", err)
 	}
@@ -149,10 +141,9 @@ func TestUseAfterRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Releasing and then calling methods must not crash; it must return safe zero values / ErrDocumentReleased.
 	doc.Release()
 
-	// Calling Release again must be a safe no-op.
+	// A second Release is a no-op.
 	doc.Release()
 
 	if got := doc.PageCount(); got != 0 {
@@ -186,7 +177,6 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	}
 	defer doc.Release()
 
-	// A normal request renders successfully and fits within the requested box.
 	page, err := doc.RenderPageForSize(0, 800, 800, 0, "")
 	if err != nil {
 		t.Fatalf("unexpected error rendering for size: %v", err)
@@ -198,15 +188,13 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 		t.Errorf("rendered image %v does not fit within 800x800", b)
 	}
 
-	// A non-positive target size must be rejected up front with ErrInvalidPageSize.
 	for _, sz := range []struct{ w, h int }{{0, 800}, {800, 0}, {-1, 800}, {800, -1}} {
 		if _, err = doc.RenderPageForSize(0, sz.w, sz.h, 0, ""); !errors.Is(err, pdfview.ErrInvalidPageSize) {
 			t.Errorf("expected ErrInvalidPageSize for target size %dx%d, got %v", sz.w, sz.h, err)
 		}
 	}
 
-	// A request whose output would exceed OverallMaxPixels must be rejected with ErrImageTooLarge rather than
-	// attempting a huge allocation. Both render paths enforce the same limit and report the same sentinel.
+	// Both render paths reject a request past OverallMaxPixels with ErrImageTooLarge before allocating.
 	defer func(prev int) { pdfview.OverallMaxPixels = prev }(pdfview.OverallMaxPixels)
 	pdfview.OverallMaxPixels = 100
 	if _, err = doc.RenderPageForSize(0, 800, 800, 0, ""); !errors.Is(err, pdfview.ErrImageTooLarge) {
@@ -217,10 +205,9 @@ func TestRenderPageForSizeLimits(t *testing.T) {
 	}
 }
 
-// TestOverLargeRenderUsesImageTooLarge pins the agreement between OverallMaxPixels and the raster surface's own pixel
-// cap. The default used to be twice the surface cap, so a request landing between the two passed every documented
-// guard and then failed inside the surface allocation, reaching the caller as ErrUnableToCreateImage instead of the
-// documented ErrImageTooLarge.
+// TestOverLargeRenderUsesImageTooLarge pins that OverallMaxPixels defaults to the raster surface's own pixel cap: a
+// request between the two would pass every guard and fail inside the surface allocation as ErrUnableToCreateImage
+// instead of the documented ErrImageTooLarge.
 func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
 	if pdfview.OverallMaxPixels != render.MaxSurfacePixels {
 		t.Fatalf("OverallMaxPixels default %d does not match the surface cap %d", pdfview.OverallMaxPixels,
@@ -236,15 +223,14 @@ func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
 	}
 	defer doc.Release()
 
-	// Measure the page at 72 dpi (scale 1) so the over-large request can be derived from its actual size.
+	// Derive the over-large request from the page's size at scale 1.
 	base, err := doc.RenderPage(0, 72, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := base.Image.Bounds()
-	// Aim halfway between the surface cap and the old math.MaxInt32/4 default: too large to render, yet small enough
-	// that the previous default let it through. Nothing is allocated, since the guard precedes the surface creation.
-	// Only RenderPageForSize can ask for such a size; RenderPage clamps its scale at 10x.
+	// Aim halfway between the surface cap and math.MaxInt32/4, the former default. Only RenderPageForSize can ask for
+	// such a size; RenderPage clamps its scale at 10x.
 	target := float64(pdfview.OverallMaxPixels+math.MaxInt32/4) / 2
 	scale := math.Sqrt(target / (float64(b.Dx()) * float64(b.Dy())))
 	maxWidth := int(math.Ceil(float64(b.Dx()) * scale))
@@ -254,10 +240,9 @@ func TestOverLargeRenderUsesImageTooLarge(t *testing.T) {
 	}
 }
 
-// internalLinkPDF is a minimal two-page document with two internal links on page 0, both targeting the second page: one
-// via an explicit /XYZ destination ([4 0 R /XYZ 30 150 0]) and one via a named destination (/A /GoTo /D (Chapter2),
-// which resolves to a /Fit destination with no point). No xref is supplied (startxref 0) so the engine rebuilds it;
-// only the link resolution matters here.
+// internalLinkPDF is a two-page document with two internal links on page 0, both targeting page 1: one via an explicit
+// /XYZ destination and one via a named destination (Chapter2) that resolves to a /Fit destination with no point.
+// startxref 0 makes the engine rebuild the xref.
 const internalLinkPDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R /Names << /Dests 6 0 R >> >>
@@ -294,20 +279,16 @@ func TestInternalLinks(t *testing.T) {
 	}
 	defer doc.Release()
 
-	page, err := doc.RenderPage(0, 72, 0, "") // 72 dpi => scale 1.0, so DestPoint values are page points
+	page, err := doc.RenderPage(0, 72, 0, "") // 72 dpi: scale 1, so DestPoint values are page points.
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Page 0 carries two internal links — one explicit /XYZ destination and one named destination — both pointing at
-	// the second page (0-based index 1). Each must resolve to PageNumber 1 with an empty URI. The named destination in
-	// particular was silently dropped by the previous "#page=" string parsing, and the page index must be 0-based: the
-	// target is the second page object, so 1 rather than 0.
 	if len(page.Links) != 2 {
 		t.Fatalf("expected 2 internal links, got %d", len(page.Links))
 	}
-	// The /XYZ destination (left 30, top 150 on a 200-tall page) resolves to (30, 50) in top-left/y-down image space;
-	// the named /Fit destination has no explicit point and so resolves to (0, 0). Match by DestPoint rather than order.
+	// /XYZ 30 150 on a 200-tall page is (30, 50) in top-left/y-down space; /Fit has no point and resolves to (0, 0).
+	// Match by DestPoint rather than order.
 	var sawXYZ, sawFit bool
 	for i, l := range page.Links {
 		if l.PageNumber != 1 {

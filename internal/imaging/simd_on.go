@@ -17,11 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
-// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
-// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
-// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
-// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
+// init points the dispatch variables at the vector kernels this architecture prefers (see simd_prefs_<arch>.go).
+// Nothing is repointed unless vecmath.KernelsSupported says the machine can run them: that is false where the simd
+// package emulates every operation in scalar Go, slower than the scalar code the kernels replace, and on an amd64 CPU
+// with AVX but not AVX2, where the kernels' broadcasts would fault. Past that gate, each kernel is installed only where
 // its preference constant says its benchmarks earned it.
 func init() {
 	if !vecmath.KernelsSupported() {
@@ -41,11 +40,10 @@ func init() {
 	}
 }
 
-// The gates each kernel applies to its own work before deciding to vector-process it. Below its gate a kernel hands
-// the call straight back to the scalar function, because the setup costs more than the few lanes it would save. They
-// are vars rather than consts so the equivalence tests can sweep both sides of each gate. Each is measured in the
-// units its kernel counts: bytes for the two byte kernels, samples for the JPX normalizer, and whole pixels for the
-// alpha composite.
+// The gates each kernel applies before vector-processing its work; below its gate a kernel hands the call to the
+// scalar function, because the setup costs more than the few lanes it would save. They are vars so the equivalence
+// tests can sweep both sides of each gate. Units: bytes for the two byte kernels, samples for the JPX normalizer, and
+// pixels for the alpha composite.
 var (
 	invertBytesMin    = 16
 	thresholdMin      = 16
@@ -72,13 +70,12 @@ func invertBytesSIMD(dst, src []byte) {
 	}
 }
 
-// thresholdSIMD is thresholdScalar a vector at a time: 255 into dst wherever gray's sample is below 128 and 0
-// elsewhere, or the reverse when invert is set.
+// thresholdSIMD is thresholdScalar a vector at a time.
 //
-// Uint8s has no ordered comparison, so the "< 128" test is the sign-bit test v&0x80 == 0, which is exact for this one
-// threshold and no other. invert is loop-invariant, so it is hoisted into a swap of the IfElse arms rather than
-// checked per lane. The scalar function only ever stores 255, leaving the rest of a freshly allocated (so zero-filled)
-// plane alone; writing the zeros back explicitly is what makes the vector form a plain full-width store.
+// Uint8s has no ordered comparison, so "< 128" is the sign-bit test v&0x80 == 0, exact for this threshold and no
+// other. invert is loop-invariant, so it swaps the IfElse arms rather than being checked per lane. The scalar function
+// stores only the 255s into a zero-filled plane; writing the zeros explicitly makes the vector form a plain full-width
+// store.
 func thresholdSIMD(dst, gray []byte, invert bool) {
 	if len(dst) < thresholdMin {
 		thresholdScalar(dst, gray, invert)
@@ -103,11 +100,10 @@ func thresholdSIMD(dst, gray []byte, invert bool) {
 	}
 }
 
-// int32Safe reports whether this normalizer's arithmetic fits the 32-bit lanes normalizePlaneSIMD computes in. Every
-// precision through 31 does: clamping the sample into [−offset, maxVal−offset] before the offset is added bounds
-// every intermediate by 2^p−1, and the two clamp bounds are ±2^(p−1) at worst. Precision 32 does not — its offset
-// alone is 2^31 — and stays on the int64 scalar path, where it has always been. It lives here rather than beside
-// jpxNorm because nothing in the default build has any use for it.
+// int32Safe reports whether this normalizer's arithmetic fits normalizePlaneSIMD's 32-bit lanes. Every precision
+// through 31 does: clamping the sample into [−offset, maxVal−offset] before adding the offset bounds every
+// intermediate by 2^p−1, and the clamp bounds are ±2^(p−1) at worst. Precision 32 does not (its offset alone is
+// 2^31) and stays on the int64 scalar path. It lives here rather than beside jpxNorm because only this build uses it.
 func (n jpxNorm) int32Safe() bool {
 	return n.offset <= 1<<30
 }
@@ -120,13 +116,12 @@ const normalizeChunk = 256
 // normalizePlaneSIMD is normalizePlaneScalar with the clamp and offset done a vector at a time.
 //
 // jpxNorm.at clamps v+offset into [0, maxVal] in int64. The kernel clamps v into [−offset, maxVal−offset] first and
-// adds the offset afterwards, which yields the same value — the clamp is monotone and the offset is a constant — with
-// every intermediate inside int32. See jpxNorm.int32Safe for why that is enough, and why precision 32 is handed back
-// to the scalar function along with any plane too short to be worth the setup.
+// adds the offset afterwards, the same value (the clamp is monotone and the offset constant) with every intermediate
+// inside int32; see int32Safe for why that is enough and why precision 32 goes back to the scalar function.
 //
-// The precision shift is not part of the vector half. ShiftAll* is a compiler intrinsic whose distance has to be a
-// compile-time constant, and this one is the component's precision, known only at run time. It costs nothing to fold
-// into the narrowing pass, which is already scalar for want of a narrowing lane conversion.
+// The precision shift stays scalar: ShiftAll* is an intrinsic whose distance must be a compile-time constant, and this
+// one is known only at run time. It folds for free into the narrowing pass, which is already scalar because the
+// portable API has no narrowing lane conversion.
 func normalizePlaneSIMD(dst []byte, samples []int32, n jpxNorm) {
 	if len(dst) < normalizePlaneMin || !n.int32Safe() {
 		normalizePlaneScalar(dst, samples, n)
@@ -196,24 +191,21 @@ func andBytes(b []byte) byte {
 
 // compositeAlphaChunk is how many pixels one pass of compositeAlphaSIMD widens into its staging buffer. The portable
 // API has no widening lane conversion, so the mask's bytes reach the 32-bit lanes through a scalar fill; a chunk of
-// this size keeps that buffer (2KB) and the 8KB of pixels it scales inside L1 no matter how large the image is.
+// this size keeps that buffer (2KB) and the 2KB of pixels it scales inside L1 no matter how large the image is.
 const compositeAlphaChunk = 512
 
-// compositeAlphaSIMD specializes compositeAlphaScalar's equal-dimension case, where the mask matches the image pixel
-// for pixel and no sampling is needed: the plane and the image's alpha bytes advance in lockstep, so the whole
-// composite is one flat pass. Every other shape — a mask coarser than the image on either axis, an image whose pixel
-// buffer is short, or a plane too small to be worth the setup — goes back to the scalar function.
+// compositeAlphaSIMD specializes compositeAlphaScalar's equal-dimension case, where the plane and the image's alpha
+// bytes advance in lockstep and the composite is one flat pass. Every other shape — a coarser mask, a short pixel
+// buffer, or a plane below the gate — goes back to the scalar function.
 //
 // Pixels are worked on as packed little-endian words (R, G, B, A from the low byte up, which is what a reshape of the
-// byte lanes yields), so the alpha byte is a shift away and the other three channels ride through untouched under an
-// AND. The divide is vecmath.UDiv255, exact over this product's domain: two byte channels top out at 65025.
+// byte lanes yields), so the alpha byte is a shift away and the other channels ride through under an AND. The divide
+// is vecmath.UDiv255, exact over this product's domain (two byte channels top out at 65025).
 //
-// The scalar function skips pixels whose plane byte is 255 rather than computing them. Computing them anyway is safe
-// because alpha*255/255 == alpha exactly, so the skip changes nothing but speed. Per pixel that skip is not something
-// a vector kernel can keep, but per chunk it is, and it is worth keeping: real soft masks are smooth, so a fully
-// opaque run of them is common and costs only the scan that recognizes it. The same scan supplies the HasAlpha
-// answer, which is likewise not per pixel — the flag goes up when any plane byte differs from 255, which is exactly
-// what an AND across the plane reports.
+// The scalar function skips pixels whose plane byte is 255; computing them anyway is safe since alpha*255/255 == alpha.
+// The skip is kept per chunk rather than per pixel: real soft masks are smooth, so a fully opaque run is common and
+// costs only the AND scan that recognizes it. The same scan answers HasAlpha, which goes up when any plane byte
+// differs from 255.
 func compositeAlphaSIMD(img *Image, plane []byte, mw, mh int) {
 	n := img.Width * img.Height
 	if n < compositeAlphaMin || mw != img.Width || mh != img.Height || len(img.Pix) < n*4 {
@@ -233,7 +225,7 @@ func compositeAlphaSIMD(img *Image, plane []byte, mw, mh int) {
 		all := andBytes(chunk)
 		acc &= all
 		if all == 0xff {
-			continue // Every pixel here would be multiplied by 255/255, which is what it already holds.
+			continue // 255/255 leaves every pixel as it is.
 		}
 		buf := scratch[:end-base]
 		for i, a := range chunk {

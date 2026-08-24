@@ -17,8 +17,7 @@ import (
 	"github.com/richardwilkes/pdfview/internal/jbig2"
 )
 
-// isJBIG2 reports whether the codec is JBIG2Decode. The filter has no abbreviated inline-image spelling, so unlike
-// isDCT and isCCITT one name is the whole test.
+// isJBIG2 reports whether the codec is JBIG2Decode, which has no abbreviated inline-image spelling.
 func isJBIG2(codec cos.Name) bool { return codec == codecJBIG2Names }
 
 // jbig2MinSegmentHeader is the shortest legal segment header: a 4-byte segment number, the flags byte, the
@@ -26,17 +25,15 @@ func isJBIG2(codec cos.Name) bool { return codec == codecJBIG2Names }
 const jbig2MinSegmentHeader = 11
 
 // decodeJBIG2 expands a JBIG2Decode payload to packed one-bit rows (byte-aligned, MSB first) at the decoded page's own
-// column count, h rows tall, with a 0 bit meaning black. That polarity is the PDF contract rather than JBIG2's own (a
-// set pixel is black on the page bitmap): MuPDF and pdf.js both invert, so the samples read correctly through
-// /DeviceGray and an ImageMask with the default /Decode [0 1] paints where the ink is. /BitsPerComponent is not
-// consulted — the codec fixes it at 1.
+// column count, h rows tall, with a 0 bit meaning black. That polarity is PDF's, not JBIG2's (a set page pixel is
+// black): MuPDF and pdf.js both invert, so the samples read correctly through /DeviceGray and an ImageMask with the
+// default /Decode [0 1] paints where the ink is. /BitsPerComponent is not consulted; the codec fixes it at 1.
 //
-// The page bitmap's dimensions are recovered from the segment headers before the library sees the payload, so a
-// hostile stream cannot make it allocate past the caller's budget, and the same budget goes to the library as a
-// cumulative cap covering the bitmaps no header declares. A payload whose page information segment parsed but
-// whose region data the library rejects (the truncated-mid-region case) yields a full-size all-white page, which is
-// what MuPDF paints for it; rows past the decoded page height and columns past its width are white for the same
-// reason. A payload with no usable page information is declined, and the image renders blank.
+// The page dimensions are recovered from the segment headers before the library sees the payload, so a hostile stream
+// cannot allocate past the caller's budget, and the same budget goes to the library as a cumulative cap on bitmaps no
+// header declares. A payload whose page information parsed but whose region data the library rejects (truncated
+// mid-region) yields a full-size all-white page, as MuPDF paints it; rows past the decoded page height and columns
+// past its width are white too. A payload with no usable page information is declined.
 func (dec *decoder) decodeJBIG2(h int) (data []byte, cols int, err error) {
 	return decodeJBIG2Plane(dec.data, dec.jbig2Globals(), h)
 }
@@ -45,8 +42,7 @@ func (dec *decoder) decodeJBIG2(h int) (data []byte, cols int, err error) {
 // same budget checks and the same recovery the production path applies.
 func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, err error) {
 	caps := jbig2CapsFor(payload, globals)
-	// The globals stream reaches the decoder unfiltered by anything else, so its segments are scanned against the same
-	// caps; only the payload is expected to declare a page.
+	// The globals stream is scanned against the same caps; only the payload is expected to declare a page.
 	if _, _, err = jbig2Scan(globals, caps); err != nil {
 		return nil, 0, err
 	}
@@ -63,15 +59,15 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 	if decodeErr == nil {
 		cols = int(page.Width())
 	}
-	// Bound each dimension the way run() bounds Width/Height before multiplying: cols comes from the payload and h
-	// from the caller, so an unbounded product could overflow int64 and slip under the budget check.
+	// Bound each dimension before multiplying, as run does: an unbounded cols×h could overflow int64 and slip under
+	// the budget check.
 	if cols <= 0 || h <= 0 || cols > maxImagePixels || h > maxImagePixels || int64(cols)*int64(h) > budget {
 		return nil, 0, ErrTooLarge
 	}
 	rowBytes := (cols + 7) / 8
 	out := make([]byte, rowBytes*h)
 	for i := range out {
-		out[i] = 0xff // 1 bits: white under the inverted convention above.
+		out[i] = 0xff // White.
 	}
 	if decodeErr != nil {
 		slog.Debug("pdfview: JBIG2 region undecodable; painting the page white", "error", decodeErr,
@@ -86,9 +82,9 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 	if width > cols {
 		width = cols
 	}
-	// The decoded page is already packed one bit per pixel, MSB first, but with JBIG2's polarity: a set bit is ink.
-	// The rows below are copied inverted into the white-filled output, whole bytes at a time where a byte holds only
-	// columns the crop keeps, and bit by bit across the boundary so columns past width stay white.
+	// The decoded page is packed one bit per pixel, MSB first, with JBIG2's polarity (a set bit is ink). Rows are
+	// copied inverted into the white-filled output: whole bytes where a byte holds only kept columns, then bit by bit
+	// across the boundary so columns past width stay white.
 	stride := int(page.Stride())
 	packed := page.Data()
 	wholeBytes := width >> 3
@@ -108,9 +104,8 @@ func decodeJBIG2Plane(payload, globals []byte, h int) (data []byte, cols int, er
 	return out, cols, nil
 }
 
-// jbig2Globals returns the decoded bytes of the /JBIG2Globals stream named by the image's /DecodeParms, or nil when
-// there is none or it cannot be decoded (the segments it would have contributed are then simply missing, which the
-// decode below reports as a failure rather than silently mis-rendering).
+// jbig2Globals returns the decoded bytes of the /JBIG2Globals stream named by /DecodeParms, or nil when there is none
+// or it cannot be decoded (the decode then fails on the missing segments rather than mis-rendering).
 func (dec *decoder) jbig2Globals() []byte {
 	if dec.d == nil || dec.parms == nil {
 		return nil
@@ -126,12 +121,11 @@ func (dec *decoder) jbig2Globals() []byte {
 	return globals
 }
 
-// jbig2Page decodes the payload's page through the vendored decoder's embedded-profile entry point, which takes the
-// stream as PDF stores it — no file header, sequential segments, everything on page 1 — and enforces budget as a
-// cumulative cap on every bitmap the decode allocates, the only bound possible on symbol dimensions that arrive as
-// arithmetic-decoded deltas. The library documents no panics, but its input here is attacker-controlled, so a panic
-// escaping it is converted to an error: the fuzz-enforced "panics never escape" invariant is on this package's entry
-// points, not on the dependency.
+// jbig2Page decodes the payload's page through the embedded-profile entry point, which takes the stream as PDF stores
+// it (no file header, sequential segments, everything on page 1) and enforces budget as a cumulative cap on every
+// bitmap the decode allocates, the only bound possible on symbol dimensions that arrive as arithmetic-decoded deltas.
+// A panic escaping the library becomes an error: the fuzz-enforced "panics never escape" invariant is on this
+// package's entry points, not on the dependency.
 func jbig2Page(data, globals []byte, budget int64) (page *jbig2.Image, err error) {
 	defer recoverCodec(codecJBIG2Names, &err)
 	dec, err := jbig2.NewEmbeddedDecoder(data, globals, jbig2.Limits{MaxPixels: budget})
@@ -149,9 +143,9 @@ func jbig2Page(data, globals []byte, budget int64) (page *jbig2.Image, err error
 }
 
 // jbig2Caps bounds everything a JBIG2 stream can ask the decoder to allocate, derived from the payload's own size the
-// way maxPixelsFor derives the pixel budget. The adopted decoder sizes several slices straight from 32-bit segment
-// fields with no cap of its own — a four-byte symbol-dictionary body claiming 2^32 new symbols makes it allocate a
-// 32 GB pointer slice — so the scan below rejects such a stream before it ever reaches the library.
+// way maxPixelsFor derives the pixel budget. The decoder sizes several slices straight from 32-bit segment fields with
+// no cap of its own (a four-byte symbol-dictionary body claiming 2^32 new symbols would allocate a 32 GB pointer
+// slice), so jbig2Scan rejects such a stream before the library sees it.
 type jbig2Caps struct {
 	// pixels bounds page, region, and pattern-cell areas.
 	pixels int64
@@ -179,12 +173,11 @@ func jbig2CapsFor(payload, globals []byte) jbig2Caps {
 }
 
 // jbig2Scan walks a stream's segment headers, rejecting every field that would size an allocation past caps, and
-// returns the page bitmap's dimensions — zero when the stream declares no page, which is what a /JBIG2Globals stream
-// does. Every dimension and count a JBIG2 segment can claim is a 32-bit field, so without this a few bytes of hostile
-// input would ask the library for a terabyte-scale allocation before any of this package's caps applied. The walk is
-// self-bounding: each iteration consumes at least jbig2MinSegmentHeader bytes of a fixed-length input, so it runs at
-// most len(data)/11 times. A header or body that runs off the end ends the walk with whatever was learned, the same
-// leniency the region decode itself gets.
+// returns the page bitmap's dimensions — zero when the stream declares no page, as a /JBIG2Globals stream does not.
+// Every dimension and count a segment can claim is a 32-bit field, so without this a few hostile bytes would ask the
+// library for a terabyte-scale allocation. The walk is self-bounding: each iteration consumes at least
+// jbig2MinSegmentHeader bytes, so it runs at most len(data)/11 times. A header or body that runs off the end ends the
+// walk with whatever was learned, the same leniency the region decode gets.
 func jbig2Scan(data []byte, caps jbig2Caps) (w, h int, err error) {
 	const unknownLength = 0xffffffff
 	pageW, pageH, bottom := int64(-1), int64(-1), int64(0)
@@ -213,8 +206,8 @@ walk:
 		case segNum > 256:
 			refSize = 2
 		}
-		// refCount is capped above and refSize tops out at 4, so the product stays well inside the 64-bit int this
-		// engine requires; an offset past the payload simply ends the walk below.
+		// refCount is capped above and refSize tops out at 4, so the product fits; an offset past the payload ends the
+		// walk below.
 		off += int(refCount * refSize)
 		if flags&0x40 != 0 {
 			off += 4
@@ -304,7 +297,7 @@ func jbig2ScanRegion(body []byte, caps jbig2Caps, bottom *int64) (ok bool, err e
 	return true, nil
 }
 
-// jbig2ScanSymbolDict bounds a symbol dictionary segment's exported and new symbol counts (T.88 7.4.3), each of which
+// jbig2ScanSymbolDict bounds a symbol dictionary segment's exported and new symbol counts (T.88 7.4.2), each of which
 // the decoder turns straight into a slice of that many entries. The counts sit past a variable run of adaptive-template
 // pixels whose length the flags word selects.
 func jbig2ScanSymbolDict(body []byte, caps jbig2Caps) (ok bool, err error) {
@@ -320,7 +313,7 @@ func jbig2ScanSymbolDict(body []byte, caps jbig2Caps) (ok bool, err error) {
 			off += 2
 		}
 	}
-	if dictFlags&0x0002 != 0 && (dictFlags>>12)&0x0001 == 0 { // SDREFAGG set with SDRTEMPLATE 0: one refinement pair.
+	if dictFlags&0x0002 != 0 && (dictFlags>>12)&0x0001 == 0 { // SDREFAGG set with SDRTEMPLATE 0: two refinement AT pairs.
 		off += 4
 	}
 	if len(body) < off+8 {
@@ -349,8 +342,8 @@ func jbig2ScanPatternDict(body []byte, caps jbig2Caps) (ok bool, err error) {
 	return true, nil
 }
 
-// jbig2ScanTextRegion bounds a text region segment's instance count (T.88 7.4.4.1), which sits past the flags words and
-// the optional refinement adaptive-template pixels. body starts after the region segment information field.
+// jbig2ScanTextRegion bounds a text region segment's instance count (T.88 7.4.3.1.4), which sits past the flags words
+// and the optional refinement adaptive-template pixels. body starts after the region segment information field.
 func jbig2ScanTextRegion(body []byte, caps jbig2Caps) (ok bool, err error) {
 	if len(body) < 2 {
 		return false, nil
@@ -360,7 +353,7 @@ func jbig2ScanTextRegion(body []byte, caps jbig2Caps) (ok bool, err error) {
 	if textFlags&0x0001 != 0 { // SBHUFF: a second flags word selects the standard tables.
 		off += 2
 	}
-	if textFlags&0x0002 != 0 && (textFlags>>15)&0x0001 == 0 { // SBREFINE with SBRTEMPLATE 0: one AT pair.
+	if textFlags&0x0002 != 0 && (textFlags>>15)&0x0001 == 0 { // SBREFINE with SBRTEMPLATE 0: two AT pairs.
 		off += 4
 	}
 	if len(body) < off+4 {
@@ -386,10 +379,9 @@ func jbig2ScanHalftoneRegion(body []byte, caps jbig2Caps) (ok bool, err error) {
 	return true, nil
 }
 
-// recoverCodec converts a panic escaping a third-party codec into err, shared by both codec glue files. Malformed
-// input must degrade to a skipped image, and this package's fuzz targets enforce that no panic reaches a caller, so
-// the dependency's own robustness is never relied on. The error pointer is how a deferred recover reports through its
-// caller's named return.
+// recoverCodec converts a panic escaping a third-party codec into err, shared by both codec glue files: malformed
+// input must degrade to a skipped image, and the fuzz targets enforce that no panic reaches a caller. The pointer is
+// how a deferred recover reports through its caller's named return.
 //
 //nolint:gocritic // ptrToRefParam: the pointer is the point; see above.
 func recoverCodec(codec cos.Name, err *error) {

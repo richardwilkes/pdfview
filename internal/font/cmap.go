@@ -14,11 +14,11 @@ import (
 )
 
 // Character-to-GID lookup over specific sfnt 'cmap' subtables. go-text's ProcessCmap selects one "best" subtable, but
-// simple-font code→GID mapping (ISO 32000-2 9.6.5.4) needs specific subtables tried in a pinned order — (3,1) Windows
-// Unicode by AGL value, (3,0) Windows Symbol with the 0xF000 fold, (1,0) Macintosh Roman by code — so the engine keeps
-// the parsed records and consults them directly. Formats 0, 4, 6, and 12 cover every subtable in practice for these
-// platform/encoding pairs (format 2 is legacy CJK and is not consulted; 13 is last-resort fonts; 14 is variation
-// selectors).
+// simple-font code→GID mapping (ISO 32000-2 9.6.5.4) tries specific subtables in a pinned order: (3,1) Windows
+// Unicode by AGL value, then (3,0) Windows Symbol with the 0xF000 fold, then (1,0) Macintosh Roman by code. So the
+// engine keeps the parsed records and consults them directly. Formats 0, 4, 6, and 12 cover every subtable in practice
+// for these platform/encoding pairs (format 2 is legacy CJK and is not consulted; 13 is last-resort fonts; 14 is
+// variation selectors).
 
 // cmapTable is one cmap subtable the engine can query.
 type cmapTable struct {
@@ -139,10 +139,9 @@ func pickCmaps(cm tables.Cmap) (unicode, symbol, macRoman *cmapTable) {
 }
 
 // usableCmapSubtable reports whether lookup understands the subtable's format. Format 2 (the legacy CJK high-byte
-// mapping) is deliberately out of scope, and a font whose only (1,0) or (3,0) subtable is format 2 is therefore treated
-// as having no such table at all: pickCmaps leaves the slot nil and sfntInfo.gid runs off the end of its chain into the
-// "code as GID" last resort. That fallthrough — not a lookup miss inside a rejected table — is the degradation such
-// fonts get; it renders the wrong glyphs for a format-2 CJK font, which is why a real implementation would go here.
+// mapping) is deliberately out of scope, so a font whose only (1,0) or (3,0) subtable is format 2 is treated as having
+// no such table: pickCmaps leaves the slot nil and sfntInfo.gid runs off the end of its chain into the "code as GID"
+// last resort, which renders the wrong glyphs for a format-2 CJK font. A real implementation would go here.
 func usableCmapSubtable(sub tables.CmapSubtable) bool {
 	switch sub.(type) {
 	case tables.CmapSubtable0, tables.CmapSubtable4, tables.CmapSubtable6, tables.CmapSubtable12:

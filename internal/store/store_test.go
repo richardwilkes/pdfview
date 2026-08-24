@@ -127,9 +127,8 @@ func TestOversizedReplaceKeepsOthers(t *testing.T) {
 	s := New(100)
 	s.Put(keyA{1}, "a", 30)
 	s.Put(keyA{2}, "b", 30)
-	s.Put(keyA{3}, "c", 30) // Three useful entries, well within budget.
-	// Re-put key 3 with a value larger than the whole budget. It must drop only key 3, not needlessly evict the
-	// other (useful) entries en route to evicting the oversized one.
+	s.Put(keyA{3}, "c", 30)
+	// An oversized re-put must drop only key 3, not evict the others on the way.
 	s.Put(keyA{3}, "huge", 200)
 	if _, ok := s.Get[string](keyA{3}); ok {
 		t.Errorf("oversized replacement survived")
@@ -176,8 +175,7 @@ func TestConcurrentAccess(t *testing.T) {
 				k := keyA{i % 61}
 				s.Put(k, fmt.Sprintf("%d-%d", g, i), 16)
 				s.Get[string](k)
-				// Max is read lock-free; exercise it under -race concurrently with the writers above to prove the
-				// documented immutable-after-New invariant holds and no race is introduced.
+				// Max reads lock-free; -race checks that against the writers above.
 				if got := s.Max(); got != 1<<10 {
 					t.Errorf("Max() = %d, want %d", got, 1<<10)
 				}

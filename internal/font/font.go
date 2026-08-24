@@ -33,7 +33,7 @@ import (
 // previous font (matching the oracle's operator-level error recovery).
 var (
 	// ErrUnsupportedFont marks font configurations without engine support (Type0 fonts encoded with a predefined
-	// non-Identity CMap); the interpreter skips text shown with them, never erroring the page.
+	// non-Identity CMap).
 	ErrUnsupportedFont = errors.New("unsupported font type")
 	// ErrBadFont marks a font dictionary too malformed to use.
 	ErrBadFont = errors.New("unusable font dictionary")
@@ -60,9 +60,8 @@ type Font struct {
 	enc *[256]string
 	// widths maps codes to advances in text space (the PDF 1000-unit values already divided by 1000).
 	widths map[uint32]float32
-	// afm is the standard-14 fallback width table (glyph name → 1000-unit width) consulted only when the PDF supplies
-	// no /Widths array at all and the font is substituted (embedded programs fall back to their own advances instead).
-	// When /Widths exists, codes it does not cover take /MissingWidth, per the descriptor.
+	// afm is the standard-14 fallback width table (glyph name → 1000-unit width), set only when the PDF supplies no
+	// /Widths array and no embedded program supplies advances (see loadSimple).
 	afm map[string]uint16
 	// sfnt carries the parsed embedded TrueType/OpenType program, nil otherwise.
 	sfnt *sfntInfo
@@ -76,7 +75,7 @@ type Font struct {
 	// type3 carries Type 3 CharProcs state; the interpreter recurses into the procs instead of drawing outlines
 	// (GlyphPath reports none).
 	type3 *type3Info
-	// toUni is the parsed /ToUnicode CMap, nil when absent; it takes precedence over every Unicode source.
+	// toUni is the parsed /ToUnicode CMap, nil when absent.
 	toUni *cmapPDF
 	// sub carries the bundled substitute face when no embedded program renders (nil for embedded fonts).
 	sub *subInfo
@@ -93,8 +92,7 @@ type Font struct {
 	descender float32
 	// missingWidth is the descriptor /MissingWidth in text space.
 	missingWidth float32
-	// hasWidths records whether the dictionary carried a /Widths array (its gaps then mean /MissingWidth, never a
-	// fallback source).
+	// hasWidths records whether the dictionary carried a /Widths array.
 	hasWidths bool
 }
 
@@ -143,10 +141,9 @@ func loadDescriptor(d *cos.Document, dict cos.Dict) descriptor {
 	if v, has := d.GetInt(fd, "Flags"); has {
 		out.flags = int(v)
 	}
-	// The COS lexer keeps an over-long numeric literal as the correctly-signed infinity on the documented understanding
-	// that the downstream guards reject it (internal/cos/lexer.go). These are those guards: a non-finite advance would
-	// poison the interpreter's text matrix and a non-finite ascent/descent would misplace every stext quad, so a value
-	// that does not survive the narrowing to float32 is treated as absent.
+	// The COS lexer passes an over-long numeric literal through as ±Inf and relies on guards like these
+	// (internal/cos/lexer.go): a non-finite advance would poison the text matrix and a non-finite ascent/descent would
+	// misplace every stext quad, so a value that does not narrow to a finite float32 counts as absent.
 	if v, has := cos.AsReal(d.Resolve(fd["MissingWidth"])); has && isFiniteF(float32(v)) {
 		out.missingWidth = float32(v) / 1000
 	}
@@ -179,14 +176,11 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.Flags = desc.flags
 	f.missingWidth = desc.missingWidth
 
-	// The embedded program supplies the quad metrics; substituted fonts use the standard-14 pins. Each descriptor entry
-	// is tried in turn and a program that yields nothing falls through to the next one, so a dictionary carrying both a
-	// corrupt FontFile2 and a usable FontFile3 (or a program sitting in an entry its /Subtype does not predict) still
-	// renders its real glyphs instead of being substituted away — the same allowance loadType0 makes for composite
-	// fonts. "Yields nothing" includes an sfnt that parsed but has neither a go-text face nor a glyf walker
-	// (simpleGlyphs): its shapes would come from the substitute, so its metrics must not be taken either — the package
-	// rule is that a substituted font uses the pinned metrics of its replacement, not the quad of a program nothing
-	// draws.
+	// The embedded program supplies the quad metrics; substituted fonts use the standard-14 pins. Each FontFile entry is
+	// tried in turn and one that yields no usable program falls through to the next, so a corrupt FontFile2 beside a
+	// usable FontFile3 still renders its real glyphs (loadType0 makes the same allowance). An sfnt with neither a go-text
+	// face nor a glyf walker (simpleGlyphs) counts as no program: its shapes would come from the substitute, so its
+	// metrics must not be taken either.
 	embedded := false
 	if desc.fontFile2 != nil {
 		if info := parseSFNTStream(d, desc.fontFile2); info.simpleGlyphs() {
@@ -240,24 +234,19 @@ func loadSimple(d *cos.Document, dict cos.Dict) (*Font, error) {
 	f.toUni = loadToUnicode(d, dict)
 	buildUnicode(f)
 
-	// Widths: /Widths always wins. Without one, substituted fonts take the standard-14 AFM widths and embedded programs
-	// their own advances (in Width).
 	f.hasWidths = loadWidths(d, dict, f)
 
-	// Shapes: an embedded program renders itself; anything else — including embedded programs whose bytes yield no
-	// outline source at all (rejected by simpleGlyphs above, before their metrics were taken) — renders through the
-	// deterministic Liberation substitute (never an error, never a system font). An sfnt go-text rejects (no cmap
-	// table) but whose glyf/loca tables read keeps rendering its own shapes through the direct glyf walker. The
-	// substitute is the glyph source only when no embedded source exists, so GID/GlyphPath/Width stay mutually
-	// consistent.
+	// Shapes: an embedded program renders itself (an sfnt go-text rejects for lacking cmap still draws through the glyf
+	// walker); anything else renders through the deterministic Liberation substitute, never a system font. The
+	// substitute is the glyph source only when no embedded source exists, so GID/GlyphPath/Width stay consistent.
 	if f.sfnt == nil && f.cff == nil && f.t1 == nil {
 		f.sub = loadSubstitute(std14)
 	}
-	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs their hsbw advances
-	// (programAdvance); everything else — substituted fonts per the std14-styles pin, and bare CFF until its charstring
-	// advances land — takes the AFM widths of the standard-14 stand-in. The test is whether the sfnt actually has an
-	// advance source, not merely whether one parsed: a program with neither a go-text face nor an hmtx table supplies
-	// no advance at all, and suppressing the AFM table for it left every code at /MissingWidth (0 by default).
+	// Width fallback for /Widths-less fonts: sfnt programs supply hmtx advances and Type 1 programs hsbw advances
+	// (programAdvance); everything else — substituted fonts (the std14-styles pin) and bare CFF, whose charstring
+	// advances are not read — takes the AFM widths of the standard-14 stand-in. hasAdvances asks for an actual advance
+	// source, not a parsed program: an sfnt with neither a go-text face nor an hmtx table would otherwise leave every
+	// code at /MissingWidth (0 by default).
 	if !f.hasWidths && !f.sfnt.hasAdvances() && f.t1 == nil {
 		f.afm = data.AFMWidths(std14)
 	}
@@ -310,8 +299,8 @@ func loadWidths(d *cos.Document, dict cos.Dict, f *Font) bool {
 
 // Width returns the advance for a code in text space (em units at size 1). A present /Widths array is authoritative:
 // its value when the code resolves, /MissingWidth otherwise. Without one, substituted fonts use the standard-14 AFM
-// width for the code's glyph name and embedded sfnt programs their own hmtx advance, then /MissingWidth. Composite
-// fonts use /W with /DW as the default instead.
+// width for the code's glyph name and embedded sfnt and Type 1 programs their own advance (programAdvance), then
+// /MissingWidth. Composite fonts use /W with /DW as the default instead.
 //
 // nBytes is the number of bytes the code spanned in the string it was decoded from (1 for every simple font, whatever
 // ForEachCode reported for a composite one): a CMap entry applies only to codes of the length it was written with.
@@ -346,15 +335,12 @@ func (f *Font) Unicode(code uint32, nBytes uint8) rune {
 	return r
 }
 
-// UnicodeFull returns every rune a code maps to: the leading one Unicode reports, and — for the one-to-many /ToUnicode
-// mappings of ISO 32000-2 9.10.3, which a ligature glyph uses to spell out the letters it draws ("fl" for a single fl
-// glyph) — the runes after it. rest is nil for every ordinary code, so the extraction seam pays for the whole-target
-// decode only where a code really does carry more than one rune. It resolves both in one CMap lookup, which is why the
-// interpreter calls this rather than Unicode once per glyph and then asking again for the rest.
-//
-// Only /ToUnicode produces a rest; buildUnicode's glyph-name table is one rune per code, for the reasons given there. A
-// ligature glyph carrying no /ToUnicode is still searchable by the letters it draws, but by the other route: its name
-// reaches a ligature code point, which the structured-text device decomposes.
+// UnicodeFull returns every rune a code maps to: the leading rune Unicode reports and, for the one-to-many /ToUnicode
+// mappings of ISO 32000-2 9.10.3 (a ligature glyph spelling out "fl"), the runes after it. rest is nil for every
+// ordinary code, so callers pay for the whole-target decode only where a code carries more than one rune. Only
+// /ToUnicode produces a rest: buildUnicode's glyph-name table is one rune per code. A ligature glyph without /ToUnicode
+// is still searchable by its letters, because its name reaches a ligature code point the structured-text device
+// decomposes.
 func (f *Font) UnicodeFull(code uint32, nBytes uint8) (first rune, rest []rune) {
 	r, multi := f.lookupUnicode(code, nBytes)
 	if !multi {
@@ -364,7 +350,7 @@ func (f *Font) UnicodeFull(code uint32, nBytes uint8) (first rune, rest []rune) 
 }
 
 // lookupUnicode resolves a code's leading rune, reporting whether a /ToUnicode target supplied it and carried more
-// runes after it. The returns are unnamed so the inner lookup below can use the obvious names for them.
+// runes after it.
 func (f *Font) lookupUnicode(code uint32, nBytes uint8) (rune, bool) {
 	if f.toUni != nil {
 		if r, multi, ok := f.toUni.bfRune(code, nBytes); ok {
@@ -386,8 +372,7 @@ func (f *Font) GlyphName(code uint32) string {
 }
 
 // MemoryEstimate returns a rough byte footprint for cache budgeting (internal/store): the embedded program's data plus
-// a fixed allowance for the per-font tables. It never needs to be exact — the store's budget is a working-set bound,
-// not an accounting ledger.
+// a fixed allowance for the per-font tables.
 func (f *Font) MemoryEstimate() uint64 {
 	const base = 8 << 10 // gids/uni/enc tables, widths map, struct overhead.
 	n := uint64(base)
@@ -473,11 +458,10 @@ func (f *Font) ForEachCode(s []byte, fn func(code uint32, nBytes uint8) bool) {
 // conventions), else the code itself for ASCII, else unknown. A /ToUnicode CMap, when present, takes precedence over
 // this table at lookup time (see Unicode).
 //
-// One rune per code is all this table carries, which is the whole of what the glyph-name route can extract: MuPDF's
-// cid_to_ucs is an array of single values filled from fz_unicode_from_glyph_name, and a name resolving to several code
-// points (the AGL's Hebrew points, a multi-value uniXXXXYYYY) keeps only the first here as it does there. The one route
-// by which a name reaches more than one character is ligatureAltName below, which turns the name into a ligature code
-// point that the structured-text device then spells out.
+// The table holds one rune per code, which is all the glyph-name route can extract: MuPDF's cid_to_ucs is an array of
+// single values filled from fz_unicode_from_glyph_name, so a name resolving to several code points (the AGL's Hebrew
+// points, a multi-value uniXXXXYYYY) keeps only the first, as it does there. ligatureAltName is the one route by which
+// a name reaches more than one character, through a ligature code point the structured-text device spells out.
 func buildUnicode(f *Font) {
 	for code := range 256 {
 		if name := f.enc[code]; name != "" {
@@ -495,16 +479,15 @@ func buildUnicode(f *Font) {
 
 // ligatureAltName rewrites the five underscore-separated ligature names MuPDF's fz_unicode_from_glyph_name special-
 // cases ("f_l" and friends, the form an OpenType-aware producer writes for a ligature glyph) into the AGL names of the
-// code points they stand for; every other name passes through untouched.
+// code points they stand for; every other name passes through untouched. Without it "flu" set as one f_l glyph plus
+// "u" would extract as "fu": the name splits on the underscore and only the first component's rune survives. The
+// rewrite reaches an alphabetic-presentation code point instead, which the structured-text device decomposes back into
+// the letters drawn.
 //
-// Without it the name splits into components whose first alone survives, so a page setting "flu" as one f_l glyph plus
-// "u" extracted as "fu" and no reader could search for the word. The rewrite reaches an alphabetic-presentation code
-// point instead, which the structured-text device decomposes back into the letters drawn.
-//
-// The other underscore names are deliberately left alone: MuPDF truncates those at the first underscore, and taking
-// the first component's rune — which is what the split-and-keep-the-first-rune path already does — lands in the same
-// place. This is extraction only, exactly as it is in MuPDF, where fz_unicode_from_glyph_name feeds cid_to_ucs while
-// glyph SELECTION by name goes through fz_unicode_from_glyph_name_strict, which has no such rewrite.
+// The other underscore names are left alone: MuPDF truncates those at the first underscore, which lands where the
+// split-and-keep-the-first-rune path already does. This is extraction only, as in MuPDF, where
+// fz_unicode_from_glyph_name feeds cid_to_ucs while glyph selection by name goes through
+// fz_unicode_from_glyph_name_strict, which has no such rewrite.
 func ligatureAltName(name string) string {
 	trimmed := name
 	if dot := strings.IndexByte(trimmed, '.'); dot > 0 {

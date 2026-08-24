@@ -11,9 +11,6 @@
 
 package pdfview
 
-// Which of this package's vector kernels are worth dispatching to on arm64. A kernel whose benchmark does not beat
-// the scalar code it replaces on a given architecture is turned off here rather than deleted, since the same kernel
-// can be the right choice on another one. The values are settled from simd-bench.sh benchstat runs.
-//
-// arm64 values are settled by the coordinator from benchstat runs on this repo's reference arm64 machine.
+// Which of this package's vector kernels are worth dispatching to on arm64; see simd_prefs_amd64.go for the policy. The
+// values come from simd-bench.sh benchstat runs on the reference arm64 machine.
 const preferUnpremultiply = true

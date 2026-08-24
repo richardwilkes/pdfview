@@ -70,14 +70,12 @@ func extract(path, pageLabel, search string) (err error) {
 	}
 	fmt.Println(divider)
 
-	// A document whose catalog has no usable page tree opens successfully with zero pages, so there is nothing to
-	// render. Report that rather than letting RenderPage fail with "invalid page number".
+	// A document with no usable page tree opens with zero pages; report that rather than let RenderPage fail.
 	if doc.PageCount() == 0 {
 		fmt.Println("document has no renderable pages")
 		return nil
 	}
-	// Resolve the label to a 0-based page number. Labels are not unique: a document that restarts its numbering can
-	// have more than one page with the same label, so render the first match and report the rest.
+	// Labels are not unique (numbering can restart), so render the first match and report the rest.
 	pageNumber := 0
 	if pageLabel != "" {
 		matches := doc.PagesWithLabel(pageLabel)
@@ -92,7 +90,7 @@ func extract(path, pageLabel, search string) (err error) {
 	}
 	fmt.Printf("rendering page %d (label %q)\n", pageNumber, doc.PageLabel(pageNumber))
 
-	// Render the requested page at 150 DPI, reporting up to 10 search matches.
+	// 150 DPI, up to 10 search matches.
 	var page *pdfview.RenderedPage
 	if page, err = doc.RenderPage(pageNumber, 150, 10, search); err != nil {
 		return err

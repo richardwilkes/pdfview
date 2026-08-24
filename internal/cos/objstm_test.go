@@ -47,9 +47,9 @@ func TestParseObjStmClampsHeaderCount(t *testing.T) {
 }
 
 // TestParseObjStmClampsHeaderOffsets checks that an unbounded /First and unbounded header offsets cannot combine into a
-// position inside the payload. Both are file-supplied and objFromStm adds them together, so without clamping a pair such
-// as /First math.MaxInt64 with an offset of -(math.MaxInt64-3) lands on offset 3 — an object parsed from the wrong place
-// in the stream, reported as if it were the one asked for. Every such entry must be rejected instead.
+// position inside the payload. Both are file-supplied and objFromStm adds them together, so without clamping a pair
+// such as /First math.MaxInt64 with an offset of -(math.MaxInt64-3) lands on offset 3, an object parsed from the wrong
+// place in the stream and reported as if it were the one asked for. Every such entry must be rejected instead.
 func TestParseObjStmClampsHeaderOffsets(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -182,12 +182,9 @@ func TestObjStmIndexBuiltOnce(t *testing.T) {
 	}
 }
 
-// TestParseObjStmAllocatesFromEntriesRead covers the other half of the /N clamp. Clamping /N to len(data)/3 bounds the
-// header LOOP, but using it as the slice capacity made the allocation proportional to the DECODED payload, which
-// internal/filter lets reach max(64 MB, 256x input): a small file declaring a huge /N over a large payload of
-// non-numeric bytes broke out of the loop on the very first entry yet still retained two slices sized for the whole
-// payload, for the document's lifetime (repair() loads every object stream it finds). The slices must grow from the
-// entries that actually parse.
+// TestParseObjStmAllocatesFromEntriesRead covers the other half of the /N clamp: the header slices must grow from the
+// entries that actually parse, not be preallocated from the clamp, which is proportional to the decoded payload (see
+// parseObjStm).
 func TestParseObjStmAllocatesFromEntriesRead(t *testing.T) {
 	payload := bytes.Repeat([]byte("zz "), 1<<16) // Nothing here parses as a header integer.
 	d := &Document{}

@@ -17,51 +17,44 @@ import (
 	"github.com/go-text/typesetting/font/opentype"
 )
 
-// Budgeted Type 2 charstring interpretation (Adobe TN5177), the outline source for every CFF program the engine draws:
-// bare CFF/Type1C simple fonts, CIDFontType0 descendants, and the 'CFF ' table of a CFF-flavored OpenType program.
+// Budgeted Type 2 charstring interpretation (Adobe TN5177) for every CFF program the engine draws: bare CFF/Type1C
+// simple fonts, CIDFontType0 descendants, and the 'CFF ' table of a CFF-flavored OpenType program.
 //
 // go-text supplies the machine (psi.Machine) and the geometry operators (psi.CharstringReader), and its own
-// cff.CFF.LoadGlyph drives them with an unbudgeted handler: psi.Machine caps subroutine *nesting* at 10 but nothing
-// caps *branching*, so a charstring whose subroutines each call the next N times costs N^10 operator dispatches. A
-// 213-byte program with a branch factor of 9 already needs seconds for one glyph and the cost is exactly exponential in
-// the branch factor, so a slightly wider one never returns. The handler here is go-text's, operator for operator, with
-// a work budget threaded through it — the same shape as the direct glyf walker's glyfWorkBudget and internal/type1's
-// maxHandlerOps, which exist for the identical reason. Because it drives the very same CharstringReader methods, the
-// outlines it produces are those LoadGlyph produced; only the hostile programs behave differently, and they draw
-// nothing.
+// cff.CFF.LoadGlyph drives them unbudgeted: psi.Machine caps subroutine nesting at 10 but nothing caps branching, so a
+// charstring whose subroutines each call the next N times costs N^10 dispatches. A few hundred bytes with a branch
+// factor of 9 cost seconds for one glyph, and a slightly wider program never returns. The handler here is go-text's,
+// operator for operator, with a work budget threaded through it, like the glyf walker's glyfWorkBudget and
+// internal/type1's maxHandlerOps. It drives the same CharstringReader methods, so valid programs produce exactly the
+// outlines LoadGlyph does; only hostile programs differ, and they draw nothing.
 //
-// Three deliberate additions go past go-text, all of them TN5177-legal forms it fails or ignores where FreeType — and
-// so MuPDF — accepts them: the deprecated dotsection hint runs as a no-op, the arithmetic/storage/conditional operator
-// group (section 4.4-4.5) is implemented (compute below), and the four-operand endchar composes two standard-encoding
-// glyphs the way Type 1's seac did (seacEndchar below) instead of silently drawing an empty glyph. Type1C conversions
-// of Adobe-era fonts are where all three exist in the wild.
+// Three TN5177-legal forms go-text fails or ignores are implemented because FreeType, and so MuPDF, accepts them: the
+// deprecated dotsection hint runs as a no-op, the arithmetic/storage/conditional operator group (sections 4.4-4.5) runs
+// (compute), and the four-operand endchar composes two standard-encoding glyphs like Type 1's seac (seacEndchar).
+// Type1C conversions of Adobe-era fonts carry all three.
 //
-// Driving the machine ourselves means owning the subroutine arrays too: go-text keeps them unexported, so cffSubrs
-// re-walks the container (INDEX and DICT readers from cff.go) for the Global Subr INDEX, the Private DICT's local Subrs
-// and — for CID-keyed programs — the per-FDArray Private DICTs with the FDSelect that picks among them.
+// go-text keeps the subroutine arrays unexported, so cffSubrs re-walks the container (with cff.go's INDEX and DICT
+// readers) for the Global Subr INDEX, the Private DICT's local Subrs and, for CID-keyed programs, the per-FDArray
+// Private DICTs with the FDSelect that picks among them.
 
 // Caps against hostile Type 2 charstrings.
 const (
 	// maxCFFHandlerOps bounds one glyph's interpretation. Each operator costs one unit plus one per operand on the
-	// argument stack when it runs, so the budget prices the tokens actually executed rather than only the operators:
-	// without the operand charge a program could pair every dispatch with a 512-deep push run (the argument stack's own
-	// ceiling) and buy 500x the work for the same count. Real glyphs — including the densest CJK outlines — run a few
-	// thousand units.
+	// argument stack, so a program cannot pair every dispatch with a 513-deep push run (the argument stack's size) and
+	// buy 500x the work for the same count. Real glyphs, including the densest CJK outlines, run a few thousand units.
 	maxCFFHandlerOps = 1 << 18
-	// maxCFFSegments bounds one glyph's emitted outline segments, like internal/type1's cap of the same name: the
-	// budget above bounds the operators, but rlineto and its relatives emit one segment per operand pair, so the
-	// segment count needs its own ceiling to keep a legal-looking charstring from amplifying into hundreds of megabytes
-	// of path.
+	// maxCFFSegments bounds one glyph's emitted outline segments, like internal/type1's maxSegments: rlineto and its
+	// relatives emit one segment per operand pair, so the operator budget alone would let a legal-looking charstring
+	// amplify into hundreds of megabytes of path.
 	maxCFFSegments = 1 << 14
 	// maxCFFSubrs bounds the entries read from one subroutine INDEX. An INDEX count is a Card16, so this drops nothing
 	// a conforming program can express.
 	maxCFFSubrs = 65536
 	// maxCFFFontDicts bounds the FDArray entries of a CID-keyed program (FDSelect indices are single bytes).
 	maxCFFFontDicts = 256
-	// maxCFFArithValue bounds every value the arithmetic operators may leave on the stack. Numbers the machine parses
-	// are at most 16-bit-integer sized, so before compute existed nothing on the stack could take a coordinate past
-	// float32's range; a mul/add chain can, and a non-finite float32 must never reach outline geometry. 2^30 is far
-	// past any coordinate a real glyph computes and still leaves the full budget's worth of accumulation finite.
+	// maxCFFArithValue bounds every value the arithmetic operators push. Parsed numbers are at most 16-bit-integer
+	// sized, so only a mul/add chain can carry a coordinate past float32's range, and a non-finite float32 must never
+	// reach outline geometry. 2^30 is far past any real coordinate and keeps a full budget's worth of accumulation finite.
 	maxCFFArithValue = 1 << 30
 	// cffTransientSize is the transient array behind put/get, at the size TN5177 Appendix B guarantees.
 	cffTransientSize = 32
@@ -78,7 +71,7 @@ type cffSubrs struct {
 	fdSelect []uint8
 }
 
-// globalFor returns the global subroutines (nil-receiver safe: a program whose container walk failed simply has none).
+// globalFor returns the global subroutines (nil-safe: a program whose container walk failed has none).
 func (c *cffSubrs) globalFor() [][]byte {
 	if c == nil {
 		return nil
@@ -103,8 +96,8 @@ func (c *cffSubrs) localFor(gid uint32) [][]byte {
 }
 
 // parseCFFSubrs re-walks a CFF container for its subroutine arrays. Anything unreadable yields nil or a partial result
-// rather than an error: a missing array leaves the calls into it failing, which drops the glyph, and that is the same
-// degradation every other malformed-program path in this package takes.
+// rather than an error: calls into a missing array fail and drop the glyph, the same degradation every other
+// malformed-program path in this package takes.
 func parseCFFSubrs(data []byte, top *cffTop, nGlyphs int) *cffSubrs {
 	if len(data) < 4 {
 		return nil
@@ -128,17 +121,17 @@ func parseCFFSubrs(data []byte, top *cffTop, nGlyphs int) *cffSubrs {
 	if err != nil {
 		return nil
 	}
-	// One budget covers every array the program declares. A single INDEX cannot exceed maxCFFSubrs (its count is a
-	// Card16), but a CID-keyed program may name up to 256 font DICTs, and pointing all of them at one large INDEX would
-	// otherwise turn a 64 KB program into hundreds of megabytes of slice headers.
+	// One budget covers every array the program declares: a CID-keyed program may name up to 256 font DICTs, and
+	// pointing all of them at one large INDEX would otherwise turn a 64 KB program into hundreds of megabytes of slice
+	// headers.
 	budget := maxCFFSubrs - len(global)
 	out := &cffSubrs{global: global}
 	if !top.isCID {
 		out.local = [][][]byte{cffLocalSubrs(data, top.privOff, top.privSize, &budget)}
 		return out
 	}
-	// CID-keyed: the Private DICT (and so the local subroutines) is per font DICT, and FDSelect names the one each
-	// glyph uses (TN5176 sections 18-19).
+	// CID-keyed: the Private DICT, and so the local subroutines, is per font DICT, and FDSelect names the one each glyph
+	// uses (TN5176 sections 18-19).
 	fontDicts, _, err := cffIndex(data, top.fdArrayOff, maxCFFFontDicts)
 	if err != nil || len(fontDicts) == 0 {
 		return out
@@ -183,9 +176,9 @@ func cffLocalSubrs(data []byte, privOff, privSize int, budget *int) [][]byte {
 	if subrsOff <= 0 || privOff+subrsOff > len(data) {
 		return nil
 	}
-	// An array trimmed to fit the budget would shift the Type 2 subroutine bias (which is derived from the array's
-	// length) and resolve every call in this font DICT to the wrong routine, so one that does not fit yields nothing at
-	// all: the glyphs go blank rather than drawing another routine's shape.
+	// An array trimmed to fit the budget would shift the Type 2 subroutine bias, which derives from the array's length,
+	// and resolve every call in this font DICT to the wrong routine, so one that does not fit yields nothing: the glyphs
+	// go blank rather than drawing another routine's shape.
 	if count := cffIndexCount(data, privOff+subrsOff); count < 0 || count > *budget {
 		return nil
 	}
@@ -244,9 +237,9 @@ func cffFDSelectRanges(data []byte, pos, nGlyphs, gidSize int) []uint8 {
 	for i := range nRanges {
 		at := pos + i*(gidSize+1)
 		first := be(at, gidSize)
-		// TN5176 section 19 requires the records to be in increasing GID order, which is also what go-text's binary
-		// search over them assumes. Enforcing it keeps each glyph written at most once: overlapping records would let a
-		// short table cost nRanges × nGlyphs writes, and a mis-ordered one cannot be read correctly anyway.
+		// TN5176 section 19 requires increasing GID order, which go-text's binary search also assumes. Enforcing it writes
+		// each glyph at most once: overlapping records would let a short table cost nRanges × nGlyphs writes, and a
+		// mis-ordered one cannot be read correctly anyway.
 		if first < covered {
 			return nil
 		}
@@ -260,9 +253,8 @@ func cffFDSelectRanges(data []byte, pos, nGlyphs, gidSize int) []uint8 {
 	return out
 }
 
-// type2Handler interprets a Type 2 charstring, mirroring go-text's own handler operator for operator so the outlines
-// match what cff.CFF.LoadGlyph would have produced (plus the package comment's deliberate additions), and charging
-// every dispatch against a work budget so a hostile subroutine call graph cannot run unbounded.
+// type2Handler interprets a Type 2 charstring under the work budget, mirroring go-text's handler operator for operator
+// plus the additions described in the file comment above.
 type type2Handler struct {
 	info *cffInfo // The owning program, for the component charstrings a seac endchar names.
 	cs   psi.CharstringReader
@@ -287,12 +279,12 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 	if op.IsEscaped {
 		switch op.Operator {
 		case 0: // dotsection
-			// A Type 1 hint bracketing the dot of letters like 'i' that survives in Type1C conversions of Adobe-era
-			// fonts. TN5177 Appendix A keeps it reserved and FreeType (so also MuPDF) runs it as a no-op; go-text's own
-			// handler rejects it, which would drop the whole glyph over an operator that carries no geometry.
+			// A Type 1 hint bracketing the dot of letters like 'i', kept by Type1C conversions of Adobe-era fonts. TN5177
+			// Appendix A reserves it and FreeType runs it as a no-op; go-text's handler rejects it, dropping the whole glyph
+			// over an operator that carries no geometry.
 		case 3, 4, 5, 9, 10, 11, 12, 14, 15, 18, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30:
-			// The arithmetic, storage, and conditional operators compute on the argument stack and leave their
-			// results there for the operator that consumes them, so they never clear it.
+			// The arithmetic, storage, and conditional operators leave their results on the stack for the operator that
+			// consumes them, so they never clear it.
 			return h.compute(state, op.Operator)
 		case 34: // hflex
 			err = h.cs.Hflex(state)
@@ -310,11 +302,11 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 	}
 	switch op.Operator {
 	case 11: // return
-		return state.Return() // Does not clear the argument stack.
+		return state.Return()
 	case 14: // endchar
-		// The optional leading width operand is the PDF /Widths' business, not the outline's, so it is dropped here.
-		// Four operands (five with that width) are the deprecated accented-glyph form instead — exactly the two counts
-		// FreeType accepts, so a sloppy charstring with other junk left on the stack still just ends.
+		// The optional leading width is dropped: /Widths supplies advances. Four operands (five with the width) are the
+		// deprecated accented-glyph form, exactly the two counts FreeType accepts, so other leftovers on the stack still
+		// just end the glyph.
 		if state.ArgStack.Top == 4 || state.ArgStack.Top == 5 {
 			if err = h.seacEndchar(state); err != nil {
 				return err
@@ -323,9 +315,9 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 		h.cs.ClosePath()
 		return psi.ErrInterrupt
 	case 10: // callsubr
-		return psi.LocalSubr(state) // Does not clear the argument stack.
+		return psi.LocalSubr(state)
 	case 29: // callgsubr
-		return psi.GlobalSubr(state) // Does not clear the argument stack.
+		return psi.GlobalSubr(state)
 	case 21: // rmoveto
 		err = h.cs.Rmoveto(state)
 	case 22: // hmoveto
@@ -337,7 +329,7 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 	case 3, 23: // vstem, vstemhm
 		h.cs.Vstem(state)
 	case 19, 20: // hintmask, cntrmask
-		h.cs.Hintmask(state) // Skips the mask bytes and manages the stack itself.
+		h.cs.Hintmask(state)
 		return nil
 	case 5: // rlineto
 		h.cs.Rlineto(state)
@@ -367,8 +359,7 @@ func (h *type2Handler) Apply(state *psi.Machine, op psi.Operator) error {
 }
 
 // glyphSegments interprets one glyph's charstring under the work budget, reporting false when the glyph is out of range
-// or the charstring failed (malformed, or over budget) — the caller then draws nothing, exactly as it did for a
-// LoadGlyph error.
+// or the charstring failed (malformed, or over budget); the caller then draws nothing.
 func (c *cffInfo) glyphSegments(gid uint32) ([]opentype.Segment, bool) {
 	if c.font == nil || uint64(gid) >= uint64(len(c.font.Charstrings)) {
 		return nil, false
@@ -382,10 +373,9 @@ func (c *cffInfo) glyphSegments(gid uint32) ([]opentype.Segment, bool) {
 }
 
 // compute runs one operator of the arithmetic, storage, and conditional group (TN5177 sections 4.4 and 4.5), which
-// go-text's handler rejects wholesale even though old Type1C conversions genuinely reach div and its siblings. Results
-// stay on the stack for the operator that consumes them. Malformed use — underflow, a zero divisor, a negative square
-// root, an out-of-range index — fails the glyph like any other bad charstring, and every pushed value is bounded so no
-// operator chain can carry a coordinate past what outline geometry survives.
+// go-text's handler rejects wholesale even though old Type1C conversions reach div and its siblings. Results stay on
+// the stack for the operator that consumes them. Malformed use (underflow, a zero divisor, a negative square root, an
+// out-of-range index) fails the glyph, and every pushed value is bounded by maxCFFArithValue.
 func (h *type2Handler) compute(state *psi.Machine, op byte) error {
 	st := &state.ArgStack
 	push := func(v float64) error {
@@ -545,9 +535,8 @@ func rollStack(st *psi.ArgStack, n, j int32) {
 	copy(group, rotated)
 }
 
-// random returns the next value in (0,1] for operator 12 23. The spec asks only for a pseudo-random value in that
-// range, and a page must raster identically on every run and platform, so this is a fixed-seed xorshift sequence
-// rather than anything environmental (FreeType is deterministic here for the same reason).
+// random returns the next value in (0,1] for operator 12 23. A page must raster identically on every run and platform,
+// so this is a fixed-seed xorshift32 sequence rather than anything environmental (FreeType is deterministic here too).
 func (h *type2Handler) random() float64 {
 	if h.rng == 0 {
 		h.rng = 2463534242 // Marsaglia's xorshift32 example seed.
@@ -559,10 +548,9 @@ func (h *type2Handler) random() float64 {
 }
 
 // seacEndchar composes the deprecated accented-glyph endchar (TN5177 Appendix C): adx ady bchar achar name two
-// standard-encoding glyphs, the base drawn in place and the accent displaced by (adx, ady). go-text reads none of it
-// and returns an empty outline for such glyphs; FreeType composes, and accented Latin glyphs in Type1C conversions are
-// exactly where the form survives. A component may not itself compose (FreeType rejects the nesting too), and both
-// components share the caller's work budget, so a self-referential program terminates instead of recursing.
+// standard-encoding glyphs, the base drawn in place and the accent displaced by (adx, ady). go-text returns an empty
+// outline for such glyphs; FreeType composes them. A component may not itself compose (FreeType rejects the nesting
+// too), and both components share the caller's work budget, so a self-referential program terminates.
 func (h *type2Handler) seacEndchar(state *psi.Machine) error {
 	if h.info == nil || h.inSeac {
 		return errBadCFF

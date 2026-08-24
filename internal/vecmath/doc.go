@@ -7,17 +7,15 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package vecmath holds the small arithmetic helpers shared by this module's goexperiment.simd vector kernels.
+// Package vecmath holds the arithmetic helpers shared by this module's goexperiment.simd vector kernels.
 //
-// Everything with an implementation lives in files guarded by //go:build goexperiment.simd, since the standard
-// library's simd package only exists under that experiment. This file carries no build tag so that the package
-// always has at least one Go source file and the default (non-experiment) build of ./... still succeeds; it
-// deliberately declares nothing.
+// Every file with an implementation is guarded by //go:build goexperiment.simd, since the standard library's simd
+// package only exists under that experiment. This file carries no build tag so the package always has a Go source
+// file and the default build of ./... still succeeds; it declares nothing.
 //
-// The helpers here are the pieces every kernel needs and nobody should re-derive: reciprocal-multiply division by
-// the alpha (255) and luminosity-weight (252) denominators, each backed by an exhaustive proof over its documented
-// input domain in vecmath_test.go. That test file also pins the simd semantics the kernels are designed around —
-// wrapping (not saturating) 8-bit adds, arithmetic right shifts on signed lanes, truncate-toward-zero float
-// conversion, and little-endian lane order across reshapes — so a change in those semantics fails here loudly
-// instead of quietly corrupting pixels somewhere downstream.
+// The helpers are reciprocal-multiply division by the alpha (255) and luminosity-weight (252) denominators, each
+// proven exhaustively over its documented input domain in vecmath_test.go. That test file also pins the simd
+// semantics the kernels rely on (wrapping 8-bit adds, arithmetic right shifts on signed lanes, truncate-toward-zero
+// float conversion, and little-endian lane order across reshapes) so a change in them fails there instead of
+// corrupting pixels downstream.
 package vecmath

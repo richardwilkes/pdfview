@@ -16,9 +16,9 @@ import (
 	"testing"
 )
 
-// TestDispatchIsScalarWithoutExperiment pins the promise the default build makes: with no goexperiment.simd, nothing
-// exists to repoint the dispatch variables, so they still hold the scalar functions that shipped before any kernel
-// did. The tagged half of this pair, in simd_equiv_test.go, pins the other direction.
+// TestDispatchIsScalarWithoutExperiment pins the default build's promise: with no goexperiment.simd, nothing exists to
+// repoint the dispatch variables, so they hold the scalar functions. TestKernelsWiredWithExperiment in
+// simd_equiv_test.go pins the other direction.
 func TestDispatchIsScalarWithoutExperiment(t *testing.T) {
 	for _, entry := range []struct {
 		name string

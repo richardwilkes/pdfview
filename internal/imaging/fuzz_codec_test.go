@@ -17,12 +17,12 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// FuzzJBIG2 drives raw JBIG2Decode payloads and /JBIG2Globals bytes through decodeJBIG2Plane, the same entry point the
-// three switch sites reach, so the segment-header scan, the pixel budget, and the panic recovery wrap the third-party
-// decoder exactly as they do in production. The third argument is the dictionary /Height the plane is produced at, so
-// the fuzzer explores the crop and white-fill paths as well as the decode. The decoder must neither panic nor hang,
-// must never return a plane inconsistent with the column count it reports, and must never produce one past the budget
-// the payload's own size allows. Seeds are the corpus files' JBIG2 payloads paired with their globals streams.
+// FuzzJBIG2 drives raw JBIG2Decode payloads and /JBIG2Globals bytes through decodeJBIG2Plane, the entry point every
+// decodeJBIG2 caller reaches, so the segment-header scan, the pixel budget, and the panic recovery wrap the decoder
+// exactly as in production. The third argument is the dictionary /Height, so the crop and white-fill paths are
+// explored too. The decoder must neither panic nor hang, must return a plane consistent with the column count it
+// reports, and must stay inside the budget the payload's size allows. Seeds are the corpus files' JBIG2 payloads
+// paired with their globals streams.
 func FuzzJBIG2(f *testing.F) {
 	for _, seed := range codecSeeds(f, codecJBIG2Names) {
 		f.Add(seed.payload, seed.globals, seed.height)
@@ -42,12 +42,11 @@ func FuzzJBIG2(f *testing.F) {
 	})
 }
 
-// FuzzJPX drives raw JPXDecode payloads through jpxRasterFor, the entry point run() and alphaPlane reach, so the
-// header-parse budget check and the panic recovery wrap the third-party decoder exactly as they do in production. Each
-// payload runs under both /Indexed verdicts, since that flag selects between the container's own rendering and the raw
-// component planes. The decoder must neither panic nor hang, and every raster it returns must be self-consistent and
-// inside the budget the payload's own size allows. Seeds are the corpus files' JPX payloads, both JP2-wrapped and bare
-// codestreams.
+// FuzzJPX drives raw JPXDecode payloads through jpxRasterFor, the entry point run and alphaPlane reach, so the
+// header-parse budget check and the panic recovery wrap the decoder exactly as in production. Each payload runs under
+// both /Indexed verdicts, since that flag selects between the container's own rendering and the raw component planes.
+// The decoder must neither panic nor hang, and every raster it returns must be self-consistent and inside the budget
+// the payload's size allows. Seeds are the corpus files' JPX payloads, both JP2-wrapped and bare codestreams.
 func FuzzJPX(f *testing.F) {
 	for _, seed := range codecSeeds(f, codecJPXNames) {
 		f.Add(seed.payload)

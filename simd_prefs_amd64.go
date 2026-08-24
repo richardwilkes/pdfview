@@ -11,10 +11,10 @@
 
 package pdfview
 
-// Which of this package's vector kernels are worth dispatching to on amd64. A kernel whose benchmark does not beat
-// the scalar code it replaces on a given architecture is turned off here rather than deleted, since the same kernel
-// can be the right choice on another one. The values are settled from simd-bench.sh benchstat runs.
+// Which of this package's vector kernels are worth dispatching to on amd64. A kernel whose benchmark does not beat the
+// scalar code on an architecture is turned off here rather than deleted, since it can be the right choice on another.
+// The values come from simd-bench.sh benchstat runs.
 //
-// Settled 2026-08-21 from a simd-bench.sh run on an Intel Xeon W-2191B (Skylake-X): 1.4x on an opaque page, 4.7x on
-// banded translucency, 1.7x on scattered translucency.
+// Unpremultiply on an Intel Xeon W-2191B (Skylake-X): 1.4x on an opaque page, 4.7x on banded translucency, 1.7x on
+// scattered translucency.
 const preferUnpremultiply = true

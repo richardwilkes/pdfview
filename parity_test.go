@@ -23,12 +23,11 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testsupport"
 )
 
-// TestParity walks the committed goldens (testfiles/goldens/<name>/truth.json plus PNGs, produced from testfiles/corpus
-// by oracle/regen.sh) and compares the full public API surface against the recorded MuPDF behavior: open success and
-// the corpus/golden pairing (sha256), PageCount, RequiresAuthentication and the Authenticate status bits for every
-// recorded attempt, TableOfContents at every recorded DPI, render dimensions, stride, and links, search hit rectangles
-// for every recorded needle (exact), and pixel content within each golden's gate — its thresholds.json ratchet when
-// present (the measured, understood divergences such as substitute-font letterforms), else the default thresholds.
+// TestParity compares the full public API surface against the goldens (testfiles/goldens/<name>/truth.json plus PNGs,
+// produced from testfiles/corpus by oracle/regen.sh) recording MuPDF's behavior: the corpus/golden sha256 pairing,
+// PageCount, authentication status for every recorded attempt, TableOfContents at every recorded DPI, render
+// dimensions, stride, and links, search hits for every recorded needle (exact), and pixels within each golden's gate
+// (its thresholds.json ratchet when present, else the default thresholds).
 func TestParity(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("testfiles", "goldens"))
 	if err != nil {
@@ -176,10 +175,8 @@ func parityRender(t *testing.T, golden *testsupport.Golden, doc *pdfview.Documen
 			compareHits(t, fmt.Sprintf("%s search %q", label, needle), again.SearchHits, render.Search[needle])
 		}
 	}
-	// images-jbig2's own golden records MuPDF padding its failed JBIG2 decode into a black square, a divergence this
-	// engine deliberately does not reproduce (the vendored decoder rejects the garbage payload and the image renders
-	// blank); its pixel content is enforced in TestImageCorpusPixels against the images-jpx golden, whose page content
-	// is byte-identical apart from the codec name. Everything else about it (dims, stride, links) compares above.
+	// images-jbig2's golden records MuPDF padding its failed JBIG2 decode into a black square, which this engine does
+	// not reproduce (the image renders blank); TestImageCorpusPixels gates its pixels against the images-jpx golden.
 	if golden.Name == "images-jbig2" {
 		return
 	}

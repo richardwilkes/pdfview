@@ -12,8 +12,8 @@
 package jbig2
 
 // Whether each kernel is worth using on arm64. A kernel that loses its benchmark on one architecture gets its
-// constant cleared there rather than being deleted, so the other architectures keep it. These values are settled per
-// architecture from simd-bench.sh benchstat results; the coordinator settles arm64's after this area lands.
+// constant cleared there rather than deleted, so the other architectures keep it. These values are settled per
+// architecture from simd-bench.sh benchstat results.
 
 const (
 	// preferComposeBytes selects composeBytesSIMD for byte-aligned composition.

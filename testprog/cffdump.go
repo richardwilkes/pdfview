@@ -11,8 +11,8 @@ package main
 
 import "fmt"
 
-// dumpCFFPrivate walks a bare CFF program far enough to print the Top DICT and Private DICT operators, so the exact
-// operator a stricter parser rejects can be identified. Minimal TN5176 reader; ignores everything it doesn't need.
+// dumpCFFPrivate walks a bare CFF program far enough to print the Top DICT and Private DICT operators, so the operator
+// a stricter parser rejects can be identified. It is a minimal TN5176 reader that ignores everything else.
 func dumpCFFPrivate(raw []byte) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -46,9 +46,8 @@ func dumpCFFPrivate(raw []byte) {
 	fmt.Println()
 }
 
-// sanitizeCFFPrivate returns a copy of raw with deprecated Private DICT operators (ForceBoldThreshold 12 15, lenIV
-// 12 16) rewritten to the whitelisted same-arity initialRandomSeed (12 19), plus whether anything changed. Experiment
-// for validating the fix approach.
+// sanitizeCFFPrivate returns a copy of raw with the deprecated Private DICT operators ForceBoldThreshold (12 15) and
+// lenIV (12 16) rewritten to the accepted, same-arity initialRandomSeed (12 19), plus whether anything changed.
 func sanitizeCFFPrivate(raw []byte) (out []byte, changed bool) {
 	defer func() {
 		if recover() != nil {
@@ -88,7 +87,7 @@ func sanitizeDictBytes(dict []byte) bool {
 		case b <= 21:
 			if b == 12 && i+1 < len(dict) {
 				if dict[i+1] == 15 || dict[i+1] == 16 { // ForceBoldThreshold / lenIV
-					dict[i+1] = 19 // initialRandomSeed: whitelisted, same arity, value ignored
+					dict[i+1] = 19 // initialRandomSeed: accepted, same arity, value ignored
 					changed = true
 				}
 				i += 2

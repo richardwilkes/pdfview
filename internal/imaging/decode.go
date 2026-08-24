@@ -27,10 +27,9 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 	bilevel := isCCITT(dec.codec) || isJBIG2(dec.codec)
 	switch {
 	case bilevel:
-		// CCITT and JBIG2 output is always one bit per sample; rows are byte-aligned at the decoder's column count,
-		// which may differ from /Width (extra columns are dropped, missing ones read as zero samples). Both codecs fix
-		// bpc at 1 regardless of /BitsPerComponent, so we do not consult (or require) that key here — deployed viewers
-		// render such images when they omit it, and so do we.
+		// CCITT and JBIG2 output is one bit per sample in rows byte-aligned at the decoder's column count, which may
+		// differ from /Width (extra columns are dropped, missing ones read as zero samples). Neither consults
+		// /BitsPerComponent, so a stream that omits it still decodes, as in deployed viewers.
 		var cols int
 		var err error
 		if isCCITT(dec.codec) {
@@ -61,10 +60,8 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		return nil, ErrBadImage
 	}
 	if bilevel && ncomp != 1 {
-		// CCITT and JBIG2 are bilevel, single-component codecs: their rows are cols one-bit samples, one per pixel, and
-		// rowStride above is sized for that. A multi-component color space would make the per-pixel loop read ncomp
-		// samples per pixel against a single-component row, producing garbage. Decline the malformed pairing (rendered
-		// blank).
+		// A bilevel row holds one single-component sample per pixel, so a multi-component space would read ncomp
+		// samples per pixel against it and produce garbage.
 		return nil, ErrBadImage
 	}
 	if rowStride == 0 {
@@ -82,9 +79,8 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 		reader.seek(y * rowStride)
 		for x := range w {
 			for c := range ncomp {
-				// Columns past the decoder's own count (CCITT with /Width > /Columns) are not present in the row's
-				// byte-aligned data; reading them would consume padding and then the next row's bits, so they read as
-				// zero samples per the contract above.
+				// Columns past the decoder's count are not in the byte-aligned row; reading them would consume padding
+				// and then the next row's bits, so they read as zero samples.
 				if x < validCols {
 					samples[c] = reader.next()
 				} else {
@@ -103,9 +99,8 @@ func (dec *decoder) decodeSamples(w, h int, interpolate bool) (*Image, error) {
 			if colorKey != nil && inColorKey(samples, colorKey) {
 				out.A = 0
 			}
-			// HasAlpha reports whether any pixel is non-opaque, so it tracks the emitted alpha rather than only the
-			// color-key path: a color space can produce a transparent color on its own (/Separation /None's ToNRGBA
-			// returns the zero NRGBA), and declaring that surface opaque to the renderer is a contract violation.
+			// A color space can produce a transparent color on its own (/Separation /None returns the zero NRGBA), so
+			// HasAlpha tracks the emitted alpha rather than only the color-key path.
 			if out.A != 255 {
 				hasAlpha = true
 			}
@@ -160,10 +155,8 @@ func (dec *decoder) decodeArray(ncomp int) []float32 {
 	out := make([]float32, 2*ncomp)
 	for i := range out {
 		v, numOK := cos.AsReal(dec.d.Resolve(arr[i]))
-		// The finiteness test is applied after the narrowing: a legal PDF number beyond float32's range is a finite
-		// float64 but ±Inf here, which makes decodeMapping's dmin/dscale non-finite and maps every sample to ±Inf/NaN.
-		// color.clamp01 and alphaByte absorb that today, but dctByteMapping and the lut tables take the same values, so
-		// the guarantee belongs at the validation.
+		// Test finiteness after narrowing: a legal PDF number beyond float32's range is a finite float64 but ±Inf here,
+		// which would make dmin/dscale non-finite and map every sample to ±Inf/NaN in dctByteMapping and the LUTs.
 		f := float32(v)
 		if !numOK || math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
 			return nil
@@ -173,9 +166,9 @@ func (dec *decoder) decodeArray(ncomp int) []float32 {
 	return out
 }
 
-// lut precomputes the sample→NRGBA table for single-component spaces at 8 bits or fewer, covering the common grayscale,
-// indexed, and single-tint images without a per-pixel interface call. Multi-component and 16-bit images convert per
-// pixel.
+// lut precomputes the sample→NRGBA table for single-component spaces at 8 bits or fewer, covering the common
+// grayscale, indexed, and single-tint images without a per-pixel interface call. Multi-component and 16-bit images
+// convert per pixel.
 func (m *decodeMapping) lut(space pdfcolor.Space, bpc int) []color.NRGBA {
 	if space.NComponents() != 1 || bpc > 8 {
 		return nil
@@ -190,9 +183,9 @@ func (m *decodeMapping) lut(space pdfcolor.Space, bpc int) []color.NRGBA {
 	return table
 }
 
-// colorKeyRanges returns the /Mask color-key ranges as flat [min, max] pairs in raw sample space (ISO 32000-2 8.9.6.5),
-// or nil when /Mask is absent or not an array — or when an /SMask is present, which overrides the /Mask entry entirely
-// (8.9.6.6). Out-of-range and reversed entries are clamped rather than rejected.
+// colorKeyRanges returns the /Mask color-key ranges as flat [min, max] pairs in raw sample space (ISO 32000-2
+// 8.9.6.5), or nil when /Mask is absent or not an array, or when an /SMask is present (it overrides /Mask; see
+// applyMasks). Out-of-range and reversed entries are clamped rather than rejected.
 func (dec *decoder) colorKeyRanges(ncomp, bpc int) []uint32 {
 	if _, hasSMask := dec.softMaskStream(); hasSMask {
 		return nil
@@ -229,13 +222,12 @@ func inColorKey(samples, ranges []uint32) bool {
 	return true
 }
 
-// stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked with the current paint. A
-// decoded sample of 0 marks under the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT and JBIG2
-// payloads decode to bits first; DCT (degenerate but tolerated) thresholds the gray plane at one half. JPX is declined
-// outright: unpacking a still-compressed continuous-tone payload as 1-bpc samples would punch pseudo-random holes in an
-// otherwise correct base image, and the oracle evidence for the codec's stencil behavior covers only the /ImageMask
-// XObject, which run() diverts to decodeJPX before reaching here. What still arrives is applyStencilMask's /Mask
-// stencil stream, which no golden pins.
+// stencilPlane decodes an ImageMask's bits to a coverage plane: 255 where the page is marked. A sample of 0 marks under
+// the default Decode [0 1]; Decode [1 0] flips (ISO 32000-2 8.9.6.2). CCITT and JBIG2 payloads decode to bits first;
+// DCT (degenerate but tolerated) thresholds the gray plane at one half. JPX is declined: unpacking a still-compressed
+// payload as 1-bpc samples would punch pseudo-random holes in a correct base image, and the oracle evidence for the
+// codec covers only the /ImageMask XObject, which run diverts to decodeJPX. What still arrives is applyStencilMask's
+// /Mask stencil stream, which no golden pins.
 func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	if isJPX(dec.codec) {
 		return nil, ErrUnsupportedCodec
@@ -279,8 +271,7 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	for y := range h {
 		reader.seek(y * rowStride)
 		for x := range w {
-			// Columns past the decoder's count read as zero samples (see decodeSamples); crossing the byte-aligned
-			// row boundary into padding or the next row would otherwise corrupt the stencil.
+			// Columns past the decoder's count read as zero samples (see decodeSamples).
 			sample := uint32(0)
 			if x < validCols {
 				sample = reader.next()
@@ -293,10 +284,9 @@ func (dec *decoder) stencilPlane(w, h int) ([]byte, error) {
 	return alpha, nil
 }
 
-// thresholdScalar fills dst with the stencil coverage of a gray plane: 255 where the sample is below half, 0
-// elsewhere, or the reverse when invert is set. dst and gray must be the same length, and dst must start zero-filled —
-// this writes only the 255s and leaves the rest of a freshly allocated plane as it found it. See thresholdFn for the
-// vector form.
+// thresholdScalar fills dst with the stencil coverage of a gray plane: 255 where the sample is below 128, else 0, or
+// the reverse when invert is set. dst and gray must be the same length, and dst must start zero-filled: only the 255s
+// are written. thresholdFn is the vector form.
 func thresholdScalar(dst, gray []byte, invert bool) {
 	for i, v := range gray[:len(dst)] {
 		if (v < 128) != invert {
@@ -305,13 +295,10 @@ func thresholdScalar(dst, gray []byte, invert bool) {
 	}
 }
 
-// invertBytesScalar writes the ones' complement of src into dst, which must be the same length. It is how the JBIG2
-// row copy flips polarity: that codec stores ink as set bits, the opposite of this package's packed convention. See
-// invertBytesFn for the vector form.
-//
-// dctCMYK's Adobe re-inversion is the same operation on whole bytes (255 − v and ^v agree for every byte) but does
-// not use this: reconstructing the row into a buffer ahead of that loop measured ~10% slower than the subtraction it
-// already folds into the per-component read, in both builds, because the conversion after it dominates.
+// invertBytesScalar writes the ones' complement of src into dst, which must be the same length. The JBIG2 row copy uses
+// it to flip polarity: that codec stores ink as set bits, the opposite of this package's packed convention. dctCMYK's
+// 255−v is the same operation but stays inline: a separate inversion pass measured ~10% slower, since the conversion
+// after it dominates. invertBytesFn is the vector form.
 func invertBytesScalar(dst, src []byte) {
 	src = src[:len(dst)]
 	for i := range dst {
@@ -320,8 +307,7 @@ func invertBytesScalar(dst, src []byte) {
 }
 
 // rowStrideFor returns the byte length of one row of w pixels at ncomp components of bpc bits each. The product tops
-// out at 2^35 bits (2^26 columns * 32 components * 16 bits, the caps run enforces), well inside the 64-bit int this
-// engine requires.
+// out at 2^35 bits (2^26 columns × 32 components × 16 bits, the caps this package enforces), inside a 64-bit int.
 func rowStrideFor(w, ncomp, bpc int) int {
 	return (w*ncomp*bpc + 7) / 8
 }
@@ -339,7 +325,6 @@ func (r *sampleReader) seek(byteOff int) {
 	r.pos = byteOff * 8
 }
 
-// next returns the next sample.
 func (r *sampleReader) next() uint32 {
 	switch r.bpc {
 	case 8:

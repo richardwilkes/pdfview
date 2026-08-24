@@ -192,11 +192,10 @@ func (l *lexer) lexNumber() token {
 		i++
 	}
 	if i < len(span) && span[i] == '.' {
-		// Real: parse the mantissa span with strconv for correct rounding, ignoring any junk beyond a second decimal
-		// point. A range error is not a parse failure: strconv still hands back the correctly-signed infinity (or zero,
-		// on underflow), which is the right answer and one the downstream finiteness guards reject. Falling back to
-		// `whole` there would instead yield the arbitrary truncated prefix accumulated before the integer overflow was
-		// detected, letting a bogus finite coordinate through.
+		// Real: strconv parses the mantissa for correct rounding, ignoring junk beyond a second decimal point. A range
+		// error is not a parse failure: strconv still returns the correctly signed infinity (or zero on underflow),
+		// which the downstream finiteness guards reject. Falling back to `whole` would yield the truncated prefix
+		// accumulated before the overflow was detected and let a bogus finite coordinate through.
 		end := i + 1
 		for end < len(span) && span[end] >= '0' && span[end] <= '9' {
 			end++
@@ -349,11 +348,10 @@ func (l *lexer) lexLiteralString() (token, error) {
 	return token{}, errUnterminatedString
 }
 
-// maxHexStringScan caps how many bytes a hex string may scan before giving up, the length counterpart of the literal
-// string parser's maxStringNesting. Without it an unterminated '<' consumes every remaining byte of the buffer, which is
-// harmless for a single top-level scan but amplifies the repair sweep, where the lexer is restarted at every candidate
-// offset. The bound is far above any real hex string — the largest in practice is a signature's /Contents, tens of
-// kilobytes — so only hostile or truncated input reaches it.
+// maxHexStringScan caps how many bytes a hex string may scan, the length counterpart of maxStringNesting. Without it an
+// unterminated '<' consumes every remaining byte, which is harmless for one top-level scan but amplifies the repair
+// sweep, where the lexer restarts at every candidate offset. The largest real hex string, a signature's /Contents, is
+// tens of kilobytes, so only hostile or truncated input reaches the bound.
 const maxHexStringScan = 1 << 20
 
 // lexHexString scans a <...> string. Whitespace and invalid characters between the digits are skipped (leniency), and a
@@ -401,7 +399,7 @@ func (l *lexer) lexKeyword() token {
 		l.pos++
 	}
 	if l.pos == start {
-		// Defensive: cannot happen, since next() dispatches only regular characters here.
+		// Defensive: cannot happen, since lexTokenAt dispatches only regular characters here.
 		l.pos++
 	}
 	return token{kind: tkKeyword, s: l.data[start:l.pos]}

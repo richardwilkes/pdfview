@@ -19,19 +19,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// PDF CMaps (ISO 32000-2 9.7.5, 9.10.3): the code→CID maps of Type0 font /Encoding entries and — through the bf
-// operators — ToUnicode maps. CMap content is lexically PDF surface syntax, so the exported cos.Lexer tokenizes it
-// (exactly as content streams do); the operators consulted are begincodespacerange/endcodespacerange,
-// begincidrange/begincidchar, beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the CIDSystemInfo
-// boilerplate, dict/proc syntax) is skipped by the same sliding-operand-window convention the content interpreter uses.
+// PDF CMaps (ISO 32000-2 9.7.5, 9.10.3): the code→CID maps of Type0 font /Encoding entries and, through the bf
+// operators, ToUnicode maps. CMap content is lexically PDF surface syntax, so cos.Lexer tokenizes it as it does content
+// streams; the operators consulted are begincodespacerange/endcodespacerange, begincidrange/begincidchar,
+// beginbfrange/beginbfchar, usecmap, and /WMode. Everything else (the CIDSystemInfo boilerplate, dict/proc syntax) is
+// skipped by the same sliding-operand-window convention the content interpreter uses.
 
-// CMap resource caps. maxCodespaces is far tighter than maxCMapRanges because codespaces are consulted per DECODED
-// CHARACTER CODE, not per lookup that a sorted list can binary search: nextCode probes the list at each of the four
-// code lengths and, for a code in none of them, walks it again to find the longest matching prefix. Every real CMap
-// declares a handful (the predefined Adobe ones top out well under ten, and the PostScript convention caps one
-// begincodespacerange block at 100 entries), while parsing accepted 65536 of them — enough to make a multi-megabyte
-// show operator cost hundreds of thousands of comparisons per byte, minutes of CPU for one page. Entries past the cap
-// are dropped.
+// CMap resource caps. maxCodespaces is far tighter than maxCMapRanges because codespaces are consulted per decoded
+// character code: nextCode probes the list at each of the four code lengths and, for a code in none of them, walks it
+// again for the longest matching prefix. Real CMaps declare a handful (the predefined Adobe ones stay under ten, and
+// the PostScript convention caps one begincodespacerange block at 100 entries); 65536 of them would make a
+// multi-megabyte show operator cost minutes of CPU. Entries past the cap are dropped.
 const (
 	maxCMapRanges  = 65536
 	maxCodespaces  = 128
@@ -64,14 +62,13 @@ type bfEntry struct {
 }
 
 // cmapPDF is one parsed CMap. codespaces is the declaration order the longest-prefix rule in nextCode walks; byLen is
-// the same set bucketed by code length and merged into sorted, disjoint ranges, which is what the per-code membership
-// test binary searches.
+// the same set bucketed by code length and merged into sorted, disjoint ranges, which the per-code membership test
+// binary searches.
 //
-// The cid and bf lists are bucketed by code length for the same reason ISO 32000-2 9.7.6.2 scopes a cidrange to codes
-// of its own length: a CMap may declare both a 1-byte and a 2-byte codespace, and entries of the two lengths address
-// unrelated codes even where their numeric values coincide. Merging them into one value-keyed list let the wider entry
-// shadow the narrower one away in sortRanges, so a 1-byte code resolved through the 2-byte entry and selected the wrong
-// glyph (and the wrong ToUnicode string).
+// The cid and bf lists are bucketed by code length because ISO 32000-2 9.7.6.2 scopes a cidrange to codes of its own
+// length: a CMap may declare both a 1-byte and a 2-byte codespace, and entries of the two lengths address unrelated
+// codes even where their values coincide, so one value-keyed list would let the wider entry shadow the narrower one
+// and resolve a 1-byte code to the wrong glyph (and the wrong ToUnicode string).
 type cmapPDF struct {
 	base       *cmapPDF // usecmap target, consulted when this map has no entry
 	codespaces []codespaceRange
@@ -86,9 +83,8 @@ type cmapPDF struct {
 }
 
 // indexCodespaces builds byLen from codespaces: bucketed by code length, sorted by starting code, and with overlapping
-// or adjacent ranges merged. Merging preserves the covered set exactly — the membership test asks only whether a code
-// lies in some range of its length — so nothing the declaration order carries is lost here; nextCode's longest-prefix
-// fallback keeps using codespaces itself, where each entry's own byte-position ranges still matter.
+// or adjacent ranges merged. Merging preserves the covered set exactly, which is all the membership test asks; the
+// longest-prefix fallback in nextCode still walks codespaces, where each entry's own byte-position ranges matter.
 func (cm *cmapPDF) indexCodespaces() {
 	for i := range cm.byLen {
 		cm.byLen[i] = nil
@@ -203,15 +199,13 @@ func parseCMap(data []byte, depth int, resolveUse func(cos.Name) *cmapPDF) *cmap
 }
 
 // sortRanges leaves the code→CID and bf lists sorted by starting code and non-overlapping, so cid and bfRune can
-// binary search them instead of walking from the start. Both run once per glyph shown — Font.Width and Font.GID consult
-// cid, Font.Unicode consults bfRune — and parsing accepts up to maxCMapRanges entries in each list, so a linear scan
-// costs O(glyphs × ranges) on a text-heavy page using a large embedded CMap or /ToUnicode. The /W and /W2 lists already
-// get exactly this treatment for the same reason (see disjointCIDRanges).
+// binary search them. Both run once per glyph shown (Font.Width and Font.GID consult cid, Font.Unicode consults
+// bfRune) and each list may hold maxCMapRanges entries, so a linear scan costs O(glyphs × ranges) on a text-heavy page
+// with a large embedded CMap or /ToUnicode. The /W and /W2 lists get the same treatment (see disjointCIDRanges).
 //
-// Overlap is malformed: ISO 32000-2 9.7.5.3 maps a code through one entry. It resolves as it does for /W — the
+// Overlap is malformed: ISO 32000-2 9.7.5.3 maps a code through one entry. It resolves as it does for /W: the
 // contested span goes to the entry with the lower starting code, the earlier entry in the CMap breaking a tie. Entries
-// of different code lengths never contest anything: they address different codes, so each bucket is made disjoint
-// alone.
+// of different code lengths address different codes, so each bucket is made disjoint alone.
 func (cm *cmapPDF) sortRanges() {
 	cm.indexCodespaces()
 	for n := range cm.cids {
@@ -417,7 +411,7 @@ func (cm *cmapPDF) parseBFRanges(lex *cos.Lexer, budget *int, char bool) {
 }
 
 // nextCode decodes the next character code from b (ISO 32000-2 9.7.6.3): the codespace ranges determine how many bytes
-// one code spans. Codes outside every codespace consume bytes per the partial-match rule — the length of the codespace
+// one code spans. Codes outside every codespace consume bytes per the partial-match rule: the length of the codespace
 // whose leading bytes match the longest prefix of the input (each byte within that byte position's range), ties broken
 // by the shortest codespace, defaulting to one byte.
 func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
@@ -460,7 +454,7 @@ func (cm *cmapPDF) nextCode(b []byte) (code uint32, n int) {
 
 // inCodespace reports whether an nBytes-length code value lies in any codespace (own or base). It binary searches the
 // merged per-length index rather than walking the declaration order: nextCode calls this up to four times for every
-// character code a show operator decodes, so a linear walk cost O(codes × codespaces).
+// character code a show operator decodes.
 func (cm *cmapPDF) inCodespace(v uint32, nBytes uint8) bool {
 	if nBytes < 1 || nBytes > 4 {
 		return false
@@ -480,13 +474,13 @@ func (cm *cmapPDF) inCodespace(v uint32, nBytes uint8) bool {
 }
 
 // lengthOrder returns the bucket indexes a code decoded at nBytes bytes consults, in order: its own length first, then
-// the remaining lengths shortest-first (nBytes outside 1-4 — an unknown length — consults them all shortest-first).
+// the remaining lengths shortest-first (nBytes outside 1-4, an unknown length, consults them all shortest-first).
 //
 // The trailing lengths are the lenient half of the rule ISO 32000-2 9.7.6.2 states strictly. An entry written with the
-// code's own length always wins, which is what the specification requires and what the wrong-glyph case needs, but a
-// code no entry of its length maps still falls back to one of another length rather than resolving to .notdef (or to no
-// Unicode at all): producers routinely write a simple font's /ToUnicode with 2-byte codes, or a 2-byte CMap's
-// begincidchar with 1-byte ones, and every deployed viewer — which key their tables on the value alone — maps those.
+// code's own length always wins, as the specification requires, but a code no entry of its length maps still falls
+// back to another length rather than resolving to .notdef (or to no Unicode at all): producers routinely write a simple
+// font's /ToUnicode with 2-byte codes, or a 2-byte CMap's begincidchar with 1-byte ones, and every deployed viewer,
+// keying its tables on the value alone, maps those.
 func lengthOrder(nBytes uint8) [4]int {
 	var out [4]int
 	n := 0
@@ -526,12 +520,11 @@ func (cm *cmapPDF) cid(code uint32, nBytes uint8) uint32 {
 // bfRune maps a code decoded at nBytes bytes to the first rune of its bf target (ToUnicode), reporting false when the
 // code maps nowhere.
 //
-// Only the leading rune is decoded here, never the whole target: this is the per-glyph lookup, while parseBFRanges puts
-// no cap on a target's length (a hex string token reaches the lexer's maxHexStringScan of ~512 KB). Decoding the whole
-// target on every call allocated a []uint16 and a string proportional to it, so a hostile /ToUnicode over a text-heavy
-// page turned extraction into hundreds of gigabytes of churn to produce one rune. Codes whose target carries more than
-// one rune — ligatures, and the "one-to-many" mappings of ISO 32000-2 9.10.3 generally — report multi, and the caller
-// asks bfRunesAfterFirst for the rest only for those.
+// Only the leading rune is decoded, never the whole target: this is the per-glyph lookup, while parseBFRanges puts no
+// cap on a target's length (a hex string token decodes up to ~512 KB before the lexer's maxHexStringScan stops it), so
+// decoding the whole target on every call would allocate proportional to it and turn extraction over a text-heavy page
+// into gigabytes of churn for one rune. Codes whose target carries more than one rune (ligatures, and the one-to-many
+// mappings of ISO 32000-2 9.10.3 generally) report multi, and the caller asks bfRunesAfterFirst for the rest.
 func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (r rune, multi, ok bool) {
 	dst, inc, found := cm.bfTarget(code, nBytes)
 	if !found {
@@ -544,11 +537,11 @@ func (cm *cmapPDF) bfRune(code uint32, nBytes uint8) (r rune, multi, ok bool) {
 }
 
 // bfRunesAfterFirst returns the runes of a code's bf target past its leading one, decoded UTF-16BE with surrogate pairs
-// combined — the "filler" characters MuPDF's pdf_show_char emits for a one-to-many mapping. It is called only for the
-// codes bfRune reported multi for, so the whole-target decode this does costs nothing on the ordinary one-rune path.
+// combined: the "filler" characters MuPDF's pdf_show_char emits for a one-to-many mapping. It is called only for the
+// codes bfRune reported multi for, so the whole-target decode costs nothing on the ordinary one-rune path.
 //
-// The result is capped at maxBFRunes runes, exactly as MuPDF caps a mapping at PDF_MRANGE_CAP code units: without it a
-// single glyph in a hostile file expands into a quarter-million recorded characters.
+// The result is capped at maxBFRunes runes, as MuPDF caps a mapping at PDF_MRANGE_CAP code units: without it a single
+// glyph in a hostile file expands into a quarter-million recorded characters.
 func (cm *cmapPDF) bfRunesAfterFirst(code uint32, nBytes uint8) []rune {
 	dst, inc, ok := cm.bfTarget(code, nBytes)
 	if !ok {
@@ -627,14 +620,14 @@ func (cm *cmapPDF) bfTarget(code uint32, nBytes uint8) (dst []byte, inc uint16, 
 	return nil, 0, false
 }
 
-// utf16BEFirstRune decodes the first rune of UTF-16BE bytes, adding inc to the final code unit (the bfrange increment
-// rule: "the last byte of the string shall be incremented", which for UTF-16 targets is the final code unit). Odd
-// lengths drop the trailing byte, matching lenient viewers, and an empty target reports false — the caller then falls
-// through to its other Unicode sources, exactly as an absent entry does.
+// utf16BEFirstRune decodes the first rune of UTF-16BE bytes, adding inc to the final code unit (the bfrange rule "the
+// last byte of the string shall be incremented", which for UTF-16 targets is the final code unit). Odd lengths drop the
+// trailing byte, matching lenient viewers, and an empty target reports false so the caller falls through to its other
+// Unicode sources, as for an absent entry.
 //
 // The increment reaches the leading rune only when the target is one code unit long, or two of which the first is a
 // high surrogate; longer targets increment a unit the leading rune does not span. Lone or mispaired surrogates decode
-// to U+FFFD, which is what utf16.Decode yields for the same input.
+// to U+FFFD, as utf16.Decode yields for the same input.
 func utf16BEFirstRune(b []byte, inc uint16) (rune, bool) {
 	if len(b) < 2 {
 		if len(b) == 1 { // A single byte: treat as one 8-bit unit (some producers write <41>).

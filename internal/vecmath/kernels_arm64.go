@@ -12,8 +12,8 @@
 package vecmath
 
 // archKernelsSupported reports whether this CPU has every instruction the module's kernels compile to on arm64.
-// Everything they compile to is baseline NEON, which every arm64 CPU Go supports carries, so there is nothing to
-// check past the simd package's own emulation verdict.
+// Everything they compile to is baseline NEON, which every arm64 CPU Go supports carries, so the simd package's
+// emulation verdict is the whole answer.
 func archKernelsSupported() bool {
 	return true
 }

@@ -12,10 +12,10 @@ package content
 import "github.com/richardwilkes/pdfview/internal/cos"
 
 // opInlineImage consumes a BI … ID … EI inline image (ISO 32000-2 8.9.7), decodes it, draws it, and leaves the lexer
-// positioned just past the EI keyword. The dictionary entries between BI and ID are parsed with the ordinary operand
-// machinery; the binary payload after ID is isolated by length when the dictionary supplies a usable /L (or /Length),
-// and otherwise by scanning for the EI keyword delimited the way real encoders emit it. Malformed constructs degrade to
-// drawing nothing; the only hard obligation is not to desynchronize the tokenizer.
+// just past the EI keyword. The entries between BI and ID are parsed with the ordinary operand machinery; the binary
+// payload after ID is isolated by length when the dictionary supplies a usable /L (or /Length), otherwise by scanning
+// for a delimited EI keyword. Malformed constructs draw nothing; the only hard obligation is not to desynchronize the
+// tokenizer.
 func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 	dict, ok := parseInlineDict(lex)
 	if !ok {
@@ -36,13 +36,12 @@ func (in *interp) opInlineImage(lex *cos.Lexer, data []byte) {
 }
 
 // parseInlineDict parses the key/value entries between BI and ID. It reports false when the stream ends before ID
-// arrives (nothing to draw, nothing left to position past). The entries share one maxOperandElements allowance — the
-// same one objects.go gives an ordinary array or dictionary operand — spent across the keys stored here and everything
-// their values nest. Without it the dictionary was the one unbounded container the interpreter parsed: a page stream
-// may inflate to 64 MB, so a single BI followed by millions of distinct "/aN <</b 0>>" pairs (a few hundred kilobytes
-// of flate) built a cos.Dict of millions of entries, each holding its own Go map, for the one budget unit the BI
-// operator costs. Entries past the allowance are parsed and dropped rather than abandoning the dictionary: the
-// tokenizer must still reach ID to stay in sync with the payload that follows.
+// (nothing to draw, nothing to position past). The entries share one maxOperandElements allowance — the same one
+// objects.go gives an array or dictionary operand — spent across the keys stored here and everything their values nest:
+// a page stream may inflate to 64 MB, so one BI followed by millions of distinct "/aN <</b 0>>" pairs would otherwise
+// build a cos.Dict of millions of entries, each holding its own Go map, for the one budget unit BI costs. Entries past
+// the allowance are parsed and dropped rather than abandoning the dictionary: the tokenizer must still reach ID to stay
+// in sync with the payload.
 func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 	dict := cos.Dict{}
 	budget := maxOperandElements
@@ -67,8 +66,8 @@ func parseInlineDict(lex *cos.Lexer) (cos.Dict, bool) {
 				return nil, false
 			}
 			// A key with no value that runs straight into ID (e.g. "BI /W 4 /IM ID<binary>") must terminate the
-			// dictionary here; parseOperand cannot make an operand from the ID keyword and would silently swallow it,
-			// missing the payload marker and desynchronizing the tokenizer into the binary payload.
+			// dictionary here: parseOperand would swallow the ID keyword and desynchronize the tokenizer into the
+			// payload.
 			if valTok.Kind == cos.TokenKeyword && string(valTok.Bytes) == "ID" {
 				return dict, true
 			}
@@ -117,10 +116,9 @@ func eiAt(data []byte, pos int) (end int, ok bool) {
 
 // scanForEI finds the first plausible EI keyword at or after pos: preceded by whitespace (or the payload start) and
 // followed by whitespace, a delimiter, or end of input. Binary payloads can contain the letters "EI", so the delimiting
-// requirements matter; a payload byte pair that still satisfies them ends the payload early, which is the standard
-// failure mode every reader shares for undeclared-length inline images. With no EI at all, everything to the end of
-// input is consumed. The returned payloadEnd excludes the single whitespace byte separating the payload from the EI
-// keyword; end is just past the keyword.
+// requirements matter; a payload byte pair that still satisfies them ends the payload early, the failure mode every
+// reader shares for undeclared-length inline images. With no EI at all, everything to the end of input is consumed.
+// payloadEnd excludes the single whitespace byte before the keyword; end is just past it.
 func scanForEI(data []byte, pos int) (payloadEnd, end int) {
 	for i := pos; i+2 <= len(data); i++ {
 		if data[i] != 'E' || data[i+1] != 'I' {

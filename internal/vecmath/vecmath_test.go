@@ -20,9 +20,8 @@ import (
 // domainMax is the upper end of the input domain both helpers document as exact.
 const domainMax = 0xFFFF
 
-// TestUDiv255 proves UDiv255 over its whole documented domain rather than sampling it: every n in [0, 0xFFFF] is
-// pushed through a vector lane and compared against the scalar quotient. The batch size is the machine's vector
-// width, so this is 16384 vector ops on a 128-bit target and fewer on a wider one.
+// TestUDiv255 proves UDiv255 over its whole documented domain: every n in [0, 0xFFFF] goes through a vector lane and
+// is compared against the scalar quotient.
 func TestUDiv255(t *testing.T) {
 	forEachInDomain(t, func(in, out []uint32) {
 		UDiv255(simd.LoadUint32s(in)).Store(out)
@@ -34,9 +33,8 @@ func TestUDiv255(t *testing.T) {
 	})
 }
 
-// TestUDiv252 proves UDiv252 over its whole documented domain, the same way TestUDiv255 does. It is the check that
-// the biased ((n+1)*4161)>>20 form really is exact and not merely close: an off-by-one here would shift luminosity
-// soft-mask values by one code point across whole images.
+// TestUDiv252 proves UDiv252 over its whole documented domain the same way. An off-by-one in the biased form would
+// shift luminosity soft-mask values by one code point across whole images.
 func TestUDiv252(t *testing.T) {
 	forEachInDomain(t, func(in, out []uint32) {
 		UDiv252(simd.LoadUint32s(in)).Store(out)
@@ -48,9 +46,9 @@ func TestUDiv252(t *testing.T) {
 	})
 }
 
-// forEachInDomain walks [0, domainMax] a vector at a time, handing check a filled input buffer and a scratch output
-// buffer of exactly one vector's worth of lanes. Every value in the domain appears in some batch; the final batch is
-// padded with domainMax, which the batch before it already covered, so padding cannot mask a failure.
+// forEachInDomain walks [0, domainMax] one vector at a time, handing check a filled input buffer and a scratch output
+// buffer of one vector's worth of lanes. Lanes past domainMax in the final batch repeat domainMax, which that batch
+// already covers, so padding cannot mask a failure.
 func forEachInDomain(t *testing.T, check func(in, out []uint32)) {
 	t.Helper()
 	var probe simd.Uint32s
@@ -71,10 +69,10 @@ func forEachInDomain(t *testing.T, check func(in, out []uint32)) {
 
 // TestPinUint8sAddWraps pins that Uint8s.Add is modular (255+1 == 0) and that saturation is a separate method.
 //
-// Kernel design that relies on it: the PNG/TIFF predictor undo in internal/filter/predictor.go. The Up, Sub,
-// Average, and Paeth reconstructions are defined by the PNG spec as byte addition modulo 256 (row[i] += prev[i] and
-// friends), so their vector forms add raw Uint8s lanes with no clamp. If Add saturated, every reconstructed sample
-// that overflows would stick at 255 and the decoded image would be wrong, not merely clipped.
+// Kernel that relies on it: addRowsSIMD in internal/filter/simd_on.go, the PNG Up predictor undo. RFC 2083 section
+// 6.3 defines the reconstruction as byte addition modulo 256 (row[i] += prev[i]), so the kernel adds raw Uint8s lanes
+// with no clamp. If Add saturated, every reconstructed sample that overflows would stick at 255 and the decoded image
+// would be wrong, not merely clipped.
 func TestPinUint8sAddWraps(t *testing.T) {
 	var probe simd.Uint8s
 	lanes := probe.Len()
@@ -91,7 +89,6 @@ func TestPinUint8sAddWraps(t *testing.T) {
 			t.Fatalf("Uint8s.Add lane %d: 255+1 gave %d, want 0 (Add must wrap, not saturate)", i, got)
 		}
 	}
-	// The saturating behavior lives on its own method, which is what a kernel that does want a clamp must call.
 	simd.LoadUint8s(a).AddSaturated(simd.LoadUint8s(b)).Store(out)
 	for i, got := range out {
 		if got != 255 {
@@ -101,12 +98,12 @@ func TestPinUint8sAddWraps(t *testing.T) {
 }
 
 // TestPinInt32sShiftAllRightIsArithmetic pins that Int32s.ShiftAllRight replicates the sign bit rather than shifting
-// in zeros, so it is floor-division by a power of two on negative lanes.
+// in zeros, so it is floor division by a power of two on negative lanes.
 //
-// Kernel design that relies on it: the reversible 5/3 inverse DWT in internal/jpeg2000/wavelet. Its lifting steps
-// are exactly L[i] -= (H[i-1]+H[i]+2)>>2 and H[i] += (L[i]+L[i+1])>>1 over signed coefficients, and JPEG 2000
-// specifies those shifts as floor division. Wavelet coefficients are routinely negative; a logical shift would turn
-// a small negative value into a value near 2^31 and destroy the tile.
+// Kernels that rely on it: sub53RowSIMD and add53RowSIMD in internal/jpeg2000/wavelet/simd_on.go, the reversible 5/3
+// inverse DWT. Its lifting steps are L[i] -= (H[i-1]+H[i]+2)>>2 and H[i] += (L[i]+L[i+1])>>1 over signed
+// coefficients, and JPEG 2000 specifies those shifts as floor division. Coefficients are routinely negative; a logical
+// shift would turn a small negative value into one near 2^31 and destroy the tile.
 func TestPinInt32sShiftAllRightIsArithmetic(t *testing.T) {
 	var probe simd.Int32s
 	lanes := probe.Len()
@@ -121,7 +118,6 @@ func TestPinInt32sShiftAllRightIsArithmetic(t *testing.T) {
 			t.Fatalf("Int32s.ShiftAllRight lane %d: -8>>1 gave %d, want -4 (shift must be arithmetic)", i, got)
 		}
 	}
-	// The all-ones case is the sharpest statement of the same fact: an arithmetic shift can never clear the sign.
 	for i := range lanes {
 		in[i] = -1
 	}
@@ -131,7 +127,6 @@ func TestPinInt32sShiftAllRightIsArithmetic(t *testing.T) {
 			t.Fatalf("Int32s.ShiftAllRight lane %d: -1>>31 gave %d, want -1", i, got)
 		}
 	}
-	// Positive lanes must still behave like an unsigned shift.
 	for i := range lanes {
 		in[i] = 9
 	}
@@ -143,14 +138,13 @@ func TestPinInt32sShiftAllRightIsArithmetic(t *testing.T) {
 	}
 }
 
-// TestPinFloat32sConvertToInt32Truncates pins that Float32s.ConvertToInt32 rounds toward zero — 2.9 becomes 2 and
-// -2.9 becomes -2 — rather than rounding to nearest or flooring.
+// TestPinFloat32sConvertToInt32Truncates pins that Float32s.ConvertToInt32 rounds toward zero (2.9 becomes 2 and
+// -2.9 becomes -2) rather than rounding to nearest or flooring.
 //
-// Kernel design that relies on it: the float-to-index conversions in internal/render (shading.go's function-domain
-// sampling and the sample-filter coordinate math). Those sites want floor or round-half-up, not truncation, so their
-// vector forms must add the bias themselves. Truncation and flooring agree on non-negative inputs and disagree on
-// negative ones, which is exactly where a shading extended past its domain lands, so this is the fact that decides
-// whether the bias is needed at all.
+// Kernel that relies on it: unpremultiplyChannel in simd_on.go at the repository root, which replaces the scalar
+// divide by alpha with a nudged reciprocal multiply and truncates the product. The nudge is built so the truncated
+// estimate is right or exactly one too low, never too high, and the correction step that follows assumes that; a
+// round-to-nearest conversion would break it.
 func TestPinFloat32sConvertToInt32Truncates(t *testing.T) {
 	values := []float32{2.9, -2.9, 2.5, -2.5, 0.75, -0.75, 7.999, -7.999}
 	wants := []int32{2, -2, 2, -2, 0, 0, 7, -7}
@@ -170,14 +164,14 @@ func TestPinFloat32sConvertToInt32Truncates(t *testing.T) {
 	}
 }
 
-// TestPinUint8sReshapeToUint32sIsLittleEndian pins that a reshape from byte lanes to word lanes keeps
-// little-endian memory order: word lane j is the four bytes at 4j..4j+3, low byte first.
+// TestPinUint8sReshapeToUint32sIsLittleEndian pins that a reshape from byte lanes to word lanes keeps little-endian
+// memory order: word lane j is the four bytes at 4j..4j+3, low byte first.
 //
-// Kernel design that relies on it: every kernel that flips between per-channel byte work and per-pixel packed work —
-// internal/render/glyphmask.go's RGBA blend and internal/imaging's channel scaling both hold pixels as packed
-// uint32 while their channel math is byte-wise. The packed layout is little-endian on the wire too; see
-// internal/render/render.go, which writes rows out with binary.LittleEndian.PutUint32. If a reshape permuted lanes,
-// pixels would come back with their channels reversed.
+// Kernels that rely on it: every kernel that loads RGBA bytes and works on them as packed pixel words, which is
+// maskLumaVec in internal/render/simd_on.go, compositeAlphaSIMD in internal/imaging/simd_on.go, and unpremultiplyVec
+// in simd_on.go at the repository root. The packed layout is little-endian on the wire too: internal/render/render.go
+// writes rows out with binary.LittleEndian.PutUint32. If a reshape permuted lanes, pixels would come back with their
+// channels reversed.
 func TestPinUint8sReshapeToUint32sIsLittleEndian(t *testing.T) {
 	var byteProbe simd.Uint8s
 	var wordProbe simd.Uint32s

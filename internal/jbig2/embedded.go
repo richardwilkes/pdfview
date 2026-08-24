@@ -19,11 +19,10 @@ import (
 
 // Limits bounds what a single decode may allocate.
 type Limits struct {
-	// MaxPixels caps the cumulative area, in pixels, of every bitmap one decode allocates: the page and any striped
-	// growth of it, each region, each new symbol bitmap, each pattern cell, and each halftone gray-code plane. It
-	// bounds decode work as well as memory, because a symbol's area is charged before the generic-region decode that
-	// fills it runs; symbol dimensions arrive as arithmetic-decoded deltas that no scan of the payload can see, so a
-	// cumulative area cap is the only bound available on them. Zero means no cap.
+	// MaxPixels caps the cumulative area, in pixels, of every bitmap one decode allocates: the page and its striped
+	// growth, each region, each new symbol bitmap, each pattern cell, and each halftone gray-code plane. It bounds
+	// decode work as well as memory: a symbol's area is charged before the generic-region decode that fills it, and
+	// symbol dimensions are arithmetic-decoded deltas no scan of the payload can see. Zero means no cap.
 	MaxPixels int64
 }
 
@@ -38,8 +37,8 @@ var errEmptyPayload = errors.New("jbig2: empty payload")
 // no branch of their own.
 type budget struct {
 	remaining int64
-	// exceeded records that some charge was refused. The decode paths report failures as an untyped result code, so
-	// this is what lets the entry point name the cap as the reason rather than reporting a generic decode failure.
+	// exceeded records that a charge was refused. The decode paths report failures as a bare Result code, so this is
+	// what lets the entry point return ErrLimitExceeded rather than a generic failure.
 	exceeded bool
 }
 
@@ -55,9 +54,8 @@ func newBudget(maxPixels int64) *budget {
 	return &budget{remaining: maxPixels}
 }
 
-// charge deducts a w by h bitmap's area from the remaining budget, reporting ErrLimitExceeded when it does not fit.
-// Callers charge before allocating, and a caller whose dimensions are not yet known to be positive may pass them as
-// they are: a degenerate bitmap allocates nothing and costs nothing.
+// charge deducts a w by h bitmap's area from the budget, reporting ErrLimitExceeded when it does not fit. Callers
+// charge before allocating; a non-positive dimension allocates nothing and costs nothing.
 func (b *budget) charge(w, h int64) error {
 	if b == nil {
 		return nil
@@ -80,11 +78,10 @@ func (b *budget) exceededLimit() bool {
 	return b != nil && b.exceeded
 }
 
-// NewEmbeddedDecoder builds a decoder over a PDF-embedded JBIG2 stream: the ISO 32000-2 7.4.7 profile directly, which
-// is T.88's big-endian sequential organization with no file header, every segment implicitly on page 1, and the
-// /JBIG2Globals bytes parsed first into a shared segment context. No other container is probed for — a payload is
-// taken as segments and nothing else — and the globals are parsed here, so a decoder that constructs is one whose
-// globals were usable.
+// NewEmbeddedDecoder builds a decoder over a PDF-embedded JBIG2 stream: the ISO 32000-2 7.4.7 profile, which is T.88's
+// sequential organization with no file header, every segment implicitly on page 1, and the /JBIG2Globals bytes parsed
+// first into a shared segment context. No other container is probed for, and the globals are parsed here, so a decoder
+// that constructs is one whose globals were usable.
 func NewEmbeddedDecoder(payload, globals []byte, limits Limits) (*Decoder, error) {
 	if len(payload) == 0 {
 		return nil, errEmptyPayload
@@ -104,10 +101,9 @@ func NewEmbeddedDecoder(payload, globals []byte, limits Limits) (*Decoder, error
 	return &Decoder{doc: doc}, nil
 }
 
-// DecodePage decodes the page the payload carries and returns its bitmap packed one bit per pixel, MSB first within
-// each byte and Stride() bytes per row, with a set bit meaning black — T.88's polarity, which is the inverse of the
-// PDF image convention the caller emits. Everything in the embedded profile belongs to page 1, so the first call
-// returns that page and every later call reports io.EOF.
+// DecodePage decodes the page the payload carries: one bit per pixel, MSB first, Stride() bytes per row, and a set bit
+// meaning black — T.88's polarity, the inverse of the PDF image convention. Everything in the embedded profile
+// belongs to page 1, so the first call returns that page and every later call reports io.EOF.
 func (d *Decoder) DecodePage() (*Image, error) {
 	if d.doc == nil {
 		return nil, errors.New("jbig2: decoder not initialized")
@@ -134,8 +130,8 @@ func (d *Decoder) DecodePage() (*Image, error) {
 	}
 }
 
-// takePage hands back the decoded page and releases the segment results that fed it, which are dead the moment the
-// page is assembled and are the bulk of what a symbol-heavy decode holds.
+// takePage hands back the decoded page and releases the segment results that fed it, which are the bulk of what a
+// symbol-heavy decode holds.
 func (d *Decoder) takePage() *Image {
 	page := d.doc.page
 	d.pageIndex++

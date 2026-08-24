@@ -24,18 +24,16 @@ import (
 // consult, and the go-text face that supplies glyph outlines and fallback advances.
 type sfntInfo struct {
 	// face is the go-text view of the program, used for glyph outlines (GlyphDataOutline) and hmtx advances. It is nil
-	// when go-text rejects the program (such as a subset with no cmap table at all — go-text requires one); metrics and
-	// cmap lookups still work then, and TrueType-flavored programs fall back to the direct glyf walker below for
-	// outlines.
+	// when go-text rejects the program (a subset with no cmap table, which go-text requires); metrics and cmap lookups
+	// still work then, and TrueType-flavored programs fall back to the direct glyf walker for outlines.
 	face *otfont.Face
 	// glyf is the direct glyf outline walker (glyf.go): the only outline source for CIDFontType2 programs (whose
 	// subsets routinely omit cmap) and the fallback for cmap-less simple TrueType programs.
 	glyf *glyfInfo
-	// cff is the wrapped 'CFF ' table of a CFF-flavored OpenType program, prepared for the repo's budgeted Type 2
-	// interpreter (cff_charstring.go). Font.GlyphPath prefers it over face, whose GlyphDataOutline would reach the same
-	// charstrings through go-text's unbudgeted loader. It is not an outline source for simpleGlyphs/cidGlyphs: those
-	// decide whether a program can be drawn at all, and a CFF-flavored program that go-text refused to build a face for
-	// is one this package still substitutes away.
+	// cff is the wrapped 'CFF ' table of a CFF-flavored OpenType program, prepared for the budgeted Type 2 interpreter
+	// (cff_charstring.go). Font.GlyphPath prefers it over face, whose GlyphDataOutline reaches the same charstrings
+	// through go-text's unbudgeted loader. simpleGlyphs/cidGlyphs ignore it: a CFF-flavored program go-text refused a
+	// face for is still substituted away.
 	cff *cffInfo
 	// cmapUnicode/cmapSymbol/cmapMacRoman are the subtables of the pinned lookup chains (nil when absent).
 	cmapUnicode  *cmapTable
@@ -51,11 +49,10 @@ type sfntInfo struct {
 	nGlyphs   int
 }
 
-// simpleGlyphs reports whether a parsed program can supply outlines for a simple font: either go-text accepted it
-// (GlyphPath's Face path) or its glyf/loca walker was built (the cmap-less fallback). A program that parsed far enough
-// to yield metrics but has neither draws nothing, so the loaders treat it as no program at all — the substitute owns
-// both the shapes and the metrics rather than the two coming from different fonts. Safe on a nil receiver: a stream
-// that did not parse answers the same "no".
+// simpleGlyphs reports whether a parsed program can supply outlines for a simple font: go-text accepted it (GlyphPath's
+// face path) or its glyf/loca walker was built (the cmap-less fallback). A program that yields metrics but has neither
+// draws nothing, so the loaders treat it as no program at all and the substitute owns both shapes and metrics. Safe on
+// a nil receiver: a stream that did not parse answers the same "no".
 func (s *sfntInfo) simpleGlyphs() bool { return s != nil && (s.face != nil || s.glyf != nil) }
 
 // cidGlyphs reports the same for a CIDFontType2 program, where GlyphPath uses only the direct glyf walker (CID subsets
@@ -63,16 +60,14 @@ func (s *sfntInfo) simpleGlyphs() bool { return s != nil && (s.face != nil || s.
 func (s *sfntInfo) cidGlyphs() bool { return s != nil && s.glyf != nil }
 
 // hasAdvances reports whether the program can supply the /Widths-absent advance fallback (programAdvance). Safe on a
-// nil receiver, like simpleGlyphs: a font with no sfnt at all answers the same "no", which is what routes it to the
-// standard-14 AFM widths.
+// nil receiver: a font with no sfnt answers "no", which routes it to the standard-14 AFM widths.
 func (s *sfntInfo) hasAdvances() bool {
 	return s != nil && s.upem > 0 && (s.face != nil || len(s.hmtx) != 0)
 }
 
-// advance returns the hmtx advance for a GID in em units. The table stores one entry per glyph up to numberOfHMetrics
-// and the last entry applies to every glyph past it (OpenType hmtx), which is how monospace tails are encoded — but
-// only out to the program's glyph count, past which there is no glyph and so no advance, which is also where go-text's
-// own reader stops.
+// advance returns the hmtx advance for a GID in em units. The last hmtx entry applies to every glyph past
+// numberOfHMetrics (the OpenType monospace tail), but only up to the program's glyph count, where go-text's own reader
+// stops too.
 func (s *sfntInfo) advance(gid uint32) (float32, bool) {
 	if len(s.hmtx) == 0 || s.upem <= 0 || uint64(gid) >= uint64(s.nGlyphs) {
 		return 0, false
@@ -99,11 +94,10 @@ func parseSFNTStream(d *cos.Document, s *cos.Stream) (info *sfntInfo) {
 	return parseSFNT(raw)
 }
 
-// parseSFNT reads the metrics tables of an sfnt font, following FreeType's rules (which the oracle's MuPDF build
-// inherits — FreeType is BSD-licensed and fine to consult): ascender/descender come from hhea; when both are zero, from
-// OS/2 sTypoAscender/sTypoDescender; when those are zero too, from usWinAscent and -usWinDescent. All divided by head's
-// unitsPerEm. Hostile bytes that panic the parser yield nil (the guard lives here, not only in parseSFNTStream, so the
-// fuzzer exercises the same contract).
+// parseSFNT reads the metrics tables of an sfnt font by FreeType's rules, which the oracle's MuPDF build inherits:
+// ascender/descender come from hhea; when both are zero, from OS/2 sTypoAscender/sTypoDescender; when those are zero
+// too, from usWinAscent and -usWinDescent. All are divided by head's unitsPerEm. Hostile bytes that panic the parser
+// yield nil (the guard lives here as well as in parseSFNTStream so the fuzzer exercises the same contract).
 func parseSFNT(raw []byte) (info *sfntInfo) {
 	defer func() {
 		if recover() != nil {
@@ -166,9 +160,9 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 	if cffRaw, cffErr := ld.RawTable(opentype.MustNewTag("CFF ")); cffErr == nil {
 		if prepared := parseCFFGlyphBytes(cffRaw, nil); prepared != nil &&
 			len(prepared.font.Charstrings) == info.nGlyphs {
-			// The charstring count must agree with maxp, which is the same gate go-text applies before its face will
-			// draw from a 'CFF ' table: taking over exactly the cases its Face would have handled keeps a program with
-			// a mismatched CFF alongside a usable glyf table rendering from the glyf, as it did before.
+			// The charstring count must agree with maxp, the same gate go-text applies before its face draws from a
+			// 'CFF ' table, so a program with a mismatched CFF alongside a usable glyf table keeps rendering from the
+			// glyf.
 			info.cff = prepared
 		}
 	}
@@ -176,8 +170,7 @@ func parseSFNT(raw []byte) (info *sfntInfo) {
 }
 
 // parseHMetrics reads the advance of each longHorMetric record from hmtx (a 4-byte record whose leading uint16 is the
-// advance width). A table shorter than hhea's count is read as far as it goes rather than rejected, matching how
-// leniently the rest of this file treats a truncated program.
+// advance width). A table shorter than hhea's count is read as far as it goes, like every other truncated table here.
 func parseHMetrics(ld *opentype.Loader, nHMetrics int) []uint16 {
 	if nHMetrics <= 0 {
 		return nil

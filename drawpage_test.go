@@ -24,37 +24,28 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// glaiveName is the corpus name of the GLAIVE fixture.
 const glaiveName = "glaive"
 
 // TestDrawPage pins the DrawPage contract: drawing onto a caller-created raster surface with ctm =
 // geom.ScaleMatrix(dpi/72, dpi/72) reproduces RenderPage's output at that dpi. The page CTM composition is
 // bit-identical between the two paths, so content without text compares byte-exact. Text renders through RenderPage's
-// per-glyph coverage blits but DrawPage's merged-outline fills; the two composite identically except where adjacent
-// glyphs' antialiasing fringes overlap — the merged path unions the outlines where per-glyph coverage composites twice
-// — so pages with text compare on the fraction of diverging pixels (measured worst across these arms: 0.102% of pixels
-// over Δ24, 2.155% over Δ8, all of it isolated fringe pixels further amplified by the straight-alpha comparison at
-// near-zero alpha).
+// per-glyph coverage blits but DrawPage's merged-outline fills, which differ only where adjacent glyphs' antialiasing
+// fringes overlap (the merged path unions outlines that per-glyph coverage composites twice), so pages with text
+// compare on the fraction of diverging pixels: measured worst across these arms 0.102% over Δ24 and 2.155% over Δ8,
+// all isolated fringe pixels amplified by the straight-alpha comparison at near-zero alpha. Both routes darken stems
+// with the same pen (see applyStemDarkening) and their total page alpha agrees exactly on every arm, so a regression
+// that drops or duplicates coverage trips these bounds long before it reaches the ink figures.
 //
-// Those fractions were 0.004% and 0.032% under canvas v0.2.1, widened at v0.2.4 (which resolves analytic-AA coverage
-// at a finer 1/64-scanline grid and so expresses the fringe difference on more pixels), and widened again when stem
-// darkening became the default: the dilated outlines put more fringe pixels where adjacent glyphs overlap. What the
-// bound protects is unchanged, because this is redistribution and not loss: both routes dilate identically (the blit
-// path per glyph, the merged path per run, same pen — see applyStemDarkening), and the two paths' total page alpha
-// agrees EXACTLY on every arm (554,535,440 on glaive page 1 at 150 dpi from both); the diverging pixels differ only in
-// their straight-alpha RGB at near-zero alpha. A regression that actually drops or duplicates coverage moves that
-// total and trips these bounds long before it reaches the ink figures.
-//
-// The comparison covers every pixel including the page edge, which is what pins DrawPage's page-box clip to the same
-// bound RenderPage's page-sized surface imposes: an unsnapped clip on a page whose scaled extent is not a whole number
-// of pixels (glaive's 595.2 pt width fills 595.2 of 596 columns) leaves that last band partly covered, and an
-// antialiased one shifts interior pixels as well. TestDrawPageClipsToPageBox pins that the clip is really there.
+// The comparison includes the page edge, which pins DrawPage's page-box clip to the bound RenderPage's page-sized
+// surface imposes: an unsnapped clip on a page whose scaled extent is not a whole number of pixels (glaive's 595.2 pt
+// width fills 595.2 of 596 columns) leaves the last band partly covered, and an antialiased one shifts interior pixels.
+// TestDrawPageClipsToPageBox pins that the clip is there.
 func TestDrawPage(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		page int
 		dpi  int
-		text bool // has text: allow the fringe-pixel divergence described above
+		text bool // Allows the fringe-pixel divergence described above.
 	}{
 		{name: "vectors", page: 0, dpi: 72},
 		{name: "vectors", page: 0, dpi: 100},
@@ -168,9 +159,9 @@ func readSurfaceNRGBA(t *testing.T, surf *surface.Surface, width, height int) []
 	return pix
 }
 
-// overflowingPagePDF is a one-page document whose 100×100 pt page paints an opaque red rectangle covering
-// [-100, 300]² — every corner of a canvas twice the page's size. RenderPage cannot show the overflow (its surface is
-// the page's size), so only DrawPage exercises it. No xref is supplied (startxref 0) so the engine rebuilds it.
+// overflowingPagePDF is a one-page document whose 100×100 pt page paints an opaque red rectangle over [-100, 300]²,
+// every corner of a canvas twice the page's size. Only DrawPage can show the overflow: RenderPage's surface is the
+// page's size. startxref 0 makes the engine rebuild the xref.
 const overflowingPagePDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -196,10 +187,8 @@ startxref
 %%EOF
 `
 
-// TestDrawPageClipsToPageBox pins that DrawPage confines a page's content to its page box. RenderPage bounds the same
-// content implicitly by rasterizing into a page-sized surface; DrawPage draws onto a canvas the caller sized, so
-// without an explicit clip a page painting past its own box — bleed, printer's marks, or a stream like this one —
-// repaints whatever else the caller has on the canvas.
+// TestDrawPageClipsToPageBox pins that DrawPage confines a page's content to its page box: the caller's canvas has no
+// page-sized surface to bound it, so a stream painting past its box would repaint whatever else is on the canvas.
 func TestDrawPageClipsToPageBox(t *testing.T) {
 	d, err := pdfview.New([]byte(overflowingPagePDF), 0)
 	if err != nil {
@@ -211,8 +200,8 @@ func TestDrawPageClipsToPageBox(t *testing.T) {
 	if surf == nil {
 		t.Fatal("unable to create surface")
 	}
-	// The identity matrix draws the page at 72 dpi with its top-left at the canvas origin, so the page box covers
-	// exactly [0, 100)² of the 200×200 canvas and lands on whole pixel boundaries.
+	// The identity matrix draws the page at 72 dpi at the canvas origin, so the page box covers exactly [0, 100)² of
+	// the 200×200 canvas on whole pixel boundaries.
 	if err = d.DrawPage(surf.Canvas(), 0, geom.IdentityMatrix()); err != nil {
 		t.Fatal(err)
 	}
@@ -271,9 +260,9 @@ func TestDrawPageErrors(t *testing.T) {
 	}
 }
 
-// TestDrawPageInvalidMatrix pins the caller-matrix validation: a matrix that is itself non-finite, or one whose
-// composition with the page CTM overflows, is rejected with ErrInvalidMatrix without drawing anything or disturbing the
-// canvas. Without the guard the non-finite CTM reaches the raster device, which concats it onto the caller's canvas.
+// TestDrawPageInvalidMatrix pins that a non-finite caller matrix, or one whose composition with the page CTM overflows,
+// is rejected with ErrInvalidMatrix without drawing or disturbing the canvas; otherwise the non-finite CTM reaches the
+// raster device, which concats it onto the caller's canvas.
 func TestDrawPageInvalidMatrix(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", "vectors.pdf"))
 	if err != nil {
@@ -317,7 +306,7 @@ func TestDrawPageInvalidMatrix(t *testing.T) {
 			}
 		})
 	}
-	// A finite matrix at the same page must still paint, so the guard is not simply rejecting everything.
+	// A finite matrix must still paint, so the guard is not rejecting everything.
 	t.Run("finite", func(t *testing.T) {
 		rendered, rerr := d.RenderPage(0, 72, 0, "")
 		if rerr != nil {

@@ -21,11 +21,10 @@ import (
 )
 
 // decodeDCT handles DCTDecode payloads through the standard library's JPEG decoder, which performs the YCbCr→RGB and
-// Adobe APP14 CMYK/YCCK handling internally. The decoded component bytes then follow the same path as raw samples:
-// /Decode mapping, then conversion through the image's own color space (dctSpace), which for the device spaces is the
-// captured behavior in internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands). The JPEG's own
-// dimensions are authoritative for the raster (the dictionary's /Width and /Height only position the unit square, which
-// the CTM maps regardless of resolution).
+// Adobe APP14 CMYK/YCCK handling internally. The component bytes then follow the raw-sample path: /Decode mapping,
+// then conversion through the image's own color space (dctSpace), which for the device spaces is the captured
+// behavior in internal/color (a CMYK JPEG pixel converts exactly like a k operator's operands). The JPEG's own
+// dimensions are authoritative for the raster; the dictionary's /Width and /Height only position the unit square.
 func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {
 	decoded, w, h, err := dec.dctImage()
 	if err != nil {
@@ -39,9 +38,9 @@ func (dec *decoder) decodeDCT(interpolate bool) (*Image, error) {
 	case *image.YCbCr:
 		dec.dctYCbCr(pix, src, w, h, &hasAlpha)
 	case *image.RGBA:
-		// image/jpeg returns this form for every 3-component JPEG whose components it decides are already RGB: an Adobe
-		// APP14 marker with transform 0, or component IDs 'R','G','B' with no JFIF marker. Neither is exotic in PDF
-		// payloads, so it carries the same /Decode and color-key support as the YCbCr form.
+		// image/jpeg returns this form for a 3-component JPEG it decides is already RGB (an Adobe APP14 transform of 0,
+		// or component IDs 'R','G','B', either without a JFIF marker), so it needs the same /Decode and color-key
+		// support as the YCbCr form.
 		dec.dctRGBA(pix, src, w, h, &hasAlpha)
 	case *image.CMYK:
 		dec.dctCMYK(pix, src, w, h, &hasAlpha)
@@ -81,13 +80,12 @@ func (dec *decoder) dctImage() (img image.Image, w, h int, err error) {
 	return decoded, bounds.Dx(), bounds.Dy(), nil
 }
 
-// dctSpace returns the color space the JPEG's ncomp decoded component bytes convert through: the image's own
-// /ColorSpace, falling back to the device space for ncomp components when the dictionary names none, names one this
-// package cannot resolve, or names one whose component count disagrees with what the payload actually carries (the
-// payload wins — a space of a different arity would consume the bytes at the wrong rate). Inferring the space from the
-// decoded Go type alone renders every DCT image in a non-device space with wrong colors: an all-zero 1-component JPEG
-// under /Separation with a subtractive tint transform paints black where tint 0 must paint white, a fully inverted
-// image, and /Indexed, /DeviceN, and /ICCBased whose /N disagrees with the component count fare no better.
+// dctSpace returns the color space the JPEG's ncomp component bytes convert through: the image's own /ColorSpace, or
+// the device space for ncomp components when the dictionary names none, names one this package cannot resolve, or
+// names one whose component count disagrees with the payload (the payload wins; a space of a different arity would
+// consume the bytes at the wrong rate). Inferring the space from the decoded Go type alone would render every DCT
+// image in a non-device space wrong: an all-zero 1-component JPEG under a /Separation with a subtractive tint
+// transform must paint white (tint 0), not black (TestDCTNonDeviceColorSpace).
 func (dec *decoder) dctSpace(ncomp int) pdfcolor.Space {
 	if space, err := dec.colorSpace(); err == nil && space.NComponents() == ncomp {
 		return space
@@ -118,35 +116,21 @@ func (dec *decoder) dctByteMapping(space pdfcolor.Space) [][]float32 {
 	return out
 }
 
-// minParallelRows is the fewest rows a band is worth handing to a goroutine of its own. Below twice this height an
-// image converts serially on the calling goroutine, so the many small rasters a typical PDF carries (icons, rules,
-// logos, tiling-pattern cells) pay nothing for the fan-out machinery.
+// minParallelRows is the fewest rows worth a goroutine of its own. Below twice this height an image converts serially,
+// so the many small rasters a typical PDF carries (icons, rules, logos, tiling-pattern cells) pay nothing for the
+// fan-out.
 const minParallelRows = 16
 
-// parallelRows splits an image's h rows into contiguous bands, one goroutine per band, runs convert over each, and
-// returns only once every band has finished. The per-pixel conversions below dominate the cost of decoding a
-// page-scale DCT image — a CMYK JPEG spends nearly all of its decode inside internal/color's 17^4-grid multilinear
-// interpolation, run once per pixel — and they are perfectly parallel over rows, which is where that time comes back.
+// parallelRows splits h rows into contiguous bands, runs convert over each on its own goroutine, and returns once every
+// band has finished. The per-pixel conversions dominate a page-scale DCT decode (a CMYK JPEG spends nearly all of it
+// in internal/color's 17^4-grid multilinear interpolation) and are independent across rows.
 //
-// Why splitting by rows cannot change a single output byte:
-//
-//   - Each band writes only the pixels of its own rows: every destination offset is (y*w+x)*4 and the bands partition
-//     y, so no two goroutines address the same byte of pix. The decoded source raster is only ever read.
-//   - Everything the conversions share is fully built and read-only by the time the fan-out starts: the color space,
-//     the /Decode byte mapping from dctByteMapping, the color-key ranges, and the byte LUTs. So are the tables inside
-//     internal/color, whose lazy loads sit behind sync.OnceValue/sync.OnceValues and are safe to reach concurrently.
-//     A /Separation or /DeviceN space does evaluate its tint transform per pixel, but internal/function's Eval methods
-//     read only parsed state and allocate their own working storage per call.
-//   - The mutable per-pixel scratch — the component and sample buffers a conversion rewrites for every pixel — is not
-//     shared: convert allocates its own inside each band.
-//   - hasAlpha is the only state that spans pixels, and it moves in one direction only (false to true, never read back
-//     inside the loops), so OR-ing the bands' results together afterwards yields exactly what a single serial pass
-//     would have produced, whatever order the pixels ran in. Each band accumulates into a flag of its own rather than
-//     writing through the caller's pointer, and the merge happens after Wait, which orders every band's write ahead of
-//     the read here.
-//
-// Nothing is retained past the call and no state is kept at package level, so a caller rendering several documents at
-// once is no different from one rendering a single page.
+// Splitting by rows cannot change an output byte: each band writes only its own rows' pixels and only reads the
+// source raster; everything shared (the color space, the /Decode mapping, the color-key ranges, the LUTs, and
+// internal/color's tables behind sync.OnceValue) is built before the fan-out and read-only after; a /Separation or
+// /DeviceN tint transform's Eval reads only parsed state and allocates its own scratch per call; and convert allocates
+// its per-pixel scratch inside each band. hasAlpha only ever moves from false to true and is never read inside the
+// loops, so each band accumulates its own flag and the merge after Wait matches a serial pass exactly.
 func parallelRows(h int, hasAlpha *bool, convert func(y0, y1 int, bandAlpha *bool)) {
 	workers := min(runtime.GOMAXPROCS(0), h/minParallelRows)
 	if workers <= 1 {
@@ -190,7 +174,7 @@ func (dec *decoder) dctGray(pix []byte, src *image.Gray, w, h int, hasAlpha *boo
 		lut[s] = space.ToNRGBA(comps)
 	}
 	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
-		samples := make([]uint32, 1) // Rewritten per pixel, so it belongs to the band rather than the image.
+		samples := make([]uint32, 1) // Per-band scratch, rewritten every pixel.
 		for y := y0; y < y1; y++ {
 			row := src.Pix[y*src.Stride:]
 			for x := range w {
@@ -226,8 +210,8 @@ func (dec *decoder) dctYCbCr(pix []byte, src *image.YCbCr, w, h int, hasAlpha *b
 	})
 }
 
-// dctRGBA converts a 3-component JPEG image/jpeg handed back untransformed. Its alpha is 255 for every pixel (the
-// decoder fills the channel), so only the mask paths can make a pixel non-opaque.
+// dctRGBA converts the 3-component form image/jpeg hands back untransformed. Its alpha is 255 for every pixel, so only
+// the mask paths can make a pixel non-opaque.
 func (dec *decoder) dctRGBA(pix []byte, src *image.RGBA, w, h int, hasAlpha *bool) {
 	conv := dec.newDCT3()
 	parallelRows(h, hasAlpha, func(y0, y1 int, bandAlpha *bool) {
@@ -243,12 +227,11 @@ func (dec *decoder) dctRGBA(pix []byte, src *image.RGBA, w, h int, hasAlpha *boo
 }
 
 // dct3 is the shared per-pixel conversion for a 3-component DCT image: the /Decode mapping, the color-key ranges, and
-// the space the component bytes convert through. DeviceRGB — the overwhelmingly common case — reduces to one byte LUT
-// per channel; any other 3-component space (a /DeviceN with three colorants) converts through its ToNRGBA per pixel, as
-// the raw-sample path does for multi-component spaces.
+// the space the bytes convert through. DeviceRGB — the overwhelmingly common case — reduces to one byte LUT per
+// channel; any other 3-component space (a /DeviceN with three colorants) converts through ToNRGBA per pixel.
 //
-// Everything here is read-only after newDCT3 builds it except comps and samples, which put rewrites for every pixel;
-// forBand hands each row band its own pair of those so the bands share only the immutable part.
+// Everything is read-only after newDCT3 except comps and samples, which put rewrites every pixel; forBand hands each
+// row band its own pair.
 type dct3 struct {
 	space    pdfcolor.Space
 	mapping  [][]float32
@@ -280,11 +263,9 @@ func (dec *decoder) newDCT3() *dct3 {
 	return c
 }
 
-// forBand returns a converter for one row band: a copy of c carrying its own per-pixel scratch, so concurrent bands
-// never write the same buffer. The copied tables (the LUT, the mapping, the color-key ranges) and the space are only
-// read from here on, and the buffers are allocated exactly where newDCT3 allocated them — the fast paths that leave
-// them nil (a DeviceRGB space, an absent color key) must stay nil, since put keys its behavior off those same fields.
-// Building the converter itself cannot move into the band, since newDCT3 reads and parses through the decoder.
+// forBand returns a copy of c with its own per-pixel scratch, so concurrent bands never write the same buffer. The
+// buffers are allocated exactly where newDCT3 allocated them, since put keys its behavior off which fields are nil.
+// newDCT3 itself stays outside the bands because it parses through the decoder.
 func (c *dct3) forBand() *dct3 {
 	band := *c
 	if c.comps != nil {
@@ -319,12 +300,12 @@ func (c *dct3) put(pix []byte, off int, b0, b1, b2 byte, hasAlpha *bool) {
 }
 
 // dctCMYK converts a 4-component JPEG. The standard library undoes the Adobe inversion (its image.CMYK holds true ink
-// values), but the oracle pins the opposite convention for DCT streams inside PDFs: MuPDF consumes libjpeg's raw
-// output, which leaves Adobe CMYK/YCCK samples in their stored, inverted form, and applies no inversion of its own — a
-// transform-0 probe renders near-black under the identity /Decode. The stored samples are therefore reconstructed here
-// (255−v per channel, which also restores libjpeg's YCCK output for transform-2 files), and /Decode plus color-key
-// masking see those, like every other codec's raw samples. Producers compensate with /Decode [1 0 1 0 1 0 1 0] when
-// they intend true ink values, which then flows through mapping below exactly as in MuPDF.
+// values), but the oracle pins the opposite for DCT streams inside PDFs: MuPDF consumes libjpeg's raw output, which
+// leaves Adobe CMYK/YCCK samples in their stored, inverted form, and applies no inversion of its own — a transform-0
+// probe renders near-black under the identity /Decode. The stored samples are therefore reconstructed here (255−v per
+// channel, which also restores libjpeg's YCCK output for transform-2 files) before /Decode and color-key masking.
+// Producers that intend true ink values compensate with /Decode [1 0 1 0 1 0 1 0], which flows through the mapping
+// exactly as in MuPDF.
 func (dec *decoder) dctCMYK(pix []byte, src *image.CMYK, w, h int, hasAlpha *bool) {
 	colorKey := dec.colorKeyRanges(4, 8)
 	space := dec.dctSpace(4)

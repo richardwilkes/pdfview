@@ -9,11 +9,10 @@
 
 package cos
 
-// Decryptor decrypts the strings and stream payload of objects stored directly in the file, keyed by the object's
-// number and generation. Objects parsed out of an object stream are never passed to it: the object stream's payload was
-// already decrypted as a whole under the stream's own number, and ISO 32000-2 7.6.2 does not separately encrypt the
-// objects it contains. The document installs one via SetDecryptor once its security handler (internal/crypt) has been
-// built from the /Encrypt dictionary.
+// Decryptor decrypts the strings and stream payload of objects stored directly in the file, keyed by object number and
+// generation. Objects parsed out of an object stream are never passed to it: the stream's payload was decrypted as a
+// whole under its own number, and ISO 32000-2 7.6.2 does not separately encrypt the objects inside. The document
+// installs one via SetDecryptor once the security handler (internal/crypt) is built from the /Encrypt dictionary.
 type Decryptor interface {
 	// DecryptString returns the decrypted bytes of a string belonging to object (num, gen). It must return the input
 	// unchanged when decryption is not possible (for example, before authentication), and must never panic on malformed
@@ -28,14 +27,11 @@ type Decryptor interface {
 	EncryptsMetadata() bool
 }
 
-// typeMetadata is the /Type value of a metadata stream. Such streams are stored unencrypted when the encryption
-// dictionary sets /EncryptMetadata false (ISO 32000-2 7.6.2), so the decryptor skips them in that case.
 const typeMetadata Name = "Metadata"
 
-// SetDecryptor installs dec and drops every cached object, so objects parsed before the security handler existed — the
-// catalog probed while validating the root, and the /Encrypt dictionary itself — are reparsed and decrypted on next
-// use. The /Encrypt object number is recorded from the trailer so that its own strings (the /O, /U, and related entries
-// the handler was built from) are never themselves run through the decryptor (ISO 32000-2 7.6.2).
+// SetDecryptor installs dec and drops every cached object, so objects parsed before the security handler existed are
+// reparsed and decrypted on next use. The /Encrypt object's number is recorded so that its own strings (/O, /U, and
+// related entries) are never run through the decryptor (ISO 32000-2 7.6.2).
 func (d *Document) SetDecryptor(dec Decryptor) {
 	d.decryptor = dec
 	d.encryptNum = 0
@@ -53,19 +49,16 @@ func (d *Document) DropCaches() {
 	d.rearmRepair()
 }
 
-// rearmRepair re-enables the once-per-document repair scan. A sweep that ran before the current decryption state was
-// reached could not decode a single object stream — their payloads were still ciphertext — so it recovered neither the
-// objects inside them nor a catalog stored there. Both callers change that state (a decryptor arriving, or a successful
-// authentication supplying the file key), so the document is entitled to one more sweep, which now reads those streams.
-// A document that needs no repair never pays for this: nothing runs until a load actually fails.
+// rearmRepair re-enables the once-per-document repair scan. A sweep run before the current decryption state could not
+// decode any object stream (their payloads were still ciphertext), so it recovered neither the objects inside them nor
+// a catalog stored there. Nothing runs until a load actually fails, so a document that needs no repair pays nothing.
 func (d *Document) rearmRepair() {
 	d.repaired = false
 }
 
-// decryptDirect decrypts, in place, the strings and stream payload of an object that was stored directly at a file
-// offset under object number num and generation gen, and returns it. It is a no-op when no decryptor is installed or
-// the object is the encryption dictionary itself. It never follows indirect references: every indirect object is
-// decrypted under its own key when it is itself loaded.
+// decryptDirect decrypts, in place, the strings and stream payload of an object stored directly in the file as (num,
+// gen), and returns it. It is a no-op when no decryptor is installed or the object is the encryption dictionary. It
+// never follows indirect references: each indirect object is decrypted under its own key when loaded.
 func (d *Document) decryptDirect(num, gen int, obj Object) Object {
 	if d.decryptor == nil || num == d.encryptNum {
 		return obj
@@ -100,9 +93,9 @@ func (d *Document) decryptValue(num, gen int, obj Object) Object {
 		for k, e := range v.Dict {
 			v.Dict[k] = d.decryptValue(num, gen, e)
 		}
-		// A metadata stream's payload is stored in the clear when the encryption dictionary sets /EncryptMetadata false
-		// (ISO 32000-2 7.6.2), but the strings in its dictionary are still encrypted; every other stream — including
-		// object streams — has its payload encrypted too.
+		// A metadata stream's payload is stored in the clear when /EncryptMetadata is false (ISO 32000-2 7.6.2), but
+		// the strings in its dictionary are still encrypted; every other stream, object streams included, has its
+		// payload encrypted too.
 		if typ != typeMetadata || d.decryptor.EncryptsMetadata() {
 			v.Raw = d.decryptor.DecryptStream(num, gen, v.Raw)
 		}

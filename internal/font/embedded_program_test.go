@@ -19,9 +19,9 @@ import (
 )
 
 // TestType0OpenTypeFontFile3IsEmbedded covers ISO 32000-2 9.9 Table 126, which permits /FontFile3 with
-// /Subtype /OpenType for CIDFontType0 and CIDFontType2 alike. Reading such a stream only as bare CFF failed on the
-// sfnt header and substituted the font away: its metrics fell back to the standard-14 pin and its glyphs came from
-// Liberation through /ToUnicode — or, with no /ToUnicode, nothing rendered at all.
+// /Subtype /OpenType for CIDFontType0 and CIDFontType2 alike. Read only as bare CFF, such a stream fails on the sfnt
+// header and the font is substituted away: standard-14 pinned metrics and Liberation glyphs through /ToUnicode, or
+// nothing rendered at all without a /ToUnicode.
 func TestType0OpenTypeFontFile3IsEmbedded(t *testing.T) {
 	ttf := data.Liberation("LiberationSans-Regular")
 	if ttf == nil {
@@ -41,7 +41,7 @@ func TestType0OpenTypeFontFile3IsEmbedded(t *testing.T) {
 	if f.sub != nil {
 		t.Error("a substitute was loaded alongside the embedded program, so GID and GlyphPath disagree")
 	}
-	// LiberationSans' hhea ascender is 1854 over a 2048 upem; the substitute pin it used to fall back to is 0.8.
+	// LiberationSans' hhea ascender is 1854 over a 2048 upem; the substitute pin is 0.8.
 	if f.ascender < 0.904 || f.ascender > 0.906 {
 		t.Errorf("ascender = %v, want ≈0.905 from the embedded program's hhea", f.ascender)
 	}
@@ -54,18 +54,17 @@ func TestType0OpenTypeFontFile3IsEmbedded(t *testing.T) {
 	}
 }
 
-// cmaplessLiberation rebuilds the bundled program without its cmap table — the exact shape a TrueType subset takes when
-// its producer drops the table the PDF encoding makes redundant. go-text refuses such a program, so the direct glyf
-// walker draws it and the go-text face is nil.
+// cmaplessLiberation rebuilds the bundled program without its cmap table, the shape a TrueType subset takes when its
+// producer drops the table the PDF encoding makes redundant. go-text refuses such a program, so the direct glyf walker
+// draws it and the go-text face is nil.
 func cmaplessLiberation(t *testing.T, tags ...string) []byte {
 	t.Helper()
 	return buildSFNT(liberationTables(t, tags...))
 }
 
-// TestCmaplessTrueTypeWidthsComeFromHmtx pins the /Widths-absent fallback for a program go-text rejected. The loader
-// had already suppressed the standard-14 AFM table (an embedded program was present), so with no advance source the
-// font reported /MissingWidth — 0 by default — for every code while its outlines rendered correctly, piling the whole
-// string onto one point.
+// TestCmaplessTrueTypeWidthsComeFromHmtx pins the /Widths-absent fallback for a program go-text rejected. An embedded
+// program suppresses the standard-14 AFM table, so with no other advance source the font would report /MissingWidth
+// (0 by default) for every code while its outlines rendered correctly, piling the whole string onto one point.
 func TestCmaplessTrueTypeWidthsComeFromHmtx(t *testing.T) {
 	program := cmaplessLiberation(t, "head", "hhea", "maxp", "loca", "glyf", "hmtx")
 	f, err := loadFromDict(t,

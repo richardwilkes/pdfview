@@ -7,14 +7,13 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package crypt implements the PDF standard security handler (ISO 32000-2 7.6): revisions 2, 3, and 4 (RC4 and AESV2),
-// revision 5, and revision 6 (AESV3). It authenticates the user and owner passwords, reproducing the status bits
-// MuPDF's fz_authenticate_password returns, and decrypts strings and streams with per-object keys.
+// Package crypt implements the PDF standard security handler (ISO 32000-2 7.6): revisions 2-4 (RC4 and AESV2) and 5-6
+// (AESV3). It authenticates the user and owner passwords, reproducing the status bits MuPDF's fz_authenticate_password
+// returns, and decrypts strings and streams with per-object keys.
 //
-// It is installed into the COS layer as a cos.Decryptor: the handler is built from the /Encrypt dictionary, the empty
-// password is tried immediately (unlocking documents that need no password), and once a password authenticates the file
-// encryption key lets every subsequently loaded object be decrypted. All cryptographic primitives come from the Go
-// standard library. Hostile input yields errors or pass-through data, never a panic.
+// The COS layer installs it as a cos.Decryptor: New builds the handler from the /Encrypt dictionary and tries the empty
+// password at once, and once a password authenticates, the file encryption key decrypts every object loaded after it.
+// All primitives come from the Go standard library. Hostile input yields errors or pass-through data, never a panic.
 package crypt
 
 import (
@@ -67,8 +66,7 @@ func New(c *cos.Document, encDict cos.Dict) (*Handler, error) {
 	}
 	v, _ := c.GetInt(encDict, "V")
 	r, ok := c.GetInt(encDict, "R")
-	// The standard security handler defines revisions 2 through 6 (ISO 32000-2 7.6.4); there is no revision 1 and
-	// nothing above 6, so both ends are rejected, as is a missing or non-integer /R.
+	// The standard security handler defines only revisions 2 through 6 (ISO 32000-2 7.6.4).
 	if !ok || r < 2 || r > 6 {
 		return nil, errBadRevision
 	}
@@ -115,17 +113,15 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 	case h.r <= 4:
 		length := 40
 		// /Length exists only for V >= 2 (ISO 32000-1 Table 20); V 0 and V 1 fix the key at 40 bits, and MuPDF likewise
-		// reads /Length only when v == 2 || v == 4. Honoring it regardless of /V means an out-of-spec but real
-		// `/V 1 /R 2 /Length 128` dictionary derives a 16-byte key where the writer used 5, so no derived key ever
-		// matches /U: the empty-password probe and both correct passwords fail and the document is reported permanently
-		// locked while other readers open it.
+		// reads /Length only for V 2 and V 4. Out-of-spec `/V 1 /R 2 /Length 128` files exist; honoring their /Length
+		// derives a 16-byte key where the writer used 5, so no password authenticates and the document reads as locked.
 		if v >= 2 {
 			if l, ok := c.GetInt(encDict, "Length"); ok && l >= 40 && l <= 256 && l%8 == 0 {
 				length = int(l)
 			}
 		}
-		// The RC4/AESV2 file key derives from a 16-byte MD5 digest, so a hostile /Length up to 256 (keyLen 32) would
-		// slice that digest out of range and panic. Cap at 16 (ISO 32000-2 keys never exceed 128 bits for R<=4).
+		// The R<=4 file key is sliced from a 16-byte MD5 digest, so a hostile /Length up to 256 (keyLen 32) would panic.
+		// ISO 32000-2 keys never exceed 128 bits for R<=4.
 		h.keyLen = min(length/8, 16)
 		if len(h.o) < 32 || len(h.u) < 32 {
 			return errBadKeyEntry
@@ -134,13 +130,11 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 			var strLen, stmLen int
 			h.strM, strLen = h.cryptFilterMethod(c, encDict, "StrF")
 			h.stmM, stmLen = h.cryptFilterMethod(c, encDict, "StmF")
-			// The selected crypt filter carries its own /Length (ISO 32000-2 Table 25), and the top-level one is
-			// optional with a 40-bit default, so a V4 document that omits it must not be decrypted with a 40-bit key
-			// just because the crypt filter is where the real length was written. /AESV2 is defined to use a 128-bit
-			// key whatever either /Length says: without pinning it, objectKey hands aes.NewCipher a 10-byte key, the
-			// decrypt reports failure, and apply returns the CIPHERTEXT unchanged — the document authenticates and
-			// renders as garbage instead of failing. Streams win over strings when the two filters disagree, since one
-			// file key length serves both.
+			// The selected crypt filter carries its own /Length (ISO 32000-2 Table 25) and the top-level one is optional
+			// with a 40-bit default, so the filter's length wins. /AESV2 uses a 128-bit key whatever either /Length says:
+			// a 10-byte per-object key makes aes.NewCipher fail and apply return the CIPHERTEXT unchanged, so the
+			// document authenticates and renders as garbage. Streams win over strings when the two filters disagree,
+			// since one file key length serves both.
 			switch {
 			case h.stmM == methodAESV2 || h.strM == methodAESV2:
 				h.keyLen = 16
@@ -167,11 +161,10 @@ func (h *Handler) configure(c *cos.Document, encDict cos.Dict, v int) error {
 		if len(h.oe) < 32 || len(h.ue) < 32 {
 			return errBadKeyEntry
 		}
-		// /StmF, /StrF, and /CF apply to V5 exactly as they do to V4 (ISO 32000-2 7.6.5), both defaulting to /Identity,
-		// and MuPDF parses crypt filters for v == 4 || v == 5 alike. Hardcoding AESV3 here corrupted every legal
-		// document that leaves its content in the clear — `/StmF /Identity /StrF /Identity /EFF /StdCF` is what
-		// Acrobat's "encrypt only file attachments" writes — because aesCBCDecrypt succeeds on any payload of at least
-		// 32 bytes, so the cleartext streams came back as noise and every page rendered blank or garbled.
+		// /StmF, /StrF, and /CF apply to V5 exactly as to V4 (ISO 32000-2 7.6.5), both defaulting to /Identity, and
+		// MuPDF parses crypt filters for V4 and V5 alike. Hardcoding AESV3 here corrupts every legal document that leaves
+		// its content in the clear (Acrobat's "encrypt only file attachments" writes `/StmF /Identity /StrF /Identity
+		// /EFF /StdCF`): aesCBCDecrypt succeeds on any payload of at least 32 bytes, so every page renders as noise.
 		h.strM, _ = h.cryptFilterMethod(c, encDict, "StrF")
 		h.stmM, _ = h.cryptFilterMethod(c, encDict, "StmF")
 	}
@@ -208,10 +201,9 @@ func (h *Handler) cryptFilterMethod(c *cos.Document, encDict cos.Dict, which cos
 }
 
 // cryptFilterKeyLen reads a crypt filter dictionary's /Length as a key length in BYTES, or 0 when it is absent or
-// unusable. ISO 32000-2 Table 25 defines the entry in bits, but writers in the field also store it in bytes (the value
-// is then a plausible 5-16 where a bit length would be 40-128), so both spellings are accepted the way deployed readers
-// accept them. The result is capped at 16 for the same reason the top-level length is: the R<=4 file key is sliced out
-// of a 16-byte MD5 digest.
+// unusable. ISO 32000-2 Table 25 defines the entry in bits, but writers in the field also store it in bytes (a
+// plausible 5-16 where a bit length would be 40-128), so both spellings are accepted as deployed readers accept them.
+// The result is capped at 16 for the same reason the top-level length is.
 func cryptFilterKeyLen(c *cos.Document, filter cos.Dict) int {
 	l, ok := c.GetInt(filter, "Length")
 	if !ok {
@@ -278,9 +270,9 @@ func (h *Handler) EncryptsMetadata() bool {
 	return h.metaEnc
 }
 
-// apply performs the actual decryption for one string or stream. It is total: any shortfall (no key, bad key length,
-// malformed ciphertext) yields the input unchanged rather than an error or panic, because these hooks run deep inside
-// object loading where there is no error channel and hostile input must not crash.
+// apply decrypts one string or stream. It is total: any shortfall (no key, bad key length, malformed ciphertext) yields
+// the input unchanged, because these hooks run deep inside object loading where there is no error channel and hostile
+// input must not crash.
 func (h *Handler) apply(m method, num, gen int, data []byte) []byte {
 	if h.fileKey == nil || m == methodIdentity || len(data) == 0 {
 		return data

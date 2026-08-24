@@ -13,9 +13,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Outline-walk guards: depth is capped, reference cycles are cut by a visited set shared across the whole walk, and the
-// total number of nodes is capped so a hostile /Next chain cannot balloon memory. The public API applies its own,
-// configurable OverallMaxTOCEntries budget on top.
+// Outline-walk guards: depth is capped, a visited set shared across the walk cuts reference cycles, and the node count
+// is capped so a hostile /Next chain cannot balloon memory. The public API applies its own, configurable
+// OverallMaxTOCEntries budget on top.
 const (
 	maxOutlineDepth = 64
 	maxOutlineNodes = 65536

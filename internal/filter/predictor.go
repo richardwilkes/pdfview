@@ -13,10 +13,9 @@ import (
 	"fmt"
 )
 
-// applyPredictor reverses the predictor transform named by p on decompressed data. Predictor 1 (or less, treated as 1)
-// is a no-op, 2 is TIFF horizontal differencing, and 10-15 are the PNG filters (each row carries its own filter-type
-// byte, so the specific value does not matter on decode). data is owned by the caller's decode stage and may be
-// modified in place; the result is capped at maxSize bytes.
+// applyPredictor reverses the predictor transform p names on decompressed data: 1 (or less) is a no-op, 2 is TIFF
+// horizontal differencing, and 10-15 are the PNG filters. data belongs to the caller's decode stage and may be modified
+// in place; the result is capped at maxSize bytes.
 func applyPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	switch {
 	case p.Predictor <= 1:
@@ -47,10 +46,10 @@ func validatePredictorParams(p Params) error {
 	return nil
 }
 
-// predictorRowLen returns the number of bytes in one predictor row, clamped to dataLen. A row cannot be longer than the
-// data itself, and clamping also keeps hostile Columns values from forcing large allocations for a file that does not
-// actually contain such rows. The product of the validated parameters tops out at 2^34 (64 colors * 16 bits * 2^24
-// columns), well inside the 64-bit int this engine requires. The result is zero only when dataLen is zero.
+// predictorRowLen returns the bytes in one predictor row, clamped to dataLen: a row cannot be longer than the data, and
+// the clamp keeps a hostile Columns from forcing a large allocation for rows the file does not contain. The product of
+// the validated parameters tops out at 2^34 (64 colors * 16 bits * 2^24 columns), inside the 64-bit int this engine
+// requires. The result is zero only when dataLen is zero.
 func predictorRowLen(p Params, dataLen int) int {
 	return min((p.Colors*p.BitsPerComponent*p.Columns+7)/8, dataLen)
 }
@@ -61,9 +60,8 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 	if err := validatePredictorParams(p); err != nil {
 		return nil, err
 	}
-	// The number of bytes per complete pixel, rounded up to at least one, per the PNG specification's filtering model.
-	// A single sub-byte pixel rounds up to 1, but a multi-component sub-byte config (e.g. 5 colors * 2 bits) spans
-	// more than one byte, so round the whole pixel width up rather than flooring per component.
+	// Bytes per complete pixel, rounded up to at least one. A multi-component sub-byte layout (e.g. 5 colors * 2 bits)
+	// spans more than one byte, so round the whole pixel width up rather than flooring per component.
 	bpp := max(1, (p.Colors*p.BitsPerComponent+7)/8)
 	rowLen := predictorRowLen(p, len(data))
 	if rowLen == 0 {
@@ -82,8 +80,8 @@ func pngPredictor(p Params, data []byte, maxSize int) ([]byte, error) {
 		pos++
 		n := min(rowLen, len(data)-pos)
 		copy(row, data[pos:pos+n])
-		// Zero-fill the remainder of a truncated final row so the filter arithmetic below stays in bounds; only the n
-		// bytes actually present are emitted.
+		// Zero-fill the rest of a truncated final row so the filter arithmetic stays in bounds; only the n bytes present
+		// are emitted.
 		for i := n; i < rowLen; i++ {
 			row[i] = 0
 		}
@@ -161,8 +159,7 @@ func tiffPredictor(p Params, data []byte) ([]byte, error) {
 	if err := validatePredictorParams(p); err != nil {
 		return nil, err
 	}
-	// Clamping rowLen to len(data) is behavior-preserving here: a row at least as long as the data yields a single
-	// iteration covering all of it either way.
+	// Clamping rowLen to len(data) changes nothing here: a row at least as long as the data is one iteration either way.
 	rowLen := predictorRowLen(p, len(data))
 	switch p.BitsPerComponent {
 	case 8:

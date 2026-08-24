@@ -9,14 +9,13 @@
 
 package imaging
 
-// The dispatch variables for this package's vectorizable loops. Each defaults to the portable scalar implementation
-// and is what the call sites actually call, so the default build runs exactly the code that was here before the
-// kernels existed. Under //go:build goexperiment.simd, simd_on.go's init repoints them at the vector kernels — unless
-// the target only emulates vector operations, where the kernels would be slower than what they replace. Every kernel
-// carries its own gate and hands work it does not want straight back to the scalar function, so switching these is
-// safe at any size and for any argument shape.
+// The dispatch variables for this package's vectorizable loops. Each defaults to the portable scalar implementation,
+// which is what the call sites call. Under the goexperiment.simd build tag, simd_on.go's init repoints them at the
+// vector kernels unless the target only emulates vector operations, where the kernels would be slower. Every kernel
+// carries its own gate and hands work it does not want back to the scalar function, so switching these is safe at any
+// size and for any argument shape.
 //
-// simd_wiring_test.go locks the default wiring; the equivalence tests lock the experiment's.
+// simd_wiring_test.go locks the default wiring; simd_equiv_test.go locks the experiment's.
 var (
 	invertBytesFn    = invertBytesScalar
 	thresholdFn      = thresholdScalar

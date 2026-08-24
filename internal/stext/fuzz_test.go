@@ -92,8 +92,8 @@ func FuzzSelection(f *testing.F) {
 	f.Add([]byte{'b', 2, 0, 'r', 2, 1, 'o', 2, 0, 'w', 9, 2, 'n', 2, 16}, 3, 1, float32(-1e9), float32(1e9))
 	f.Add([]byte{0, 0, 4, 1, 1, 8, ' ', 9, 2}, -7, 1<<30, float32(0), float32(0))
 	// A non-finite coordinate on the character a line takes its advance direction from, followed by word-sized gaps:
-	// the direction comes out NaN, so every one of segmentQuads' merge comparisons is false and each gap's synthesized
-	// space stands as a quad of its own. This is the shape that puts more quads on a page than it has characters.
+	// the direction is NaN, so every merge comparison in segmentQuads is false and each synthesized space stands as a
+	// quad of its own. This shape puts more quads on a page than it has characters.
 	f.Add([]byte("00800A02 020"), 0, 4, float32(50), float32(50))
 	f.Fuzz(func(t *testing.T, layout []byte, start, end int, x, y float32) {
 		page := NewPage(charsFromLayout(layout))

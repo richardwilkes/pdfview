@@ -9,12 +9,10 @@
 
 package filter
 
-// The dispatch variables for this package's vectorizable loops. Each defaults to the portable scalar implementation
-// and is what the call sites actually call, so the default build runs exactly the code that was here before the
-// kernels existed. Under //go:build goexperiment.simd, simd_on.go's init repoints them at the vector kernels — unless
-// the target only emulates vector operations, where the kernels would be slower than what they replace. Each kernel
-// carries its own length gate and hands short work straight back to the scalar function, so switching these is safe
-// at any size.
+// The dispatch variables for this package's vectorizable loops. Each defaults to the portable scalar implementation.
+// Under //go:build goexperiment.simd, simd_on.go's init repoints them at the vector kernels unless the target only
+// emulates vector operations, where the kernels would be slower than what they replace. Each kernel gates on length and
+// hands short work back to the scalar function, so switching is safe at any size.
 //
-// simd_wiring_test.go locks the default wiring; the equivalence tests lock the experiment's.
+// simd_wiring_test.go locks the default wiring; simd_equiv_test.go locks the experiment's.
 var addRowsFn = addRowsScalar

@@ -302,7 +302,7 @@ func TestClipRestoredByQ(t *testing.T) {
 
 func TestUnbalancedSaveUnwinds(t *testing.T) {
 	rec := run(t, nil, nil, "q q 0 0 10 10 re W n q 1 0 0 rg")
-	// Three clips? No: one W clip at depth 3; stream ends; unwind must pop it exactly once.
+	// One W clip at depth 3; the unwind at stream end must pop it exactly once.
 	wantOps(t, rec, opClip, opPopClip)
 }
 
@@ -343,8 +343,8 @@ func TestTextObjectSkippedSafely(t *testing.T) {
 }
 
 func TestInlineImageDecodesAndDraws(t *testing.T) {
-	// Without /L: the payload contains a lone EI-lookalike inside binary that lacks the delimiters, then a real EI. The
-	// lexer must stay in sync and the image must decode from the scan-delimited payload.
+	// Without /L: the payload holds an EI-lookalike lacking delimiters before the real EI. The lexer must stay in sync
+	// and the image must decode from the scan-delimited payload.
 	rec := run(t, nil, nil, "BI /W 2 /H 2 /BPC 8 /CS /G ID \x00EIx\xff\x01 EI 0 0 1 1 re f")
 	wantOps(t, rec, opFillImage, opFill)
 	img := rec.calls[0].img
@@ -663,9 +663,9 @@ func TestTilingPatternPaint(t *testing.T) {
 	}
 }
 
-// A tiling paint carries the identity a device needs to cache its rasterized cell: the pattern's reference, plus the
-// scn-supplied color for an uncolored pattern (the same stencil paints a different cell in a different color). The key
-// must be withheld — nil — whenever Replay would paint nothing, or a device would cache emptiness as the cell.
+// A tiling paint's Key identifies the rasterized cell a device may cache: the pattern's reference, plus the
+// scn-supplied color for an uncolored pattern. It is nil whenever Replay would paint nothing, or a device would cache
+// the empty cell.
 func TestTilingPatternCacheKey(t *testing.T) {
 	d, res := patternPDF(t)
 	keyOf := func(content string) any {
@@ -697,9 +697,8 @@ func TestTilingPatternCacheKey(t *testing.T) {
 	}
 }
 
-// A tiling pattern whose cell selects the pattern again paints NOTHING on the inner selection (the cycle guard), so
-// that inner paint must carry no cache key: a device that cached it would serve the empty cell for every later,
-// legitimate use of the same pattern.
+// A tiling pattern whose cell selects the pattern again paints nothing on the inner selection (the cycle guard), so
+// that inner paint must carry no cache key, or a device would serve the empty cell for every later use of the pattern.
 func TestTilingPatternCacheKeyWithheldWhileActive(t *testing.T) {
 	cell := "/Pattern cs /P scn 0 0 2 2 re f"
 	dict := "<< /PatternType 1 /PaintType 1 /BBox [0 0 4 4] /XStep 4 /YStep 4 /Resources << /Pattern << /P 1 0 R >> >>"

@@ -46,8 +46,7 @@ func (in *interp) opEndText() {
 	in.inText = false
 }
 
-// opTf implements Tf. Like the oracle, a failed font load aborts the operator and keeps the previous font and size (its
-// interpreter drops the operator on error); text then continues in the prior font.
+// opTf implements Tf. A failed font load aborts the operator and keeps the previous font and size, like the oracle.
 func (in *interp) opTf() {
 	if len(in.operands) < 2 {
 		return
@@ -68,12 +67,11 @@ func (in *interp) opTf() {
 	in.gs.text.size = float32(size)
 }
 
-// loadFont resolves /Resources /Font <name> and loads it, caching per reference — in the document's budgeted store when
-// one is wired (surviving across runs), else in the per-Run map. Failures are cached as nil either way, so hostile
-// content cannot force repeated parses. Each load that actually parses charges the work budget (fontLoadCost), like
-// every other resource parse an operator can force: the cache makes a repeat of the same reference free but bounds
-// nothing on its own, since a resource dictionary may name up to maxContainerElements distinct font references that all
-// share one expensive FontFile.
+// loadFont resolves /Resources /Font <name> and loads it, caching per reference: in the document's budgeted store when
+// one is wired (surviving across runs), else in the per-Run LRU. Failures cache as nil either way, so hostile content
+// cannot force repeated parses. Each load that parses charges the work budget (fontLoadCost): the cache makes a repeat
+// of the same reference free but bounds nothing on its own, since a resource dictionary may name up to
+// maxContainerElements distinct font references that all share one expensive FontFile.
 func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	raw, ok := in.resource("Font", name)
 	if !ok {
@@ -84,8 +82,8 @@ func (in *interp) loadFont(name cos.Name) (*font.Font, bool) {
 	if isRef {
 		if in.st != nil {
 			if f, hit := in.st.Get[*font.Font](fontKey{ref: key}); hit {
-				// A cached negative entry is a nil *font.Font, so report a miss on nil to match the
-				// no-store LRU path below; otherwise a repeated Tf would clear the current font.
+				// A cached negative entry is nil; report it as a miss like the LRU path, or a repeated Tf would clear
+				// the current font.
 				return f, f != nil
 			}
 		} else if f, cached := in.fonts.get(key); cached {
@@ -119,10 +117,9 @@ func fontSize(f *font.Font) uint64 {
 }
 
 // textMove implements Td (and the T*/'/" leading moves): translate the line matrix and restart the text matrix from it.
-// The composed matrix gets the same finiteness guard every other matrix-composing site applies: finite operands against
-// a finite Tlm still overflow once both are near float32's ceiling, and since Tm is reset from Tlm, a stored ±Inf would
-// make newRun return nil for every later show operator — with only Tm or BT able to recover, never another Td. Leaving
-// the line matrix where it was drops that move instead of deleting the rest of the text.
+// Finite operands against a finite Tlm still overflow near float32's ceiling, and since Tm is reset from Tlm, a stored
+// ±Inf would make newRun return nil for every later show operator, with only Tm or BT able to recover. Leaving the line
+// matrix where it was drops that move instead of deleting the rest of the text.
 func (in *interp) textMove(tx, ty float32) {
 	if !isFinitePt(tx, ty) {
 		return
@@ -188,10 +185,9 @@ func (in *interp) opTJ() {
 			continue
 		}
 		if n, isNum := cos.AsReal(el); isNum && isFinitePt(float32(n), 0) {
-			// Guard the kicked text matrix like appendGlyphs guards the advanced one: the operand is range-checked, but
-			// float32(-n)/1000 still overflows against a large Tf size or Tz, and a stored ±Inf would make newRun return
-			// nil for every later show operator until the next BT/Tm/Td — the rest of the text object would silently
-			// vanish. Leaving the matrix where it was drops that one kick instead.
+			// The operand is range-checked, but float32(-n)/1000 still overflows against a large Tf size or Tz, and a
+			// stored ±Inf would make newRun return nil for every later show operator until the next BT/Tm/Td. Leaving
+			// the matrix where it was drops that one kick instead.
 			var kicked gfx.Matrix
 			if vertical { // TJ numbers kick the vertical advance, with no horizontal-scaling factor.
 				kicked = gfx.Translate(0, float32(-n)/1000*ts.size).Mul(in.tm)
@@ -243,18 +239,17 @@ func (in *interp) newRun() *device.TextRun {
 
 // maxRunGlyphs caps how many glyphs one show operator's run may hold (one TJ array's strings share the allowance, since
 // they compose a single run). The per-glyph budget charge bounds a Run's total glyph work but not the peak heap of a
-// single run: a glyph costs one or two payload bytes in the string operand — which internal/filter lets a content
-// stream inflate to 64 MB — against a ~44-byte device.Glyph in the run, so one uncapped Tj built hundreds of megabytes
-// of live entries (near a gigabyte through append's growth) from a stream that flate-compresses to a few kilobytes,
-// before the device ever saw the run. This is the class stext.maxChars caps downstream, applied to the interpreter-side
-// run the way maxOperandElements caps one operand, and sits far above any real show operator (a whole page of text runs
-// to a few thousand glyphs).
+// single run: a glyph costs one or two payload bytes in the string operand, which internal/filter lets a content stream
+// inflate to 64 MB, against a 64-byte device.Glyph in the run, so one uncapped Tj could build hundreds of megabytes of
+// live entries from a stream that flate-compresses to a few kilobytes, before the device ever saw the run. This is the
+// class stext.maxChars caps downstream, applied to the interpreter-side run the way maxOperandElements caps one
+// operand, and sits far above any real show operator (a whole page of text runs to a few thousand glyphs).
 const maxRunGlyphs = 1 << 16
 
 // appendGlyphs decodes one string operand into positioned glyphs, advancing the text matrix per glyph. The glyph count
 // drains the per-Run operator budget so huge strings cannot amplify work unboundedly, and the run itself is capped at
-// maxRunGlyphs. In vertical writing mode (ISO 32000-2 9.7.4.3), each glyph is displaced by its position vector v (folded
-// into its Trm) and the text matrix advances by the vertical displacement w1 in y — with no horizontal-scaling
+// maxRunGlyphs. In vertical writing mode (ISO 32000-2 9.7.4.3), each glyph is displaced by its position vector v
+// (folded into its Trm) and the text matrix advances by the vertical displacement w1 in y, with no horizontal-scaling
 // contribution, which applies only to x-axis quantities (9.3.4).
 func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 	ts := &in.gs.text
@@ -276,10 +271,9 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 			adv = w1
 		}
 		if trm.IsFinite() {
-			// The emitted advance is the glyph quad's width in the structured-text device (Trm × (advance, ...)), so a
-			// non-finite one collapses the quad's right edge to the origin through the device's float→int clamp — the
-			// hit tracks nothing. The width sources guard themselves, but the emission does not depend on that: an
-			// unusable advance is emitted as zero, which is what a zero-width glyph would carry anyway.
+			// The emitted advance is the glyph quad's width in the structured-text device, so a non-finite one would
+			// collapse the quad's right edge to the origin through the device's float→int clamp. An unusable advance
+			// is emitted as zero, what a zero-width glyph would carry anyway.
 			emitted := adv
 			if !isFinitePt(emitted, 0) {
 				emitted = 0
@@ -294,10 +288,9 @@ func (in *interp) appendGlyphs(run *device.TextRun, s []byte) {
 				Advance: emitted,
 			})
 		}
-		// Guard the advanced text matrix like every other matrix-composing site: the font's advance comes from the font
-		// object graph, where a hostile /Widths, /W or /MissingWidth entry can be ±Inf. Folding one in would poison in.tm
-		// permanently, making newRun return nil for every later show operator until the next BT — the rest of the text
-		// object would silently vanish. Leaving the matrix where it was drops that glyph's advance instead.
+		// The font's advance comes from the font object graph, where a hostile /Widths, /W or /MissingWidth entry can
+		// be ±Inf. Folding one in would poison in.tm permanently, making newRun return nil for every later show
+		// operator until the next BT. Leaving the matrix where it was drops that glyph's advance instead.
 		var advanced gfx.Matrix
 		if vertical {
 			ty := adv*ts.size + ts.charSpacing
@@ -354,13 +347,11 @@ func (in *interp) emitRun(run *device.TextRun) {
 }
 
 // emitType3Run paints a Type 3 run: the glyph procs execute through the interpreter (depth-capped, cycle-guarded),
-// inheriting the caller's graphics state — which is how a d1 (shape) glyph picks up the current fill color, since d1
-// blocks the proc's own color operators. The run itself still reaches the device (FillText draws nothing for a font
-// without outlines) so the structured-text device sees Type 3 text like any other. Type 3 text clipping (modes 4-7) is
-// not supported: the run clips nothing rather than everything, the least-wrong degrade until a corpus file demands
-// proc-rendered clip masks. Mode 7 (clip-only) paints nothing either, so it is reported as IgnoreText — no proc runs and
-// no clip accumulates, but the run still reaches the device and stays searchable, matching what ClipText gives the
-// non-Type-3 path.
+// inheriting the caller's graphics state, which is how a d1 (shape) glyph picks up the current fill color. The run
+// itself still reaches the device (FillText draws nothing for a font without outlines) so the structured-text device
+// sees Type 3 text like any other. Type 3 text clipping (modes 4-7) is not supported: the run clips nothing rather than
+// everything, the least-wrong degrade until a corpus file demands proc-rendered clip masks. Mode 7 (clip-only) paints
+// nothing either, so it is reported as IgnoreText: no proc runs and no clip accumulates, but the run stays searchable.
 func (in *interp) emitType3Run(run *device.TextRun, paint bool, mode int) {
 	if mode == 3 || mode == 7 {
 		in.dev.IgnoreText(run)
@@ -405,9 +396,9 @@ func (in *interp) execType3Glyph(f *font.Font, g *device.Glyph) {
 	if !bodyOK {
 		return
 	}
-	// Guard the composed CTM's finiteness, like cm/Tm/execForm/replayMask: a finite /FontMatrix against a finite Trm can
-	// still multiply to NaN/Inf. Unlike a form's optional /Matrix there is no sane fallback — glyph space is defined only
-	// by that product — so the glyph is dropped rather than painted under the raw text-space CTM.
+	// A finite /FontMatrix against a finite Trm can still multiply to NaN/Inf. Unlike a form's optional /Matrix there is
+	// no sane fallback (glyph space is defined only by that product), so the glyph is dropped rather than painted under
+	// the raw text-space CTM.
 	ctm := f.Type3Matrix().Mul(g.Trm)
 	if !ctm.IsFinite() {
 		return

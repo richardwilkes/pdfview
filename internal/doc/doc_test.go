@@ -46,7 +46,7 @@ func mustOpen(t *testing.T, data []byte) *doc.Document {
 const (
 	catalogObj = "<< /Type /Catalog /Pages 2 0 R >>"
 	pageObj    = "<< /Type /Page >>"
-	// pagesOneKidObj mirrors the internal-test package's pagesOneKid, which this external test package cannot see.
+	// pagesOneKidObj duplicates nav_unit_test.go's pagesOneKid.
 	pagesOneKidObj = "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
 )
 
@@ -226,11 +226,9 @@ func TestCorpusPageCounts(t *testing.T) {
 	}
 }
 
-// TestOverRangeMediaBoxFallsBack covers rectFromObj's finiteness check, which tested the float64 before narrowing to the
-// float32 the geometry is stored in. "1" followed by 39 zeros is a legal PDF integer and a finite float64, but ±Inf as a
-// float32 — and such a box passes the x0 < x1 && y0 < y1 usability test, so it became the page's effective geometry
-// instead of falling back to the default MediaBox: PageSize handed ±Inf across the engine seam and every render of the
-// page failed. The narrowed value must be tested, as content.rectFrom and font.loadDescriptor already do.
+// TestOverRangeMediaBoxFallsBack pins that rectFromObj tests finiteness after narrowing to float32: "1" followed by 39
+// zeros is a legal PDF integer and a finite float64 but ±Inf as float32, and such a box must fall back to the default
+// MediaBox rather than become the page's geometry and hand ±Inf across the engine seam.
 func TestOverRangeMediaBoxFallsBack(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39) // 1e39: finite as a float64, +Inf as a float32.
 	for _, tc := range []struct {

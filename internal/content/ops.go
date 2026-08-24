@@ -16,16 +16,16 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// op dispatches one operator. Operators with missing or mistyped operands are skipped, as are unknown ones — the
-// operand list is discarded either way by the caller, which is the viewer-conventional recovery that keeps hostile or
-// sloppy content from desynchronizing anything.
+// op dispatches one operator. Operators with missing or mistyped operands are skipped, as are unknown ones; the caller
+// discards the operand list either way, the viewer-conventional recovery that keeps sloppy content from
+// desynchronizing anything.
 //
-//nolint:gocyclo // A flat dispatch table over the content operator set; a map of closures would just hide the same fan-out.
+//nolint:gocyclo // A flat dispatch table over the content operator set.
 func (in *interp) op(word string) {
 	if in.t3Shape == t3Mask || in.suppressColor {
-		// After d1, a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill color
-		// paints the glyph (ISO 32000-2 9.6.4). An uncolored tiling pattern's cell is likewise a stencil painted with
-		// the pattern color (8.7.3.3), so its color operators are suppressed too.
+		// After d1 a Type 3 charproc is a pure shape: its color operators are ignored so the caller's fill color paints
+		// the glyph (ISO 32000-2 9.6.4). An uncolored tiling pattern's cell is likewise a stencil painted with the
+		// pattern color (8.7.3.3).
 		switch word {
 		case "g", "G", "rg", "RG", "k", "K", "cs", "CS", "sc", "SC", "scn", "SCN":
 			return
@@ -39,8 +39,7 @@ func (in *interp) op(word string) {
 		in.opRestore()
 	case "cm":
 		if v, ok := in.floats(6); ok {
-			// Guard the resulting CTM's finiteness (like opTm): finite operands can still multiply to a NaN/Inf CTM,
-			// which the path/stroke/shading paints pass straight to the device without re-checking.
+			// Finite operands can still multiply to a NaN/Inf CTM, which the paints pass straight to the device.
 			if m := (gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}).Mul(in.gs.ctm); m.IsFinite() {
 				in.gs.ctm = m
 			}
@@ -64,7 +63,7 @@ func (in *interp) op(word string) {
 	case "d":
 		in.opDash()
 	case "ri", "i":
-		// Rendering intent and flatness tolerance: accepted, no observable effect in this renderer.
+		// Rendering intent and flatness: no effect in this renderer.
 	case "gs":
 		in.opExtGState()
 
@@ -102,10 +101,10 @@ func (in *interp) op(word string) {
 			in.cur = in.start
 		}
 	case "re":
-		// The corners x+w / y+h are a float32 addition over validated operands, so they still reach ±Inf — the overflow
-		// gfx.Path.RectCorners exists to remove. It matters more here than at the /BBox sites: buildPath drops a path
-		// whole when any point is non-finite, so an unchecked corner discards every subpath built before it in the same
-		// construction. Validating the corners drops just the bad rectangle, the way m and l drop just their own point.
+		// x+w / y+h are float32 additions over validated operands, so they can still reach ±Inf. The raster device
+		// (buildPath) drops a path whole when any point is non-finite, so an unchecked corner would discard every
+		// subpath built before it; validating the corners drops just the bad rectangle, as m and l drop just their
+		// point.
 		if v, ok := in.floats(4); ok && isFinitePt(v[0], v[1]) && isFinitePt(v[2], v[3]) {
 			if x1, y1 := v[0]+v[2], v[1]+v[3]; isFinitePt(x1, y1) {
 				in.path.RectCorners(v[0], v[1], x1, y1)
@@ -326,8 +325,8 @@ func (in *interp) paintPath(fill, evenOdd, stroke, closeFirst bool) {
 	in.hasCur = false
 }
 
-// marks reports whether painting with the space produces marks: a /Pattern space marks only once an scn has selected a
-// usable pattern; Separation /None never marks by definition (its color resolves transparent).
+// marks reports whether painting with space can mark: a /Pattern space marks only once an scn has selected a usable
+// pattern. (A Separation /None resolves to a transparent color, so it needs no check here.)
 func (in *interp) marks(space pdfcolor.Space, pat *patternRes) bool {
 	if _, isPattern := space.(*pdfcolor.Pattern); isPattern {
 		return pat != nil
@@ -357,10 +356,9 @@ func (in *interp) strokePaint() device.Paint {
 
 // componentsFor implements the color-component half of sc/scn/SC/SCN: the leading numeric operands, which must number
 // exactly the space's component count (uncolored-pattern operands are followed by the pattern name, which patternFor
-// consumes). A short or absent operand list reports false so the caller leaves the current color alone, matching
-// g/rg/k — which require the exact count via floats(n) — and this file's contract that operators with missing operands
-// are skipped. Without that, a bare scn in, say, DeviceCMYK would repaint in white: the missing components pad with
-// zeroes on the way to ToNRGBA.
+// consumes). A short or absent list reports false so the caller leaves the current color alone, matching g/rg/k and
+// the skip-on-missing-operands convention; otherwise a bare scn in DeviceCMYK would repaint in white, the missing
+// components padding with zeroes on the way to ToNRGBA.
 func (in *interp) componentsFor(space pdfcolor.Space) ([]float32, bool) {
 	n := space.NComponents()
 	if n == 0 {
@@ -408,9 +406,9 @@ func (in *interp) opDash() {
 }
 
 // resolvedDashLengths prepares an ExtGState /D dash-length array for opDash. Content-stream operands are always direct,
-// so opDash reads the entries without resolving them, but a /D array lives in the object graph where `[[3 0 R 2] 0]` is
+// so opDash reads entries without resolving them, but a /D array lives in the object graph where `[[3 0 R 2] 0]` is
 // legal; the entries are resolved into a copy, since the original belongs to the document's object cache. The
-// maxDashEntries truncation mirrors opDash's own, so the trailing entries it would ignore are never loaded.
+// maxDashEntries truncation mirrors opDash's, so the entries it would ignore are never loaded.
 func (in *interp) resolvedDashLengths(obj cos.Object) cos.Object {
 	arr, ok := cos.AsArray(in.doc.Resolve(obj))
 	if !ok {
@@ -555,11 +553,10 @@ func (in *interp) opDo() {
 	in.execForm(raw, stream)
 }
 
-// execForm runs a form XObject's content under the full form discipline — recursion depth cap, reference cycle set, a
+// execForm runs a form XObject's content under the full form discipline: recursion depth cap, reference cycle set, a
 // work-budget charge for the body on every invocation (the cycle set stops re-entry, not repetition), q + /Matrix
-// concat + /BBox clip + own-/Resources frame + fresh per-stream state, then Q — against the current graphics state.
-// opDo dispatches here; AnnotRun.Annot enters here directly for annotation appearance streams (which are form XObjects
-// positioned by the caller's CTM).
+// concat + /BBox clip + own /Resources frame + fresh per-stream state, then Q. opDo dispatches here; AnnotRun.Annot
+// enters directly for annotation appearance streams.
 func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if in.formDepth >= maxFormDepth {
 		return
@@ -577,33 +574,32 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	if !ok {
 		return
 	}
-	// A form executes like q; cm /Matrix; W-clip /BBox; its content; Q — with its own resources and a fresh per-stream
-	// state (operand list, path, pending clip).
 	if len(in.gsStack) >= maxQDepth {
 		return // No room to save state; skipping the form entirely is the only balanced choice.
 	}
 	in.opSave()
 	if v, has := numbers6(in.doc, stream.Dict, "Matrix"); has {
-		// Guard the concatenated CTM's finiteness (like cm/replayMask): finite operands can still multiply to a
-		// NaN/Inf CTM, which transformAABB/ClipPath and the form body's paints pass on without re-checking.
+		// Finite operands can still multiply to a NaN/Inf CTM (like cm), which transformAABB/ClipPath and the form
+		// body's paints pass on unchecked.
 		if m := (gfx.Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}).Mul(in.gs.ctm); m.IsFinite() {
 			in.gs.ctm = m
 		}
 	}
 	// A /Group /S /Transparency form composites as a transparency group (ISO 32000-2 11.6.6): the current soft mask,
 	// constant alpha, and blend apply once to the group's composite (the mask via the replay, the alpha/blend via
-	// BeginGroup), and the group's interior starts with those reset. Painting a group via Do is a nonstroking
-	// operation, so the FILL alpha composites it.
+	// BeginGroup), and the interior starts with them reset. Painting a group via Do is a nonstroking operation, so the
+	// FILL alpha composites it.
 	inGroup, isolated, knockout := in.transparencyGroup(stream.Dict)
 	maskWrapped := false
-	// One /BBox lookup serves both the group bbox and the clip: re-resolving four array entries per form invocation
-	// works against the repeat-cheapness the work budget in budget.go assumes.
+	// One /BBox lookup serves both the group bbox and the clip: re-resolving four entries per form invocation works
+	// against the repeat-cheapness budget.go assumes.
 	bbox, hasBBox := rectFrom(in.doc, stream.Dict, "BBox")
 	if inGroup {
 		bboxDev := gfx.Rect{}
 		if hasBBox {
-			// Like replayMask: a finite bbox against a finite CTM can still overflow to ±Inf in the corner products, and
-			// device.BeginGroup documents the bbox as geometry a device may size its work to. Degrade to the empty rect.
+			// A finite bbox against a finite CTM can still overflow to ±Inf in the corner products (like replayMask);
+			// device.BeginGroup documents the bbox as geometry a device may size its work to, so degrade to the empty
+			// rect.
 			if mapped := transformAABB(bbox, in.gs.ctm); mapped.IsFinite() {
 				bboxDev = mapped
 			}
@@ -617,9 +613,9 @@ func (in *interp) execForm(raw cos.Object, stream *cos.Stream) {
 	}
 	if hasBBox {
 		clip := &gfx.Path{}
-		// Corner form, not Rect's origin-plus-extent form: rectFrom validated the four entries individually, but
-		// X1-X0 overflows to +Inf for a box spanning more than float32's range, and the +Inf corners Rect would then
-		// emit degenerate the clip (the form paints nothing) for a box that should clip nothing at all.
+		// Corner form, not origin-plus-extent: rectFrom validated the four entries individually, but X1-X0 overflows to
+		// +Inf for a box spanning more than float32's range, and a clip with +Inf corners paints nothing where the box
+		// should clip nothing at all.
 		clip.RectCorners(bbox.X0, bbox.Y0, bbox.X1, bbox.Y1)
 		in.dev.ClipPath(clip, false, in.gs.ctm)
 		in.gs.clips++

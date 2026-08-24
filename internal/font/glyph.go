@@ -34,9 +34,9 @@ type subInfo struct {
 }
 
 // liberationFor maps a canonical standard-14 name to the bundled Liberation family member that substitutes for it
-// (substitution is deterministic — never system fonts). Symbol has no dingbat/pi-font stand-in; it renders through
-// LiberationSans by Unicode value, which covers its Greek and most of its operators. ZapfDingbats resolves no Unicode
-// from its aN glyph names, so it produces no outlines unless a dingbat-capable bundle is added.
+// (substitution is deterministic — never system fonts). Symbol has no pi-font stand-in; it renders through
+// LiberationSans by Unicode value, which covers its Greek and most of its operators. ZapfDingbats' aN glyph names
+// resolve no Unicode, so it produces no outlines.
 func liberationFor(std14 string) string {
 	family, style := "LiberationSans", "Regular"
 	switch std14 {
@@ -131,10 +131,10 @@ func firstRune(s string) rune {
 }
 
 // buildGIDs precomputes the code→GID table for a simple font once its encoding, embedded program, and substitute are
-// all settled. Codes that map nowhere stay 0 (.notdef). Substituted fonts map only through AGL-resolved glyph names —
-// never the ASCII-identity Unicode fallback the extraction table carries — because a name the AGL cannot resolve
-// (ZapfDingbats' aN names, private-use names) means the substitute has no version of that glyph; drawing the fallback
-// letterform would be the WRONG glyph, worse than none.
+// all settled. Codes that map nowhere stay 0 (.notdef). Substituted fonts map only through AGL-resolved glyph names,
+// never the ASCII-identity fallback the extraction table carries: a name the AGL cannot resolve (ZapfDingbats' aN
+// names, private-use names) means the substitute has no version of that glyph, and the fallback letterform would be
+// the wrong glyph, worse than none.
 func (f *Font) buildGIDs() {
 	symbolic := symbolicFlags(f.Flags)
 	for code := range uint32(256) {
@@ -177,10 +177,10 @@ func (f *Font) GID(code uint32, nBytes uint8) uint32 {
 	return 0
 }
 
-// GlyphPath returns the glyph's outline in em-normalized glyph space (y up, advance 1.0 = one em), or nil when the
-// glyph has no outline source (substituted fonts with no shape for it, hostile font programs, pure spacing glyphs
-// report an empty — non-nil — path only when the program defines an empty outline). The result is freshly built on each
-// call; the raster device caches converted paths per (font, GID).
+// GlyphPath returns the glyph's outline in em-normalized glyph space (y up, 1.0 = one em), or nil when it has no
+// outline source (a substitute with no shape for it, a hostile program). A spacing glyph whose program defines an empty
+// outline yields an empty, non-nil path. The result is built fresh on each call; the render device caches converted
+// paths.
 func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	defer func() {
 		if recover() != nil { // Hostile font programs must degrade to a missing glyph, never break the render.
@@ -259,10 +259,9 @@ func (f *Font) programAdvance(gid uint32) (float32, bool) {
 		if f.sfnt.face != nil {
 			return f.sfnt.face.HorizontalAdvance(opentype.GID(gid)) / f.sfnt.upem, true
 		}
-		// go-text rejects a program with no cmap table — the exact case the direct glyf walker draws — so a font whose
-		// dictionary carried no /Widths would otherwise advance every code by /MissingWidth (0 by default) while its
-		// outlines rendered correctly, piling the whole string on one point. The hmtx table read at parse time is the
-		// same advance source the face would have used.
+		// go-text rejects a program with no cmap table — the case the direct glyf walker draws — so without hmtx a
+		// /Widths-less font would advance every code by /MissingWidth (0 by default) and pile the string on one point.
+		// hmtx is the advance source the face would have used.
 		if adv, ok := f.sfnt.advance(gid); ok {
 			return adv, true
 		}

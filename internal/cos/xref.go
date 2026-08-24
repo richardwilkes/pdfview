@@ -46,12 +46,8 @@ var (
 	errBadXrefStream = errors.New("cannot parse cross-reference stream")
 )
 
-// typeXRef is the /Type value of a cross-reference stream. Such streams are never encrypted (ISO 32000-2 7.5.8.2), so
-// the decryptor skips them.
 const typeXRef Name = "XRef"
 
-// typeCatalog is the /Type value of the document catalog, which the repair sweep looks for when no recovered trailer
-// names a /Root.
 const typeCatalog Name = "Catalog"
 
 // startXrefWindow is how far from the end of the file the startxref keyword is searched for. The spec says the last
@@ -82,8 +78,7 @@ func (d *Document) findStartXref() (int64, error) {
 // /XRefStm) links. Sections are processed newest first and the first entry seen for an object number wins, implementing
 // incremental-update precedence. The trailer is merged the same way.
 func (d *Document) loadXref() error {
-	// Anything reached from here resolves against a table that is still being assembled, so the repair scan is deferred
-	// and failed loads are not cached for the life of the document. See Document.xrefLoading.
+	// Loads reached from here resolve against an incomplete table; see Document.xrefLoading.
 	d.xrefLoading = true
 	defer func() { d.xrefLoading = false }()
 	start, err := d.findStartXref()
@@ -117,11 +112,10 @@ func (d *Document) loadXref() error {
 	return nil
 }
 
-// mergeTrailers combines the trailer dictionaries of a cross-reference chain, newest first: the newest trailer wins,
-// with the document-level keys filled in from older trailers when the newer ones lack them. The result is always a
-// fresh dictionary: the inputs are parsed objects — for a cross-reference stream, trailers[0] is the stream's own
-// dictionary — and neither this merge nor the caller's later edits (installRepairedRoot supplies a fallback /Root)
-// may alter what another consumer of that object sees.
+// mergeTrailers combines a cross-reference chain's trailers, newest first: the newest wins, with the document-level
+// keys filled in from older ones. The result is always a fresh dictionary: the inputs are parsed objects — for a
+// cross-reference stream, trailers[0] is the stream's own dictionary — and neither the merge nor later edits
+// (installRepairedRoot supplies a fallback /Root) may alter what another consumer of that object sees.
 func mergeTrailers(trailers []Dict) Dict {
 	if len(trailers) == 0 {
 		return Dict{}
@@ -144,12 +138,10 @@ func mergeTrailers(trailers []Dict) Dict {
 
 // readXrefSection reads the classic table or cross-reference stream at offset, adds its entries (first seen wins), and
 // returns its trailer dictionary. For a classic section in a hybrid file, the /XRefStm stream is processed after the
-// table itself, giving the table precedence over the stream and both precedence over /Prev, per ISO 32000-2 7.5.8.4.
-// hybrids records the /XRefStm offsets already read, so that N ~60-byte classic sections all naming the SAME
-// cross-reference stream read (and fully decode) that stream once rather than N times. loadXref's own visited set does
-// not cover them — it tracks the /Prev chain's offsets — and d.xrefStreamRows short-circuits only the row loop, which
-// runs after StreamData has already inflated the whole payload, so neither bounds the repeat. It is a companion set
-// rather than the visited map itself so that a /Prev link to such an offset still walks the chain beyond it.
+// table, giving the table precedence over the stream and both precedence over /Prev (ISO 32000-2 7.5.8.4). hybrids
+// records the /XRefStm offsets already read, so N tiny classic sections all naming the same stream decode it once:
+// loadXref's visited set tracks only the /Prev chain, and the row budget runs after StreamData has inflated the whole
+// payload. It is a separate set so a /Prev link to such an offset still walks the chain beyond it.
 func (d *Document) readXrefSection(offset int64, hybrids map[int64]bool) (Dict, error) {
 	p := newParser(d.data, int(offset))
 	tok, err := p.next()
@@ -262,12 +254,11 @@ func (d *Document) setEntry(num int64, entry xrefEntry) bool {
 	return true
 }
 
-// setStreamEntry records an entry read from a cross-reference stream. freeInTable, when non-nil, holds the object
-// numbers the classic table of this same hybrid section marked free; an entry of any other kind replaces one of those,
-// since a free classic entry is exactly the placeholder a hybrid producer writes for an object only the /XRefStm can
-// express (ISO 32000-2 7.5.8.4). Letting the placeholder win instead lost both the object and, when the number named an
-// object stream, everything stored inside it. Precedence over other sections is unchanged: the override applies only to
-// entries this section's own table installed, and each number is overridden at most once.
+// setStreamEntry records an entry read from a cross-reference stream. freeInTable, when non-nil, holds the numbers the
+// classic table of this same hybrid section marked free; a non-free entry replaces one of those, since a free classic
+// entry is the placeholder a hybrid producer writes for an object only the /XRefStm can express (ISO 32000-2 7.5.8.4).
+// Precedence over other sections is unchanged: the override applies only to entries this section's own table
+// installed, each at most once.
 func (d *Document) setStreamEntry(num int64, entry xrefEntry, freeInTable map[int]bool) {
 	if entry.kind != xrefFree && num > 0 && num <= maxObjectNumber && freeInTable[int(num)] {
 		delete(freeInTable, int(num))
@@ -297,15 +288,13 @@ func (d *Document) readXrefStream(offset int64, freeInTable map[int]bool) (Dict,
 	return stream.Dict, nil
 }
 
-// Cross-reference stream entry budget. A classic table pays 20 file bytes per entry, so the file's own size bounds how
-// many entries it can register; a cross-reference stream pays only rowLen bytes of *decoded* payload, and internal/
-// filter lets a stream decode to max(64 MB, 256x input), so /W [1 1 1] with /Index [0 16777216] fits setEntry's whole
-// object-number range inside a 49 KB file and leaves a map of 2^24 entries live for the document's lifetime (measured:
-// ~1.9 GB allocated by Open alone, before any page is rendered). minXrefStreamRows is the floor below which no
-// legitimate file can be constrained, and xrefStreamRowBytes charges each row a plausible minimum of file bytes for the
-// object it names — together they leave real documents unbounded in practice (past ~64 MB of file the object-number
-// ceiling binds first) while keeping the table proportional to the input. The budget is shared across every section of
-// the chain so a file cannot split the same total across many streams.
+// Cross-reference stream entry budget. A classic table pays 20 file bytes per entry, so the file's size bounds its
+// entries; a stream pays rowLen bytes of decoded payload, and internal/filter lets a stream decode to max(64 MB, 256x
+// input), so /W [1 1 1] with /Index [0 16777216] fits the whole object-number range inside a 49 KB file and leaves a
+// map of 2^24 entries live for the document's lifetime (~1.9 GB allocated by Open alone). minXrefStreamRows is a floor
+// no legitimate file can be constrained below, and xrefStreamRowBytes charges each row a plausible minimum of file
+// bytes for the object it names; together they keep the table proportional to the input while leaving real documents
+// unbounded in practice. The budget is shared across the chain so a file cannot split the total across many streams.
 const (
 	minXrefStreamRows  = 1 << 16
 	xrefStreamRowBytes = 4
@@ -317,13 +306,12 @@ func (d *Document) maxXrefStreamRows() int {
 }
 
 func (d *Document) readXrefStreamEntries(stream *Stream, freeInTable map[int]bool) error {
-	// A cross-reference stream defines the very table a reference from its own dictionary would be resolved against, and
-	// this section's entries are not registered until the loop below, so such a reference reads against data that is at
-	// best incomplete and at worst a stale entry from a newer section pointing at the wrong offset. ISO 32000-2 7.5.8.2
-	// accordingly requires these values to be direct; /W, /Index, and /Size are already read with direct-only
-	// accessors, and this rejects the two that StreamData would otherwise resolve. Failure here is not fatal to the
-	// document: a hybrid file's /XRefStm is optional, and for a primary section Open falls back to the repair scan,
-	// which rebuilds the table from the file itself rather than from a reference that cannot be trusted yet.
+	// A cross-reference stream defines the very table a reference from its own dictionary would resolve against, and
+	// this section's entries are not registered until the loop below, so such a reference reads against data that is
+	// at best incomplete and at worst a stale entry from a newer section. ISO 32000-2 7.5.8.2 accordingly requires these
+	// values to be direct; /W, /Index, and /Size are read with direct-only accessors, and this rejects the two
+	// StreamData would otherwise resolve. Failure is not fatal: a hybrid file's /XRefStm is optional, and for a primary
+	// section Open falls back to the repair scan.
 	if hasIndirect(stream.Dict["Filter"], 0) || hasIndirect(stream.Dict["DecodeParms"], 0) {
 		return fmt.Errorf("%w: /Filter and /DecodeParms must be direct objects", errBadXrefStream)
 	}

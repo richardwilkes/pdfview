@@ -13,11 +13,11 @@ package codestream
 
 // Which kernels this architecture prefers. A false constant leaves that dispatch variable on its scalar default, so a
 // kernel that loses its benchmark is switched off here rather than deleted — the code, its equivalence tests, and its
-// benchmark all stay, and the decision is one word.
+// benchmark all stay.
 //
-// These values are settled per architecture from simd-bench.sh benchstat results. Settled 2026-08-21 on an Intel
-// Xeon W-2191B (Skylake-X): RCT 1.4-1.5x, plane clamp 1.5-1.8x, palette add+clamp 1.8-2.0x. The below-gate clamp
-// call costs ~2.5 ns more than the inline scalar loop, a one-time cost per tiny plane that the gate makes irrelevant.
+// Settled from simd-bench.sh benchstat results on an Intel Xeon W-2191B (Skylake-X): RCT 1.4-1.5x, plane clamp
+// 1.5-1.8x, palette add+clamp 1.8-2.0x. The below-gate clamp call costs ~2.5 ns more than the inline scalar loop, once
+// per tiny plane.
 const (
 	preferApplyRCT      = true
 	preferClampPlane    = true

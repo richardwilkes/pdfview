@@ -19,11 +19,10 @@ import (
 )
 
 // Mesh shadings (ISO 32000-2 8.7.4.5.5-8) are tessellated at parse time into flat triangles: vertex colors are
-// converted to the rendered RGB space first (MuPDF likewise converts mesh vertex colors to the destination space and
-// interpolates RGB), then triangles are subdivided until the color difference across each is below one 8-bit step, so
-// drawing them flat is visually equivalent to Gouraud interpolation. Truncated or malformed stream data degrades to
-// however many complete primitives were read — never an error — matching the leniency both MuPDF and the filter layer
-// apply.
+// converted to the rendered RGB space first (MuPDF likewise interpolates in the destination space), then triangles are
+// subdivided until the color spread across each is below one 8-bit step, so flat drawing matches Gouraud
+// interpolation. Truncated or malformed stream data degrades to the complete primitives read so far, never an error,
+// matching the leniency of MuPDF and the filter layer.
 
 // vert is one mesh vertex: a shading-space position plus its resolved RGB color (0-255 range, kept in float for exact
 // midpoint interpolation).
@@ -52,7 +51,6 @@ func (r *bitReader) read(bits int) (uint32, bool) {
 	return out, true
 }
 
-// align advances to the next byte boundary (each type 4 vertex and each type 6/7 patch begins on one).
 func (r *bitReader) align() {
 	r.pos = (r.pos + 7) &^ 7
 }
@@ -74,14 +72,12 @@ type meshDecode struct {
 	costly bool      // resolving one color runs a PDF function
 }
 
-// decodeVal maps a raw bit-field value into the decode range for slot i.
 func (m *meshDecode) decodeVal(raw uint32, bits, slot int) float32 {
 	dmin, dmax := m.decode[2*slot], m.decode[2*slot+1]
 	maxRaw := float64(uint64(1)<<uint(bits)) - 1
 	return dmin + float32(float64(raw)/maxRaw)*(dmax-dmin)
 }
 
-// readVertex reads one x, y, color tuple.
 func (m *meshDecode) readVertex(r *bitReader) (vert, bool) {
 	var v vert
 	rx, ok := r.read(m.bpc)
@@ -101,14 +97,10 @@ func (m *meshDecode) readVertex(r *bitReader) (vert, bool) {
 	return v, true
 }
 
-// readColor reads one color tuple and resolves it to RGB. When resolving runs a PDF function — a /Function of any mesh
-// type, or the tint transform of a /Separation or /DeviceN space — the whole parse shares maxMeshColorEvals of them: a
-// mesh declares its vertex and patch count through its payload, so without a budget here one stream's parse can force
-// up to 2*maxMeshVertices evaluations while internal/content prices the parse at a flat shadingParseCost on the
-// assumption that a shading parse evaluates a function 256 times. Repeated raw tuples are memoized rather than charged,
-// which costs a hostile stream nothing it did not already spend and makes the common case (a mesh whose payload reuses
-// a handful of colors) free. Running out degrades like a truncated stream: the read fails, and the caller keeps the
-// primitives it already has.
+// readColor reads one color tuple and resolves it to RGB. When resolving runs a PDF function (costly), the whole parse
+// shares maxMeshColorEvals of them; repeated raw tuples come from the memo and are not charged, which makes the common
+// case (a payload that reuses a handful of colors) free. Running out degrades like a truncated stream: the read fails
+// and the caller keeps the primitives it already has.
 func (m *meshDecode) readColor(r *bitReader) ([3]float32, bool) {
 	comps := make([]float32, m.nColor)
 	var key uint64
@@ -139,7 +131,6 @@ func (m *meshDecode) readColor(r *bitReader) ([3]float32, bool) {
 	return c, true
 }
 
-// toRGB runs the /Function set, if any, and converts the result through the shading's color space.
 func (m *meshDecode) toRGB(comps []float32) [3]float32 {
 	if m.fns != nil {
 		comps = evalComps(m.fns, comps, m.nComps)
@@ -152,9 +143,9 @@ func (m *meshDecode) toRGB(comps []float32) [3]float32 {
 func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.Space, fns []function.Func) error {
 	dict := stream.Dict
 	m := meshDecode{space: space, fns: fns, nComps: space.NComponents()}
-	// The three bit widths are range-checked as the int64 the file declared, before any narrowing: only the widths the
-	// standard lists are legal, so anything else — including a value far outside int range, where int(v) is
-	// implementation-defined — is rejected here. /VerticesPerRow, /ShadingType and /hival are all checked the same way.
+	// The bit widths are range-checked as the int64 the file declared, before any narrowing: only the widths the
+	// standard lists are legal, so a value far outside int range (where int(v) is implementation-defined) is rejected
+	// here. /VerticesPerRow, /ShadingType and /hival are checked the same way.
 	bpc, ok := d.GetInt(dict, "BitsPerCoordinate")
 	if !ok || !validBits(bpc, 1, 2, 4, 8, 12, 16, 24, 32) {
 		return errBadShading
@@ -204,9 +195,8 @@ func parseMesh(d *cos.Document, stream *cos.Stream, sh *Shading, space pdfcolor.
 	case KindFreeTriangle:
 		parseFreeTriangles(r, &m, b)
 	case KindLatticeTriangle:
-		// The row width is capped at half the vertex budget, not the whole of it: parseLattice must read at least two
-		// rows for a lattice to form any triangle at all, so a perRow above the halfway point would let the reader
-		// consume — and allocate — two rows of up to maxMeshVertices vertices each, twice the documented cap.
+		// The row width is capped at half the vertex budget: parseLattice reads at least two rows before any triangle
+		// forms, so a wider row would let it read and allocate up to twice maxMeshVertices vertices.
 		rows, hasRows := d.GetInt(dict, "VerticesPerRow")
 		if !hasRows || rows < 2 || rows > maxMeshVertices/2 {
 			return errBadShading
@@ -313,9 +303,9 @@ type patch struct {
 	c [4][3]float32
 }
 
-// Stream point orders (grid row, col), per the spec's tensor figure: a fresh patch's 16 (tensor) points are the
-// boundary counterclockwise from (0,0) then the four interior points; Coons patches carry only the 12 boundary points.
-// Continuation patches reuse row 0 from the previous patch's shared edge and read the rest.
+// Stream point orders as (grid row, col), per the spec's tensor figure: a fresh tensor patch's 16 points are the
+// boundary starting at (0,0), then the four interior points; Coons patches carry only the 12 boundary points.
+// Continuation patches take row 0 from the previous patch's shared edge and read the rest.
 var (
 	tensorOrderNew  = [][2]int{{0, 0}, {0, 1}, {0, 2}, {0, 3}, {1, 3}, {2, 3}, {3, 3}, {3, 2}, {3, 1}, {3, 0}, {2, 0}, {1, 0}, {1, 1}, {1, 2}, {2, 2}, {2, 1}}
 	tensorOrderCont = tensorOrderNew[4:]
@@ -391,8 +381,8 @@ func parsePatches(r *bitReader, m *meshDecode, b *meshBuilder, tensor bool) {
 	}
 }
 
-// fillCoonsInterior computes the four interior control points of a Coons patch from its boundary, the standard
-// Coons-to-tensor promotion (ISO 32000-2 8.7.4.5.7).
+// fillCoonsInterior computes the four interior control points of a Coons patch from its boundary, the Coons-to-tensor
+// promotion given with the type 7 shadings (ISO 32000-2 8.7.4.5.8).
 func fillCoonsInterior(pa *patch) {
 	p := &pa.p
 	p[1][1] = coonsInner(p[0][0], p[0][1], p[1][0], p[0][3], p[3][0], p[3][1], p[1][3], p[3][3])
@@ -486,8 +476,8 @@ func patchColor(pa *patch, u, v float32) color.NRGBA {
 }
 
 // meshBuilder accumulates the input primitives during stream parsing, then tessellates them under the global triangle
-// budget in finish(). Collecting first keeps the budget FAIR: every input triangle and patch gets an equal share, so a
-// color-contrasting first primitive cannot exhaust the budget and drop everything after it.
+// budget in finish(). Collecting first gives every input triangle and patch an equal share of the budget, so a
+// color-contrasting first primitive cannot exhaust it and drop everything after it.
 type meshBuilder struct {
 	input   []gouraudTri
 	patches []patch
@@ -499,8 +489,6 @@ type gouraudTri struct {
 	v [3]vert
 }
 
-// triangle records one input Gouraud triangle for tessellation. The cap is the input-triangle budget rather than the
-// vertex budget, since a lattice within the vertex budget forms nearly two triangles per vertex.
 func (b *meshBuilder) triangle(v0, v1, v2 vert) {
 	if len(b.input) < maxMeshInputTris {
 		b.input = append(b.input, gouraudTri{v: [3]vert{v0, v1, v2}})

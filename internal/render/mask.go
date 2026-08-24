@@ -28,8 +28,8 @@ import (
 
 // Transparency groups and soft masks. A group maps to SaveLayer with the group's constant alpha and blend mode on the
 // restore paint; a NON-isolated group whose composite is trivial (alpha 1, blend Normal, no knockout) is passed through
-// without a layer, which reproduces non-isolated semantics exactly — interior blend modes then see the true backdrop,
-// as MuPDF does (oracle-pinned by the isolation probe). A non-isolated group with a non-trivial composite still gets a
+// without a layer, which reproduces non-isolated semantics exactly — interior blend modes see the true backdrop, as in
+// MuPDF (pinned by the transparency-group golden). A non-isolated group with a non-trivial composite still gets a
 // layer, an accepted isolated approximation.
 //
 // Soft masks render their content to a separate offscreen surface: BeginMask swaps the canvas, EndMask reads the
@@ -39,10 +39,9 @@ import (
 //
 // Every span is sized to the mask's device-space bbox, not the page: the interpreter clips mask content to that box
 // (content.replayMask), so the surface, the readback, the coverage plane, and the DstIn all cover only it, and the
-// area beyond it takes the single coverage value an out-of-bbox mask sample has (maskOutsideValue). This matters
-// because the interpreter wraps EVERY painting operation under an active /SMask in its own Begin/End/Pop cycle — a
-// page-sized allocate-and-scan per operation would otherwise cost a full page's bytes per fill, stroke, glyph run, and
-// image.
+// area beyond it takes the single coverage value an out-of-bbox mask sample has (maskOutsideValue). The interpreter
+// wraps EVERY painting operation under an active /SMask in its own Begin/End/Pop cycle, so a page-sized
+// allocate-and-scan per span would cost a full page's bytes per fill, stroke, glyph run, and image.
 
 // groupState is one BeginGroup's record.
 type groupState struct {
@@ -74,21 +73,17 @@ type maskState struct {
 func (d *Device) BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend device.Blend, alpha float64) {
 	trivial := alpha >= 1 && blend == device.BlendNormal && !knockout
 	if !isolated && trivial {
-		// Non-isolated with nothing to composite: drawing inline IS the group semantics (interior blends composite
-		// against the true backdrop).
+		// Non-isolated with nothing to composite: drawing inline IS the group semantics.
 		d.groupStack = append(d.groupStack, groupState{})
 		return
 	}
 	paint := canvas.NewPaint()
 	paint.Color = colorcore.ARGB(alpha8(alpha), 255, 255, 255)
 	paint.BlendMode = blendModes[blend]
-	// Size the layer to the group's bbox rather than letting canvas fall back to the whole current clip: the
-	// interpreter pushes the form's /BBox clip only AFTER this call, so without the hint a group nested to
-	// maxFormDepth holds that many page-sized premultiplied layers at once even when every one of them is a small
-	// stamp — hundreds of megabytes at 300 dpi letter, gigabytes at the documented OverallMaxPixels. maskBounds is
-	// exactly the sizing a soft-mask span uses (map through the canvas's matrix, snap outward with a pixel of margin so
-	// the antialiased /BBox clip edge is never cut, intersect with the surface), and it degrades an unusable or
-	// uncomputed bbox to the whole surface, which is what the nil hint meant.
+	// Size the layer to the group's bbox rather than the whole current clip: the interpreter pushes the form's /BBox clip
+	// only AFTER this call, so without the hint a group nested to maxFormDepth holds that many page-sized premultiplied
+	// layers at once even when each is a small stamp — hundreds of megabytes at 300 dpi letter. maskBounds is the sizing
+	// a soft-mask span uses and degrades an unusable bbox to the whole surface, which is what a nil hint means.
 	base := d.c.TotalMatrix()
 	x0, y0, w, h, onSurface := d.maskBounds(bbox, &base)
 	// A positioned box with no area, or one wholly off the surface, marks nothing: the empty hint makes canvas skip
@@ -99,7 +94,7 @@ func (d *Device) BeginGroup(bbox gfx.Rect, isolated, knockout bool, blend device
 	}
 	count := d.c.Save()
 	// The bounds are device pixels, so they are given with the canvas at identity and the caller's matrix put back for
-	// the group's content (the same two-step EndMask uses for the masked-content layer).
+	// the group's content.
 	d.c.ResetMatrix()
 	d.c.SaveLayer(&bounds, paint)
 	d.c.SetMatrix(&base)
@@ -136,13 +131,11 @@ func (d *Device) applyKnockout(paint *canvas.Paint) {
 }
 
 // maxMaskDepth caps how many soft-mask spans may be open at once, and maxMaskPages the offscreen surface bytes they may
-// hold between them, as a multiple of the page's own byte size. Each open span holds a bbox-sized offscreen surface, so
-// unbounded nesting is a memory-pressure vector; the depth cap alone bounds only the COUNT, which at page-sized boxes
-// is still maxMaskDepth pages of live commitment. Upstream form-XObject recursion already bounds mask nesting well
-// below the depth cap; both limits keep the commitment bounded even if that upstream invariant is ever broken,
-// degrading deeper masks to the no-surface path (mask content is swallowed, the masked op still draws) rather than
-// allocating without limit. The budget is a multiple of the page so the outermost mask — which can legitimately cover
-// the whole page at any dpi — always fits.
+// hold between them, as a multiple of the page's byte size. Each open span holds a bbox-sized offscreen surface, so
+// unbounded nesting is a memory-pressure vector, and the depth cap alone still allows maxMaskDepth page-sized surfaces.
+// Form-XObject recursion already bounds mask nesting below the depth cap; both limits hold even if that invariant
+// breaks, degrading deeper masks to the no-surface path (mask content swallowed, the masked op still draws). The budget
+// is a multiple of the page so the outermost mask, which can legitimately cover the whole page, always fits.
 const (
 	maxMaskDepth = 16
 	maxMaskPages = 4
@@ -158,9 +151,9 @@ func (d *Device) BeginMask(bbox gfx.Rect, luminosity bool, backdrop stdcolor.NRG
 	ms := &maskState{luminosity: luminosity, transfer: transfer, saved: d.c, savedClip: d.textClip}
 	d.textClip = nil
 	ms.outside = maskOutsideValue(luminosity, backdrop, transfer)
-	// The mask content draws under whatever matrix the canvas being masked carries — a Wrapped device's caller may have
-	// translated, scaled, or rotated theirs — so the bbox (device space as the interpreter sees it) maps through that
-	// matrix to reach the pixels the coverage plane is applied at.
+	// The mask content draws under whatever matrix the canvas being masked carries (a Wrapped device's caller may have
+	// set one), so the bbox (device space as the interpreter sees it) maps through that matrix to reach the pixels the
+	// coverage plane is applied at.
 	base := d.c.TotalMatrix()
 	var onSurface bool
 	ms.x0, ms.y0, ms.w, ms.h, onSurface = d.maskBounds(bbox, &base)
@@ -173,16 +166,16 @@ func (d *Device) BeginMask(bbox gfx.Rect, luminosity bool, backdrop stdcolor.NRG
 	}
 	if ms.surf == nil {
 		// No mask surface: isolate the mask content in an invisible layer so it cannot mark the page. With the bbox
-		// wholly off the surface there is nothing to rasterize and the mask is its outside value everywhere, which
-		// PopMask still applies; when the surface could not be created at all (depth or byte cap, allocation failure)
-		// the masked op instead draws unmasked (degrade, never erase).
+		// wholly off the surface the mask is its outside value everywhere, which PopMask still applies; when the surface
+		// could not be created (depth or byte cap, allocation failure) the masked op draws unmasked (degrade, never
+		// erase).
 		ms.constant = !onSurface
 		ms.guard = d.c.SaveLayerAlpha(nil, 0)
 	} else {
 		d.c = ms.surf.Canvas()
 		// The mask surface is a fresh canvas at identity covering only the bbox, so adopt the masked canvas's matrix
 		// with the surface's device-pixel origin removed: mask content then rasterizes into the same pixels the plane is
-		// applied at, offset into the smaller surface.
+		// applied at.
 		base.PostTranslate(float32(-ms.x0), float32(-ms.y0))
 		d.c.SetMatrix(&base)
 		if luminosity {
@@ -211,22 +204,19 @@ func maskOutsideValue(luminosity bool, backdrop stdcolor.NRGBA, transfer []byte)
 	return v
 }
 
-// maskBounds returns the device-pixel rectangle a mask span's surface must cover: the mask content's bbox mapped
-// through base, snapped outward to whole pixels with a pixel of margin so the antialiased edge of the bbox clip is
-// never cut, and intersected with the surface. The interpreter clips mask content to this bbox, so nothing the mask
-// paints can fall outside it. BeginGroup sizes its layer with the same call, for the same reason: the group's content
-// is clipped to the same box, one step later.
+// maskBounds returns the device-pixel rectangle a mask span's surface must cover: the bbox mapped through base, snapped
+// outward to whole pixels with a pixel of margin so the antialiased edge of the bbox clip is never cut, and intersected
+// with the surface. The interpreter clips mask content to this bbox, so nothing the mask paints can fall outside it.
+// BeginGroup sizes its layer with the same call, since the group's content is clipped to the same box one step later.
 //
-// The zero rect is the "no usable bbox" signal — the interpreter emits it when the mask's CTM is unusable, and a caller
-// that does not compute one passes it too — so it carries no information and degrades to the whole surface, as do
-// non-finite and absurd corners. A POSITIONED box with no area is different: it says exactly where the mask content is
-// clipped to, and that region cannot rasterize anything, so the mask reduces to its constant outside coverage
-// (ok false). Distinguishing the two matters for cost as much as clarity: a /BBox that collapses under the anchor CTM
-// (a degenerate scale, a zero-extent box) is common enough, and the interpreter wraps EVERY painting operation in its
-// own Begin/End/Pop cycle, so degrading it to the whole surface would allocate, prefill, read back, and scan a
-// page-sized offscreen per fill, stroke, glyph run, and image.
+// The zero rect is the "no usable bbox" signal (the interpreter emits it when the mask's CTM is unusable) and degrades
+// to the whole surface, as do non-finite and absurd corners. A POSITIONED box with no area says exactly where the
+// content is clipped to, and that region cannot rasterize anything, so the mask reduces to its constant outside
+// coverage (ok false). The distinction matters for cost: a /BBox that collapses under the anchor CTM is common, and
+// degrading it to the whole surface would allocate, prefill, read back, and scan a page-sized offscreen per painting
+// operation.
 //
-// ok is also false when the rectangle lies entirely off the surface, for the same reason: no rasterizable content.
+// ok is also false when the rectangle lies entirely off the surface: no rasterizable content.
 func (d *Device) maskBounds(bbox gfx.Rect, base *geom.Matrix) (x0, y0, w, h int, ok bool) {
 	if bbox == (gfx.Rect{}) || !bbox.IsFinite() {
 		return 0, 0, d.width, d.height, true
@@ -248,8 +238,7 @@ func (d *Device) maskBounds(bbox gfx.Rect, base *geom.Matrix) (x0, y0, w, h int,
 			minY, maxY = min(minY, p.Y), max(maxY, p.Y)
 		}
 	}
-	// Keep the floor/ceil conversions in range; Go leaves an out-of-range float→int conversion implementation-defined
-	// and the platforms disagree (mirrors rectInterior's clamp).
+	// Keep the floor/ceil conversions in range (see clampDim); mirrors rectInterior's clamp.
 	const maxReasonable = 1 << 24
 	if minX < -maxReasonable || maxX > maxReasonable || minY < -maxReasonable || maxY > maxReasonable {
 		return 0, 0, d.width, d.height, true
@@ -272,11 +261,9 @@ func (d *Device) EndMask() {
 	}
 	ms := d.maskStack[n-1]
 	if ms.ended {
-		// EndMask leaves the span on the stack for PopMask, so a repeated call would land here again: it would take the
-		// no-surface branch (EndMask releases the surface) and restore to a guard count only that branch ever sets,
-		// unwinding the canvas to save count 0 — including state the interpreter still expects to pop — and then open a
-		// second masked-content layer whose count overwrote the first. The other stack operations here (EndGroup,
-		// PopMask, PopClip) all guard their own stack, so this one does too.
+		// EndMask leaves the span on the stack for PopMask, so a repeat would take the no-surface branch (the surface is
+		// already released), restore to a guard count only that branch sets — unwinding the canvas to save count 0, past
+		// state the interpreter still expects to pop — and open a second masked-content layer over the first's count.
 		return
 	}
 	ms.ended = true
@@ -287,9 +274,8 @@ func (d *Device) EndMask() {
 	switch {
 	case ms.mask != nil && ms.outside == 0:
 		// Nothing outside the plane survives the DstIn, so bound the masked-content layer to the plane's rectangle: the
-		// layer device covers the mask's area instead of the whole page, and PopMask's DstIn only has to touch it. The
-		// bounds are device pixels, so they are given with the canvas at identity and the caller's matrix put back for
-		// the content draws.
+		// layer covers the mask's area instead of the whole page, and PopMask's DstIn only has to touch it. The bounds
+		// are device pixels, so they are given with the canvas at identity and the caller's matrix put back.
 		m := d.c.TotalMatrix()
 		ms.layer = d.c.Save()
 		d.c.ResetMatrix()
@@ -307,7 +293,7 @@ func (d *Device) EndMask() {
 
 // closeMaskSpan undoes BeginMask's canvas swap: it puts the interrupted text-clip accumulation back and either closes
 // the no-surface guard layer or restores the page canvas and releases the mask surface. The plane EndMask builds is a
-// copy, so the surface (and its budget charge) goes here rather than being held for the masked op's whole span.
+// copy, so the surface (and its budget charge) is released here rather than held for the masked op's whole span.
 func (d *Device) closeMaskSpan(ms *maskState) {
 	d.textClip = ms.savedClip
 	if ms.surf == nil {
@@ -334,10 +320,9 @@ func (d *Device) PopMask() {
 	ms := d.maskStack[n-1]
 	d.maskStack = d.maskStack[:n-1]
 	if !ms.ended {
-		// EndMask never ran for this span, so there is no coverage plane and no masked-content layer: ms.layer is still
-		// zero and d.c may still be the mask surface's canvas. Restoring to count 0 would unwind past the interpreter's
-		// own saves — on the wrong canvas at that. Close the span the way EndMask would instead and apply nothing, the
-		// mirror of EndMask's guard against a repeated call. The interpreter always pairs Begin/End/Pop, so this is
+		// EndMask never ran: there is no plane and no masked-content layer, ms.layer is still zero, and d.c may still be
+		// the mask surface's canvas, so restoring to count 0 would unwind past the interpreter's own saves on the wrong
+		// canvas. Close the span as EndMask would and apply nothing. The interpreter always pairs Begin/End/Pop; this is
 		// defense in depth.
 		d.closeMaskSpan(ms)
 		return
@@ -366,8 +351,7 @@ func (d *Device) PopMask() {
 
 // maskOutside applies the mask's constant outside coverage to the part of the canvas the coverage plane does not cover
 // — the four bands around it, or the whole canvas when there is no plane. Called with the canvas at identity and paint
-// already set to DstIn. Nothing is drawn where the value would leave the layer untouched anyway (a full-coverage
-// outside value) or where the plane already covers everything.
+// already set to DstIn.
 func (d *Device) maskOutside(ms *maskState, paint *canvas.Paint) {
 	if ms.outside == 255 { // Full coverage outside: the layer passes through there unchanged.
 		return
@@ -418,8 +402,8 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 			plane[j] = pix[i]
 		}
 	}
-	// Only a full 256-entry LUT can be indexed by an arbitrary 0–255 mask value; anything shorter is unusable, so treat
-	// it as identity rather than trusting the caller's slice length (parseTransfer returns nil or exactly 256).
+	// Only a full 256-entry LUT can be indexed by an arbitrary mask value; anything shorter is treated as identity
+	// (parseTransfer returns nil or exactly 256).
 	if len(ms.transfer) == 256 {
 		for j, v := range plane {
 			plane[j] = ms.transfer[v]
@@ -435,24 +419,21 @@ func (d *Device) maskPlane(ms *maskState) *imagecore.Image {
 }
 
 // lumaPlaneScalar reduces the RGBA readback in pix to one maskLuma value per pixel in plane. The luminosity surface
-// is opaque (prefilled with the backdrop), so the premultiplied bytes it hands over are the straight color values.
-//
-// It is the default behind lumaPlaneFn, and the fallback the vector kernel takes for planes too small to be worth its
-// setup.
+// is opaque (prefilled with the backdrop), so its premultiplied bytes are the straight color values. It is the default
+// behind lumaPlaneFn and the vector kernel's fallback for small planes.
 func lumaPlaneScalar(plane, pix []byte) {
 	for i, j := 0, 0; j < len(plane); i, j = i+4, j+1 {
 		plane[j] = maskLuma(pix[i], pix[i+1], pix[i+2])
 	}
 }
 
-// maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's conversion (lcms-backed, like the
-// device-color tables in internal/color) was captured behaviorally from per-channel and neutral ramps: the response is
-// a weighted sum of the ENCODED channel values — weights 78/159/15 out of 252, measured at the ramp tops — followed by
-// the captured neutral response curve. Neutral inputs reproduce the oracle exactly by construction; primaries and
-// mixtures land within ±2 of the oracle across the 800-sample probe set (the oracle itself converts DeviceGray-sourced
-// mask content through a slightly different gray→gray ICC path, also within ±2). Entry 255 is pinned to 255 rather than
-// the measured RGB-path 254 so fully lit mask areas pass content through unchanged (the oracle's gray-path white does
-// the same).
+// maskLuma converts one RGB color to MuPDF's luminosity-mask value. The oracle's lcms-backed conversion was captured
+// behaviorally from per-channel and neutral ramps: a weighted sum of the ENCODED channel values (weights 78/159/15 out
+// of 252, measured at the ramp tops) followed by the captured neutral response curve. Neutral inputs reproduce the
+// oracle exactly by construction; primaries and mixtures land within ±2 across the 800-sample probe set (the oracle's
+// own gray→gray ICC path for DeviceGray-sourced mask content is also within ±2). Entry 255 is pinned to 255 rather than
+// the measured RGB-path 254 so fully lit mask areas pass content through unchanged, as the oracle's gray-path white
+// does.
 func maskLuma(r, g, b uint8) uint8 {
 	t := (78*uint32(r) + 159*uint32(g) + 15*uint32(b) + 126) / 252
 	return maskNeutralLUT[t]

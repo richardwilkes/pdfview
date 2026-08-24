@@ -106,7 +106,6 @@ func TestGenerateWritesTablesOnlyAfterValidation(t *testing.T) {
 	}
 }
 
-// A failed DeviceRGB verification must abort before anything is written; the gray table used to land on disk first.
 func TestGenerateLeavesTablesAloneWhenRGBVerificationFails(t *testing.T) {
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
@@ -121,7 +120,6 @@ func TestGenerateLeavesTablesAloneWhenRGBVerificationFails(t *testing.T) {
 	checkUntouched(t, dir)
 }
 
-// Likewise for the CMYK grid: the tables are only worth committing once interpolation still matches observation.
 func TestGenerateLeavesTablesAloneWhenCMYKValidationFails(t *testing.T) {
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })

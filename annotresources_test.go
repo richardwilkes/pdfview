@@ -16,10 +16,8 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// inheritedAnnotResourcesPDF is a 60x20 page carrying three annotations, each an appearance stream with no /Resources
-// of its own: every one of them reaches the red-square form through the page's own (indirect) /Resources dictionary.
-// The engine resolves that dictionary once for the whole annotation pass instead of once per annotation, so this file
-// is what pins the hoist: all three squares must still be painted, from the same resources the first one used.
+// inheritedAnnotResourcesPDF is a 60x20 page with three annotations whose shared appearance stream has no /Resources of
+// its own, so each reaches the red-square form through the page's indirect /Resources dictionary.
 const inheritedAnnotResourcesPDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -61,9 +59,8 @@ startxref
 %%EOF
 `
 
-// TestAnnotationsShareThePageResources renders the file above and checks that every annotation drew. The page's
-// /Resources entry is indirect, so resolving it is real COS work; hoisting that resolution out of the per-annotation
-// loop must not change which resources any annotation sees (the value cannot change during the pass).
+// TestAnnotationsShareThePageResources pins that runAnnots resolves the page's /Resources once per pass and every
+// annotation still paints from it.
 func TestAnnotationsShareThePageResources(t *testing.T) {
 	doc, err := pdfview.New([]byte(inheritedAnnotResourcesPDF), 0)
 	if err != nil {

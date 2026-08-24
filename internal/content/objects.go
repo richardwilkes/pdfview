@@ -17,12 +17,11 @@ const maxNesting = 512
 
 // maxOperandElements caps how many array elements and dictionary entries one operand may hold, in total across its
 // whole object tree. Nesting depth alone is not a bound on size: an array is a single operand consumed by a single
-// operator, so the work budget charges one unit for the whole thing (exec charges per operator) and maxOperands only
-// bounds how many operands are retained, not how large one is. internal/filter lets a content stream decode to
-// max(64 MB, 256x input), and each element of "[1 1 1 ...] TJ" costs two payload bytes and sixteen bytes of slice, so
-// without this cap a small file buys tens of millions of elements and hundreds of megabytes of live heap — the same
-// class stext.maxChars already caps for structured text. The cap is far above any real operand (the longest TJ arrays
-// deployed content produces run to a few thousand entries).
+// operator, so the work budget charges one unit for the whole thing and maxOperands bounds only how many operands are
+// retained, not how large one is. internal/filter lets a content stream decode to max(64 MB, 256x input), and each
+// element of "[1 1 1 ...] TJ" costs two payload bytes and sixteen bytes of slice, so without this cap a small file buys
+// tens of millions of elements and hundreds of megabytes of live heap (the class stext.maxChars caps for structured
+// text). The cap is far above any real operand: the longest deployed TJ arrays run to a few thousand entries.
 const maxOperandElements = 1 << 16
 
 // parseTopOperand assembles one whole operand, seeding the element budget its containers share.
@@ -32,11 +31,10 @@ func parseTopOperand(lex *cos.Lexer, tok cos.Token) (obj cos.Object, ok bool) {
 }
 
 // parseOperand assembles one operand object whose first token has already been read. Content streams carry only direct
-// objects — "R" is not an operator there, so integers are never reference lookahead candidates — which is why this
-// small assembler exists alongside the COS object parser. Malformed containers are returned as parsed so far (leniency;
-// the enclosing operator will typically be skipped anyway), with ok reporting whether the value is usable at all.
-// budget is the shared element allowance described at maxOperandElements; it is decremented once per stored element, so
-// nesting cannot multiply the total.
+// objects ("R" is not an operator there, so integers are never reference lookahead candidates), which is why this
+// assembler exists alongside the COS object parser. Malformed containers are returned as parsed so far, with ok
+// reporting whether the value is usable at all. budget is the shared element allowance described at
+// maxOperandElements, decremented once per stored element, so nesting cannot multiply the total.
 func parseOperand(lex *cos.Lexer, tok cos.Token, depth int, budget *int) (obj cos.Object, ok bool) {
 	switch tok.Kind {
 	case cos.TokenInt:

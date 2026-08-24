@@ -102,11 +102,10 @@ func TestSearchGapAsWordSpace(t *testing.T) {
 	}
 }
 
-// TestSearchLeadingSpaceNeedle pins a needle whose FIRST rune is whitespace: at the match's starting position the
-// whitespace branch consumes no characters, so the synthesized alternatives must be tested against the predecessor of
-// that starting character. Without it, " Text" found nothing where "Kerned Text" matched.
+// TestSearchLeadingSpaceNeedle pins a needle whose first rune is whitespace: at the match's start the whitespace branch
+// consumes no characters, so the synthesized alternatives must be tested against the predecessor of the starting
+// character.
 func TestSearchLeadingSpaceNeedle(t *testing.T) {
-	// A ≥ gapSpaceEm em TJ gap with no space character in the stream satisfies the leading needle space.
 	first, endX := mkWord("Kerned", 100, 200, 10, 20)
 	wide, wideEndX := mkWord("Text", endX+gapSpaceEm*20, 200, 10, 20)
 	got := searchChars(append(append([]Char(nil), first...), wide...), " Text", 100)
@@ -123,7 +122,6 @@ func TestSearchLeadingSpaceNeedle(t *testing.T) {
 	if got[0] != want {
 		t.Fatalf("quad = %+v, want %+v", got[0], want)
 	}
-	// A sub-threshold gap still must not satisfy it.
 	narrow, _ := mkWord("Text", endX+gapSpaceEm*20*0.9, 200, 10, 20)
 	if got = searchChars(append(append([]Char(nil), first...), narrow...), " Text", 100); len(got) != 0 {
 		t.Fatalf("gap < threshold: expected 0 quads, got %d", len(got))
@@ -137,12 +135,11 @@ func TestSearchLeadingSpaceNeedle(t *testing.T) {
 	if got[0].UL.X != 40 || got[0].UR.X != line2EndX {
 		t.Fatalf("line-break quad spans %v..%v, want 40..%v", got[0].UL.X, got[0].UR.X, line2EndX)
 	}
-	// An actual space character before the word satisfies it as well.
 	spaced, _ := mkWord("a b", 100, 200, 10, 12)
 	if got = searchChars(spaced, " b", 100); len(got) != 1 {
 		t.Fatalf("space character: expected 1 quad, got %d", len(got))
 	}
-	// With no predecessor at all, a leading-space needle must still fail at the very start of the stream.
+	// With no predecessor at all, a leading-space needle fails at the start of the stream.
 	if got = searchChars(wide, " Text", 100); len(got) != 0 {
 		t.Fatalf("stream start: expected 0 quads, got %d", len(got))
 	}
@@ -167,11 +164,10 @@ func TestSearchWrappedMatch(t *testing.T) {
 	}
 }
 
-// TestSearchQuadMergeVerticalFuzz pins add_quad's vertical fuzz over the shape that first exposed it: an oversized
-// inter-word space. A 40-pt space amid 20-pt words puts its lower-left corner 4 pt below the corner the open quad ends
-// at, which is exactly the space's own quadVFuzzEm (0.1 × 40) and so does NOT merge, and its 40-pt right edge then sits
-// 4 pt from the following 20-pt word against a fuzz of only 2 — so the one single-line match yields three quads (word,
-// oversized space, word), which is the hit-quad-split.pdf behavior.
+// TestSearchQuadMergeVerticalFuzz pins add_quad's vertical fuzz against an oversized inter-word space. A 40-pt space
+// amid 20-pt words puts its lower-left corner 4 pt below the corner the open quad ends at, exactly the space's own
+// quadVFuzzEm (0.1 × 40), so it does not merge; its 40-pt right edge then sits 4 pt from the following 20-pt word
+// against a fuzz of 2, so the single-line match yields three quads (word, space, word), as hit-quad-split.pdf does.
 func TestSearchQuadMergeVerticalFuzz(t *testing.T) {
 	alpha, endX := mkWord("alpha", 100, 200, 10, 20)
 	space := mkChar(' ', endX, 200, 20, 40)
@@ -194,10 +190,9 @@ func TestSearchQuadMergeVerticalFuzz(t *testing.T) {
 	}
 }
 
-// TestSearchQuadRaisedCharacter brackets the vertical fuzz exactly, over the shape a real page shifts a character
-// with: a text rise putting an exponent, a footnote marker, or a formula's digit on its own baseline. The comparison is
-// strict, so a character shifted by exactly quadVFuzzEm of its em splits the hit while one shifted a hair less does not
-// — the boundary MuPDF lands on, and the one hit-quad-rise.pdf holds the corpus to.
+// TestSearchQuadRaisedCharacter brackets the vertical fuzz exactly over a text rise (an exponent, a footnote marker, or
+// a formula's digit). The comparison is strict, so a character shifted by exactly quadVFuzzEm of its em splits the hit
+// while one shifted a hair less does not: the boundary MuPDF lands on, which hit-quad-rise.pdf holds the corpus to.
 func TestSearchQuadRaisedCharacter(t *testing.T) {
 	for _, tc := range []struct {
 		want int
@@ -228,10 +223,8 @@ func TestSearchQuadRaisedCharacter(t *testing.T) {
 	}
 }
 
-// TestSearchQuadWordGapBridged covers the synthesized space: pdfview records no character for a word-sized TJ gap, so
-// segmentQuads stands one in ahead of the character that closes the gap, exactly as MuPDF's structured-text device puts
-// a real space into the stream there. Without it a gap of quadHFuzzEm or more would split a hit MuPDF reports whole,
-// which is what text-std14's "Kerned Text" needle — a 0.5 em TJ gap standing in for the space — would then do.
+// TestSearchQuadWordGapBridged covers the synthesized space (see segmentQuads): without it a gap of quadHFuzzEm or more
+// would split a hit MuPDF reports whole, as text-std14's "Kerned Text" needle would.
 func TestSearchQuadWordGapBridged(t *testing.T) {
 	// A 0.7 em gap: past the 0.5 em horizontal fuzz, yet the hit is one quad reaching from alpha's leading corners to
 	// beta's trailing ones, the gap included.
@@ -274,10 +267,9 @@ func TestSearchQuadWordGapBridged(t *testing.T) {
 	}
 }
 
-// TestSearchQuadTrailingCorners pins what a merge does to the open quad: it REPLACES the trailing corners with the
-// merged character's own rather than unioning the two, so a quad reaches from the first merged character's leading
-// corners to the last one's trailing corners and carries the last one's height on its right edge. Two words of
-// different sizes on one baseline show the difference, and also show the fuzz scaling by the incoming size.
+// TestSearchQuadTrailingCorners pins that a merge replaces the open quad's trailing corners with the merged character's
+// rather than unioning the two, so the quad carries the last character's height on its right edge. Two words of
+// different sizes on one baseline show the difference, and the fuzz scaling by the incoming size.
 func TestSearchQuadTrailingCorners(t *testing.T) {
 	small, endX := mkWord("ab", 100, 200, 10, 20)
 	// 24 pt against 20: the tops stand 3.2 pt apart against the incoming character's fuzz of 2.4, so the words split.
@@ -310,9 +302,8 @@ func TestSearchQuadTrailingCorners(t *testing.T) {
 }
 
 func TestSearchMirroredExtent(t *testing.T) {
-	// Vertically-mirrored text puts the ascender below the descender in y-down space, so its quads run "upside down".
-	// The merge rule needs no case for that — vdist is an absolute perpendicular distance — and a uniform mirrored run
-	// must come back as one quad rather than one per character.
+	// Vertically mirrored text puts the ascender below the descender in y-down space; a uniform mirrored run must still
+	// come back as one quad rather than one per character.
 	chars, endX := mkMirroredWord("alpha", 100, 200, 10, 20)
 	got := searchChars(chars, "alpha", 100)
 	if len(got) != 1 {
@@ -374,9 +365,8 @@ func TestSearchBudget(t *testing.T) {
 	}
 }
 
-// TestFoldEqualMatchesStringsEqualFold pins foldEqual to the strings.EqualFold spelling it replaced: over every rune,
-// its whole simple-folding orbit must compare equal and the next rune (outside the orbit) must not, with each verdict
-// cross-checked against EqualFold on the single-rune strings.
+// TestFoldEqualMatchesStringsEqualFold cross-checks foldEqual against strings.EqualFold on single-rune strings: over
+// every rune, its whole simple-folding orbit must compare equal and the next rune (outside the orbit) must not.
 func TestFoldEqualMatchesStringsEqualFold(t *testing.T) {
 	check := func(a, b rune) {
 		t.Helper()
@@ -405,9 +395,9 @@ func TestFoldEqualMatchesStringsEqualFold(t *testing.T) {
 	}
 }
 
-// TestFoldEqualInvalidRunes pins the invalid-rune handling: string(r) replaced negative, surrogate, and out-of-range
-// runes with U+FFFD, so the extracted character carrying one still matches a U+FFFD needle rune (which is what decoding
-// invalid UTF-8 in the needle yields) exactly as before.
+// TestFoldEqualInvalidRunes pins the invalid-rune handling: negative, surrogate, and out-of-range runes fold as U+FFFD,
+// as string(r) would spell them, so an extracted character carrying one still matches a U+FFFD needle rune (what
+// decoding invalid UTF-8 in the needle yields).
 func TestFoldEqualInvalidRunes(t *testing.T) {
 	for _, r := range []rune{-1, -0x10000, 0xD800, 0xDFFF, unicode.MaxRune + 1, 0x7FFFFFFF} {
 		if !foldEqual(r, utf8.RuneError) {
@@ -460,9 +450,8 @@ func TestSearchUnmappedRuneBreaksMatch(t *testing.T) {
 }
 
 func TestSearchRotatedRun(t *testing.T) {
-	// A 90°-rotated run: the baseline advances through device y, so the perpendicular line-break test must keep it a
-	// single line. There is no rotation-specific quad assembly — adjacent characters of a uniform rotated run share
-	// their corners exactly, so the one merge rule walks the run into a single first-to-last-corner quad.
+	// A 90°-rotated run: the baseline advances through device y, so the perpendicular line-break test must keep it one
+	// line, and the one merge rule must walk it into a single first-to-last-corner quad.
 	chars := make([]Char, 0, 7)
 	x, y := float32(100), float32(400)
 	for _, r := range "Rotated" {
@@ -607,11 +596,7 @@ func TestRecordRetainsOnlyTheCurrentRun(t *testing.T) {
 	}
 }
 
-// TestRecordCapsCharacters verifies record bounds what it accumulates. The interpreter's work budget bounds how many
-// glyphs a page may show, but not the memory their records take: a Char is ~60 bytes, so an unbounded slice turns a
-// 61 KB file — one form XObject holding a 60 000-byte Tj, invoked 80 times — into most of a gigabyte of live heap on
-// the search pass, a ~16 000x amplification over the input. Every other accumulation in the engine is capped; this one
-// drops its excess the way the link and outline walks drop theirs, and what was recorded stays searchable.
+// TestRecordCapsCharacters pins the maxChars cap against the shape that motivates it (see maxChars).
 func TestRecordCapsCharacters(t *testing.T) {
 	const perRun = 4096
 	dev := New()
@@ -637,10 +622,9 @@ func TestRecordCapsCharacters(t *testing.T) {
 	}
 }
 
-// mkLigatureRun builds a one-glyph run whose glyph draws a ligature: lead starts the extraction and rest follows it,
-// as a one-to-many /ToUnicode mapping supplies. Like mkRun the font is metric-free, so the recorded quads have no
-// height; the vertical extent of the characters a glyph spells out is pinned by TestRecordFillerGeometry below and,
-// against MuPDF itself, by the text-ligature corpus goldens.
+// mkLigatureRun builds a one-glyph run whose glyph draws a ligature: lead starts the extraction and rest follows it, as
+// a one-to-many /ToUnicode mapping supplies. Like mkRun the font is metric-free, so the recorded quads have no height;
+// TestRecordFillerGeometry and the text-ligature goldens pin the vertical extent.
 func mkLigatureRun(lead rune, rest []rune, x, y, size, adv float32) *device.TextRun {
 	return &device.TextRun{
 		Font: &font.Font{},
@@ -653,10 +637,9 @@ func mkLigatureRun(lead rune, rest []rune, x, y, size, adv float32) *device.Text
 	}
 }
 
-// TestRecordSpellsOutOneToManyToUnicode covers the reason a ligature is searchable at all: a glyph whose /ToUnicode
-// target holds several runes contributes one character per rune, not just the target's first. Keeping only the first
-// left the fl glyph of "Reflect" contributing only its f, so the word extracted without its l and no reader searching
-// for it could find the page (richardwilkes/gcs#1092).
+// TestRecordSpellsOutOneToManyToUnicode pins that a glyph whose /ToUnicode target holds several runes contributes one
+// character per rune, not just the first: otherwise the fl glyph of "Reflect" contributes only its f and no search for
+// the word finds the page (richardwilkes/gcs#1092).
 func TestRecordSpellsOutOneToManyToUnicode(t *testing.T) {
 	dev := New()
 	dev.FillText(mkLigatureRun('f', []rune{'l'}, 100, 200, 10, 0.6), device.Paint{})
@@ -665,15 +648,13 @@ func TestRecordSpellsOutOneToManyToUnicode(t *testing.T) {
 	}
 	chars := dev.Chars()
 	base, filler := chars[0], chars[1]
-	// The extra character carries no advance and stands where the glyph left the pen, so the text after the glyph
-	// keeps the spacing the glyph laid down and a match starting at the extra character starts at the glyph's end.
 	if filler.Origin != base.End || filler.End != base.End {
 		t.Errorf("filler spans %+v-%+v, want both at the base's end %+v", filler.Origin, filler.End, base.End)
 	}
 	if filler.Size != base.Size || filler.Axis != base.Axis {
 		t.Errorf("filler size/axis = %v/%v, want the base's %v/%v", filler.Size, filler.Axis, base.Size, base.Axis)
 	}
-	// The whole point: the word the glyphs spell is findable, and searching for the leading rune alone still is.
+	// The word the glyph spells is findable, and the leading rune alone still is.
 	if got := searchChars(chars, "fl", 8); len(got) != 1 {
 		t.Errorf("searching %q found %d quads, want 1", "fl", len(got))
 	}
@@ -682,9 +663,8 @@ func TestRecordSpellsOutOneToManyToUnicode(t *testing.T) {
 	}
 }
 
-// TestRecordFillerGeometry pins the quad of a character a glyph spells out beyond its first: MuPDF hands a no-glyph
-// character the current pen as both its start and its end point, so the quad is zero-width and sits at the base's
-// advance end, while still spanning the font's full ascender-to-descender height there.
+// TestRecordFillerGeometry pins the filler quad: zero-width at the base's advance end, still spanning the font's full
+// ascender-to-descender height.
 func TestRecordFillerGeometry(t *testing.T) {
 	dev := New()
 	base := mkChar('f', 100, 200, 6, 10)
@@ -704,9 +684,8 @@ func TestRecordFillerGeometry(t *testing.T) {
 	}
 }
 
-// TestRecordDecomposesLigatureCodePoints covers the other route a glyph reaches extraction spelling several letters:
-// the Unicode alphabetic-presentation ligatures, which a glyph named "fl" reaches through the AGL with no /ToUnicode
-// involved at all. MuPDF's fz_add_stext_char decomposes them, so a page using them is searchable by the letters drawn.
+// TestRecordDecomposesLigatureCodePoints covers the other route to several letters per glyph: the Unicode
+// alphabetic-presentation ligatures, which a glyph named "fl" reaches through the AGL with no /ToUnicode involved.
 func TestRecordDecomposesLigatureCodePoints(t *testing.T) {
 	for _, tc := range []struct {
 		want string

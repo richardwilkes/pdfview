@@ -69,22 +69,18 @@ func TestDeviceGrayCurve(t *testing.T) {
 	}
 }
 
-// TestGrayTableGuard covers the wrong-sized-asset fallback: a corrupt or short gray table must not index out of range,
-// mirroring the length guard on the CMYK path. The real embed is validated separately by TestDeviceGrayCurve.
+// TestGrayTableGuard pins grayFromTable's wrong-sized-table fallback: a short or nil table yields the neutral ramp
+// instead of indexing out of range.
 func TestGrayTableGuard(t *testing.T) {
-	// The embedded table must be exactly the expected size, so grayValid hands it through unchanged.
 	if grayValid() == nil {
 		t.Fatal("embedded gray table failed its length guard")
 	}
-	// A wrong-sized (here, too-short) table falls back to a neutral ramp rather than panicking. Under the old code,
-	// v=1 would index grayTable[3057:3063] and panic on this 3-byte slice.
 	for _, v := range []float32{0, 0.25, 0.5, 1} {
 		want := rgbByte(v)
 		if got := grayFromTable([]byte{0, 0, 0}, v); got != (color.NRGBA{R: want, G: want, B: want, A: 255}) {
 			t.Errorf("fallback gray %v = %v, want neutral %d", v, got, want)
 		}
 	}
-	// A nil table is treated the same way.
 	if got := grayFromTable(nil, 1); got != (color.NRGBA{R: 255, G: 255, B: 255, A: 255}) {
 		t.Errorf("nil-table white = %v", got)
 	}
@@ -163,10 +159,8 @@ func TestParseIndexed(t *testing.T) {
 	}
 }
 
-// TestIndexedHivalClamped pins the clamp on /hival. The spec caps it at 255, but a producer that miscounts a 256-entry
-// palette emits 256, and rejecting the space is not a neutral outcome: the interpreter's fallback for an unresolvable
-// space is DeviceGray, so every sc/scn operand is reread as a gray level and index 200 paints near-white instead of
-// palette entry 200. MuPDF clamps, so we clamp.
+// TestIndexedHivalClamped pins parseIndexed's /hival clamp: an over-range /hival keeps the full 256-entry palette
+// instead of tripping the interpreter's DeviceGray fallback.
 func TestIndexedHivalClamped(t *testing.T) {
 	var lookup strings.Builder
 	for i := range 256 {
@@ -189,7 +183,7 @@ func TestIndexedHivalClamped(t *testing.T) {
 	for _, hival := range []string{"256", "300", "100000", "256.0"} {
 		t.Run("hival "+hival, func(t *testing.T) {
 			space := parse(t, hival)
-			// Clamped to 255: the full palette survives, and indices past it clamp to the last entry as always.
+			// Clamped to 255: the full palette survives.
 			for _, idx := range []float32{0, 200, 255, 300} {
 				want := ref.ToNRGBA([]float32{idx})
 				if got := space.ToNRGBA([]float32{idx}); got != want {
@@ -201,7 +195,7 @@ func TestIndexedHivalClamped(t *testing.T) {
 			}
 		})
 	}
-	// A negative /hival clamps the other way, to a one-entry palette, rather than tripping the DeviceGray fallback.
+	// A negative /hival clamps to a one-entry palette.
 	for _, hival := range []string{"-1", "-100000"} {
 		t.Run("hival "+hival, func(t *testing.T) {
 			space := parse(t, hival)
@@ -213,15 +207,14 @@ func TestIndexedHivalClamped(t *testing.T) {
 			}
 		})
 	}
-	// A /hival that is not a number is still a broken space, not a clamp.
+	// A non-numeric /hival is still a broken space.
 	if _, err := Parse(docWith(t, "[ /Indexed /DeviceRGB /Nope <"+table+"> ]"), cos.Ref{Num: 1}); err == nil {
 		t.Error("a non-numeric /hival parsed")
 	}
 }
 
-// TestIndexedNonFiniteIndex pins the float-space clamp. An int-space clamp would be architecture-dependent here: Go
-// leaves an out-of-range float→int conversion implementation-defined, so +Inf becomes math.MaxInt64 on arm64 (clamping
-// up to hival) but math.MinInt64 on amd64 (clamping down to 0) — the same file rendering different pixels per platform.
+// TestIndexedNonFiniteIndex pins clampIndex's float-space clamp; an int-space clamp would send +Inf to opposite ends of
+// the palette on arm64 and amd64.
 func TestIndexedNonFiniteIndex(t *testing.T) {
 	d := docWith(t, "[ /Indexed /DeviceRGB 2 <FF0000 00FF00 0000FF> ]")
 	space, err := Parse(d, cos.Ref{Num: 1})
@@ -249,9 +242,8 @@ func TestIndexedNonFiniteIndex(t *testing.T) {
 	}
 }
 
-// TestSeparationIndexedAltOverflow walks the reachable path: a /Separation whose alternate is /Indexed and whose tint
-// transform is a type-2 function. /Range is optional for type 2, so nothing clamps the math.Pow overflow and the raw
-// +Inf reaches Indexed.ToNRGBA.
+// TestSeparationIndexedAltOverflow walks the reachable path to a non-finite index: a /Separation with an /Indexed
+// alternate and a type-2 tint transform without /Range, whose math.Pow overflow reaches Indexed.ToNRGBA as +Inf.
 func TestSeparationIndexedAltOverflow(t *testing.T) {
 	d := docWith(t, "[ /Separation /Spot 2 0 R 3 0 R ]",
 		"[ /Indexed /DeviceRGB 2 <FF0000 00FF00 0000FF> ]",
@@ -359,10 +351,8 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
-// TestIndexedPaletteIsPrecomputed pins the /Indexed lookup cost. The palette is resolved to device colors once, at
-// parse time, so a conversion is a single indexed read: no per-call scratch slice, and no per-call re-evaluation of the
-// base space. That matters for the cases internal/imaging's single-component LUT does not cover — a 16-bpc /Indexed
-// image, or one whose base runs a /Separation tint transform — where ToNRGBA is called once per pixel.
+// TestIndexedPaletteIsPrecomputed pins that an /Indexed conversion is one indexed read: no per-call allocation and no
+// re-evaluation of the base space (here a /Separation tint transform).
 func TestIndexedPaletteIsPrecomputed(t *testing.T) {
 	d := docWith(t, "[ /Indexed 2 0 R 1 <0064> ]",
 		"[ /Separation /Spot /DeviceGray 3 0 R ]",
@@ -382,8 +372,8 @@ func TestIndexedPaletteIsPrecomputed(t *testing.T) {
 	}
 }
 
-// TestIndexedShortLookupTable pins the fault tolerance the per-call conversion had: table bytes the lookup string does
-// not reach read as 0 rather than erroring or panicking, for every index up to hival.
+// TestIndexedShortLookupTable pins that table bytes past the end of the lookup string read as 0 for every index up to
+// hival.
 func TestIndexedShortLookupTable(t *testing.T) {
 	d := docWith(t, "[ /Indexed /DeviceRGB 2 <FF00> ]") // Two bytes for a nine-byte table.
 	space, err := Parse(d, cos.Ref{Num: 1})

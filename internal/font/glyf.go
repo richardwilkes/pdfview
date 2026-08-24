@@ -30,17 +30,17 @@ type glyfInfo struct {
 	upem     float32
 }
 
-// glyfCompositeDepth caps composite-glyph recursion (matching go-text's own cap).
+// glyfCompositeDepth caps composite-glyph recursion; go-text's own cap is 20.
 const glyfCompositeDepth = 8
 
 // glyfWorkBudget caps the total work one path() call may spend: one unit per component visited, one per contour
-// emitted, and one per contour point converted. The depth cap alone bounds recursion depth but not branching, so a
-// chain where glyph i is N components of glyph i+1 costs N^depth appendGlyph calls (and a path that grows just as fast)
-// without this ceiling. Points must be charged too, or the same amplification runs through a fat leaf instead: a simple
-// glyph can declare 65536 points in a few hundred bytes (repeat-flag runs whose X_SAME/Y_SAME deltas cost no coordinate
-// bytes at all), so a budget that only counts glyphs and contours still lets thousands of leaf visits emit hundreds of
-// millions of verbs — gigabytes of gfx.Path, an allocation failure no recover() can catch. Sized like maxSegments in
-// the Type 1 interpreter; real glyphs stay in the low hundreds.
+// emitted, and one per contour point converted. The depth cap bounds recursion but not branching: a chain where glyph i
+// is N components of glyph i+1 costs N^depth appendGlyph calls and a path that grows as fast. Points must be charged
+// too, or the same amplification runs through a fat leaf: a simple glyph can declare 65536 points in a few hundred
+// bytes (repeat-flag runs whose X_SAME/Y_SAME deltas cost no coordinate bytes), so a budget counting only glyphs and
+// contours still lets thousands of leaf visits emit hundreds of millions of verbs — gigabytes of gfx.Path, an
+// allocation failure no recover() can catch. Sized like maxSegments in the Type 1 interpreter; real glyphs stay in the
+// low hundreds.
 const glyfWorkBudget = 1 << 14
 
 // newGlyfInfo builds the walker from an sfnt loader; nil when the program has no usable glyf/loca pair.
@@ -141,8 +141,8 @@ func (g *glyfInfo) appendGlyph(p *gfx.Path, gid uint32, m gfx.Matrix, depth int,
 }
 
 // componentMatrix builds a composite component's transform: the 2x2 scale matrix plus the args translation. Anchored
-// (point-matching) placement is not supported — the component lands untranslated, the degradation deployed rasterizers
-// apply when point indices are unusable; no real corpus file has exercised it.
+// (point-matching) placement is not supported: the component lands untranslated, as deployed rasterizers degrade when
+// point indices are unusable.
 func componentMatrix(part *tables.CompositeGlyphPart) gfx.Matrix {
 	var tx, ty float32
 	if !part.IsAnchored() {

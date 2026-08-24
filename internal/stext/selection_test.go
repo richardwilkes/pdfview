@@ -20,11 +20,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// corpusChars interprets one corpus page's content at scale 1 (page space) against a fresh structured-text device,
-// exactly as the engine's extraction seam does — page content first, then annotation appearance streams. It is the
-// only way to get REAL character geometry in front of these tests: the synthetic layouts elsewhere in this package
-// are uniform by construction, and it is the corpus's kerning, mixed sizes, and rotation that make the selection
-// heuristics worth pinning.
+// corpusChars interprets one corpus page's content at scale 1 (page space) against a fresh structured-text device, as
+// the engine's extraction seam does: page content first, then annotation appearance streams. The synthetic layouts
+// elsewhere in this package are uniform by construction; the corpus's kerning, mixed sizes, and rotation are what make
+// the selection heuristics worth pinning.
 func corpusChars(t *testing.T, file string, pageNumber int) []Char {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "testfiles", "corpus", file))
@@ -50,12 +49,11 @@ func corpusChars(t *testing.T, file string, pageNumber int) []Char {
 	return dev.Chars()
 }
 
-// TestSelectionQuadsMatchSearchQuads is the guard the whole selection model hangs on: highlighting a range must paint
-// exactly what searching for that range's text paints. Both go through segmentQuads, so this pins that Page's line
-// runs and range intersection hand it the same character slices the matcher does — over real corpus geometry, where
-// the line breaks, the oversized-space and raised-character splits, and the rotated runs actually occur. The
-// comparison is exact: these are the same float32 corners the oracle-pinned quad-parity goldens hold search to, so any
-// drift here is drift away from MuPDF too.
+// TestSelectionQuadsMatchSearchQuads pins that highlighting a range paints exactly what searching for its text paints:
+// Page's line runs and range intersection must hand segmentQuads the same character slices the matcher does, over real
+// corpus geometry where line breaks, oversized-space and raised-character splits, and rotated runs occur. The
+// comparison is exact: these are the float32 corners the oracle-pinned goldens hold search to, so drift here is drift
+// from MuPDF.
 func TestSelectionQuadsMatchSearchQuads(t *testing.T) {
 	for _, tc := range []struct {
 		file    string
@@ -177,8 +175,8 @@ func TestNewLinesSplitsOnLineBreakBetween(t *testing.T) {
 		t.Fatalf("offset under the baseline threshold: got %d lines, want 1", len(lines))
 	}
 
-	// Then along the baseline. A wrapped line is exactly this case: it starts a long way back along the advance
-	// direction while its baseline has moved by less than one em, so the perpendicular test alone would swallow it.
+	// Then along the baseline: a wrapped line starts far back along the advance direction while its baseline has moved
+	// by less than one em.
 	wrapped, _ := mkWord("fox", 40, 200+baseMaxDistEm*12*0.99, 10, 12)
 	if lines := newLines(append(append([]Char(nil), first...), wrapped...)); len(lines) != 2 {
 		t.Fatalf("wrapped line: got %d lines, want 2", len(lines))
@@ -278,9 +276,8 @@ func TestIndexAtPicksNearestLine(t *testing.T) {
 	if len(page.lines) != 4 {
 		t.Fatalf("expected 4 lines, got %d", len(page.lines))
 	}
-	// The gutter's center is equidistant from the left column's right edge (50) and the right column's left edge
-	// (200). The tie must resolve toward the earlier line, so the caret lands at the end of the left column's top
-	// line rather than at the start of the right column's — the behavior a text editor gives a click in a gutter.
+	// The gutter's center (125) is equidistant from the left column's right edge (50) and the right column's left edge
+	// (200); the tie resolves to the earlier line, so the caret lands at the end of the top-left line.
 	if got, want := page.IndexAt(gfx.Point{X: 125, Y: 100}), len(topLeft); got != want {
 		t.Errorf("gutter: got %d, want %d (the end of the top-left line)", got, want)
 	}
@@ -462,11 +459,9 @@ func TestLineAtCoversTheStream(t *testing.T) {
 	}
 }
 
-// TestIndexAtSharesAGlyphAmongItsLetters pins the hit test over a glyph that spells several characters. The fillers
-// all sit at the glyph's pen, so measured by their own geometry every caret position of the group is at its trailing
-// edge — and a point just short of the pen would land between the first letter and the second, inside a shape the
-// page shows no boundary in. The group instead shares the glyph's advance evenly: each letter owns an equal slice, a
-// point in the trailing slice lands after all of the letters, and a caret can land between any two of them.
+// TestIndexAtSharesAGlyphAmongItsLetters pins the hit test over a glyph that spells several characters (see glyphSpan):
+// each letter owns an equal slice of the glyph's advance, a point in the trailing slice lands after all the letters,
+// and a caret can land between any two of them.
 func TestIndexAtSharesAGlyphAmongItsLetters(t *testing.T) {
 	const x0, y, adv, size = 100, 200, 10, 12
 	// "ﬂow": the ligature records "f" with the glyph's whole advance and "l" as a filler at its pen.

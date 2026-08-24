@@ -7,27 +7,20 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Package imaging decodes PDF image XObjects and inline images (ISO 32000-2 8.9) into the two raster forms the raster
-// device (internal/render) consumes: straight-alpha RGBA pixels for ordinary images, and a one-byte-per-pixel coverage
-// plane for stencil masks (ImageMask true), which the device tints with the current fill paint.
+// Package imaging decodes PDF image XObjects and inline images (ISO 32000-2 8.9) into the two raster forms
+// internal/render consumes: straight-alpha RGBA pixels for ordinary images, and a one-byte-per-pixel coverage plane
+// for stencil masks (ImageMask true), which the device tints with the current fill paint.
 //
-// The pipeline: the stream's leading non-image filters are applied by internal/cos (ImageFilterSplit), then the
-// terminal image codec — none (raw samples), DCTDecode (stdlib image/jpeg, including CMYK/YCCK with the Adobe APP14
-// transform), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (the vendored internal/jbig2 decoder, see jbig2.go), or
-// JPXDecode (the vendored internal/jpeg2000 decoder, see jpx.go) — produces component samples. Samples are unpacked
-// per BitsPerComponent (1/2/4/8/16), mapped through the /Decode array, and converted to rendered RGB through
-// internal/color (whose device conversions reproduce the oracle's observed ICC-backed behavior; DeviceCMYK JPEG pixels
-// flow through the same captured tables as the k operator). /SMask soft masks and /Mask entries (stencil stream or
-// color-key array) become the alpha channel. /ImageMask true on a JPXDecode image XObject is ignored outright rather
-// than declined, the oracle's posture for that spec-illegal pairing: the payload paints as an ordinary opaque image,
-// untinted by the fill color, while a /Mask stencil stream naming that codec is still declined, since no oracle
-// evidence covers it. Every decode failure still degrades to a skipped image — the page renders blank where the image
-// would be, never an error to the caller.
+// internal/cos (ImageFilterSplit) applies the stream's leading non-image filters; the terminal image codec — none
+// (raw samples), DCTDecode (stdlib image/jpeg), CCITTFaxDecode (x/image/ccitt), JBIG2Decode (internal/jbig2, see
+// jbig2.go), or JPXDecode (internal/jpeg2000, see jpx.go) — produces component samples. Samples are unpacked per
+// BitsPerComponent (1/2/4/8/16), mapped through /Decode, and converted through internal/color. /SMask and /Mask
+// entries (stencil stream or color-key array) become the alpha channel. Every decode failure degrades to a skipped
+// image: the page renders blank where the image would be, never an error to the caller.
 //
-// Robustness: image dimensions are capped before any allocation, both absolutely (maxImagePixels) and in proportion to
-// the encoded payload's size (maxPixelsFor), so hostile dictionaries claiming absurd dimensions over a few payload
-// bytes cannot force giant allocations. Sample data shorter than the claimed dimensions reads as zero samples (the
-// warn-and-continue analog of deployed viewers).
+// Image dimensions are capped before any allocation, both absolutely (maxImagePixels) and in proportion to the encoded
+// payload's size (maxPixelsFor), so a hostile dictionary cannot force a giant allocation over a few payload bytes.
+// Sample data shorter than the claimed dimensions reads as zero samples.
 package imaging
 
 import (
@@ -37,28 +30,26 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Errors reported by this package. The interpreter treats every decode failure the same way — the image is skipped and
-// the page keeps rendering — so these exist for tests and logs rather than control flow.
+// Errors reported by this package. The interpreter skips the image and keeps rendering on every decode failure, so
+// these exist for tests and logs rather than control flow.
 var (
 	// ErrBadImage is reported for malformed image dictionaries or undecodable payloads.
 	ErrBadImage = errors.New("malformed image")
-	// ErrUnsupportedCodec is reported for a codec this package declines outright, such as a JPXDecode payload used as
-	// a /Mask stencil stream: the image renders blank, not an error.
+	// ErrUnsupportedCodec is reported for a codec this package declines outright: today only stencilPlane on a
+	// JPXDecode /Mask stream, whose caller then ignores the mask.
 	ErrUnsupportedCodec = errors.New("unsupported image codec")
 	// ErrTooLarge is reported when the claimed dimensions exceed the allocation caps.
 	ErrTooLarge = errors.New("image too large")
 )
 
-// maxImagePixels is the hard cap on decoded image pixels (width × height), chosen so a 600-dpi letter-size bilevel scan
-// (~34 Mpx) still decodes while the RGBA expansion stays bounded (~256 MB worst case). Larger images are skipped
-// (rendered blank), never partially decoded.
+// maxImagePixels caps decoded image pixels (width × height) so a 600-dpi letter-size bilevel scan (~34 Mpx) still
+// decodes while the RGBA expansion stays bounded (~256 MB). Larger images are skipped, never partially decoded.
 const maxImagePixels = 1 << 26
 
 // maxPixelsFor returns the pixel budget for an image whose encoded payload is dataLen bytes: min(maxImagePixels,
-// max(2^22, 8192×dataLen)). The proportional term stops hostile dictionaries from claiming huge dimensions over a
-// handful of payload bytes (missing samples read as zeros, so the only effect of such a claim is allocation), while the
-// floor and the generous per-byte multiplier accommodate legitimately extreme compression: an all-white fax page
-// compresses to a few bytes per row under CCITT G4.
+// max(2^22, 8192×dataLen)). The proportional term stops a hostile dictionary from claiming huge dimensions over a few
+// payload bytes; the floor and the generous multiplier allow legitimately extreme compression (an all-white CCITT G4
+// fax page is a few bytes per row).
 func maxPixelsFor(dataLen int) int64 {
 	budget := int64(dataLen) * 8192
 	if budget < 1<<22 {
@@ -70,9 +61,8 @@ func maxPixelsFor(dataLen int) int64 {
 	return budget
 }
 
-// decodeParmDim narrows a dimension read from /DecodeParms to an int, reporting false when it is not a usable one. The
-// bound is applied to the int64 GetInt returns, so a dimension past maxImagePixels is rejected outright rather than
-// reaching the row-stride and pixel-product arithmetic that sizes the decode.
+// decodeParmDim narrows a /DecodeParms dimension to an int, false when it is outside (0, maxImagePixels]. The bound is
+// applied to the int64 before any row-stride or pixel-product arithmetic.
 func decodeParmDim(v int64) (dim int, ok bool) {
 	if v <= 0 || v > maxImagePixels {
 		return 0, false
@@ -106,12 +96,11 @@ func DecodeXObject(d *cos.Document, stream *cos.Stream, resources cos.Dict) (*Im
 	return dec.run()
 }
 
-// NeedsResources reports whether decoding the image dictionary dict would consult the resource dictionary in scope,
-// which happens when its /ColorSpace (or /CS) is a bare name that does not parse as a space on its own — colorSpace
-// then falls back to resources /ColorSpace[name]. Such an image decodes to different colors under different resource
-// frames, so a caller that caches decoded images by the XObject's reference alone must not cache this one: the
-// dictionary's identity does not determine the result. Reported conservatively — a name that no frame defines either
-// answers true, costing a re-decode rather than risking a stale one.
+// NeedsResources reports whether decoding dict would consult the resource dictionary in scope: its /ColorSpace (or
+// /CS) is a bare name that does not parse on its own, so colorSpace falls back to resources /ColorSpace[name]. Such an
+// image decodes to different colors under different resource frames, so a caller caching decoded images by the
+// XObject's reference alone must not cache it. A name no frame defines also answers true, costing a re-decode rather
+// than risking a stale one.
 func NeedsResources(d *cos.Document, dict cos.Dict) bool {
 	dec := &decoder{d: d, dict: dict}
 	name, isName := dec.entry("ColorSpace", "CS").(cos.Name)
@@ -181,7 +170,6 @@ func (dec *decoder) boolEntry(full, abbr cos.Name) bool {
 	return ok && bool(b)
 }
 
-// run decodes the image.
 func (dec *decoder) run() (*Image, error) {
 	w, wOK := dec.intEntry("Width", "W")
 	h, hOK := dec.intEntry("Height", "H")
@@ -191,19 +179,16 @@ func (dec *decoder) run() (*Image, error) {
 	if w*h > maxPixelsFor(len(dec.data)) {
 		return nil, ErrTooLarge
 	}
-	// A JPXDecode soft mask carries its always-smoothed posture onto the image it masks. The oracle paints an image and
-	// its mask each at its own resolution with its own filter, while compositeAlpha folds the mask into the image on
-	// the finer of the two grids, so the combined raster must be sampled the way the mask alone would have been —
-	// otherwise a mask finer than the 2x magnification band renders its coverage steps hard (images-jpx-smask.pdf pins
+	// A JPXDecode soft mask carries its always-smoothed posture (see decodeJPX) onto the image it masks: the oracle
+	// paints the mask with its own filter, and compositeAlpha folds the mask into the image on the finer of the two
+	// grids, so the combined raster must be sampled the way the mask alone would have been (images-jpx-smask.pdf pins
 	// it: an 8x8 base under a 64x64 JPX mask at 2.08x and 3.13x).
 	interpolate := dec.boolEntry("Interpolate", "I") || dec.jpxSoftMask()
 	if dec.boolEntry("ImageMask", "IM") && !isJPX(dec.codec) {
-		// A stencil mask: one bit per sample regardless of any declared BitsPerComponent or ColorSpace (ISO 32000-2
-		// 8.9.6.2); Decode [1 0] flips polarity. A JPXDecode payload is the one exception, and it is the oracle's, not
-		// the specification's: MuPDF ignores /ImageMask on that codec outright and paints the payload as an ordinary
-		// opaque image, with no fill-color tinting and no transparency, so the entry falls through to decodeJPX below
-		// (images-jpx-stencil.pdf pins it). The exception is scoped to this entry alone — a /Mask stencil stream still
-		// declines the codec in stencilPlane, where no oracle evidence covers it.
+		// A stencil mask is one bit per sample regardless of any declared BitsPerComponent or ColorSpace (ISO 32000-2
+		// 8.9.6.2); Decode [1 0] flips polarity. MuPDF ignores /ImageMask on a JPXDecode payload and paints it as an
+		// ordinary opaque image, untinted (images-jpx-stencil.pdf pins it), so that entry falls through to decodeJPX;
+		// a /Mask stencil stream naming the codec is still declined in stencilPlane, where no oracle evidence covers it.
 		alpha, err := dec.stencilPlane(int(w), int(h))
 		if err != nil {
 			return nil, err
@@ -222,7 +207,6 @@ func (dec *decoder) run() (*Image, error) {
 	return dec.decodeSamples(int(w), int(h), interpolate)
 }
 
-// bitsPerComponent returns the validated BitsPerComponent entry.
 func (dec *decoder) bitsPerComponent() (int, error) {
 	bpc, ok := dec.intEntry("BitsPerComponent", "BPC")
 	if !ok {

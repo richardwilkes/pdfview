@@ -27,9 +27,8 @@ import (
 	"github.com/richardwilkes/pdfview/internal/shading"
 )
 
-// padding is the whitespace each repeatedly executed body in these tests carries: enough that re-running it is real
-// work, while the operators it executes stay countable on one hand. The budget must charge for the scan, not just for
-// the two operators the body dispatches.
+// padding is the whitespace each repeatedly executed body carries, so re-running it is real work while the operators it
+// dispatches stay few: the budget must charge for the scan, not just for the operators.
 const padding = 1 << 16
 
 // paddedBody returns a content-stream body of padding bytes of whitespace followed by tail.
@@ -59,8 +58,8 @@ func wantBounded(t *testing.T, what string, ran, invocations, bodyLen int) {
 }
 
 // TestFormBodyChargedPerInvocation verifies that repeatedly invoking one form XObject drains the work budget in
-// proportion to the body it re-runs. The cycle set only stops recursive re-entry, so before the charge a page of
-// sequential Do operators — one budget unit each — could re-decode and re-scan a multi-megabyte body per invocation.
+// proportion to the body it re-runs. The cycle set only stops recursive re-entry; sequential Do operators re-scan the
+// body every time.
 func TestFormBodyChargedPerInvocation(t *testing.T) {
 	const invocations = 1200
 	body := paddedBody("0 0 1 1 re f")
@@ -107,8 +106,8 @@ func TestSoftMaskReplayChargedPerPaint(t *testing.T) {
 	}
 	res := cos.Dict{catExtGState: cos.Dict{resGSName: cos.Ref{Num: 2}}}
 	rec := run(t, d, res, "/GS0 gs "+strings.Repeat("0 0 1 1 re f ", paints))
-	// The mask replay is what the budget must charge: the page's fills keep being emitted, but once the budget is spent
-	// the replay executes nothing, so the mask's own clip stops appearing.
+	// The page's own fills keep being emitted; once the budget is spent the replay executes nothing, so the mask's clip
+	// stops appearing.
 	wantBounded(t, "the mask body", len(rec.byOp(opClip)), paints, len(maskBody))
 }
 
@@ -148,9 +147,8 @@ func TestStreamBodyCachedAndChargedPerCall(t *testing.T) {
 	}
 }
 
-// zipBomb returns flate-compressed data that inflates to one byte past internal/filter's 64 MB output allowance, so
-// every decode of it fails with ErrTooLarge — but only after inflating that whole allowance. It is built once for the
-// whole package: the tests below are deliberately the only ones here that touch 64 MB of anything.
+// zipBombOnce builds, once per package, flate data that inflates to one byte past internal/filter's 64 MB allowance, so
+// every decode of it fails with ErrTooLarge only after inflating that whole allowance.
 var zipBombOnce = sync.OnceValues(func() (string, error) {
 	var buf bytes.Buffer
 	zw, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
@@ -176,9 +174,8 @@ func zipBomb(t *testing.T) string {
 }
 
 // TestFailedBodyDecodeChargedForTheInflationItForced verifies that a body whose decode fails is charged for the bytes
-// the decode PRODUCED, not for the input it was handed. internal/filter inflates the whole max(64 MB, 256x input)
-// allowance before reporting ErrTooLarge, so a 64 KB zip-bombed body priced at its input length cost ~4 thousand of the
-// 4 million-unit budget for 64 MB of decompression.
+// the decode produced, not for its input: internal/filter inflates the whole max(64 MB, 256x input) allowance before
+// reporting ErrTooLarge, so a 64 KB zip bomb priced at its input length would cost ~4 thousand of the 4 million units.
 func TestFailedBodyDecodeChargedForTheInflationItForced(t *testing.T) {
 	bomb := zipBomb(t)
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
@@ -208,9 +205,8 @@ func TestFailedBodyDecodeChargedForTheInflationItForced(t *testing.T) {
 	}
 }
 
-// TestFailedBodyDecodeThatProducedNothingStaysCheap is the other half of the charge: a decode that fails without
-// producing anything did no such work, and must not exhaust a page's budget. Corrupt-but-otherwise-readable files are
-// rendered as far as they go, so one unusable form body cannot be allowed to stop the rest of the page.
+// TestFailedBodyDecodeThatProducedNothingStaysCheap verifies a decode that fails without producing anything costs no
+// more than its input: corrupt files render as far as they go, so one unusable form body must not stop the page.
 func TestFailedBodyDecodeThatProducedNothingStaysCheap(t *testing.T) {
 	body := paddedBody("0 0 1 1 re f") // Never decoded: the filter is one internal/filter rejects outright.
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
@@ -234,10 +230,9 @@ func TestFailedBodyDecodeThatProducedNothingStaysCheap(t *testing.T) {
 	}
 }
 
-// TestZipBombedFormBodiesBoundedAcrossTheFailureCache verifies the charge bounds the attack the failure cache alone
-// cannot: one more zip-bombed form than the cache holds, cycled by Do, misses on every invocation, and each miss
-// inflates 64 MB. The budget must stop that within a couple of decodes rather than the ~1000 invocations a
-// one-unit-per-Do page affords.
+// TestZipBombedFormBodiesBoundedAcrossTheFailureCache verifies the charge bounds what the failure cache alone cannot:
+// one more zip-bombed form than the cache holds, cycled by Do, misses on every invocation and inflates 64 MB each time.
+// The budget must stop that within two decodes.
 func TestZipBombedFormBodiesBoundedAcrossTheFailureCache(t *testing.T) {
 	const forms = maxCachedBodies + 1
 	const invocations = 20
@@ -297,8 +292,8 @@ func TestZipBombedImageDecodeChargedForItsInflation(t *testing.T) {
 	}
 }
 
-// TestShadingParsedOnceAcrossResourceFrames verifies the reference-keyed per-Run cache survives the fresh resource frame
-// every form invocation pushes, so a shading named from N frames is parsed — and charged — once rather than N times.
+// TestShadingParsedOnceAcrossResourceFrames verifies the reference-keyed per-Run cache survives the fresh resource
+// frame every form invocation pushes, so a shading named from N frames is parsed — and charged — once.
 func TestShadingParsedOnceAcrossResourceFrames(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF(
 		`<< /ShadingType 2 /ColorSpace /DeviceGray /Coords [0 0 1 0]
@@ -361,9 +356,8 @@ func (c *imageCounter) FillImage(*imaging.Image, gfx.Matrix, device.Paint)     {
 func (c *imageCounter) FillImageMask(*imaging.Image, gfx.Matrix, device.Paint) { c.images++ }
 
 // TestInlineImageDecodeChargedPerSample verifies a stream of inline images drains the work budget in proportion to the
-// samples the decodes produce. The dictionary alone dictates that count: maxPixelsFor's 2^22-pixel floor is independent
-// of how small the payload is, so before the charge a BI cost one budget unit out of maxTotalOps while triggering four
-// million samples of work — a kilobyte of content stream bought minutes of decoding with the budget still untouched.
+// samples the decodes produce. The dictionary alone dictates that count: imaging's maxPixelsFor has a 2^22-pixel floor
+// independent of payload size, so a one-byte BI can trigger four million samples of work.
 func TestInlineImageDecodeChargedPerSample(t *testing.T) {
 	const images = 400
 	// One payload byte claiming 2048x2048. /IM keeps the decoded plane one byte per sample rather than four, which
@@ -388,8 +382,7 @@ func TestInlineImageDecodeChargedPerSample(t *testing.T) {
 }
 
 // TestImageXObjectDecodeChargedOncePerDecode verifies an image XObject's decode charges the budget for the samples it
-// produces — so a page naming many distinct images pays for each — while the cache hit that follows charges nothing,
-// which is what keeps one image drawn repeatedly cheap.
+// produces, while the cache hit that follows charges nothing.
 func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
 		"/Type /XObject /Subtype /Image /Width 64 /Height 64 /BitsPerComponent 8 /ColorSpace /DeviceGray",
@@ -425,12 +418,9 @@ func TestImageXObjectDecodeChargedOncePerDecode(t *testing.T) {
 	}
 }
 
-// TestFontLoadChargedPerDistinctFont verifies Tf charges the work budget for the font it loads. The per-reference cache
-// makes a repeated Tf on the same reference free, but the cost is per DISTINCT reference: a resource dictionary may
-// name up to maxContainerElements font entries, and an object stream supplies a million 30-byte font dictionaries that
-// all point at one descriptor. Before the charge, Tf was the one operator that could force an arbitrarily expensive
-// resource parse for one budget unit — a font load decodes the whole embedded program (up to internal/filter's
-// allowance) and then parses it, the most expensive parse in the engine.
+// TestFontLoadChargedPerDistinctFont verifies Tf charges the work budget once per distinct font reference: a resource
+// dictionary may name up to maxContainerElements font entries, all sharing one descriptor, and each load decodes and
+// parses the whole embedded program.
 func TestFontLoadChargedPerDistinctFont(t *testing.T) {
 	const fonts = 3000
 	bodies := make([]string, fonts)
@@ -466,9 +456,8 @@ func TestFontLoadChargedPerDistinctFont(t *testing.T) {
 	}
 }
 
-// TestFontLoadChargeCountsTheProgramAndCachesFree verifies the shape of the charge: a load that parses charges the flat
-// parse cost plus the program it decoded, and the cache hit that follows charges nothing — which is what keeps one font
-// used across a whole page cheap while a page naming many distinct fonts pays for each.
+// TestFontLoadChargeCountsTheProgramAndCachesFree verifies a load charges the flat parse cost plus the program it
+// decoded, and the cache hit that follows charges nothing.
 func TestFontLoadChargeCountsTheProgramAndCachesFree(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")))
 	if err != nil {
@@ -497,10 +486,8 @@ func TestFontLoadChargeCountsTheProgramAndCachesFree(t *testing.T) {
 	}
 }
 
-// TestShadingPaintCost pins what each shading kind charges for its DEVICE-side realization, which happens per painting
-// operation rather than per parse: a type 1 shading's grid is evaluated cell by cell, and a mesh's triangles are
-// re-rasterized every time. Axial and radial shadings realize as a gradient built from the ramp parseShading already
-// sampled, so they cost only their operator unit.
+// TestShadingPaintCost pins what each shading kind charges for its device-side realization: a type 1 shading's grid
+// cells, a mesh's triangles, and one operator unit for the axial and radial kinds.
 func TestShadingPaintCost(t *testing.T) {
 	if got := shadingPaintCost(nil, gfx.Identity()); got != 0 {
 		t.Errorf("a nil shading charged %d, want 0", got)
@@ -538,10 +525,7 @@ func TestShadingPaintCost(t *testing.T) {
 }
 
 // TestShadingRealizationChargedPerPaint verifies a flood of sh operators on one shading drains the budget in proportion
-// to the device realization each one forces. The parse is cached and charged once, so before this charge a
-// flate-compressed run of sh operators — a few tens of kilobytes of file — bought one full grid evaluation and a 1 MB
-// image allocation per operator for one budget unit apiece: measured at 10 ms per sh with the cheapest possible
-// /Function and 304 ms with a 200-instruction type 4 program, both exactly linear in the repeat count.
+// to the device realization each one forces; the parse is cached and charged once, so it alone bounds nothing.
 func TestShadingRealizationChargedPerPaint(t *testing.T) {
 	const paints = 400
 	d, err := cos.Open([]byte(minimalPDF(
@@ -569,10 +553,9 @@ func TestShadingRealizationChargedPerPaint(t *testing.T) {
 	}
 }
 
-// TestLexicalGarbageChargedToBudget pins the work budget over the one path that used to escape it. A token that fails
-// to lex advances the read position, so the scan always terminates — but without a charge its bound was the stream
-// length rather than maxTotalOps, and a stream of pure garbage was scanned end to end no matter how little budget
-// remained. Each stray ')' here is a one-byte lexical error; past the budget nothing more may run.
+// TestLexicalGarbageChargedToBudget verifies lexical errors are charged: a token that fails to lex advances the read
+// position, so the scan terminates, but its bound must be maxTotalOps rather than the stream length. Each stray ')' is
+// a one-byte lexical error; past the budget nothing more may run.
 func TestLexicalGarbageChargedToBudget(t *testing.T) {
 	tail := " 0 0 1 1 re f"
 	if rec := run(t, nil, nil, strings.Repeat(")", 16)+tail); len(rec.byOp(opFill)) != 1 {
@@ -612,10 +595,9 @@ func separationPDF(t *testing.T, spaces, samples int) *cos.Document {
 	return d
 }
 
-// TestResourceParseChargedForWhatItDecodes covers the cost of a color-space or shading parse. Both charged a flat cost
-// no matter what they decoded and RETAINED — a /Separation space holds its tint transform's whole sample table, a mesh
-// shading its tessellation — so at 1025 units per cs operator, four thousand distinct spaces all naming one stream that
-// inflates to tens of megabytes fit the budget while forcing gigabytes of inflation. The charge follows the bytes.
+// TestResourceParseChargedForWhatItDecodes verifies a color-space parse is charged for the bytes it decodes on top of
+// the flat cost: a /Separation space retains its tint transform's whole sample table, so a flat charge alone would let
+// thousands of distinct spaces naming one fat stream force gigabytes of inflation.
 func TestResourceParseChargedForWhatItDecodes(t *testing.T) {
 	const samples = 1 << 20
 	d := separationPDF(t, 1, samples)
@@ -661,8 +643,7 @@ func TestManyDistinctSpacesBounded(t *testing.T) {
 	}
 }
 
-// TestResourceCachesAreBounded verifies the per-Run parse caches no longer grow without limit. A parsed resource can
-// retain far more than the dictionary it came from, and the maps kept every one of them for the whole Run.
+// TestResourceCachesAreBounded verifies the per-Run parse caches hold at most maxCachedResources entries.
 func TestResourceCachesAreBounded(t *testing.T) {
 	const spaces = maxCachedResources * 4
 	d := separationPDF(t, spaces, 16)

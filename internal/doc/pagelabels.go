@@ -18,21 +18,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Traversal guards for the /PageLabels number tree, mirroring the name-tree guards in dest.go: hostile documents cannot
-// force unbounded work because recursion is depth-capped, node count-capped, and reference cycles are skipped via a
-// visited set.
+// Traversal guards for the /PageLabels number tree, mirroring the name-tree guards in dest.go.
 const (
 	maxNumberTreeDepth = 64
 	maxNumberTreeNodes = 1 << 16
-	// maxPageLabelRanges bounds how many key → range-dictionary pairs one build retains. Only one range per page can
-	// ever matter and maxPages is 65536, so a document that hits this cap has already described every page it can have;
-	// the pairs past it are dropped, which leaves their pages labeled by the last range that did fit.
+	// maxPageLabelRanges bounds how many key → range pairs one build retains. Only one range per page can matter and
+	// maxPages is 65536, so a document at the cap has described every page it can have; pairs past it are dropped, leaving
+	// their pages on the last range that fit.
 	maxPageLabelRanges = 1 << 16
-	// maxRomanPageLabel and maxAlphaPageLabel bound how long a single label may get before the styled forms give up and
-	// print the number in decimal instead. Roman is greedy, so 65536 costs 65 "m" characters plus the remainder — about
-	// 80 bytes — while the alpha style repeats one letter, so 26*64 caps it at 64 characters. Both sit far above any
-	// page number a real document numbers in these styles, and a document that exceeds them is asking for a label no
-	// reader could use; decimal is the honest answer there.
+	// maxRomanPageLabel and maxAlphaPageLabel bound how long a label may get before the styled forms print decimal
+	// instead. Roman is greedy, so 65536 costs 65 "m" characters plus the remainder (about 80 bytes); alpha repeats one
+	// letter, so 26*64 caps it at 64 characters. Both sit far above any real page number in these styles.
 	maxRomanPageLabel = 65536
 	maxAlphaPageLabel = 26 * 64
 	// maxPageLabelStart clamps /St so that start plus the page's offset within its range cannot overflow int64.
@@ -55,9 +51,9 @@ type labelRange struct {
 // tree's first key — get their decimal ordinal, matching what a reader shows when a document declines to name its
 // pages. Labels are decoded text strings that have not been sanitized; the public API sanitizes them.
 //
-// The tree is flattened once and cached, for the same reason the /Names → /Dests name tree is (see buildDestIndex): the
-// callers are per-page, so a per-page search would re-walk the whole tree for each of up to maxPages pages. The
-// returned slice is the cache itself and must not be modified by callers.
+// The tree is flattened once and cached, as the /Names → /Dests name tree is (see buildDestIndex): the callers are
+// per-page, so a per-page search would re-walk the whole tree for each of up to maxPages pages. The returned slice is
+// the cache itself and must not be modified.
 func (d *Document) PageLabels() []string {
 	if d.pageLabels == nil {
 		d.buildPageLabels()
@@ -77,7 +73,7 @@ func (d *Document) HasPageLabels() bool {
 }
 
 // buildPageLabels flattens the catalog's /PageLabels number tree and expands it to one label per page. It always leaves
-// d.pageLabels non-nil — make with a zero length still returns a non-nil slice — so a document without the tree builds
+// d.pageLabels non-nil (make with a zero length still returns a non-nil slice), so a document without the tree builds
 // the labels once and never walks again.
 func (d *Document) buildPageLabels() {
 	ranges := d.pageLabelRanges()
@@ -187,8 +183,8 @@ func (d *Document) labelRangeFrom(key int64, value cos.Object) (labelRange, bool
 		}
 	}
 	if prefix, prefixOK := d.cos.GetString(dict, "P"); prefixOK {
-		// Decryption already happened at parse time through the installed decryptor, so this is plaintext whenever the
-		// file key is available. It is deliberately left unsanitized; the public API sanitizes.
+		// Plaintext whenever the file key is available, since the decryptor runs at parse time. Left unsanitized; the public
+		// API sanitizes.
 		r.prefix = cos.DecodeTextString(prefix)
 	}
 	if start, startOK := d.cos.GetInt(dict, "St"); startOK {

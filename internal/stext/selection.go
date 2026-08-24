@@ -18,19 +18,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/gfx"
 )
 
-// line is one run of consecutive characters that lineBreakBetween did not separate. It is the unit hit-testing snaps
-// to and the unit highlight quads are grouped by. The runs are the character stream's own — the interpreter emits
-// characters in content-stream order, so a line is always a contiguous index range and the runs partition
-// [0, len(chars)) in increasing order — not a re-flow of the page into visual reading order.
+// line is one run of consecutive characters that lineBreakBetween did not separate: the unit hit-testing snaps to and
+// highlight quads are grouped by. A line is a contiguous index range in the stream, and the runs partition
+// [0, len(chars)) in increasing order.
 type line struct {
-	// bounds is the axis-aligned extent of every corner of the run's quads, which is what a hit test measures its
-	// point against: the distance from a pointer to a line has nothing to do with the direction that line advances in,
-	// and a rotated or skewed line's quads are not axis-aligned.
+	// bounds is the axis-aligned extent of every corner of the run's quads, which a hit test measures its point
+	// against: a pointer's distance to a line has nothing to do with the line's advance direction, and a rotated or
+	// skewed line's quads are not axis-aligned.
 	bounds gfx.Rect
-	// ux, uy is the run's advance direction, taken from its first character that actually advances. Filler characters
-	// (the extra letters a ligature or a one-to-many /ToUnicode mapping spells) sit at the pen with Origin == End, so
-	// advanceDir gives them its (1, 0) degenerate fallback — right for horizontal text and wrong for everything else.
-	// A line that shows nothing but fillers keeps that same fallback, having no better answer available.
+	// ux, uy is the run's advance direction, taken from its first character that advances. Fillers sit at the pen with
+	// Origin == End, so advanceDir gives them its (1, 0) fallback, right for horizontal text and wrong for everything
+	// else. A line of nothing but fillers keeps that fallback.
 	ux, uy     float64
 	start, end int
 }
@@ -42,8 +40,7 @@ func (l line) project(x, y float32) float64 {
 	return l.ux*float64(x) + l.uy*float64(y)
 }
 
-// newLines splits chars into the runs lineBreakBetween separates — the same predicate the matcher refuses to let a
-// word span, so a selection's idea of a line and a search hit's idea of a line can never disagree.
+// newLines splits chars into the runs lineBreakBetween separates, the matcher's own line predicate.
 func newLines(chars []Char) []line {
 	if len(chars) == 0 {
 		return nil
@@ -84,24 +81,23 @@ func newLine(chars []Char, start, end int) line {
 	return l
 }
 
-// Page is the selection model over one page's recorded characters: an immutable, indexable view of the exact stream
-// the device emitted and Search matches against. Indices are positions in that stream, so a selection is a half-open
-// [start, end) pair of them and an insertion point is a single index in [0, Len()].
+// Page is the selection model over one page's recorded characters: an immutable, indexable view of the stream the
+// device emitted and Search matches against. Indices are positions in that stream, so a selection is a half-open
+// [start, end) pair and an insertion point is a single index in [0, Len()].
 //
-// Nothing here re-flows the page. Characters arrive in content-stream order — reading order for well-formed documents
-// and nothing in particular for the rest — and the lines and words carved out of them come from the same geometric
-// heuristics the matcher uses, so what selects as one line or one word is what a search hit treats as one.
+// Nothing here re-flows the page. Characters stay in content-stream order — reading order for well-formed documents and
+// nothing in particular for the rest — and lines and words come from the matcher's own heuristics, so what selects as
+// one line or word is what a search hit treats as one.
 //
-// A Page is immutable once built, so it holds no lock and any number of goroutines may read it at once. Every method
-// tolerates a nil receiver and a page with no characters, answering both with the same zero values.
+// A Page holds no lock; any number of goroutines may read it at once. Every method tolerates a nil receiver and an
+// empty page, answering both with zero values.
 type Page struct {
 	chars []Char
 	lines []line
 }
 
-// NewPage builds the selection model for a recorded character stream, taking ownership of the slice — Device.Chars
-// hands back the device's own, which the device has no further use for once its pass has ended. The caller must not
-// mutate it afterwards: the line runs computed here index into it.
+// NewPage builds the selection model for a recorded character stream and takes ownership of the slice; the caller must
+// not mutate it afterwards.
 func NewPage(chars []Char) *Page {
 	return &Page{chars: chars, lines: newLines(chars)}
 }
@@ -115,21 +111,20 @@ func (p *Page) Len() int {
 	return len(p.chars)
 }
 
-// IndexAt returns the insertion index in [0, Len()] nearest pt, which is a point in the same space as the recorded
-// characters. It reproduces what a text editor does with a click: the nearest line is chosen first, and the point is
-// then placed between two of that line's characters. So a click in the left half of a two-column gutter lands at the
-// end of the left column rather than at the start of the right one — the nearer column wins, and the earlier one wins
-// a tie — and a click off the page entirely lands at the near end of the nearest line rather than nowhere at all. A glyph that spells several characters — a ligature, or a one-to-many
-// /ToUnicode mapping — shares its advance evenly among them here, so a caret can land between any two of its letters
-// and a click at its trailing edge lands after all of them; see glyphSpan. An empty page returns 0.
+// IndexAt returns the insertion index in [0, Len()] nearest pt, a point in the same space as the recorded characters.
+// Like a text editor's click, it chooses the nearest line first and then places the point between two of that line's
+// characters: a click in the left half of a two-column gutter lands at the end of the left column (the nearer column
+// wins, and the earlier one wins a tie), and a click off the page lands at the near end of the nearest line. A glyph
+// that spells several characters (a ligature or a one-to-many /ToUnicode mapping) shares its advance evenly among them,
+// so a caret can land between any two of its letters and a click at its trailing edge lands after all of them; see
+// glyphSpan. An empty page returns 0.
 func (p *Page) IndexAt(pt gfx.Point) int {
 	if p == nil || len(p.lines) == 0 {
 		return 0
 	}
 	l := p.lines[p.nearestLine(pt)]
-	// The scan is linear by necessity, not by neglect: kerning inside a TJ array can tuck a character backwards past
-	// its predecessor's midpoint, so the projections within a line are not sorted and a binary search over them would
-	// answer with a position from the wrong part of the line.
+	// Linear, not binary: TJ kerning can tuck a character backwards past its predecessor's midpoint, so the
+	// projections within a line are not sorted.
 	target := l.project(pt.X, pt.Y)
 	for i := l.start; i < l.end; {
 		n := p.glyphSpan(i, l.end)
@@ -145,12 +140,11 @@ func (p *Page) IndexAt(pt gfx.Point) int {
 	return l.end
 }
 
-// glyphSpan returns how many characters, from index i and before end, one glyph spelled: the character at i and the
-// fillers after it. A filler carries no advance of its own and sits at its glyph's pen (see Device.recordFillers), so
-// it is recognizable as a zero-advance character whose origin is its predecessor's end. The hit test treats the group
-// as one glyph whose advance its letters share, because the page shows one shape there: measured by their own geometry
-// every caret position of the group would sit at the trailing edge, and a point just short of the pen would land
-// between the glyph's first letter and its second — inside a shape the reader sees no boundary in.
+// glyphSpan returns how many characters from index i (and before end) one glyph spelled: the character at i and the
+// fillers after it, recognizable as zero-advance characters whose origin is the predecessor's end (see
+// Device.recordFillers). The hit test treats the group as one glyph whose advance its letters share: measured by their
+// own geometry every caret position of the group would sit at the trailing edge, and a point just short of the pen
+// would land between the first letter and the second, inside a shape the reader sees no boundary in.
 func (p *Page) glyphSpan(i, end int) int {
 	n := 1
 	for i+n < end {
@@ -164,10 +158,9 @@ func (p *Page) glyphSpan(i, end int) int {
 }
 
 // nearestLine returns the position in p.lines of the line whose bounds pt is nearest, preferring the earlier line on a
-// tie. The strict comparison is what makes the tie predictable: a point exactly between two stacked lines picks the
-// upper one and a point centered in a two-column gutter picks the left column, both being the earlier line in emission
-// order. Non-finite geometry (which hostile content can produce) yields a NaN distance, which never wins the
-// comparison, so such a line is simply never chosen.
+// tie: the strict comparison makes a point exactly between two stacked lines pick the upper one and a point centered
+// in a two-column gutter pick the left column. Non-finite geometry from hostile content yields a NaN distance, which
+// never wins the comparison.
 func (p *Page) nearestLine(pt gfx.Point) int {
 	best := 0
 	bestDist := math.Inf(1)
@@ -199,8 +192,7 @@ func (p *Page) LineAt(index int) (start, end int) {
 }
 
 // lineOf returns the position in p.lines of the line containing index, clamping index into [0, len(chars)). The runs
-// partition the stream in increasing order, so a binary search is exact here — unlike the within-line scans, whose
-// projections kerning can leave unsorted. The caller guarantees the page has at least one line.
+// partition the stream in increasing order, so a binary search is exact. The caller guarantees at least one line.
 func (p *Page) lineOf(index int) int {
 	index = min(max(index, 0), len(p.chars)-1)
 	return sort.Search(len(p.lines), func(i int) bool { return index < p.lines[i].end })
@@ -230,34 +222,29 @@ func (p *Page) WordAt(index int) (start, end int) {
 	return start, end
 }
 
-// isWordChar reports whether c can be part of a word: it must carry a Unicode mapping (Rune == 0 means the font
-// provided none, and such a character never matches a needle either) and must not be whitespace.
 func isWordChar(c Char) bool {
 	return c.Rune != 0 && !unicode.IsSpace(c.Rune)
 }
 
-// joinsWord reports whether cur continues the word prev belongs to: both are word characters, and the gap between them
-// along prev's advance direction is narrower than the one the matcher reads as an inter-word space.
 func joinsWord(prev, cur Char) bool {
 	return isWordChar(prev) && isWordChar(cur) && gapBetween(prev, cur) < gapSpaceEm*prev.Size
 }
 
-// Text returns the text of the characters in [start, end), carrying the spaces and line breaks the page's geometry
-// implies but its character stream does not contain. The arguments are clamped into range and swapped when out of
-// order, so any pair of indices names some (possibly empty) selection.
+// Text returns the text of the characters in [start, end), with the spaces and line breaks the page's geometry implies
+// but its character stream does not contain. The arguments are clamped into range and swapped when out of order, so any
+// pair of indices names some (possibly empty) selection.
 //
-// Both synthesized separators are measured between STREAM neighbors — the character actually recorded before this one,
-// even when that character contributed no text — because the pen positions the decision rests on are theirs: a line
-// break emits a newline, and a gap of at least the matcher's word-space width emits a single space. Neither is doubled
-// against whitespace the stream already carries, and neither is emitted before the first real character, where it
-// would separate nothing. A character the font gives no Unicode mapping for (Rune == 0) contributes nothing to the
-// text but still holds its place in the stream, so the geometry on either side of it stays honest. Ligature fillers
-// need no special handling for the same reason: they sit at the pen with Origin == End, leaving the gap to whatever
-// follows measured from the base glyph's advance end.
+// Both separators are measured between stream neighbors — the character recorded before this one, even one that
+// contributed no text — because the pen positions the decision rests on are theirs: a line break emits a newline, and a
+// gap of at least the matcher's word-space width emits a single space. A newline is not written after a stream newline,
+// a space is written neither after nor before stream whitespace, and neither is written before the first real
+// character. A character with no Unicode mapping (Rune == 0) contributes nothing but still holds its place, so the
+// geometry on either side of it stays honest; ligature fillers sit at the pen with Origin == End, so the gap to
+// whatever follows is measured from the base glyph's advance end.
 //
-// A separator waits for the character that will follow it rather than being written where it was decided, so a
-// selection ending on an unmapped character ends on the last letter it actually spelled instead of on a space or a
-// newline separating nothing. A newline decided later supersedes a waiting space, which it implies.
+// A separator waits for the character that follows it rather than being written where it was decided, so a selection
+// ending on an unmapped character ends on the last letter it spelled instead of on a trailing space or newline. A
+// newline decided later supersedes a waiting space.
 func (p *Page) Text(start, end int) string {
 	if p == nil {
 		return ""
@@ -280,8 +267,7 @@ func (p *Page) Text(start, end int) string {
 			}
 		}
 		if cur.Rune != 0 {
-			// A newline stands whatever follows it, because the break happened; a space stands down against
-			// whitespace the stream already carries, which would otherwise be doubled.
+			// A newline stands whatever follows; a space stands down against whitespace the stream already carries.
 			if pending == '\n' || (pending == ' ' && !unicode.IsSpace(cur.Rune)) {
 				buf.WriteRune(pending)
 			}
@@ -294,15 +280,14 @@ func (p *Page) Text(start, end int) string {
 }
 
 // Quads returns the highlight geometry for [start, end): one quad per line the range touches, split further exactly
-// where a search hit would split, because this is the same segmentQuads the matcher assembles its hits with. A
-// selected word and the same word found by Search therefore paint identically. The arguments are clamped and ordered
-// as Text's are; a range covering no characters returns nil.
+// where a search hit would split, because segmentQuads assembles both. A selected word and the same word found by
+// Search therefore paint identically. The arguments are clamped and ordered as Text's are; a range covering no
+// characters returns nil.
 //
-// A quad with no width is dropped. Only the letters a single glyph spells beyond the first produce one — they sit at
-// that glyph's pen carrying no advance, so there is no shape there to paint and nothing a caret could be read from,
-// and the glyph they belong to already paints for all of them. MuPDF drops the same quads out of a selection
-// (on_highlight_char skips a character whose quad has no width) while its search path keeps them, so this is the one
-// place a selection is allowed to differ from a search hit over the same characters.
+// A quad with no width is dropped. Only the letters a glyph spells beyond the first produce one: they sit at the
+// glyph's pen with no advance, so there is no shape to paint, and the glyph already paints for all of them. MuPDF
+// drops the same quads from a selection (on_highlight_char skips a character whose quad has no width) while its search
+// path keeps them, so this is the one place a selection may differ from a search hit over the same characters.
 func (p *Page) Quads(start, end int) []gfx.Quad {
 	if p == nil {
 		return nil
@@ -311,9 +296,6 @@ func (p *Page) Quads(start, end int) []gfx.Quad {
 	if start >= end {
 		return nil
 	}
-	// The runs partition the stream in increasing order, so the range touches one contiguous span of them: lineOf
-	// finds where that span starts with a binary search, and the first run beyond the range ends it. A drag asks for
-	// this on every pointer move, and a page can carry thousands of lines.
 	var out []gfx.Quad
 	for i := p.lineOf(start); i < len(p.lines); i++ {
 		l := p.lines[i]
@@ -331,15 +313,15 @@ func (p *Page) Quads(start, end int) []gfx.Quad {
 	return out
 }
 
-// widthless reports whether q covers no width along the text's own direction, which makes it unpaintable whatever its
-// height. The corners are compared exactly rather than within a tolerance because the quads this drops are built from
-// a single point (see Device.recordFillers), and a narrow-but-real glyph must keep its quad.
+// widthless reports whether q covers no width along the text's own direction. The corners are compared exactly because
+// the quads this drops are built from a single point (see Device.recordFillers), and a narrow-but-real glyph must keep
+// its quad.
 func widthless(q gfx.Quad) bool {
 	return q.UL == q.UR && q.LL == q.LR
 }
 
-// clamp bounds a caller's range to the page and puts it in order, so a backwards drag (end before start) or an index
-// held over from a longer page names a real selection instead of indexing out of range.
+// clamp bounds a caller's range to the page and puts it in order, so a backwards drag or an index held over from a
+// longer page names a real selection.
 func (p *Page) clamp(start, end int) (from, to int) {
 	if start > end {
 		start, end = end, start

@@ -238,12 +238,11 @@ func (s *psStack) popVal() (float64, bool) {
 	return s.vals[s.n], s.bools[s.n]
 }
 
-// psToInt32 converts a stack value to the 32-bit integer that the calculator's integer operators (idiv, mod, bitshift,
-// and, or, xor, not) work on. The bounds are applied in float space on purpose: Go leaves a float→int conversion
-// implementation-defined when the value does not fit, and the platforms disagree — arm64 saturates to the nearest
-// int32 bound (and maps NaN to 0) while amd64 wraps every out-of-range operand to math.MinInt32 — so an unclamped
+// psToInt32 converts a stack value to the 32-bit integer the integer operators (idiv, mod, bitshift, and, or, xor, not)
+// work on. The bounds are applied in float space on purpose: Go leaves an out-of-range float→int conversion
+// implementation-defined, and arm64 saturates (mapping NaN to 0) while amd64 wraps to math.MinInt32, so an unclamped
 // conversion would let a tint transform that produces a huge or non-finite value yield different colors on different
-// CPUs. Saturating (and mapping NaN to 0) here keeps the result identical everywhere.
+// CPUs.
 func psToInt32(v float64) int32 {
 	switch {
 	case math.IsNaN(v):
@@ -257,9 +256,9 @@ func psToInt32(v float64) int32 {
 	}
 }
 
-// psToStackCount converts a stack value to the operand count or index used by copy, index and roll. Anything that is
-// not a finite, non-negative value within the stack limit maps to -1 so the caller's existing range check rejects it,
-// making the rejection deterministic across architectures rather than depending on how the CPU converts the operand.
+// psToStackCount converts a stack value to the operand count or index used by copy, index, and roll. Anything that is
+// not a finite, non-negative value within the stack limit maps to -1 so the caller's range check rejects it, making the
+// rejection deterministic across architectures.
 func psToStackCount(v float64) int {
 	if math.IsNaN(v) || v < 0 || v > psStackLimit {
 		return -1

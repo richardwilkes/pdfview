@@ -36,8 +36,7 @@ func (m markingDecryptor) EncryptsMetadata() bool {
 }
 
 // xorDecryptor stands in for the standard security handler with the simplest cipher of the same shape: XOR against a
-// constant. It is its own inverse, so a test enciphers a payload with the very call the document later uses to decipher
-// it.
+// constant. It is its own inverse, so a test enciphers a payload with the same call the document uses to decipher it.
 type xorDecryptor struct{}
 
 func (xorDecryptor) DecryptString(_, _ int, data []byte) []byte { return xorCipher(data) }
@@ -54,10 +53,9 @@ func xorCipher(data []byte) []byte {
 	return out
 }
 
-// buildEncryptedObjStmPDF assembles what every modern producer emits for an encrypted file: cross-reference data in a
-// cross-reference stream, the catalog and page-tree root inside an object stream, and a trailer naming /Encrypt. The
-// object stream's payload is enciphered with xorCipher, so the catalog is unreachable — the payload does not even
-// decode — until a Decryptor is installed.
+// buildEncryptedObjStmPDF assembles what every modern producer emits for an encrypted file: a cross-reference stream,
+// the catalog and page-tree root inside an object stream, and a trailer naming /Encrypt. The object stream's payload is
+// enciphered with xorCipher, so the catalog is unreachable until a Decryptor is installed.
 func buildEncryptedObjStmPDF() []byte {
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
@@ -84,10 +82,9 @@ func buildEncryptedObjStmPDF() []byte {
 	return buf.Bytes()
 }
 
-// TestEncryptedCatalogInObjectStreamOpens pins the deferred root check. Nothing at this layer can decrypt anything
-// until the layer above builds the security handler from the trailer's /Encrypt dictionary and installs it with
-// SetDecryptor, which happens only after Open returns — so an encrypted document whose catalog lives in an object
-// stream must open unvalidated rather than being rejected, with ValidateRoot running the check afterward.
+// TestEncryptedCatalogInObjectStreamOpens pins the deferred root check: an encrypted document whose catalog lives in an
+// object stream must open unvalidated rather than be rejected, with ValidateRoot running the check once SetDecryptor
+// has installed the handler.
 func TestEncryptedCatalogInObjectStreamOpens(t *testing.T) {
 	d, err := cos.Open(buildEncryptedObjStmPDF())
 	if err != nil {
@@ -104,8 +101,8 @@ func TestEncryptedCatalogInObjectStreamOpens(t *testing.T) {
 }
 
 // TestValidateRootBeforeDecryptorRetriesAfterward checks both halves of the deferral: the check reports an unreachable
-// root faithfully while the payload is still ciphertext (it is not a no-op that always passes), and the repair sweep it
-// ran blind is re-armed by SetDecryptor, so the retry that follows can sweep the object stream it could not read.
+// root while the payload is still ciphertext (it is not a no-op that always passes), and SetDecryptor re-arms the
+// repair sweep it ran blind, so the retry can sweep the object stream it could not read.
 func TestValidateRootBeforeDecryptorRetriesAfterward(t *testing.T) {
 	d, err := cos.Open(buildEncryptedObjStmPDF())
 	if err != nil {
@@ -121,10 +118,9 @@ func TestValidateRootBeforeDecryptorRetriesAfterward(t *testing.T) {
 	checkCatalog(t, d)
 }
 
-// TestDecryptSkipsUnencryptedStreams checks the two stream types that are stored in the clear: cross-reference streams
-// always (ISO 32000-2 7.5.8.2), and metadata streams when the encryption dictionary carries /EncryptMetadata false
-// (7.6.2). A cross-reference stream is exempt entirely, including the strings in its own dictionary; a metadata stream's
-// exemption covers the payload only — strings in its dictionary are still encrypted.
+// TestDecryptSkipsUnencryptedStreams checks the two stream types stored in the clear: cross-reference streams always
+// (ISO 32000-2 7.5.8.2), including the strings in their own dictionary, and metadata stream payloads when
+// /EncryptMetadata is false (7.6.2), while strings in a metadata stream's dictionary stay encrypted.
 func TestDecryptSkipsUnencryptedStreams(t *testing.T) {
 	const metadataPayload = "<x:xmpmeta/>"
 	const contentPayload = "BT ET"

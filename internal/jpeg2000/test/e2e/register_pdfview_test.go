@@ -7,10 +7,9 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// This file is pdfview-authored (MPL-2.0), not upstream code. Vendoring removed the image.RegisterFormat init
-// functions from the j2k and jp2 packages, since a library must not mutate the process-global image registry. The
-// upstream end-to-end tests reach the decoders through image.Decode, so the registration is restored here, inside the
-// test binary, where the side effect is scoped to the test process.
+// This file is pdfview-authored (MPL-2.0), not upstream code. Vendoring removed the image.RegisterFormat init functions
+// from j2k and jp2, since a library must not mutate the process-global image registry; the upstream end-to-end tests
+// reach the decoders through image.Decode, so the registration is restored here, scoped to the test binary.
 
 package e2e_test
 

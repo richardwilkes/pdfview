@@ -13,10 +13,9 @@ package codestream
 
 // Which kernels this architecture prefers. A false constant leaves that dispatch variable on its scalar default, so a
 // kernel that loses its benchmark is switched off here rather than deleted — the code, its equivalence tests, and its
-// benchmark all stay, and the decision is one word.
+// benchmark all stay.
 //
-// These values are settled per architecture from simd-bench.sh benchstat results. The coordinator settles the arm64
-// values once this area has landed; nothing here should be changed on a hunch.
+// These values are settled per architecture from simd-bench.sh benchstat results.
 const (
 	preferApplyRCT      = true
 	preferClampPlane    = true

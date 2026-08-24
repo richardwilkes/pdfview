@@ -132,15 +132,14 @@ func standard14Name(base string, flags int) string {
 }
 
 // substituteMetrics returns the text-space ascender/descender used for quads when a font is substituted, reproducing
-// the oracle's rules (pinned by the subst-metrics, std14-styles, and text-std14 corpus probes): when the font
-// dictionary carries a descriptor, each slot comes from its /Ascent or /Descent when that value is nonzero, else that
-// slot's default (0.8 / -0.2) — even for standard-14 BaseFont names. Only descriptor-less fonts use the substitute font
-// program's own metrics, which for the 14 standard fonts are the pinned FontBBox values of MuPDF's bundled
-// replacements.
+// the oracle's rules (pinned by the subst-metrics, std14-styles, and text-std14 corpus probes): with a descriptor
+// present, each slot comes from its /Ascent or /Descent when nonzero, else that slot's default (0.8 / -0.2) — even for
+// standard-14 BaseFont names. Only descriptor-less fonts use the substitute program's own metrics, which for the 14
+// standard fonts are the pinned FontBBox values of MuPDF's bundled replacements.
 func substituteMetrics(desc *descriptor, std14 string) (asc, dsc float32) {
 	if desc.present {
-		// loadDescriptor rejects a non-finite /Ascent or /Descent already; the finiteness test repeats here so this
-		// stays correct for any other descriptor source, since a non-finite slot would misplace every stext quad.
+		// loadDescriptor already rejects a non-finite /Ascent or /Descent; the test repeats here so any other descriptor
+		// source stays safe, since a non-finite slot would misplace every stext quad.
 		asc, dsc = 0.8, -0.2
 		if desc.ascent != 0 && isFiniteF(desc.ascent) {
 			asc = desc.ascent / 1000

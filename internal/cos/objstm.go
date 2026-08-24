@@ -24,9 +24,9 @@ type objStm struct {
 }
 
 // indexOf returns the header index of the given object number, or -1 if the stream does not carry it. The first
-// occurrence wins, matching what a linear scan of the header would find. The lookup map is built on the first call,
-// since a document whose cross-reference data agrees with the stream headers never needs it, while one that disagrees
-// would otherwise pay a linear scan per object — O(n²) over a full sweep of a stream with many entries.
+// occurrence wins, as a linear scan of the header would. The map is built on first call: a document whose
+// cross-reference data agrees with the headers never needs it, while one that disagrees would otherwise pay a linear
+// scan per object, O(n²) over a full sweep.
 func (s *objStm) indexOf(num int) int {
 	if s.index == nil {
 		s.index = make(map[int]int, len(s.nums))
@@ -49,31 +49,28 @@ var (
 	errObjStmDepth = errors.New("object stream nesting too deep")
 )
 
-// maxObjStmDepth caps how many object streams may be under load at once. The objStmLoading guard stops a single stream
-// from re-entering itself, but a straight chain of distinct object streams — each one's header keys (/N, /First,
-// /Filter, /DecodeParms) resolving into the next via back-pointing xref entries — recurses through loadObjStm with no
-// per-stream repeat, so nothing but this depth bound keeps a crafted file of many tiny chained streams from driving the
-// goroutine stack to a fatal overflow. Legitimate files never nest object streams (ISO 32000-2 7.5.7 forbids storing an
-// object stream inside another), so this cap is only ever hit by hostile input.
+// maxObjStmDepth caps how many object streams may be under load at once. objStmLoading stops a stream from re-entering
+// itself, but a chain of distinct object streams (each one's header keys resolving into the next via back-pointing
+// xref entries) recurses through loadObjStm with no repeat, so only this bound keeps a crafted file from overflowing
+// the goroutine stack. ISO 32000-2 7.5.7 forbids storing an object stream inside another, so only hostile input hits
+// it.
 const maxObjStmDepth = 64
 
 // loadObjStm parses and caches the object stream with the given object number. The stream object itself must be stored
-// directly in the file (an object stream inside another object stream is forbidden by ISO 32000-2 7.5.7). That does not
-// rule out re-entry: parseObjStm resolves the header keys, which can lead back here — see the two guards below.
+// directly in the file (ISO 32000-2 7.5.7). That does not rule out re-entry: parseObjStm resolves the header keys,
+// which can lead back here; see the two guards below.
 func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if stm, ok := d.objStms[num]; ok {
 		return stm, nil
 	}
-	// Guard against a stream whose header keys resolve (via indirect references and back-pointing xref entries) into
-	// this same stream: parseObjStm below resolves /N, /First, /Filter, and /DecodeParms, any of which can re-enter
-	// loadObjStm for num before it is cached. Without this the recursion is unbounded (maxResolveDepth resets on each
-	// fresh Resolve), exhausting the goroutine stack.
+	// A stream whose header keys (/N, /First, /Filter, /DecodeParms) resolve back into this same stream re-enters
+	// loadObjStm for num before it is cached. Without this guard the recursion is unbounded, since maxResolveDepth
+	// resets on each fresh Resolve.
 	if d.objStmLoading[num] {
 		return nil, errObjStmCycle
 	}
-	// len(objStmLoading) is the number of loadObjStm calls currently in progress (each sets its entry before recursing
-	// and deletes it afterward), i.e. the current nesting depth. Capping it stops a chain of distinct object streams —
-	// which the per-number cycle guard above cannot catch — from recursing without bound.
+	// len(objStmLoading) is the current nesting depth: each call sets its entry before recursing and deletes it
+	// afterward. Capping it stops a chain of distinct streams, which the cycle guard above cannot catch.
 	if len(d.objStmLoading) >= maxObjStmDepth {
 		return nil, errObjStmDepth
 	}
@@ -89,9 +86,8 @@ func (d *Document) loadObjStm(num int) (*objStm, error) {
 	if !ok {
 		return nil, errNotObjStm
 	}
-	// The object stream is stored directly in the file, so its payload is encrypted under its own number. Decrypting it
-	// here (before the /Filter chain) means the objects parsed out of it need no further decryption, matching ISO
-	// 32000-2 7.6.2.
+	// Stored directly in the file, so the payload is encrypted under the stream's own number. Decrypting it before the
+	// /Filter chain means the objects parsed out of it need no further decryption (ISO 32000-2 7.6.2).
 	d.decryptDirect(num, gen, stream)
 	d.objStmLoading[num] = true
 	stm, err := d.parseObjStm(stream)
@@ -117,18 +113,15 @@ func (d *Document) parseObjStm(stream *Stream) (*objStm, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Each header pair needs at least three bytes (a digit, a separator, and a digit), so /N values beyond that are
-	// lies; clamping keeps the header loop proportional to real data. The clamp bounds the LOOP only, never the
-	// allocation: it is proportional to the DECODED payload, which internal/filter lets reach max(64 MB, 256x input),
-	// so preallocating from it let a 61 KB file declaring /N 99999999 over a 60 MB payload of non-numeric bytes break
-	// out of the loop on the very first entry yet still retain two 21M-element slices (~380 MB) for the document's
-	// lifetime. The slices grow from the entries that actually parse instead.
+	// Each header pair needs at least three bytes, so /N beyond len(data)/3 is a lie; the clamp keeps the loop
+	// proportional to real data. It bounds only the loop, never the allocation: the decoded payload can reach
+	// internal/filter's max(64 MB, 256x input), and preallocating from the clamp let a 61 KB file declaring /N 99999999
+	// over a 60 MB payload of non-numeric bytes retain ~380 MB of slices for the document's lifetime after breaking out
+	// on the first entry. The slices grow from parsed entries instead.
 	n = min(n, int64(len(data))/3)
-	// /First and the header offsets are file-supplied and otherwise unbounded, and objFromStm adds them together. Any
-	// magnitude past the payload length can only ever name a position outside it, so clamping both here preserves every
-	// reachable position while keeping that sum of two astronomically large values from wrapping. Without it a wrap to
-	// a small positive value slips past the bounds check there and parses an object from the wrong offset inside the
-	// stream.
+	// /First and the header offsets are file-supplied, and objFromStm adds them together. Any magnitude past the payload
+	// length names a position outside it anyway, so clamping both preserves every reachable position while keeping the
+	// sum from wrapping to a small positive value that would slip past the bounds check there.
 	limit := int64(len(data))
 	stm := &objStm{
 		data:  data,

@@ -8,9 +8,8 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package gfx holds the shared geometry types the engine's graphics pipeline is built on: points, rectangles, quads, an
-// affine matrix, paths, and stroke parameters. Everything is float32 — the precision the original cgo/MuPDF
-// implementation carried (C floats), which the exact-value tests were baselined against. Matrix composition follows
-// PDF's row-vector convention: a point is transformed as [x y 1]·M, and M1.Mul(M2) applies M1 first.
+// affine matrix, paths, and stroke parameters. Everything is float32, the precision of MuPDF's C floats, which the
+// exact-value tests were baselined against.
 package gfx
 
 import "math"
@@ -108,8 +107,8 @@ func (m Matrix) ApplyXY(x, y float32) (tx, ty float32) {
 	return m.A*x + m.C*y + m.E, m.B*x + m.D*y + m.F
 }
 
-// Invert returns the inverse transform, reporting false when the matrix is degenerate (zero or non-finite determinant)
-// and no inverse exists.
+// Invert returns the inverse transform. It reports false when the determinant is zero or non-finite, or when the
+// inverse itself is not finite.
 func (m Matrix) Invert() (Matrix, bool) {
 	det := m.A*m.D - m.B*m.C
 	d := float64(det)

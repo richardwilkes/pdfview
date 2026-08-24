@@ -45,10 +45,9 @@ func privDictWithSubrsAndDeprecatedOp(sub byte) []byte {
 }
 
 // TestCFFDeprecatedPrivateDictOpParses is the whole point of the sanitizer: a CFF whose Private DICT carries an
-// operator dropped after CFF 1.0 has entirely sound charstrings, and FreeType (so MuPDF, so every other viewer) renders
-// it by skipping what it does not know. go-text instead fails the font, which would send a real body text face — the
-// Distiller-era Type1C programs these operators come from — through a Liberation substitute for every glyph on the
-// page.
+// operator dropped after CFF 1.0 has sound charstrings, and FreeType (so MuPDF, so every other viewer) renders it by
+// skipping what it does not know. go-text instead fails the font, which would send a Distiller-era body text face
+// through a Liberation substitute for every glyph on the page.
 func TestCFFDeprecatedPrivateDictOpParses(t *testing.T) {
 	for name, sub := range deprecatedPrivateOps {
 		t.Run(name, func(t *testing.T) {
@@ -60,10 +59,9 @@ func TestCFFDeprecatedPrivateDictOpParses(t *testing.T) {
 	}
 }
 
-// TestCFFDeprecatedPrivateDictOpNeedsSanitizing pins the premise the retry rests on. If go-text ever starts skipping
-// unknown Private DICT operators the way FreeType does, the fixtures above would pass with the sanitizer removed and
-// stop testing anything; this fails when that day comes, so the retry can be dropped deliberately rather than kept as
-// dead weight.
+// TestCFFDeprecatedPrivateDictOpNeedsSanitizing pins the premise the retry rests on: if go-text ever skips unknown
+// Private DICT operators the way FreeType does, the fixtures above would pass without the sanitizer, and this fails so
+// the retry can be dropped deliberately rather than kept as dead weight.
 func TestCFFDeprecatedPrivateDictOpNeedsSanitizing(t *testing.T) {
 	for name, sub := range deprecatedPrivateOps {
 		t.Run(name, func(t *testing.T) {
@@ -120,9 +118,9 @@ func TestCFFSanitizeDoesNotMutateInput(t *testing.T) {
 	}
 }
 
-// TestCFFSanitizeLeavesUnrelatedFailuresNil holds the rest of the rejection behavior still. The retry only ever adds a
-// second chance for a program the sanitizer actually changed; anything else — junk, a truncated container, a Private
-// DICT with nothing deprecated in it — must fail exactly as before, so the caller still falls back to a substitute.
+// TestCFFSanitizeLeavesUnrelatedFailuresNil pins the rest of the rejection behavior: the retry only adds a second
+// chance for a program the sanitizer changed, so junk, a truncated container, or a Private DICT with no deprecated
+// operator must still fail, and the caller still falls back to a substitute.
 func TestCFFSanitizeLeavesUnrelatedFailuresNil(t *testing.T) {
 	// Two truncations of the same layout: one whose Private DICT the sanitizer rewrites (and the retry still fails),
 	// one it leaves alone (so there is no retry at all). Both must land on nil.

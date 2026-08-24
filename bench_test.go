@@ -16,8 +16,8 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// BenchmarkRenderGlaive150 measures warm renders of the fixture's pages at 150 dpi, no search. The cgo baseline for
-// comparison is measured the same way against the published github.com/richardwilkes/pdf binding.
+// BenchmarkRenderGlaive150 measures warm renders of glaive's pages at 150 dpi with no search, the protocol the cgo
+// baseline (github.com/richardwilkes/pdf) was measured under.
 func BenchmarkRenderGlaive150(b *testing.B) {
 	data, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
@@ -30,7 +30,7 @@ func BenchmarkRenderGlaive150(b *testing.B) {
 	defer doc.Release()
 	for _, page := range []int{0, 1} {
 		b.Run("page"+string(rune('0'+page)), func(b *testing.B) {
-			// Warm once so per-document caches are populated before timing, matching the recorded protocol.
+			// Warm the per-document caches before timing.
 			if _, err = doc.RenderPage(page, 150, 0, ""); err != nil {
 				b.Fatal(err)
 			}

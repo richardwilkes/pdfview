@@ -17,8 +17,8 @@ import (
 )
 
 // BenchmarkInvertBytesSIMD measures the JBIG2 polarity flip at the row width a 300 dpi bilevel scan of a letter page
-// produces (2550 columns packed one bit per pixel, so 319 whole bytes), over a page's worth of rows. The kernel is
-// dispatched per row, exactly as decodeJBIG2 does it, so the per-call overhead is part of the measurement.
+// produces (2550 columns packed one bit per pixel, so 319 bytes), over a page's worth of rows. The kernel is
+// dispatched per row, as decodeJBIG2Plane does it, so the per-call overhead is part of the measurement.
 func BenchmarkInvertBytesSIMD(b *testing.B) {
 	const (
 		rowBytes = 319

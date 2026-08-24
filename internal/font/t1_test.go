@@ -60,9 +60,9 @@ type t1Glyph struct {
 	prog []byte
 }
 
-// buildT1Program assembles a minimal but conformant Type 1 program (compare internal/type1's full test builder; this
-// compact variant keeps the font package's fixture self-contained): three glyphs — .notdef, a 600-wide box "A", and a
-// 400-wide wedge "T" bound to a non-ASCII code by the built-in encoding.
+// buildT1Program assembles a minimal but conformant Type 1 program (a compact variant of internal/type1's buildTestFont
+// that keeps this package's fixture self-contained): three glyphs — .notdef, a 600-wide box "A", and a 400-wide wedge
+// "T" bound to a non-ASCII code by the built-in encoding.
 func buildT1Program() []byte {
 	return buildT1ProgramFrom([]t1Glyph{
 		{glyphNotdef, t1CS(0, 500, opHsbw, opEndchar)},

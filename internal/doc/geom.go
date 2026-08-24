@@ -19,8 +19,7 @@ import (
 // origin) plus the normalized /Rotate value. It defines the top-left/y-down coordinate space — matching MuPDF's
 // fz_bound_page semantics — that every coordinate crossing the engine seam (page bounds, link rectangles, destination
 // points, outline positions) is expressed in. All arithmetic is float32: the exact-value tests were baselined against
-// the C float precision of the MuPDF-based implementation, and wider intermediate math would produce off-by-one pixel
-// differences after scaling.
+// MuPDF's C float precision, and wider intermediate math would produce off-by-one pixel differences after scaling.
 type pageGeom struct {
 	x0, y0, x1, y1 float32
 	rotate         int
@@ -78,14 +77,13 @@ func (d *Document) resolveGeom(attrs inheritedAttrs) pageGeom {
 }
 
 // rectFromObj resolves obj as a rectangle: an array of four finite numbers, normalized so x0 <= x1 and y0 <= y1. ok
-// reports that the rectangle is both well formed and non-empty, which is what the box (resolveGeom) and appearance
+// reports that the rectangle is both well formed and non-empty, which the box (resolveGeom) and appearance
 // (annotAppearance) callers require.
 //
-// The two failure modes differ in what rect carries, and callers rely on the difference: a malformed value (not an
+// The two failure modes differ in what rect carries, and linkRect relies on the difference: a malformed value (not an
 // array of four, a non-number, or a magnitude that narrows to ±Inf as float32) yields the zero rectangle, while a
-// well-formed but degenerate one (zero width or height) yields its real normalized coordinates alongside ok == false.
-// That is what lets linkRect report a flat /Rect where the annotation actually sits instead of collapsing it to the
-// page corner. Do not zero rect on the degenerate path.
+// well-formed but degenerate one (zero width or height) yields its real normalized coordinates with ok == false. Do not
+// zero rect on the degenerate path.
 func (d *Document) rectFromObj(obj cos.Object) (rect [4]float32, ok bool) {
 	arr, ok := cos.AsArray(d.cos.Resolve(obj))
 	if !ok || len(arr) < 4 {
@@ -94,12 +92,9 @@ func (d *Document) rectFromObj(obj cos.Object) (rect [4]float32, ok bool) {
 	var vals [4]float32
 	for i := range vals {
 		f, numOK := cos.AsReal(d.cos.Resolve(arr[i]))
-		// The finiteness test is applied to the narrowed value, as every peer site does (content.rectFrom,
-		// content.numbers6, font.loadDescriptor, function.numberPairs): a legal PDF integer such as 1 followed by 39
-		// zeros is finite as a float64 but ±Inf as the float32 this stores, and such a box passes the usability test
-		// below to become the page's effective geometry — non-finite page sizes across the engine seam, every render
-		// failing with ErrUnableToCreateImage instead of falling back to the default MediaBox, and link rectangles
-		// collapsed to the origin.
+		// The finiteness test applies to the narrowed value, as content.rectFrom, content.numbers6, font.loadDescriptor, and
+		// function.numberPairs do: a legal PDF integer such as 1 followed by 39 zeros is finite as a float64 but ±Inf as
+		// float32, and such a box would pass the usability test below and hand non-finite page sizes across the engine seam.
 		v := float32(f)
 		if !numOK || !isFinite32(v) {
 			return rect, false
@@ -147,8 +142,8 @@ func (g pageGeom) displaySize() (width, height float32) {
 
 // toTopLeft maps a point from PDF page space (y-up, box origin wherever the document put it) into the displayed page's
 // top-left/y-down space, applying the rotation. NaN coordinates (destinations with no explicit position) propagate
-// through the arithmetic exactly as they do through MuPDF's float matrix transform — note that for 90/270 rotations a
-// NaN switches axes with its source coordinate. The four cases were pinned against MuPDF with an offset box origin.
+// through the arithmetic as they do through MuPDF's float matrix transform; for 90/270 rotations a NaN switches axes
+// with its source coordinate. The four cases were pinned against MuPDF with an offset box origin.
 func (g pageGeom) toTopLeft(x, y float32) (u, v float32) {
 	switch g.rotate {
 	case 90:

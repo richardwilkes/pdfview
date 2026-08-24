@@ -42,47 +42,39 @@ type Document struct {
 	xref     map[int]xrefEntry
 	objCache map[int]Object
 	// objFailed records the numbers whose load failed, and why, so a broken reference is parsed at most once. A failed
-	// load is not cheap — parseIndirectAt walks the object graph and captureRawStream scans for the stream's terminator
-	// — and nothing above this layer charges for it, so a content stream naming a broken reference once per operator
-	// would otherwise multiply a small input into O(operators × file size) work.
+	// load walks the object graph and may scan for a stream terminator, and nothing above this layer charges for it, so
+	// a content stream naming a broken reference once per operator would otherwise cost O(operators × file size).
 	objFailed map[int]error
 	objStms   map[int]*objStm
-	// objStmLoading tracks object streams currently being parsed, breaking the mutual recursion that a malicious file
-	// can induce when an object stream's own dictionary keys (/N, /First, /Filter, /DecodeParms) are indirect
-	// references whose xref entries point back into the same not-yet-cached stream.
+	// objStmLoading is the set of object streams currently being parsed (see loadObjStm).
 	objStmLoading map[int]bool
 	trailer       Dict
 	decryptor     Decryptor
 	data          []byte
-	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted; it is
-	// meaningful only once decryptor is non-nil.
+	// encryptNum is the object number of the /Encrypt dictionary, whose own strings are never decrypted. It is
+	// meaningful only while decryptor is non-nil.
 	encryptNum int
-	// decodeWork accumulates the bytes every filter chain this document has run has produced, including those produced
-	// by a chain that ultimately failed (see DecodeWork).
+	// decodeWork is the running total DecodeWork reports.
 	decodeWork uint64
-	// xrefStreamRows counts the cross-reference stream rows processed so far, across every section of the chain (see
-	// maxXrefStreamRows).
+	// xrefStreamRows counts cross-reference stream rows processed across the whole chain (see maxXrefStreamRows).
 	xrefStreamRows int
 	repaired       bool
-	// xrefLoading reports whether loadXref is currently assembling the cross-reference table. A load attempted from
-	// there resolves against a table that does not yet hold the section being read, let alone the older ones behind it,
-	// so its failure says nothing about the object and must not be cached — and, more importantly, must not trigger the
-	// repair scan. Repair replaces d.xref and d.trailer mid-flight; loadXref would keep calling setEntry into the
-	// replaced map and then overwrite the repaired trailer with one merged from the broken chain, while d.repaired (now
-	// set) makes Open skip the retry that would have used the repaired data.
+	// xrefLoading reports whether loadXref is assembling the cross-reference table. A load attempted from there resolves
+	// against an incomplete table, so its failure says nothing about the object and must not be cached — and must not
+	// trigger the repair scan, which would replace d.xref and d.trailer under loadXref: it would keep writing entries
+	// into the replaced map, then overwrite the repaired trailer with one merged from the broken chain, while d.repaired
+	// (now set) makes Open skip the retry.
 	xrefLoading bool
 }
 
-// Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and
-// validates that a usable document root exists, running the repair scan when the file's own cross-reference information
-// is broken, inconsistent, or missing. It fails only when even repair cannot produce a root.
+// Open parses the cross-reference data of the PDF file in data (which the Document retains and slices into) and checks
+// that a usable root exists, running the repair scan when the file's own cross-reference data is broken, inconsistent,
+// or missing. It fails only when even repair cannot produce a root.
 //
-// A trailer naming an /Encrypt dictionary is the exception: the root check is deferred instead of applied here. Nothing
-// at this layer can decrypt anything yet — the security handler is built from that dictionary by the layer above and
-// installed with SetDecryptor only after Open returns — so a catalog stored in an object stream is still ciphertext,
-// which neither Resolve (parseObjStm cannot decode the container) nor the repair sweep (it scans plaintext) can see
-// through. That combination is what every modern producer emits, so failing here would reject a large class of valid
-// files. Call ValidateRoot once the decryptor is installed to run the deferred check.
+// For a trailer naming an /Encrypt dictionary the root check is deferred. The security handler is built by the layer
+// above and installed with SetDecryptor only after Open returns, so a catalog stored in an object stream — what every
+// modern producer emits — is still ciphertext that neither Resolve nor the repair sweep can see through. Call
+// ValidateRoot once the decryptor is installed.
 func Open(data []byte) (*Document, error) {
 	d := &Document{
 		data:          data,
@@ -180,22 +172,19 @@ func (d *Document) loadObject(num int) (Object, error) {
 		return nil, err
 	}
 	obj, err := d.loadObjectUncached(num)
-	// Repair is deferred while object-stream loads or the cross-reference load are in flight. It replaces the
-	// cross-reference table and drops every cache under frames that are still parsing against the old one, its own
-	// loadObjStm sweep would re-enter a stream whose parse is suspended further down this stack, and loadXref would
-	// finish by writing entries into the replaced table and overwriting the repaired trailer. Skipping it here leaves
-	// d.repaired false, so the next failing load reached from neither of those states still triggers it.
+	// Repair is deferred while an object-stream load or the cross-reference load is in flight: it would replace the
+	// table and drop every cache under frames still parsing against the old one, and its loadObjStm sweep would
+	// re-enter a stream whose parse is suspended further down this stack (see xrefLoading). d.repaired stays false, so
+	// the next failing load reached from neither state still triggers it.
 	if err != nil && !d.repaired && !d.xrefLoading && len(d.objStmLoading) == 0 {
 		if rerr := d.repair(); rerr == nil {
 			obj, err = d.loadObjectUncached(num)
 		}
 	}
 	if err != nil {
-		// The object-stream re-entrancy and nesting guards fire because of where this load sits in the current call
-		// stack, not because of anything about num: the same object can load cleanly when reached from the top level.
-		// Both refuse before parsing anything, so leaving them out of the failure cache costs nothing. A failure during
-		// the cross-reference load is stack-dependent in the same way — it was decided against a table still being
-		// assembled — so it is not cached either, leaving the object loadable once the table is complete.
+		// The object-stream guards fire because of where this load sits in the call stack, not because of num: the
+		// same object loads cleanly from the top level, and both refuse before parsing anything. A failure during the
+		// cross-reference load was decided against an incomplete table, so it is not cached either.
 		if !d.xrefLoading && !errors.Is(err, errObjStmCycle) && !errors.Is(err, errObjStmDepth) {
 			d.objFailed[num] = err
 		}
@@ -215,9 +204,8 @@ func (d *Document) loadObjectUncached(num int) (Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		// The object was stored directly in the file, so its strings and stream payload are encrypted under its own
-		// number and generation. Objects reached through objFromStm are not: their container was decrypted as a whole
-		// (ISO 32000-2 7.6.2).
+		// Stored directly in the file, so its strings and stream payload are encrypted under its own number and
+		// generation. Objects reached through objFromStm are not: their container was decrypted as a whole.
 		return d.decryptDirect(num, gen, obj), nil
 	}
 	return d.objFromStm(entry.stmNum, entry.stmIdx, num)
@@ -291,11 +279,11 @@ func (d *Document) decodeChain(specs []filter.Spec, raw []byte) ([]byte, error) 
 	return out, err
 }
 
-// DecodeWork returns the running total of bytes every filter chain this document has run has produced. It is the one
-// measurement a caller charging a work budget cannot take for itself: a decode that fails returns no bytes at all, yet
+// DecodeWork returns the running total of bytes every filter chain this document has run has produced, including chains
+// that failed. A caller charging a work budget cannot measure that itself: a failed decode returns no bytes, yet
 // internal/filter lets one stage inflate to max(64 MB, 256x input) before reporting ErrTooLarge, so pricing a failure
-// by the input it was handed values a 64 KB zip bomb at a thousandth of the work it forced. Bracket a call with two
-// reads and charge the difference. The counter only grows, and cannot wrap within a document's lifetime.
+// by its input values a 64 KB zip bomb at a thousandth of the work it forced. Bracket a call with two reads and charge
+// the difference.
 func (d *Document) DecodeWork() uint64 {
 	return d.decodeWork
 }
@@ -311,13 +299,12 @@ func imageFilterName(name Name) bool {
 	}
 }
 
-// ImageFilterSplit applies an image XObject's leading non-image filters to raw — the stream's payload — and stops at
-// the first image-codec filter (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode, or an abbreviated form), returning
-// the processed data, the codec's name, and its resolved decode-parms dictionary (possibly nil). When the chain
-// contains no image codec, the returned codec is empty and data holds fully decoded sample bytes. Filters listed after
-// an image codec are impossible to apply (the codec ends the byte-stream pipeline) and are ignored, matching deployed
-// viewers. Only /Filter and /DecodeParms are consulted: on an ordinary stream /F is a file specification for external
-// data, not a filter abbreviation. Use InlineImageFilterSplit for inline images, where the abbreviations apply.
+// ImageFilterSplit applies the leading non-image filters of an image XObject to raw and stops at the first image codec
+// (DCTDecode, CCITTFaxDecode, JBIG2Decode, JPXDecode, or an abbreviation), returning the processed data, the codec's
+// name, and its resolved decode-parms dictionary (possibly nil). With no image codec in the chain, codec is empty and
+// data holds fully decoded samples. Filters listed after a codec cannot be applied and are ignored, as deployed viewers
+// do. Only /Filter and /DecodeParms are consulted: on an ordinary stream /F is a file specification, not a filter
+// abbreviation. Use InlineImageFilterSplit for inline images.
 func (d *Document) ImageFilterSplit(dict Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
 	return d.imageFilterSplit(Dict{"Filter": dict["Filter"], "DecodeParms": dict["DecodeParms"]}, raw)
 }
@@ -335,8 +322,8 @@ func (d *Document) InlineImageFilterSplit(dict Dict, raw []byte) (data []byte, c
 	return d.imageFilterSplit(lookup, raw)
 }
 
-// imageFilterSplit is the shared body of ImageFilterSplit and InlineImageFilterSplit; lookup holds the already-resolved
-// /Filter and /DecodeParms entries to use.
+// imageFilterSplit is the shared body of ImageFilterSplit and InlineImageFilterSplit; lookup holds the /Filter and
+// /DecodeParms entries to use, under those keys.
 func (d *Document) imageFilterSplit(lookup Dict, raw []byte) (data []byte, codec Name, parms Dict, err error) {
 	names, parmsArr, err := d.filterNamesAndParms(lookup)
 	if err != nil {
@@ -398,11 +385,11 @@ func (d *Document) filterSpecs(dict Dict) ([]filter.Spec, error) {
 }
 
 // filterNamesAndParms normalizes /Filter (name or array of names) and /DecodeParms (dictionary or array, possibly
-// containing nulls) into parallel slices. A chain longer than filter.MaxChainLength is rejected HERE, before the names
-// are resolved and collected, rather than being left to filter.DecodeChain: the array's length is file-supplied and an
-// object stream can carry a million-element one in a few megabytes, so building the []Name and []filter.Spec first cost
-// tens of milliseconds and tens of megabytes of allocation per call — and PageContents calls StreamData once per
-// /Contents entry, up to maxContentStreams of them, all able to name that one stream.
+// containing nulls) into parallel slices. A chain longer than filter.MaxChainLength is rejected here, before the names
+// are resolved, rather than by filter.DecodeChain: the array length is file-supplied, an object stream can carry a
+// million-element one in a few megabytes, and PageContents calls StreamData once per /Contents entry (up to
+// maxContentStreams of them), so building the []Name and []filter.Spec first cost tens of milliseconds and tens of
+// megabytes per call.
 func (d *Document) filterNamesAndParms(dict Dict) (names []Name, parms Array, err error) {
 	switch f := d.Resolve(dict["Filter"]).(type) {
 	case nil, Null:
@@ -459,11 +446,9 @@ func (d *Document) filterParams(parmDict Dict) filter.Params {
 	return params
 }
 
-// clearCaches drops every parsed-object cache. The repair scan calls this because entries parsed through the old
-// cross-reference data may be wrong. objStmLoading is deliberately left alone: it is not a cache but the set of
-// object-stream loads currently on the stack, and each loadObjStm frame deletes its own entry on the way out. Replacing
-// the map would strand those frames' markers in the discarded one, disarming the re-entrancy guard for the rest of the
-// recursion and letting the same stream be re-entered while it is still being parsed.
+// clearCaches drops every parsed-object cache. objStmLoading is deliberately left alone: it is not a cache but the set
+// of loadObjStm frames on the stack, each of which deletes its own entry on the way out. Replacing the map would strand
+// their markers and disarm the re-entrancy guard for the rest of the recursion.
 func (d *Document) clearCaches() {
 	d.objCache = make(map[int]Object)
 	d.objFailed = make(map[int]error)

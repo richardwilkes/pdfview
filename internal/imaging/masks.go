@@ -13,16 +13,17 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// softMaskStream returns the image's /SMask stream, if any. Soft masks exist only on image XObjects (inline images
-// cannot carry one), and when present they override the /Mask entry entirely (ISO 32000-2 8.9.6.6).
+// softMaskStream returns the image's /SMask stream, if any. The key has no inline abbreviation: inline images cannot
+// carry a soft mask.
 func (dec *decoder) softMaskStream() (*cos.Stream, bool) {
 	sm, ok := dec.entry("SMask", "").(*cos.Stream)
 	return sm, ok
 }
 
-// applyMasks applies the image's alpha source — /SMask first, else a stencil /Mask stream — to img in place. colorKeyed
-// reports that the /Mask entry was a color-key array already applied during sample conversion. Broken or oversized
-// masks are ignored, leaving the image opaque, the lenient viewer behavior.
+// applyMasks applies the image's alpha source to img in place: an /SMask, which overrides the /Mask entry entirely
+// (ISO 32000-2 8.9.6.6), else a stencil /Mask stream. colorKeyed reports that the /Mask entry was a color-key array
+// already applied during sample conversion. Broken or oversized masks are ignored, leaving the image opaque, the
+// lenient viewer behavior.
 func (dec *decoder) applyMasks(img *Image, colorKeyed bool) {
 	if sm, ok := dec.softMaskStream(); ok {
 		if plane, mw, mh, err := alphaPlane(dec.d, sm); err == nil {
@@ -49,8 +50,8 @@ func (dec *decoder) applyStencilMask(img *Image, ms *cos.Stream) {
 	sub := &decoder{d: dec.d, dict: ms.Dict, data: data, codec: codec, parms: parms}
 	mw, wOK := sub.intEntry("Width", "W")
 	mh, hOK := sub.intEntry("Height", "H")
-	// Cap each dimension against maxImagePixels first, the way run() does: without it a Width/Height near 2^40 wraps
-	// mw*mh mod 2^64 to a small value that passes the budget check, then panics or attempts an exabyte allocation.
+	// Cap each dimension against maxImagePixels before multiplying, as run does: a Width/Height near 2^40 would wrap
+	// mw*mh past int64 to a small value that passes the budget check.
 	if !wOK || !hOK || mw <= 0 || mh <= 0 || mw > maxImagePixels || mh > maxImagePixels || mw*mh > maxPixelsFor(len(data)) {
 		return
 	}
@@ -72,16 +73,14 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	sub := &decoder{d: d, dict: sm.Dict, data: data, codec: codec, parms: parms}
 	w64, wOK := sub.intEntry("Width", "W")
 	h64, hOK := sub.intEntry("Height", "H")
-	// Cap each dimension against maxImagePixels first, the way run() does: without it a Width/Height near 2^40 wraps
-	// w64*h64 mod 2^64 to a small value that passes the budget check, then panics or attempts an exabyte allocation.
+	// Same per-dimension cap as applyStencilMask.
 	if !wOK || !hOK || w64 <= 0 || h64 <= 0 || w64 > maxImagePixels || h64 > maxImagePixels || w64*h64 > maxPixelsFor(len(data)) {
 		return nil, 0, 0, ErrBadImage
 	}
 	w, h = int(w64), int(h64)
 	switch {
 	case isJPX(codec):
-		// JPX ignores /Decode (see decodeJPX), so its samples are the coverage directly rather than passing through
-		// alphaLUT the way every other codec's do.
+		// JPX ignores /Decode (see decodeJPX), so its samples are the coverage directly rather than through alphaLUT.
 		return sub.jpxGrayPlane()
 	case isDCT(codec):
 		gray, gw, gh, dctErr := sub.dctGrayPlane()
@@ -97,9 +96,8 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	var bpc, rowStride int
 	validCols := w
 	if isCCITT(codec) || isJBIG2(codec) {
-		// CCITT and JBIG2 fix bpc at 1 and supply the column count themselves, so — like decodeSamples — do not consult
-		// (or require) /BitsPerComponent here; a soft mask that omits the key must still decode. Rows are byte-aligned
-		// at the decoder's column count, so columns past it (when /Width exceeds it) read as zero samples.
+		// CCITT and JBIG2 fix bpc at 1 and supply the column count themselves (see decodeSamples), so a soft mask that
+		// omits /BitsPerComponent still decodes; columns past the decoder's count read as zero samples.
 		var cols int
 		if isCCITT(codec) {
 			data, cols, err = sub.decodeCCITT(h)
@@ -138,8 +136,7 @@ func alphaPlane(d *cos.Document, sm *cos.Stream) (plane []byte, w, h int, err er
 	for y := range h {
 		reader.seek(y * rowStride)
 		for x := range w {
-			// Columns past the decoder's count read as zero samples (see decodeSamples); the 16-bit path above never
-			// applies to CCITT, so only this LUT loop needs the guard.
+			// Columns past the decoder's count read as zero samples; the 16-bit path never applies to CCITT or JBIG2.
 			sample := uint32(0)
 			if x < validCols {
 				sample = reader.next()
@@ -181,23 +178,19 @@ func alphaByte(v float32) byte {
 	return byte(v*255 + 0.5)
 }
 
-// compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (the mask and
-// the image both span the same unit square). The nearest-sample products top out at 2^52 (a row index just under the
-// 2^26 pixel cap against a mask dimension at the same cap — say a 1 x 2^26 /SMask, only a few KB of payload, over a
-// tall base image), well inside the 64-bit int this engine requires.
+// compositeAlpha multiplies img's alpha by the mask plane, sampling nearest when the dimensions differ (both span the
+// same unit square). The nearest-sample index products top out at 2^52, both factors being under the 2^26 cap.
 //
-// The oracle paints an image and its mask each at its own resolution — the mask becomes a clip rather than part of the
-// image — so a mask finer than the image on either axis must not be decimated onto the image's grid. Such a mask
-// expands the composite onto the finer count per axis first, replicating the image's samples across it; a mask no finer
-// than the image on either axis composites in place, the arrangement the /SMask goldens pin.
+// The oracle paints an image and its mask each at its own resolution, so a mask finer than the image on either axis
+// must not be decimated onto the image's grid: the composite expands onto the finer count per axis first, replicating
+// the image's samples. A mask no finer on either axis composites in place, the arrangement the /SMask goldens pin.
 func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 	if mw <= 0 || mh <= 0 || len(plane) < mw*mh {
 		return
 	}
 	if w, h := max(img.Width, mw), max(img.Height, mh); w != img.Width || h != img.Height {
 		// The finer grid can exceed the pixel cap even though the image and the mask are each within it (a 1 x 2^26
-		// mask over a 2^26 x 1 image), so bound it before allocating. An over-cap pairing keeps the image's own grid,
-		// which decimates the mask but still renders.
+		// mask over a 2^26 x 1 image). An over-cap pairing keeps the image's grid, decimating the mask but rendering.
 		if int64(w)*int64(h) <= maxImagePixels {
 			expandForMask(img, w, h)
 		}
@@ -205,9 +198,8 @@ func compositeAlpha(img *Image, plane []byte, mw, mh int) {
 	compositeAlphaFn(img, plane, mw, mh)
 }
 
-// compositeAlphaScalar is the composite itself, once compositeAlpha has bounded the mask and expanded the image where
-// a finer mask demanded it: one nearest sample of the plane per pixel, multiplied into that pixel's alpha. See
-// compositeAlphaFn for the vector form, which specializes the equal-dimension case.
+// compositeAlphaScalar is the composite itself: one nearest sample of the plane per pixel, multiplied into that
+// pixel's alpha. compositeAlphaFn is the vector form, which specializes the equal-dimension case.
 func compositeAlphaScalar(img *Image, plane []byte, mw, mh int) {
 	for y := range img.Height {
 		my := y * mh / img.Height
@@ -224,10 +216,9 @@ func compositeAlphaScalar(img *Image, plane []byte, mw, mh int) {
 	}
 }
 
-// expandForMask replaces img's pixels with the same picture nearest-sampled onto a w x h grid, so a mask finer than the
-// image can be composited without losing its detail. The caller has already bounded w*h against maxImagePixels, the
-// same cap run() applies, so the RGBA allocation stays within the documented worst case; the row-index products stay
-// under 2^52 because both factors are within that cap.
+// expandForMask replaces img's pixels with the same picture nearest-sampled onto a w x h grid. The caller has bounded
+// w*h against maxImagePixels, so the allocation stays within the documented worst case and the row-index products
+// under 2^52.
 func expandForMask(img *Image, w, h int) {
 	pix := make([]byte, w*h*4)
 	for y := range h {

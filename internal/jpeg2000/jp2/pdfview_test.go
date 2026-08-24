@@ -257,7 +257,7 @@ func TestDecodeComponentsRGBAChannels(t *testing.T) {
 	}
 }
 
-// TestDecodeComponentsSYCCUnconverted checks the colour-space contract. sycc.jp2 declares sYCC, which the container
+// TestDecodeComponentsSYCCUnconverted checks the color-space contract. sycc.jp2 declares sYCC, which the container
 // decoder converts to RGB; DecodeComponents must hand back the stored YCC planes instead. sycc.raw is the source the
 // vector was encoded from, so an exact match proves no conversion ran, and comparing against the container decoder's
 // own output proves the conversion is real and was skipped rather than absent.
@@ -343,11 +343,10 @@ func TestDecodeErrors(t *testing.T) {
 	for _, path := range names {
 		t.Run("damaged "+filepath.Base(path), func(t *testing.T) {
 			data := read(t, filepath.Base(path))
-			// Every prefix, plus a single flipped byte at the same offset, so both the container walk and the
-			// codestream parse meet damage at every position a real corruption could land on. DecodeInfo sees them
-			// all — it is the parse this file introduced and it costs microseconds. A full decode costs far more
-			// under the race detector, so it takes a strided sample of the same offsets; the stride is odd so it
-			// does not settle onto one column of the four-byte header fields.
+			// Every prefix, plus a single flipped byte at the same offset, so both the container walk and the codestream
+			// parse meet damage at every position. DecodeInfo sees them all; a full decode costs far more under the
+			// race detector, so it takes a strided sample. The stride is odd so it does not settle onto one column of
+			// the four-byte header fields.
 			for n := range len(data) {
 				_, _ = jp2.DecodeInfo(bytes.NewReader(data[:n]))
 				bad := bytes.Clone(data)
@@ -358,10 +357,9 @@ func TestDecodeErrors(t *testing.T) {
 				}
 				// A prefix can only shrink what the header declares, so decoding one is always cheap.
 				_, _ = jp2.DecodeComponents(bytes.NewReader(data[:n]), j2k.Options{})
-				// A flipped byte in SIZ can declare a gigapixel image, and the codestream decoder documents that it
-				// sizes its buffers from the declared dimensions with no cap of its own. Gating the decode on the
-				// header report is exactly the contract DecodeInfo exists to serve, so the sweep applies it rather
-				// than working around it.
+				// A flipped byte in SIZ can declare a gigapixel image, and the codestream decoder sizes its buffers from
+				// the declared dimensions with no cap of its own, so the sweep gates the decode on the header report —
+				// the contract DecodeInfo exists to serve.
 				if infoErr != nil || int64(info.Width)*int64(info.Height)*int64(len(info.Components)) > sweepBudget {
 					continue
 				}

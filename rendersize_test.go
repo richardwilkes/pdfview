@@ -14,11 +14,9 @@ import (
 	"testing"
 )
 
-// TestRenderSpecExtentsClampToRequestedBox pins that a fit-to-size render never returns an image larger than the box
-// it was asked to fit within. The fit scale is computed in float64 while renderExtent redoes the multiply in float32
-// and ceils with a fixed 0.001 epsilon, so above roughly 17,000 px the float32 rounding error outgrows that epsilon:
-// a 67 pt wide page asked to fit 17,199 px produces an unclamped extent of 17,200. The first arm pins that overshoot
-// so the clamp cannot be quietly removed as dead code; the second pins the clamp itself.
+// TestRenderSpecExtentsClampToRequestedBox pins that a fit-to-size render never exceeds its box: past roughly 17,000 px
+// the float32 extent multiply outgrows renderExtent's 0.001 epsilon (see renderSpec), so a 67 pt page fit to 17,199 px
+// has an unclamped extent of 17,200. The first arm pins the overshoot so the clamp cannot be removed as dead code.
 func TestRenderSpecExtentsClampToRequestedBox(t *testing.T) {
 	const (
 		pageWidth  = 67
@@ -39,7 +37,7 @@ func TestRenderSpecExtentsClampToRequestedBox(t *testing.T) {
 	if height > maxHeight || height <= 0 {
 		t.Errorf("clamped height = %d, want it within (0, %d]", height, maxHeight)
 	}
-	// Without caps — the RenderPage path — the extents are whatever the scale produces.
+	// Without caps (the RenderPage path) the extents are whatever the scale produces.
 	if width, height = (renderSpec{scale: scale}).extents(pg); width != maxWidth+1 {
 		t.Errorf("uncapped width = %d, want %d", width, maxWidth+1)
 	}
@@ -48,10 +46,9 @@ func TestRenderSpecExtentsClampToRequestedBox(t *testing.T) {
 	}
 }
 
-// TestReusedDeviceRespectsCacheBudget pins that the raster device kept between renders is charged against the
-// documented maxCacheSize budget. It is not part of the store, so nothing else bounds it: a document rendered once at
-// high dpi would otherwise hold a width*height*4 surface for its whole lifetime no matter how small a cache the caller
-// asked for, and an application holding N such documents would pay N surfaces.
+// TestReusedDeviceRespectsCacheBudget pins that the raster device kept between renders is charged against maxCacheSize.
+// It is not part of the store, so nothing else bounds it: a document rendered once at high dpi would otherwise hold a
+// width*height*4 surface for its whole lifetime however small a cache the caller asked for.
 func TestReusedDeviceRespectsCacheBudget(t *testing.T) {
 	data, err := os.ReadFile("testfiles/corpus/vectors.pdf")
 	if err != nil {
@@ -86,8 +83,7 @@ func TestReusedDeviceRespectsCacheBudget(t *testing.T) {
 			if retained := doc.eng.dev != nil; retained != tc.retained {
 				t.Errorf("device retained = %v, want %v for maxCacheSize %d", retained, tc.retained, tc.maxCacheSize)
 			}
-			// Whether the surface is kept must not change what was rendered, so a second render still succeeds and
-			// produces the same dimensions.
+			// Whether the surface is kept must not change what a second render produces.
 			again, againErr := doc.RenderPage(0, 72, 0, "")
 			if againErr != nil {
 				t.Fatal(againErr)
@@ -99,10 +95,8 @@ func TestReusedDeviceRespectsCacheBudget(t *testing.T) {
 	}
 }
 
-// TestRestoreToCountContainsPanic pins that a panic raised by the canvas restore itself is contained rather than
-// escaping DrawPage. RestoreToCount pops device clip stacks and composites any open SaveLayer — exactly the state a
-// panic mid-transparency-group leaves behind — so the restore that matters most is also the one most able to panic. A
-// nil canvas is the cheapest way to make it panic.
+// TestRestoreToCountContainsPanic pins that a panic inside the canvas restore is contained rather than escaping
+// DrawPage. A nil canvas is the cheapest way to make it panic.
 func TestRestoreToCountContainsPanic(t *testing.T) {
 	if restoreToCount(nil, 0) {
 		t.Error("restoreToCount reported success on a canvas that cannot be restored")

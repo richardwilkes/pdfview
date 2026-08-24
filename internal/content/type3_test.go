@@ -17,10 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// type3PDF builds a document whose object 1 is a resource dictionary carrying a Type 3 font /T3 with two glyphs: "boxy"
-// (d1 shape: a 500×700 unit rectangle, with an attempted color change that d1 must suppress) and "dot" (d0 colored:
-// paints its own green rectangle). The glyph coordinate space is 1000 units per em (FontMatrix 0.001), and widths are
-// 600 and 400 glyph units.
+// type3PDF builds a document whose object 1 is a resource dictionary carrying a Type 3 font /T3 with three glyphs:
+// "boxy" (d1 shape: a 500×700 unit rectangle, with an attempted color change that d1 must suppress), "dot" (d0 colored:
+// paints its own green rectangle), and "recur" (shows its own code). The glyph coordinate space is 1000 units per em
+// (FontMatrix 0.001), and the widths are 600 and 400 glyph units.
 func type3PDF(t *testing.T) *cos.Document {
 	t.Helper()
 	boxy := "600 0 0 0 500 700 d1\n0 0 1 rg\n0 0 500 700 re f"
@@ -167,9 +167,7 @@ func TestType3ClipModeDegrades(t *testing.T) {
 }
 
 // TestType3NonPaintingModesStayExtractable pins that the two Type 3 render modes that paint nothing — 3 (invisible) and
-// 7 (clip-only) — still report their run to the device as IgnoreText, so structured text keeps them searchable. The
-// painting modes are checked alongside to show mode 7 is the only one that used to fall through to no device call at
-// all.
+// 7 (clip-only) — still report their run to the device as IgnoreText, so structured text keeps them searchable.
 func TestType3NonPaintingModesStayExtractable(t *testing.T) {
 	d := type3PDF(t)
 	res := resourcesOf(t, d)

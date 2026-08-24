@@ -15,9 +15,9 @@ import (
 	"testing"
 )
 
-// TestCacheBudget pins the maxCacheSize contract: the store is a pure cache, so any budget — unlimited, comfortable, or
-// one byte (nothing ever fits) — must produce byte-identical renders, and a bounded store must never hold more than its
-// budget. glaive exercises all three cached kinds: parsed fonts, glyph outlines, and (across its pages) images.
+// TestCacheBudget pins the maxCacheSize contract: the store is a pure cache, so any budget (unlimited, comfortable, or
+// one byte so nothing fits) must produce byte-identical renders, and a bounded store never holds more than its budget.
+// glaive exercises fonts, glyph paths and masks, and (across its pages) images.
 func TestCacheBudget(t *testing.T) {
 	buffer, err := os.ReadFile("testfiles/corpus/glaive.pdf")
 	if err != nil {
@@ -56,7 +56,7 @@ func TestCacheBudget(t *testing.T) {
 		doc.Release()
 	}
 
-	// Rendering the same page twice under the unlimited store (cache hits throughout) must also be identical.
+	// A cache-hit re-render must also be identical.
 	again, err := refDoc.RenderPage(0, 72, 0, "")
 	if err != nil {
 		t.Fatalf("re-render: %v", err)

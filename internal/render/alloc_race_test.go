@@ -12,7 +12,6 @@
 package render
 
 // maskMissAllocCeiling is the most allocations one glyph coverage-cache miss may make (see
-// TestGlyphMaskMissAllocationsBounded). The race detector's own bookkeeping roughly triples the count — a miss measures
-// about 8 under it against 2.5 without — so the ceiling is raised to match, keeping the same margin over the pre-reuse
-// code, which measures about 14.5 under the detector.
+// TestGlyphMaskMissAllocationsBounded). The race detector's bookkeeping roughly triples the count — a miss measures
+// about 8 under it against 2.5 without — so the ceiling is raised to keep the same margin.
 const maskMissAllocCeiling = 11

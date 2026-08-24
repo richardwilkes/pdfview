@@ -32,9 +32,8 @@ func DecodeTextString(s String) string {
 	}
 }
 
-// decodeUTF8 returns b as a Go string, replacing each run of bytes that is not a valid UTF-8 sequence with U+FFFD. A
-// PDF 2.0 writer is required to emit valid UTF-8 after the byte-order mark, but a malformed file must still satisfy
-// DecodeTextString's contract that undecodable content maps to U+FFFD rather than surviving as raw bytes.
+// decodeUTF8 returns b as a Go string with each invalid UTF-8 run replaced by U+FFFD, so a malformed file still meets
+// DecodeTextString's contract rather than passing raw bytes through.
 func decodeUTF8(b []byte) string {
 	s := string(b)
 	if utf8.ValidString(s) {
@@ -48,7 +47,6 @@ func decodeUTF16BE(b []byte) string {
 	for i := 0; i+1 < len(b); i += 2 {
 		units = append(units, uint16(b[i])<<8|uint16(b[i+1]))
 	}
-	// A trailing odd byte is dropped.
 	return string(utf16.Decode(units))
 }
 
@@ -73,11 +71,11 @@ func buildPDFDocEncoding() [256]rune {
 		case i < 0x18:
 			table[i] = utf8.RuneError // Other C0 control positions are undefined.
 		case i >= 0x20 && i <= 0x7e:
-			table[i] = rune(i) // ASCII printable range.
+			table[i] = rune(i)
 		case i == 0x7f || i == 0x9f || i == 0xad:
 			table[i] = utf8.RuneError // Undefined positions.
 		case i >= 0xa1:
-			table[i] = rune(i) // Latin-1 range.
+			table[i] = rune(i)
 		default:
 			table[i] = utf8.RuneError // Overwritten below for the defined 0x18-0x1f, 0x80-0x9e, and 0xa0 slots.
 		}

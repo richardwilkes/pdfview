@@ -102,9 +102,9 @@ func (h *Handler) computeU(key []byte) []byte {
 func (h *Handler) userPasswordFromOwner(ownerPw []byte) []byte {
 	key := md5.Sum(padPassword(ownerPw))
 	if h.r >= 3 {
-		// Algorithm 3 step (c) feeds the *entire* 16-byte digest into each new MD5. Only Algorithm 2 step (f) — the
-		// user-key derivation in keyFromUserPassword — re-hashes just the first keyLen bytes. Truncating here matches
-		// the real answer only at keyLen 16, and locks out the correct owner password at every other key length.
+		// Algorithm 3 step (c) re-hashes the entire 16-byte digest; only Algorithm 2 step (f), in keyFromUserPassword,
+		// re-hashes the first keyLen bytes. Truncating here would lock out the correct owner password at every key
+		// length but 16.
 		for range 50 {
 			key = md5.Sum(key[:])
 		}
@@ -205,9 +205,8 @@ func hash2B(pw, udata, k []byte) []byte {
 	}
 }
 
-// saslPrep applies the parts of the SASLprep profile (RFC 4013) that matter for the PDF passwords seen in practice: the
-// UTF-8 bytes are truncated to 127 bytes (ISO 32000-2 7.6.4.3.3). Full stringprep normalization is not performed; ASCII
-// passwords — effectively all of them — are unaffected.
+// saslPrep truncates the password to 127 bytes (ISO 32000-2 7.6.4.3.3). The SASLprep normalization (RFC 4013) the
+// standard also requires is not performed; it leaves ASCII passwords, effectively all of them, unchanged.
 func saslPrep(pw []byte) []byte {
 	if len(pw) > 127 {
 		return pw[:127]

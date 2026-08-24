@@ -15,22 +15,20 @@ import (
 	"github.com/richardwilkes/pdfview/internal/imaging"
 )
 
-// maxCachedImages caps the per-Run decoded-image LRU used when no budgeted store is wired. A page drawing more distinct
-// images than this still renders them all; the least-recently-used ones decode again if reused after eviction. With a
-// store, its byte budget replaces this cap.
+// maxCachedImages caps the per-Run decoded-image LRU used when no budgeted store is wired (a store's byte budget
+// replaces it). A page drawing more distinct images still renders them all; evicted ones decode again on reuse.
 const maxCachedImages = 32
 
-// drawImageXObject implements Do for /Subtype /Image: decode (cached by the resource's reference — in the document's
-// budgeted store when wired, else per Run; failures are cached too, so a broken image is not re-decoded per draw) and
-// hand the result to the device. Every failure path simply draws nothing: the page keeps rendering, blank where the
-// image would be.
+// drawImageXObject implements Do for /Subtype /Image: decode (cached by the resource's reference, in the document's
+// budgeted store when wired, else per Run; failures cache too, so a broken image is not re-decoded per draw) and hand
+// the result to the device. Every failure path draws nothing.
 func (in *interp) drawImageXObject(raw cos.Object, stream *cos.Stream) {
 	var img *imaging.Image
 	resources := in.res[len(in.res)-1]
 	// The cache is keyed on the reference alone, so an image whose decode also consults the resource frame in scope
-	// (imaging.NeedsResources: a bare /ColorSpace name resolved through resources /ColorSpace) must not go through it —
-	// two forms mapping /CS0 to different spaces would otherwise render the second image with the first's palette, and
-	// with the document store wired the stale entry would cross pages. Those images decode per draw, charged as usual.
+	// (imaging.NeedsResources: a bare /ColorSpace name resolved through resources /ColorSpace) must not go through it:
+	// two forms mapping /CS0 to different spaces would render the second image with the first's palette, and with the
+	// document store wired the stale entry would cross pages. Those images decode per draw, charged as usual.
 	if ref, isRef := raw.(cos.Ref); isRef && !imaging.NeedsResources(in.doc, stream.Dict) {
 		img = in.cachedImage(ref, stream, resources)
 	} else {
@@ -39,9 +37,8 @@ func (in *interp) drawImageXObject(raw cos.Object, stream *cos.Stream) {
 	in.drawImage(img)
 }
 
-// decodeXObject decodes one image XObject, charging the work budget for the decode it performs: a page naming many
-// distinct images must not turn a few bytes of content apiece into unbounded sample production (see budget.go).
-// Failures draw nothing.
+// decodeXObject decodes one image XObject, charging the work budget for the decode: a page naming many distinct images
+// must not turn a few bytes of content apiece into unbounded sample production (see budget.go).
 func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging.Image {
 	before := in.doc.DecodeWork()
 	img, _ := imaging.DecodeXObject(in.doc, stream, resources) //nolint:errcheck // Failures draw nothing.
@@ -49,9 +46,8 @@ func (in *interp) decodeXObject(stream *cos.Stream, resources cos.Dict) *imaging
 	return img
 }
 
-// cachedImage decodes an image XObject through the active cache layer. Only the decodes it actually performs are
-// charged: a cache hit did no work beyond the Do operator's own unit, which is what makes a repeatedly drawn image
-// cheap.
+// cachedImage decodes an image XObject through the active cache layer. Only the decodes it performs are charged: a
+// cache hit costs nothing beyond the Do operator's own unit.
 func (in *interp) cachedImage(ref cos.Ref, stream *cos.Stream, resources cos.Dict) *imaging.Image {
 	key := ref.Key()
 	if in.st != nil {
@@ -79,8 +75,8 @@ func imageSize(img *imaging.Image) uint64 {
 }
 
 // decodeInline decodes one inline image against the resource frame in scope (named /CS entries resolve through it),
-// charging the work budget for it. Inline images have no cache — the payload is the content stream itself — so every BI
-// pays, which is what bounds a stream of tiny BI operators each claiming huge dimensions.
+// charging the work budget. Inline images have no cache (the payload is the content stream itself), so every BI pays,
+// which bounds a stream of tiny BI operators each claiming huge dimensions.
 func (in *interp) decodeInline(dict cos.Dict, payload []byte) (*imaging.Image, error) {
 	before := in.doc.DecodeWork()
 	img, err := imaging.DecodeInline(in.doc, dict, payload, in.res[len(in.res)-1])
@@ -88,10 +84,9 @@ func (in *interp) decodeInline(dict cos.Dict, payload []byte) (*imaging.Image, e
 	return img, err
 }
 
-// drawImage emits one decoded image to the device under the current CTM: stencils tint with the fill paint (skipped
-// entirely when the fill space never marks), ordinary images carry the constant fill alpha and the current blend mode.
-// An ordinary image has no color source but its own samples, so its paint carries only that alpha and blend — a fill
-// pattern in scope is irrelevant to it, unlike the stencil case, where the pattern tints the mask bits.
+// drawImage emits one decoded image to the device under the current CTM. A stencil tints with the fill paint (skipped
+// when the fill space never marks). An ordinary image has no color source but its own samples, so its paint carries
+// only the constant fill alpha and blend mode; a fill pattern in scope is irrelevant to it.
 func (in *interp) drawImage(img *imaging.Image) {
 	if img == nil || !in.gs.ctm.IsFinite() {
 		return

@@ -28,9 +28,8 @@ func (d *Document) repair() error {
 	var trailers []Dict // Candidate trailers, in file order (later entries are newer).
 	var objStmNums []int
 	catalogNum := -1
-	// The offset just past the file's last "endstream" bounds the recovery scan for every swept stream header. Without
-	// it, each header lacking a matching endstream scans to end of input, so a file full of bare stream keywords costs
-	// O(n²); with it, headers beyond the last real endstream fail in constant time.
+	// The offset just past the file's last "endstream" bounds each swept stream header's recovery scan; see
+	// parseIndirectAtBounded.
 	endstreamLimit := 0
 	if i := bytes.LastIndex(d.data, []byte("endstream")); i >= 0 {
 		endstreamLimit = i + len("endstream")
@@ -50,11 +49,10 @@ func (d *Document) repair() error {
 		obj, _, end, err := parseIndirectAtBounded(d.data, int64(numStart), -1, endstreamLimit, nil)
 		if err != nil || end <= int64(idx) {
 			// A failed attempt reports how far it read, and the sweep resumes there rather than three bytes past the
-			// keyword. The work a failure already did is otherwise unbounded — an unterminated '(' or '<' scans toward
-			// end of input — so re-lexing the same span from every following candidate makes the sweep quadratic
-			// (measured through pdfview.New, a body of repeated "1 0 obj <" cost 0.19 s at 50 KB and 2.49 s at 200 KB,
-			// a clean 4x per doubling), contradicting the package's bounded-work contract. The bytes skipped are ones
-			// the file's own syntax places inside the object that failed to parse.
+			// keyword. An unterminated '(' or '<' scans toward end of input, so re-lexing the same span from every
+			// following candidate makes the sweep quadratic (through pdfview.New, a body of repeated "1 0 obj <" cost
+			// 0.19 s at 50 KB and 2.49 s at 200 KB). The bytes skipped are ones the file's own syntax places inside the
+			// object that failed to parse.
 			pos = max(idx+3, int(end))
 			continue
 		}
@@ -118,15 +116,13 @@ func (d *Document) installRepairedTrailer(trailers []Dict) {
 }
 
 // installRepairedRoot substitutes the last swept /Type /Catalog object for a trailer /Root that is missing or dead. A
-// damaged file's surviving trailer routinely names an object nothing in the file defines any more — precisely the
-// damage this sweep exists to recover from — so treating only an absent key as a miss left such a file unopenable with
-// a good catalog already in hand, and with d.repaired set Open would not retry. It runs after the recovered object
-// streams are registered so that a /Root stored inside one counts as resolvable.
+// damaged file's surviving trailer routinely names an object nothing in the file defines any more, and with d.repaired
+// set Open would not retry, so treating only an absent key as a miss left such a file unopenable with a good catalog in
+// hand. It runs after the recovered object streams are registered so a /Root stored inside one counts as resolvable.
 //
 // For an encrypted document only the absent case applies: object streams are still ciphertext until the security
-// handler is built and authenticated (both of which happen above this layer, after Open returns), so a /Root that does
-// not resolve yet says nothing about the reference — while a substituted catalog would outlive the decryptor's arrival,
-// since the resolvable-but-superseded root it installs never fails a later check.
+// handler is built above this layer, so an unresolved /Root says nothing about the reference, while a substituted
+// catalog would outlive the decryptor's arrival, since a resolvable-but-superseded root never fails a later check.
 func (d *Document) installRepairedRoot(catalogNum int) {
 	if catalogNum <= 0 {
 		return
@@ -141,7 +137,7 @@ func (d *Document) installRepairedRoot(catalogNum int) {
 }
 
 // scanTrailers finds every parseable dictionary following a "trailer" keyword, in file order. Like the object sweep, it
-// resumes past whatever each attempt read — successful or not — so that repeated "trailer <" (whose unterminated hex
+// resumes past whatever each attempt read, successful or not, so that repeated "trailer <" (whose unterminated hex
 // string reads toward end of input) costs one pass over the buffer instead of one per keyword.
 func (d *Document) scanTrailers() []Dict {
 	var trailers []Dict
@@ -193,11 +189,9 @@ func headerBefore(data []byte, idx int) (numStart, num int, ok bool) {
 		return 0, 0, false // The number runs into other regular characters (e.g. "x12 0 obj").
 	}
 	numStart = i + 1
-	// Leading zeros are legal padding ("0000000012 0 obj") and say nothing about the value's magnitude, so they do not
-	// count toward the cheap digit-count rejection: what must fit maxObjectNumber's 8 decimal digits is the significant
-	// part. Rejecting on the token's total length instead skipped well-in-range zero-padded headers the rest of the
-	// repair scan would happily accept. The offset returned is still the padded start, which is where the object's own
-	// header begins.
+	// Leading zeros are legal padding ("0000000012 0 obj") and say nothing about magnitude, so only the significant
+	// digits count toward the cheap rejection against maxObjectNumber's 8 decimal digits. The offset returned is still
+	// the padded start, where the object's header begins.
 	sig := numStart
 	for sig < numEnd && data[sig] == '0' {
 		sig++

@@ -108,8 +108,9 @@ func (b *balanceDevice) PopMask() {
 
 func (b *balanceDevice) FillShading(*shading.Shading, gfx.Matrix, device.Paint) {}
 
-// fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, an ExtGState, an Indexed
-// color space, and a Separation with a calculator tint.
+// fuzzResourcePDF gives the fuzzer real resources to reach into: a self-referential form, a transparency group,
+// ExtGStates with and without soft masks, Indexed and Separation (calculator tint) color spaces, fonts, shadings, and
+// patterns.
 const fuzzResourcePDF = `%PDF-1.7
 1 0 obj
 << /Type /Catalog >>
@@ -243,8 +244,7 @@ func FuzzContent(f *testing.F) {
 	doc, res := fuzzResources()
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dev := &balanceDevice{}
-		// Alternate between a tiny budgeted store (constant eviction) and none (per-Run caches) so both cache layers
-		// fuzz.
+		// Alternate between a tiny budgeted store (constant eviction) and none (per-Run caches) so both cache layers fuzz.
 		var st *store.Store
 		if len(data)%2 == 0 {
 			st = store.New(256)

@@ -17,11 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/type1"
 )
 
-// The COS lexer keeps a numeric literal too large for float64 as the correctly-signed infinity, on the documented
-// understanding that the downstream finiteness guards reject it (internal/cos/lexer.go). lexInf is such a literal;
-// f32Inf is finite as a float64 but overflows the float32 the font metrics narrow to. Both must be rejected, since a
-// non-finite advance poisons the interpreter's text matrix (dropping the rest of the text object) and a non-finite
-// ascender/descender collapses every stext quad to the page origin.
+// lexInf is a numeric literal the COS lexer passes through as ±Inf (internal/cos/lexer.go); f32Inf is finite as a
+// float64 but overflows the float32 the font metrics narrow to. Both must be rejected: a non-finite advance poisons the
+// interpreter's text matrix (dropping the rest of the text object) and a non-finite ascender/descender collapses every
+// stext quad to the page origin.
 var (
 	lexInf = strings.Repeat("9", 400)
 	f32Inf = "1" + strings.Repeat("0", 40)
@@ -142,9 +141,9 @@ func TestCFFMetricsNonFiniteBBoxRejected(t *testing.T) {
 	}
 }
 
-// TestType1NonFiniteFontMatrixOutline verifies glyphPath refuses a non-finite FontMatrix rather than emitting outline
-// points the rasterizer would have to cope with. The type1 parser now rejects such a matrix at its source, so this
-// pins the adapter's own guard directly.
+// TestType1NonFiniteFontMatrixOutline verifies glyphPath refuses a non-finite FontMatrix rather than emitting
+// non-finite outline points. The type1 parser rejects such a matrix at its source, so this pins the adapter's own guard
+// directly.
 func TestType1NonFiniteFontMatrixOutline(t *testing.T) {
 	prog := &type1.Font{
 		Names:       []string{glyphNotdef},
@@ -232,7 +231,7 @@ func TestType3NonFiniteWidthProductIgnored(t *testing.T) {
 	}
 }
 
-// TestSubstituteMetricsNonFiniteDescriptor pins substituteMetrics' own guard. loadDescriptor now rejects a non-finite
+// TestSubstituteMetricsNonFiniteDescriptor pins substituteMetrics' own guard. loadDescriptor rejects a non-finite
 // /Ascent or /Descent before it gets here, so this exercises the function directly: a non-finite slot must fall back to
 // its default rather than becoming the substituted font's Ascender/Descender for every quad.
 func TestSubstituteMetricsNonFiniteDescriptor(t *testing.T) {
@@ -284,15 +283,13 @@ func bcdReal(mantissa, exponent string) []byte {
 	return out
 }
 
-// TestCFFTopDictNonFiniteNarrowingRejected verifies parseCFFTopDict validates /FontBBox and /FontMatrix AFTER the
-// narrowing to float32. parseCFFFloat only rejects a non-finite float64, so a packed-BCD real such as 1e300 — perfectly
-// finite as a float64 — was stored as ±Inf with hasBBox/hasMatrix set. cffTop.metrics guards its own use of the bbox
-// and of matrix[3], but parseCFFGlyphBytes copies the same matrix into cffInfo.matrix, where Font.GlyphPath builds a
-// gfx.Matrix from it and hands it to segmentsToPath unchecked. The two sibling paths both validate at their source
-// (type1.toFloat32 for these exact keys, loadType3's isFiniteF for a Type 3 /FontMatrix); the bare-CFF path was the
-// outlier. go-text's own charstring parser happens to refuse a program carrying such a matrix today, so what this pins
-// is that the rejection is ours and deterministic: the stored matrix is the 0.001 default and hasMatrix stays clear,
-// whatever the glyph layer decides.
+// TestCFFTopDictNonFiniteNarrowingRejected verifies parseCFFTopDict validates /FontBBox and /FontMatrix after the
+// narrowing to float32: parseCFFFloat only rejects a non-finite float64, so a packed-BCD real such as 1e300 narrows to
+// ±Inf. cffTop.metrics guards its own use of the bbox and matrix[3], but parseCFFGlyphBytes copies the matrix into
+// cffInfo.matrix, which Font.GlyphPath hands to segmentsToPath unchecked. The sibling paths validate at their source
+// (type1.toFloat32, loadType3's isFiniteF). go-text's charstring parser happens to refuse such a program today, so what
+// this pins is that the rejection is ours and deterministic: the stored matrix is the 0.001 default and hasMatrix stays
+// clear, whatever the glyph layer decides.
 func TestCFFTopDictNonFiniteNarrowingRejected(t *testing.T) {
 	huge := bcdReal("1", "300") // 1e300: a finite float64, +Inf once narrowed to float32
 	zero := []byte{139}         // the small-integer encoding of 0

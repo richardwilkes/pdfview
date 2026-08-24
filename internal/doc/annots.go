@@ -28,12 +28,12 @@ import (
 //     appearance.
 //   - Placement follows ISO 32000-2 12.5.5: the form's /BBox mapped through its /Matrix yields an axis-aligned bounding
 //     box, and the appearance is translated/scaled so that box coincides with the annotation's normalized /Rect.
-//     Degenerate boxes on either side skip the annotation entirely (probe-pinned), and a reversed /Rect normalizes.
+//     Degenerate boxes on either side skip the annotation entirely, and a reversed /Rect normalizes.
 //   - Annotation opacity (/CA) is ignored — MuPDF's display path draws appearances opaque.
 //
-// MuPDF additionally synthesizes appearance streams for some /AP-less markup annotations (Square and Circle observed,
-// drawing /C borders and /IC interiors). That synthesis is deliberately out of scope: annotations without a usable /AP
-// draw nothing here, and the corpus pins only the /AP path.
+// MuPDF also synthesizes appearance streams for some /AP-less markup annotations (Square and Circle observed, drawing
+// /C borders and /IC interiors). That is out of scope: annotations without a usable /AP draw nothing here, and the
+// corpus pins only the /AP path.
 
 // maxParentDepth caps the /Parent chain walk for the widget /FT lookup so reference cycles terminate.
 const maxParentDepth = 32
@@ -120,8 +120,7 @@ func (d *Document) annotAppearance(annot cos.Dict) (a Annot, ok bool) {
 			}
 		}
 	}
-	// Map the four /BBox corners through /Matrix and take the axis-aligned bounding box, then derive the
-	// translate+scale that carries it onto /Rect (ISO 32000-2 12.5.5).
+	// The 12.5.5 placement: /BBox through /Matrix, its axis-aligned bounds carried onto /Rect.
 	x00, y00 := m.ApplyXY(bbox[0], bbox[1])
 	x10, y10 := m.ApplyXY(bbox[2], bbox[1])
 	x01, y01 := m.ApplyXY(bbox[0], bbox[3])
@@ -130,7 +129,7 @@ func (d *Document) annotAppearance(annot cos.Dict) (a Annot, ok bool) {
 	ty0 := min(min(y00, y10), min(y01, y11))
 	tx1 := max(max(x00, x10), max(x01, x11))
 	ty1 := max(max(y00, y10), max(y01, y11))
-	if !(tx0 < tx1 && ty0 < ty1) { // Degenerate or non-finite transformed box: nothing to place.
+	if !(tx0 < tx1 && ty0 < ty1) { // Degenerate or non-finite box.
 		return a, false
 	}
 	sx := (rect[2] - rect[0]) / (tx1 - tx0)

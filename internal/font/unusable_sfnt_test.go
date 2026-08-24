@@ -78,9 +78,8 @@ func metricsOnlySFNT() []byte {
 
 // TestMetricsOnlySFNTIsNotAnEmbeddedProgram pins the simple-font rule that the shapes and the quad metrics come from
 // the same font. A FontFile2 that parses but renders nothing is not an embedded program: its glyphs come from the
-// Liberation substitute, so its metrics must come from the substitute pins too. Taking ascender/descender from the
-// discarded program left a font drawn by one face and measured by another (0.9/-0.3 here instead of the descriptor's
-// 0.7/-0.15).
+// Liberation substitute, so its metrics must come from the substitute pins too (the descriptor's 0.7/-0.15 here, not
+// the discarded program's 0.9/-0.3).
 func TestMetricsOnlySFNTIsNotAnEmbeddedProgram(t *testing.T) {
 	sfnt := metricsOnlySFNT()
 	f, err := loadFromDict(t,
@@ -135,8 +134,8 @@ func TestMetricsOnlySFNTFallsThroughToNextFontFile(t *testing.T) {
 }
 
 // TestType0MetricsOnlySFNTSubstitutes pins the composite-font counterpart. Font.GlyphPath draws a CIDFontType2 only
-// through the direct glyf walker, so an sfnt without one renders nothing — and keeping it marked the font embedded,
-// suppressing the substitute that could have drawn it. Such a font must substitute instead of vanishing.
+// through the direct glyf walker, so an sfnt without one renders nothing; such a font must substitute instead of
+// vanishing.
 func TestType0MetricsOnlySFNTSubstitutes(t *testing.T) {
 	sfnt := metricsOnlySFNT()
 	f, err := loadFromDict(t,

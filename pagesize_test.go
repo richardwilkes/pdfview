@@ -18,12 +18,10 @@ import (
 	"github.com/richardwilkes/pdfview"
 )
 
-// TestPageRenderSizeMatchesRenderPage pins the property PageRenderSize exists for: the dimensions it reports for a
-// page at a given dpi are exactly the dimensions of the image a RenderPage call at that dpi produces, so a caller can
-// lay out a whole document from PageRenderSize alone and every later render lands in its slot to the pixel. It walks
-// the corpus, skipping files that fail to open or require authentication, and compares every page (capped per file to
-// bound the suite's render time) at more than one dpi. Pages RenderPage itself cannot load are skipped — PageRenderSize
-// stops at the load stage, so raster-stage failures have no dimensions to compare.
+// TestPageRenderSizeMatchesRenderPage pins that PageRenderSize reports exactly the dimensions RenderPage produces at
+// the same dpi, so a caller can lay out a document from PageRenderSize alone. It walks the corpus at two dpis, skipping
+// files that fail to open or need authentication and pages RenderPage cannot load: PageRenderSize stops at the load
+// stage, so a raster-stage failure has no dimensions to compare.
 func TestPageRenderSizeMatchesRenderPage(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join("testfiles", "corpus"))
 	if err != nil {
@@ -65,9 +63,9 @@ func TestPageRenderSizeMatchesRenderPage(t *testing.T) {
 	}
 }
 
-// TestPageSizeContract pins the error contract of PageSize and PageRenderSize on a live document — out-of-range pages
-// report ErrInvalidPageNumber, release flips every call to ErrDocumentReleased — plus the sanity of the values a valid
-// page reports, including the sub-72 dpi floor both PageRenderSize and RenderPage share via dpiToScale.
+// TestPageSizeContract pins the error contract of PageSize and PageRenderSize on a live document (out-of-range pages
+// report ErrInvalidPageNumber, release flips every call to ErrDocumentReleased) plus the sanity of a valid page's
+// values, including the dpi floor PageRenderSize and RenderPage share via dpiToScale, which clamps dpi 0 to 1.
 func TestPageSizeContract(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testfiles", "corpus", "glaive.pdf"))
 	if err != nil {

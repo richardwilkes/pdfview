@@ -273,10 +273,8 @@ func TestRunLength(t *testing.T) {
 	}
 }
 
-// TestRunLengthManyRuns exercises the repeat branch's in-place fill over a stream that is nothing but back-to-back
-// runs — the shape that used to pay one throwaway allocation per encoded run. Every run length from the 2-byte minimum
-// to the 128-byte maximum is covered, and the expansion is checked byte for byte, since filling the grown tail by hand
-// is where an off-by-one would hide.
+// TestRunLengthManyRuns checks the repeat branch's in-place fill byte for byte over a stream of back-to-back runs at
+// every length from 2 to 128, where an off-by-one in filling the grown tail would hide.
 func TestRunLengthManyRuns(t *testing.T) {
 	const runs = 127
 	in := make([]byte, 0, 2*runs+1)
@@ -543,10 +541,9 @@ func TestDecodeChain(t *testing.T) {
 	}
 }
 
-// TestDecodeChainWorkOnFailure verifies that a chain reports the work a FAILED decode performed. A stage that reports
-// ErrTooLarge inflated the whole MaxDecodedSize allowance before saying so, so a caller charging a work budget must be
-// told about those bytes: the input length says nothing about them (a 64 KB zip bomb inflates 64 MB), while a failure
-// that never produced anything must stay cheap so a merely corrupt stream does not exhaust the caller's budget.
+// TestDecodeChainWorkOnFailure pins that a failed chain reports the work it did: a stage reporting ErrTooLarge inflated
+// the whole MaxDecodedSize allowance (a 64 KB zip bomb inflates 64 MB), while a failure that produced nothing must stay
+// cheap so a merely corrupt stream does not exhaust the caller's budget.
 func TestDecodeChainWorkOnFailure(t *testing.T) {
 	bomb := zlibCompress(t, make([]byte, filter.MaxDecodedSize(0)+1))
 	_, decoded, err := filter.DecodeChain([]filter.Spec{spec(flateName)}, bomb)
@@ -587,9 +584,9 @@ func TestUnsupportedFilter(t *testing.T) {
 	}
 }
 
-// TestDecodeMaxSizeCeiling guards against the limit-arithmetic overflow that made readCapped return an empty stream:
-// int64(math.MaxInt)+1 wraps to math.MinInt64, which io.LimitReader treats as immediate EOF. With the largest possible
-// maxSize a valid stream must still decode fully rather than silently emptying.
+// TestDecodeMaxSizeCeiling pins readCapped's limit arithmetic at the largest maxSize: int64(math.MaxInt)+1 wraps to
+// math.MinInt64, which io.LimitReader treats as immediate EOF, so a valid stream must still decode fully rather than
+// silently emptying.
 func TestDecodeMaxSizeCeiling(t *testing.T) {
 	want := []byte(hello)
 	compressed := zlibCompress(t, want)

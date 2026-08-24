@@ -12,6 +12,6 @@
 package render
 
 // maskMissAllocCeiling is the most allocations one glyph coverage-cache miss may make (see
-// TestGlyphMaskMissAllocationsBounded). A miss allocates the coverage plane, the mask that owns it and the cache's own
-// bookkeeping — about 2.5 on average — while the pre-reuse code allocated about 8.5.
+// TestGlyphMaskMissAllocationsBounded). A miss measures about 2.5: the coverage plane, the mask that owns it, and the
+// cache's bookkeeping.
 const maskMissAllocCeiling = 4

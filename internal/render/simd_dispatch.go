@@ -9,13 +9,13 @@
 
 package render
 
-// The seam every vector kernel in this package is swapped in through. Each variable below names the scalar
-// implementation, which is what a default build runs and keeps running; under GOEXPERIMENT=simd, simd_on.go's init
-// repoints it at the vector kernel when the machine has a real vector unit (an emulated one is slower than the scalar
-// code it would replace). Call sites call the variable unconditionally and never test for the experiment.
+// The seam every vector kernel in this package is swapped in through. Each variable names the scalar implementation,
+// which a default build runs; under GOEXPERIMENT=simd, simd_on.go's init repoints it at the vector kernel when the
+// machine has a real vector unit (an emulated one is slower than the scalar code). Call sites call the variable
+// unconditionally and never test for the experiment.
 //
-// Each kernel's own length gate lives inside the kernel, which falls back to the scalar function below its gate, so a
-// short span costs one extra call and nothing else.
+// Each kernel's length gate lives inside the kernel, which falls back to the scalar function below it, so a short span
+// costs one extra call.
 var (
 	compositeMaskSpanFn = compositeMaskSpanScalar
 	lumaPlaneFn         = lumaPlaneScalar

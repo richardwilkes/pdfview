@@ -47,18 +47,17 @@ type Dict map[Name]Object
 
 // Ref is an indirect object reference ("N G R").
 type Ref struct {
-	// Num is the object number.
 	Num int
-	// Gen is the generation number. It is recorded for fidelity and folded into the standard security handler's
-	// per-object key by the object header, but it takes no part in resolution — see RefKey.
+	// Gen is recorded for fidelity only: resolution keys on the number alone (see RefKey), and the decryption key uses
+	// the generation from the object's own header.
 	Gen int
 }
 
 // RefKey is the identity a Ref resolves under, and the type anything keyed by reference must key on. Resolution uses
 // the object number alone: the cross-reference table holds one entry per number and Document.loadObject never consults
-// a generation. Keying on the whole Ref instead makes "4 0 R" and "4 1 R" compare unequal while naming the same object,
-// so a cycle set built from them would not fire on a form that alternates generations and every reference-keyed cache
-// would hold the same resource twice.
+// a generation. Keying on the whole Ref would make "4 0 R" and "4 1 R" compare unequal while naming the same object, so
+// a cycle set would not fire on a form that alternates generations and every reference-keyed cache would hold the same
+// resource twice.
 type RefKey int
 
 // Key returns r's resolution identity, for use as a map key. See RefKey.
@@ -67,9 +66,8 @@ func (r Ref) Key() RefKey { return RefKey(r.Num) }
 // Stream is the PDF stream object: a dictionary plus the raw, still-encoded bytes exactly as stored in the file. Use
 // Document.StreamData to apply the /Filter chain.
 type Stream struct {
-	// Dict is the stream dictionary.
 	Dict Dict
-	// Raw is the raw stream payload, sliced out of the document buffer without decoding.
+	// Raw aliases the document buffer unless a Decryptor replaced it.
 	Raw []byte
 }
 
@@ -93,11 +91,9 @@ func AsInt(obj Object) (int64, bool) {
 		return int64(v), true
 	case Real:
 		f := float64(v)
-		// Reject non-finite reals and any finite real whose (toward-zero) truncation cannot be represented as an
-		// int64: Go leaves an out-of-range float→int conversion implementation-defined, which would yield
-		// platform-dependent results. math.MaxInt64 rounds up to 2^63 as float64, so f >= math.MaxInt64 correctly
-		// rejects everything from 2^63 upward; math.MinInt64 (-2^63) is exact, so f < math.MinInt64 is the matching
-		// lower guard. Both comparisons also absorb ±Inf.
+		// Go leaves an out-of-range float→int conversion implementation-defined, so reject NaN and anything outside
+		// int64. math.MaxInt64 rounds up to 2^63 as float64, so f >= math.MaxInt64 rejects everything from 2^63 up;
+		// math.MinInt64 is exact, so f < math.MinInt64 is the matching lower guard. Both comparisons also absorb ±Inf.
 		if math.IsNaN(f) || f >= math.MaxInt64 || f < math.MinInt64 {
 			return 0, false
 		}

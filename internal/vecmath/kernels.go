@@ -13,16 +13,15 @@ package vecmath
 
 import "simd"
 
-// KernelsSupported reports whether this module's vector kernels may run on the machine the program is on. It is the
-// one question every package's init asks before it points a dispatch variable at a kernel, and two things have to
-// hold for a yes.
+// KernelsSupported reports whether this module's vector kernels may run on this machine. Every package's init asks
+// it before pointing a dispatch variable at a kernel. Two things must hold.
 //
-// The simd package must be driving real vector hardware rather than emulating lanes in scalar Go, because the
-// emulation is slower than the scalar code the kernels replace. simd.Emulated answers that.
+// The simd package must drive real vector hardware rather than emulate lanes in scalar Go, because the emulation is
+// slower than the scalar code the kernels replace. simd.Emulated answers that.
 //
 // The hardware must also carry every instruction the kernels compile to, which simd.Emulated alone does not promise.
-// On amd64 the simd package hands its 128-bit hardware tier to any CPU with AVX, but the broadcasts it emits for
-// Broadcast<Type>s — VBROADCASTSS, VPBROADCASTD and their siblings — and its masked partial loads and stores
+// On amd64 the simd package uses its 128-bit hardware tier on any CPU with AVX, but the broadcasts it emits for
+// Broadcast<Type>s (VBROADCASTSS, VPBROADCASTD and their siblings) and its masked partial loads and stores
 // (VPMASKMOVD) are AVX2, so a CPU with AVX and no AVX2 (Sandy Bridge, Ivy Bridge, AMD's Bulldozer family) passes the
 // emulation check and then dies with an illegal instruction on a kernel's first vector op. archKernelsSupported, in
 // the per-architecture files beside this one, states each port's instruction-set floor.

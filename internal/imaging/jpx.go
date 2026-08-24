@@ -21,35 +21,29 @@ import (
 	"github.com/richardwilkes/pdfview/internal/jpeg2000/jp2"
 )
 
-// isJPX reports whether the codec is JPXDecode. The filter has no abbreviated inline-image spelling, so unlike isDCT
-// and isCCITT one name is the whole test.
+// isJPX reports whether the codec is JPXDecode, which has no abbreviated inline-image spelling.
 func isJPX(codec cos.Name) bool { return codec == codecJPXNames }
 
 // jpxRaster is a decoded JPEG 2000 payload reduced to what the PDF color pipeline consumes: ncomp color samples per
 // pixel normalized to 8 bits, plus the codestream's own opacity channel as straight alpha. The codec's dimensions are
-// authoritative — the dictionary's /Width and /Height only position the unit square, which the CTM maps regardless of
-// resolution — so a dictionary disagreeing with the codestream never distorts the decode.
+// authoritative; the dictionary's /Width and /Height only position the unit square.
 type jpxRaster struct {
 	samples []byte // ncomp bytes per pixel, row-major.
 	alpha   []byte // One byte per pixel, nil when the payload carries no opacity channel.
 	w, h    int
-	ncomp   int // Color components: 1 (gray or palette index), 3 (RGB after the payload's own color transform), or 4 (CMYK).
+	ncomp   int // 1 (gray or palette index), 3 (RGB after the payload's own color transform), or 4 (CMYK).
 }
 
-// decodeJPX handles JPXDecode payloads through the adopted JPEG 2000 decoder, which performs the wavelet, color, and
-// palette work internally and hands back an image whose color channels are already in the payload's rendering space.
-// The PDF semantics layered on top are pinned to the oracle rather than to ISO 32000-2 7.4.9, which MuPDF does not
-// follow: /SMaskInData is ignored entirely, so an embedded opacity channel always applies as straight alpha (never
-// un-premultiplied, whatever the entry says), and an explicit /SMask multiplies onto that alpha through the shared
-// applyMasks path instead of replacing or being ignored. /Decode is likewise ignored, including under the /Indexed
-// override where the specification says it applies. A /ColorSpace entry overrides the payload's own space only when
-// its component count matches what the codestream carries; otherwise the payload wins, the dctSpace rule.
+// decodeJPX handles JPXDecode payloads through internal/jpeg2000, which performs the wavelet, color, and palette work
+// internally. The PDF semantics on top are pinned to the oracle rather than to ISO 32000-2 7.4.9, which MuPDF does not
+// follow: /SMaskInData is ignored, so an embedded opacity channel always applies as straight alpha; an explicit /SMask
+// multiplies onto that alpha through applyMasks; /Decode is ignored, even under the /Indexed override where the
+// specification says it applies; and a /ColorSpace entry overrides the payload's own space only when its component
+// count matches the codestream (the dctSpace rule).
 //
-// The emitted image is always marked Interpolate, whatever the dictionary says. That is not the /Interpolate entry
-// being honored: the oracle smooths JPX samples at every scale, including magnifications where it samples every other
-// codec's images unfiltered (measured against a raw-sample probe of identical geometry — MuPDF blends a JPX image's
-// sample boundaries at 1.5x, 2.1x, and 3.1x, and the same probe's boundaries only below 2x). Reproducing that is what
-// the flag buys here; a renderer-level model of the oracle's own filter choice would subsume it.
+// The image is always marked Interpolate, whatever the dictionary says: the oracle smooths JPX samples at every scale,
+// including magnifications where it samples every other codec's images unfiltered (MuPDF blends a JPX image's sample
+// boundaries at 1.5x, 2.1x, and 3.1x, and a raw-sample probe of identical geometry only below 2x).
 func (dec *decoder) decodeJPX() (*Image, error) {
 	raster, err := dec.jpxRaster()
 	if err != nil {
@@ -66,9 +60,9 @@ func (dec *decoder) decodeJPX() (*Image, error) {
 			raster.put(pix, i, lut[s], &hasAlpha)
 		}
 	case 4:
-		// CMYK converts through the space per pixel, the dctCMYK shape without its Adobe re-inversion: JPX samples
-		// arrive as true ink values, and the oracle renders them through the same ICC-backed DeviceCMYK conversion the
-		// DCT goldens pin (images-jpx-cmyk.pdf matches the k-operator conversion on every patch, both arms).
+		// CMYK converts through the space per pixel, the dctCMYK shape without its Adobe re-inversion: JPX samples are
+		// true ink values, and the oracle renders them through the same ICC-backed DeviceCMYK conversion the DCT
+		// goldens pin (images-jpx-cmyk.pdf matches the k-operator conversion on every patch, both arms).
 		comps := make([]float32, 4)
 		for i := range raster.w * raster.h {
 			for c := range 4 {
@@ -100,10 +94,9 @@ func (r *jpxRaster) put(pix []byte, i int, out stdcolor.NRGBA, hasAlpha *bool) {
 	pix[off], pix[off+1], pix[off+2], pix[off+3] = out.R, out.G, out.B, out.A
 }
 
-// jpxGrayPlane returns the payload's gray bytes for a JPX /SMask, the analog of dctGrayPlane. A soft mask should carry
-// one component; a color payload in that role reduces by the plain mean of the three, truncated. That is the oracle's
-// reduction, not a luminance weighting: a 77/150/28 model misses the golden of images-jpx-smask.pdf by mean 9.4 and
-// max 60 of 255.
+// jpxGrayPlane returns the payload's gray bytes for a JPX /SMask, the analog of dctGrayPlane. A color payload in that
+// role reduces by the plain mean of its components, truncated: the oracle's reduction, not a luminance weighting (a
+// 77/150/28 model misses the golden of images-jpx-smask.pdf by mean 9.4 and max 60 of 255).
 func (dec *decoder) jpxGrayPlane() (gray []byte, w, h int, err error) {
 	raster, err := dec.jpxRaster()
 	if err != nil {
@@ -112,9 +105,8 @@ func (dec *decoder) jpxGrayPlane() (gray []byte, w, h int, err error) {
 	return raster.grayPlane(), raster.w, raster.h, nil
 }
 
-// grayPlane reduces the raster to one byte per pixel: the samples themselves when the payload is single-component,
-// else the truncated mean of the color samples. The three-component mean is the oracle's reduction (see jpxGrayPlane);
-// a four-component payload in a mask role has no oracle pin, so the same mean extends to it as the bounded default.
+// grayPlane reduces the raster to one byte per pixel: the samples themselves for one component, else the truncated
+// mean (see jpxGrayPlane). A four-component payload in a mask role has no oracle pin; the mean is the bounded default.
 func (r *jpxRaster) grayPlane() []byte {
 	if r.ncomp == 1 {
 		return r.samples
@@ -204,25 +196,20 @@ const (
 )
 
 // jpxWantsComponents reports whether the payload must be read as raw codestream components rather than through the
-// decoder's own rendering, and whether a four-component (CMYK) raster is expected. The components path is the
-// exception, never the default: it deliberately applies none of a JP2 container's palette, `cdef`, or color-space
-// machinery, so it may only take over where the PDF layer discards that machinery anyway or where the container
-// carries none.
+// decoder's own rendering, and whether a four-component (CMYK) raster is expected. The components path applies none of
+// a JP2 container's palette, `cdef`, or color-space machinery, so it may only take over where the PDF layer discards
+// that machinery anyway or where the container carries none.
 //
-// A single-component bare codestream always qualifies. It is the one shape whose raw sample values matter rather than
-// their rendered gray — under an /Indexed override each sample is a palette index — and it has no container at all.
-//
-// A JP2 container qualifies in three cases. Under an /Indexed PDF space a single-component container's own pclr/cmap
-// palette is suppressed and its samples are the PDF palette's indices instead, the oracle's rule (images-jpx-ixjp2.pdf
-// pins both halves: the same payload under /DeviceGray keeps the container's palette). An enumerated-CMYK container
-// with exactly four components and no palette, CIELab parameters, or opacity channel must deliver ink values: the
-// decoder's own rendering bakes in a naive CMYK→RGB formula, while the oracle converts through the same ICC-backed
-// DeviceCMYK path as every other CMYK sample source (images-jpx-cmyk.pdf pins both the embedded-colr and the explicit
-// /DeviceCMYK arm to it). Otherwise a container qualifies only to normalize a precision the image path cannot: that
-// path keeps a deep component's high byte, the correct truncation at 16 bits and at no other depth. Precisions of 8
-// and 16 therefore stay on the image path, and so does any container carrying a palette, CIELab parameters, an sYCC
-// enumerated space, or a `cdef` opacity channel — none of which the components path would apply, and none of which
-// the corpus pairs with an odd precision.
+// A single-component bare codestream always qualifies: its raw sample values matter (under an /Indexed override each
+// is a palette index) and it has no container. A JP2 container qualifies in three cases. Under an /Indexed PDF space a
+// single-component container's own pclr/cmap palette is suppressed and its samples are the PDF palette's indices, the
+// oracle's rule (images-jpx-ixjp2.pdf pins both halves: the same payload under /DeviceGray keeps the container's
+// palette). An enumerated-CMYK container with exactly four components and no palette, CIELab parameters, or opacity
+// channel must deliver ink values: the decoder's own rendering bakes in a naive CMYK→RGB formula, while the oracle
+// converts through the ICC-backed DeviceCMYK path (images-jpx-cmyk.pdf pins both arms). Otherwise a container
+// qualifies only to normalize a precision the image path cannot: that path keeps a deep component's high byte, the
+// correct truncation at 16 bits and at no other depth. Precisions of 8 and 16 stay on the image path, and so does any
+// container carrying a palette, CIELab parameters, an sYCC enumerated space, or a `cdef` opacity channel.
 func jpxWantsComponents(payload []byte, bare bool, cfg image.Config, indexed bool) (want, cmyk bool) {
 	if bare {
 		return cfg.ColorModel == stdcolor.GrayModel || cfg.ColorModel == stdcolor.Gray16Model, false
@@ -273,16 +260,15 @@ func jpxIsCodestream(data []byte) bool {
 const jpxMaxComponents = 32
 
 // jpxSizGuard validates the codestream's SIZ marker before the library parses it. The pixel budget alone does not
-// bound the decoder's work: its allocations scale with the declared tile GRID as well as the image area, and a header
-// can declare a budget-compliant image cut into an enormous number of degenerate tiles — the fuzz soak found an
-// 80-byte payload declaring a 16x256048 image (just under the budget floor) in 128024 two-row tiles, which decoded
-// for four seconds over ~300 MB of tile bookkeeping. Every real tile needs at least one SOT header in the payload, so
-// the declared tile count is bounded the way jbig2Caps bounds referred-to segments: by what the payload could
-// actually carry. Subsampling factors of zero and out-of-range component counts are rejected here too, so the library
-// never sees them. Deliberately absent is any JPX-specific absolute pixel cap below maxImagePixels: the sample-count
-// budget is the only JPX-specific bound, accepting the measured worst case of ~90 bytes of peak allocation per pixel
-// (~6 GB for a crafted single-component payload at the cap, ~2 GB for RGB) in exchange for zero oracle divergence at
-// large image sizes.
+// bound the decoder's work: its allocations scale with the declared tile grid as well as the image area, and a header
+// can declare a budget-compliant image cut into an enormous number of degenerate tiles (the fuzz soak found an 80-byte
+// payload declaring a 16x256048 image in 128024 two-row tiles, which decoded for four seconds over ~300 MB of tile
+// bookkeeping). Every real tile needs an SOT header in the payload, so the tile count is bounded by what the payload
+// could carry, as jbig2Caps bounds referred-to segments. Zero subsampling factors and out-of-range component counts
+// are rejected here too. There is deliberately no JPX-specific pixel cap below maxImagePixels: the sample-count budget
+// is the only JPX-specific bound, accepting the measured worst case of ~90 bytes of peak allocation per pixel (~6 GB
+// for a crafted single-component payload at the cap, ~2 GB for RGB) in exchange for zero oracle divergence at large
+// image sizes.
 func jpxSizGuard(payload []byte, bare bool, budget int64) error {
 	cs := payload
 	if !bare {
@@ -313,11 +299,10 @@ func jpxSizGuard(payload []byte, bare bool, budget int64) error {
 			return ErrBadImage // A zero subsampling factor divides by zero somewhere downstream.
 		}
 	}
-	// The budget is charged in samples — pixels times components — not pixels: decode cost scales with the
-	// coefficient planes, so a three-component image is three times the work and memory of a gray one at the same
-	// pixel count. The fuzz soak found a 2250-byte payload declaring a 16.7 Mpx single-component-budget-sized image
-	// with three components; counting samples rejects it while every real encoding passes with orders of magnitude
-	// to spare (the corpus's densest payload decodes under nine pixels per payload byte).
+	// The budget is charged in samples (pixels × components): decode cost scales with the coefficient planes, so a
+	// three-component image is three times the work and memory of a gray one. The fuzz soak found a 2250-byte payload
+	// declaring a 16.7 Mpx image with three components; counting samples rejects it while every real encoding passes
+	// with orders of magnitude to spare (the corpus's densest payload decodes under nine pixels per payload byte).
 	if (xsiz-xo)*(ysiz-yo)*ncomp > budget {
 		return ErrTooLarge
 	}
@@ -410,10 +395,10 @@ func jpxComponentRaster(data []byte, bare bool, budget int64, cmyk bool) (raster
 }
 
 // jpxRasterOf normalizes decoded components into a raster. One component becomes a gray (or palette-index) plane and
-// three become RGB — the codestream's own multiple-component transform has already run, so the three are color — while
-// four are accepted as ink values only when the routing established a CMYK payload. Any other count belongs on the
-// image path. So do components whose native planes disagree in size, which a subsampled or reduced-resolution
-// reconstruction produces: this glue does not upsample, and no corpus payload reaches here with them.
+// three become RGB (the codestream's own multiple-component transform has already run), while four are accepted as ink
+// values only when the routing established a CMYK payload. Any other count belongs on the image path, as do
+// components whose planes disagree in size (a subsampled or reduced-resolution reconstruction): this glue does not
+// upsample, and no corpus payload arrives with them.
 func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, error) {
 	ncomp := len(comps)
 	if ncomp != 1 && ncomp != 3 && (!cmyk || ncomp != 4) {
@@ -423,8 +408,8 @@ func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, er
 	if w <= 0 || h <= 0 {
 		return nil, ErrBadImage
 	}
-	// The decoded planes need not match the header the budget was checked against, so re-check them, as jpxRasterFrom
-	// does for the image path.
+	// The decoded planes need not match the header the budget was checked against, so re-check them (as jpxRasterFrom
+	// does).
 	if int64(w)*int64(h) > budget {
 		return nil, ErrTooLarge
 	}
@@ -437,8 +422,8 @@ func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, er
 	for ci, c := range comps {
 		norm := newJPXNorm(c.Precision)
 		if ncomp == 1 {
-			// A single component stores contiguously, one byte per sample, which is the shape the vector kernel
-			// needs. The 3- and 4-component stores interleave, so they stay scalar.
+			// A single component stores contiguously, the shape the vector kernel needs; the 3- and 4-component stores
+			// interleave, so they stay scalar.
 			normalizePlaneFn(samples, c.Samples[:w*h], norm)
 			continue
 		}
@@ -451,9 +436,9 @@ func jpxRasterOf(comps []j2k.Component, budget int64, cmyk bool) (*jpxRaster, er
 
 // jpxNorm maps one component's samples from the decoder's signed domain onto the 8-bit values this pipeline renders.
 // The oracle shifts and never rounds or rescales: a precision above 8 drops its low bits (v >> (p−8)) and one below 8
-// left-shifts (v << (8−p)), so a 4-bit component's maximum sample 15 renders as 240 and the component never reaches
-// white. Precision alone decides all of it — the decoder documents signed and unsigned components alike as arriving
-// centered on zero with the encoder's DC level shift still subtracted, so the same offset restores both.
+// left-shifts (v << (8−p)), so a 4-bit component's maximum sample 15 renders as 240, never white. Precision alone
+// decides it: the decoder documents signed and unsigned components alike as arriving centered on zero with the
+// encoder's DC level shift still subtracted, so the same offset restores both.
 type jpxNorm struct {
 	offset int64
 	maxVal int64
@@ -474,14 +459,13 @@ func newJPXNorm(precision int) jpxNorm {
 }
 
 // normalizePlaneScalar normalizes a whole component plane into contiguous bytes: at, applied to every sample. dst and
-// samples must be the same length. See normalizePlaneFn for the vector form.
+// samples must be the same length. normalizePlaneFn is the vector form.
 func normalizePlaneScalar(dst []byte, samples []int32, n jpxNorm) {
 	for i, v := range samples[:len(dst)] {
 		dst[i] = n.at(v)
 	}
 }
 
-// at normalizes one sample.
 func (n jpxNorm) at(v int32) byte {
 	s := int64(v) + n.offset
 	if s < 0 {
@@ -498,18 +482,18 @@ func (n jpxNorm) at(v int32) byte {
 // jpxRasterFrom flattens a decoded image into color samples plus straight alpha. The decoder emits image.Gray(16) for
 // one component and image.NRGBA(64) for every color form (RGB, sYCC, CIELab, ICC, CMYK, palette-expanded, and
 // gray+alpha), with alpha 255 where the payload defines no opacity. Deep forms keep only their high byte, since the
-// 16-bit channels hold each sample's raw 0..2^P−1 value: that is exactly the oracle's truncation at 16 bits and wrong
-// at every other depth, which is why jpxWantsComponents routes odd precisions to the components path instead. What
-// still arrives here at an odd precision is the combination that path declines to handle (a palette, CIELab, sYCC, or
-// an opacity channel), where rendering dark is preferred over dropping the container's color machinery.
+// 16-bit channels hold each sample's raw 0..2^P−1 value: exactly the oracle's truncation at 16 bits and wrong at
+// every other depth, which is why jpxWantsComponents routes odd precisions to the components path. What still arrives
+// here at an odd precision is the combination that path declines (a palette, CIELab, sYCC, or an opacity channel),
+// where rendering dark is preferred over dropping the container's color machinery.
 func jpxRasterFrom(img image.Image, budget int64) (*jpxRaster, error) {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	if w <= 0 || h <= 0 {
 		return nil, ErrBadImage
 	}
-	// The decoded image's own bounds are what everything below sizes from, and they need not match the header the
-	// budget was checked against (a reduced-resolution or subsampled reconstruction differs), so re-check them.
+	// The decoded bounds need not match the header the budget was checked against (a reduced-resolution or subsampled
+	// reconstruction differs), so re-check them.
 	if int64(w)*int64(h) > budget {
 		return nil, ErrTooLarge
 	}
@@ -582,8 +566,7 @@ func jpxRasterFrom(img image.Image, budget int64) (*jpxRaster, error) {
 }
 
 // jpxPlaneOK reports whether a decoded image's pixel buffer really holds w by h pixels of n bytes each at stride. The
-// decoder always sizes its buffers that way; checking anyway keeps a future one from turning a mis-sized buffer into a
-// panic escaping this package, which no recover covers here.
+// decoder always sizes its buffers that way; the check keeps a mis-sized buffer from panicking outside any recover.
 func jpxPlaneOK(pix []byte, stride, w, h, n int) bool {
 	return stride >= w*n && len(pix) >= (h-1)*stride+w*n
 }
@@ -622,9 +605,9 @@ func jpxMapping(space pdfcolor.Space) decodeMapping {
 	return m
 }
 
-// jpx3 is the per-pixel conversion for a three-component JPX image, the JPX analog of dct3 without the /Decode and
-// color-key machinery this codec does not use. DeviceRGB — the overwhelmingly common case — reduces to one byte LUT
-// per channel; any other three-component space converts through its ToNRGBA per pixel.
+// jpx3 is the per-pixel conversion for a three-component JPX image: dct3 without the /Decode and color-key machinery
+// this codec does not use. DeviceRGB reduces to one byte LUT per channel; any other three-component space converts
+// through ToNRGBA per pixel.
 type jpx3 struct {
 	space   pdfcolor.Space
 	mapping decodeMapping
@@ -647,7 +630,6 @@ func newJPX3(space pdfcolor.Space, mapping decodeMapping) *jpx3 {
 	return c
 }
 
-// at converts one pixel's three color bytes.
 func (c *jpx3) at(b0, b1, b2 byte) stdcolor.NRGBA {
 	if c.device {
 		return stdcolor.NRGBA{R: c.lut[0][b0], G: c.lut[1][b1], B: c.lut[2][b2], A: 255}

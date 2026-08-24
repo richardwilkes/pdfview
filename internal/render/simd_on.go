@@ -21,12 +21,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
-// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
-// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
-// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
-// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
-// its preference constant says its benchmarks earned it.
+// init points the dispatch variables at the vector kernels this architecture prefers (simd_prefs_<arch>.go). Nothing
+// is repointed unless vecmath.KernelsSupported says the machine can run them: false where the simd package emulates
+// every operation in scalar Go (slower than the scalar code the kernels replace) and on an amd64 CPU with AVX but not
+// AVX2, where the kernels' broadcasts would fault.
 func init() {
 	if !vecmath.KernelsSupported() {
 		return
@@ -43,12 +41,10 @@ func init() {
 }
 
 // Length gates: below these the per-call setup (broadcasts, the scratch fill, the reduction) costs more than the
-// scalar function the kernel replaces, so the kernel calls that function instead. They are vars so the equivalence
-// tests can sweep both sides of each.
+// scalar function, so the kernel calls that instead. They are vars so the equivalence tests can sweep both sides.
 var (
 	// compositeMaskSpanMin is the shortest clipped glyph span, in pixels, the vector blit handles itself. Only the
-	// slivers a clip leaves at a glyph's edge are shorter, and there the group machinery's fixed cost is the whole
-	// cost.
+	// slivers a clip leaves at a glyph's edge are shorter.
 	compositeMaskSpanMin = 4
 	// maskLumaMin is the smallest luminosity plane, in pixels, the vector weighted sum handles itself.
 	maskLumaMin = 64
@@ -57,43 +53,37 @@ var (
 )
 
 // maskLumaChunk is how many pixels maskLumaPlaneSIMD converts per pass. The vector half writes its quotients to a
-// scratch row and the LUT gather then walks that row scalar-wise, so the row is deliberately small enough to stay in
-// L1 between the two passes rather than sized to the whole plane (which is a full mask bbox, often megapixels).
+// scratch row and the LUT gather then walks that row scalar-wise, so the row is kept small enough to stay in L1
+// between the two passes rather than sized to the whole plane (often megapixels).
 const maskLumaChunk = 256
 
 // compositeMaskGroup is how many pixels the blit scans and then acts on at a time. A glyph's coverage plane is mostly
-// runs of 0 outside the outline and runs of 255 inside it, with the interesting values only along the edges, so the
-// kernel looks at a group before touching it. 64 pixels measured best of 16, 32 and 64 on this repo's arm64 machine:
-// it is wider than most glyph spans, so a span is usually one group and the scan, the widening and the arithmetic
-// each run once over it, and it is still fine-grained enough that a big glyph's transparent margin is skipped rather
-// than composited. Every vector width the simd package reports divides it evenly, so a group is a whole number of
-// vectors.
+// runs of 0 outside the outline and runs of 255 inside it, so the kernel looks at a group before touching it. 64
+// measured best of 16, 32 and 64 on arm64: wider than most glyph spans, so a span is usually one group and the scan,
+// the widening and the arithmetic each run once over it, yet fine-grained enough that a big glyph's transparent margin
+// is skipped. Every vector width the simd package reports divides it evenly.
 const compositeMaskGroup = 64
 
-// compositeMaskSpanSIMD is the vector form of compositeMaskSpanScalar, with identical results for every input. drow
-// is the clipped destination span and cov the matching run of coverage bytes, which are widened into a group-sized
-// scratch on the stack on the way to 32-bit lanes — the portable simd API has no u8→u32 widen, and a group is small
-// enough that the scratch never leaves L1 or the frame.
+// compositeMaskSpanSIMD is the vector form of compositeMaskSpanScalar, with identical results for every input. drow is
+// the clipped destination span and cov the matching run of coverage bytes, widened into a group-sized scratch on the
+// stack on the way to 32-bit lanes (the portable simd API has no u8→u32 widen).
 //
-// The scalar loop's c == 0 and c == 255 arms are special cases of its general formula, not different math, so the
-// vector arithmetic below drops the switch entirely: with inv = 255-c, c == 0 gives (dst*255 + 127)/255 == dst, and
-// c == 255 gives (src*255 + 127)/255 == src in every channel (255 for alpha, which is the srcWord the scalar arm
-// stores). TestCompositeMaskSwitchArmsMatchFormula pins both.
+// The scalar loop's c == 0 and c == 255 arms are special cases of its general formula, so the vector arithmetic drops
+// the switch: with inv = 255-c, c == 0 gives (dst*255 + 127)/255 == dst and c == 255 gives (src*255 + 127)/255 == src
+// in every channel. TestCompositeMaskSwitchArmsMatchFormula pins both.
 //
-// The switch still earns its keep a group at a time, though, which is why the group scan is here: what makes the
-// scalar loop fast on glyph coverage is that it writes nothing for a transparent pixel and one word for an opaque
-// one, and a vector kernel that ran the full arithmetic over every pixel regardless would lose to it on everything
-// but the antialiased edges. Or-ing and and-ing the group's bytes together — eight at a time through a uint64, so the
-// scan is a fraction of an operation per pixel — says which of the three cases the whole group is in.
+// The switch still pays a group at a time: the scalar loop writes nothing for a transparent pixel and one word for an
+// opaque one, and a kernel that ran the full arithmetic over every pixel would lose to it everywhere but the
+// antialiased edges. Or-ing and and-ing a group's bytes (eight at a time through a uint64) says which of the three
+// cases the whole group is in.
 func compositeMaskSpanSIMD(drow []uint32, cov []byte, srcR, srcG, srcB uint32) {
 	if len(drow) < compositeMaskSpanMin {
 		compositeMaskSpanScalar(drow, cov, srcR, srcG, srcB)
 		return
 	}
 	n := min(len(drow), len(cov))
-	// Every broadcast below sits inside the branch that needs it: a span is one or two groups wide at body text
-	// sizes, so hoisting them here would build all four for spans that turn out to need none (Go's SSA has neither
-	// loop-invariant code motion nor sinking, so where they are written is where they are built).
+	// Each broadcast sits inside the branch that needs it: a span is one or two groups at body-text sizes, and Go's SSA
+	// neither hoists nor sinks them, so hoisting here would build all four for spans that need none.
 	var probe simd.Uint32s
 	lanes := probe.Len()
 	for base := 0; base < n; base += compositeMaskGroup {
@@ -115,8 +105,7 @@ func compositeMaskSpanSIMD(drow []uint32, cov []byte, srcR, srcG, srcB uint32) {
 			}
 			continue
 		}
-		// The widened coverage is declared here rather than at the top of the function so that a group the two
-		// branches above dispose of never pays for zeroing it.
+		// Declared here so a group the branches above dispose of never pays for zeroing it.
 		var cov32 [compositeMaskGroup]uint32
 		for i, c := range group {
 			cov32[i] = uint32(c)
@@ -136,12 +125,11 @@ func compositeMaskSpanSIMD(drow []uint32, cov []byte, srcR, srcG, srcB uint32) {
 	}
 }
 
-// scanCoverage reduces a run of coverage bytes to the or and the and of all of them, eight bytes at a time: the run
-// is entirely transparent exactly when or is 0, and entirely opaque exactly when and has every bit set. The byte
-// order the load uses does not matter, since nothing here reads a position back — and neither does reading a byte
-// twice, which is what lets a run that does not divide by eight finish with a load that overlaps the one before it
-// rather than a byte-at-a-time loop. A run shorter than eight bytes has no load to overlap, so its bytes are
-// broadcast into all eight positions instead, which folds them into the same pair of accumulators.
+// scanCoverage reduces a run of coverage bytes to the or and the and of all of them, eight bytes at a time: the run is
+// entirely transparent exactly when or is 0, and entirely opaque exactly when and has every bit set. Byte order does
+// not matter, and neither does reading a byte twice, so a run that does not divide by eight finishes with a load that
+// overlaps the one before it. A run shorter than eight bytes has no load to overlap, so each byte is broadcast into
+// all eight positions instead.
 func scanCoverage(cov []byte) (or, and uint64) {
 	const ones = 0x0101010101010101
 	and = ^uint64(0)
@@ -188,8 +176,7 @@ func compositeMaskChannel(src, c, dst, inv simd.Uint32s) simd.Uint32s {
 
 // maskLumaPlaneSIMD is the vector form of lumaPlaneScalar, with identical results for every input. It converts
 // chunk-sized runs of the RGBA readback in pix to maskLuma's weighted quotient in a scratch row on the stack, then
-// walks each run scalar-wise through maskNeutralLUT into plane — the portable simd API has no gather, so the LUT
-// lookup stays where it is.
+// walks each run scalar-wise through maskNeutralLUT into plane (the portable simd API has no gather).
 func maskLumaPlaneSIMD(plane, pix []byte) {
 	if len(plane) < maskLumaMin {
 		lumaPlaneScalar(plane, pix)
@@ -211,14 +198,12 @@ func maskLumaPlaneSIMD(plane, pix []byte) {
 			maskLumaVec(simd.LoadUint8s(src[i*4:]), full, wr, wg, wb, bias).Store(scratch[i:])
 		}
 		if i < n {
-			// The zero-filled lanes past the end of the run convert to 0 and are never read back: StorePart writes
-			// only the n-i entries the run actually has.
+			// The zero-filled lanes past the end of the run are never read back: StorePart writes only n-i entries.
 			v, _ := simd.LoadUint8sPart(src[i*4 : n*4])
 			maskLumaVec(v, full, wr, wg, wb, bias).StorePart(scratch[i:n])
 		}
-		// The index is masked to a byte to index the LUT without a bounds check: the largest quotient the weights
-		// can produce is (252*255 + 126)/252 = 255, so the mask never changes a value, it just says so in a way the
-		// compiler can use.
+		// The byte conversion indexes the LUT without a bounds check; the largest quotient the weights can produce is
+		// (252*255 + 126)/252 = 255, so it never changes a value.
 		out := plane[base : base+n]
 		for j, t := range scratch[:n] {
 			out[j] = maskNeutralLUT[byte(t)]
@@ -251,12 +236,9 @@ const (
 const allFiniteReduceMax = 16
 
 // allFiniteSIMD is the vector form of allFiniteScalar, with identical results for every input. gfx.Point is two packed
-// float32s (asserted above), so the points' backing array is a contiguous run of coordinates that can be scanned
-// without regard to which coordinate belongs to which point.
-//
-// NaN fails every ordered comparison and ±Inf fails this one, so a single |v| <= MaxFloat32 mask catches both, and
-// and-accumulating the masks defers the whole decision to one reduction at the end. That is the same answer the scalar
-// loop's early return gives: both report whether ANY coordinate is non-finite, and neither has side effects.
+// float32s (asserted above), so the points' backing array is a contiguous run of coordinates scanned without regard to
+// which point each belongs to. NaN fails every ordered comparison and ±Inf fails this one, so a single |v| <=
+// MaxFloat32 mask catches both, and and-accumulating the masks defers the decision to one reduction at the end.
 func allFiniteSIMD(pts []gfx.Point) bool {
 	var probe simd.Float32s
 	lanes := probe.Len()

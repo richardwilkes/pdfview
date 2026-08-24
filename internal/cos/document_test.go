@@ -350,9 +350,9 @@ func TestOpenGarbageFails(t *testing.T) {
 	}
 }
 
-// TestOpenCorpus opens every committed corpus file — including the damaged trio and the encrypted set — and requires a
-// usable root, then resolves every object and decodes every unencrypted stream to shake out parsing faults. Behavioral
-// parity with the oracle is asserted separately by TestParity at the repository root.
+// TestOpenCorpus opens every committed corpus file, including the damaged trio and the encrypted set, and requires a
+// usable root, then resolves every object and decodes every unencrypted stream to shake out parsing faults. Parity with
+// the oracle is asserted separately by TestParity at the repository root.
 func TestOpenCorpus(t *testing.T) {
 	dir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(dir)
@@ -464,11 +464,9 @@ func TestImageFilterSplit(t *testing.T) {
 	}
 }
 
-// TestCryptFilterInChain checks how a /Crypt filter in a stream's filter chain is handled, on both the general decode
-// path and the image split. /Identity — named explicitly or left to the default — is a no-op and drops out of the
-// chain; any other crypt filter is refused. The message must say so: document-level encryption is fully supported (it
-// is undone at parse time by internal/crypt), so wording about "encrypted streams" would point a reader at a
-// capability the package has rather than at the one it lacks.
+// TestCryptFilterInChain pins /Crypt handling on both the general decode path and the image split: /Identity, named or
+// defaulted, drops out of the chain; any other crypt filter is refused with a message that names /Crypt and /Identity
+// rather than "encrypted streams", since document-level encryption is supported.
 func TestCryptFilterInChain(t *testing.T) {
 	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
 	d := mustOpen(t, []byte(pdf))
@@ -517,11 +515,8 @@ func TestCryptFilterInChain(t *testing.T) {
 	}
 }
 
-// TestDecodeWorkMetersWhatChainsProduce verifies the decode-work meter counts the bytes a filter chain produced,
-// whether or not it succeeded. That is the one measurement a caller charging a work budget cannot take for itself: a
-// failed decode hands back nothing, yet internal/filter inflates the whole max(64 MB, 256x input) allowance before
-// reporting ErrTooLarge, so pricing such a stream by its input alone values a zip bomb at a thousandth of the work it
-// forced.
+// TestDecodeWorkMetersWhatChainsProduce verifies the meter counts the bytes a filter chain produced whether or not it
+// succeeded; see DecodeWork for why a caller cannot measure that itself.
 func TestDecodeWorkMetersWhatChainsProduce(t *testing.T) {
 	const decoded = "BT ET"
 	var z bytes.Buffer
@@ -577,12 +572,8 @@ func TestDecodeWorkMetersWhatChainsProduce(t *testing.T) {
 	}
 }
 
-// TestFilterChainLengthRejectedBeforeAllocating covers the cost of a /Filter array longer than a chain may be.
-// filter.DecodeChain rejects anything past filter.MaxChainLength, but only after filterNamesAndParms has resolved every
-// entry into a []Name and imageFilterSplit/filterSpecs have built the parallel []filter.Spec: a million-element name
-// array — three megabytes of object-stream payload — cost tens of milliseconds and tens of megabytes of allocation on
-// EVERY StreamData call, and doc.PageContents calls StreamData once per /Contents entry (up to maxContentStreams of
-// them), all able to name that one stream. The length is checked before anything is built.
+// TestFilterChainLengthRejectedBeforeAllocating pins that an over-long /Filter array is refused on length alone, before
+// the []Name and []filter.Spec are built (see filterNamesAndParms), and that a chain at the limit is still accepted.
 func TestFilterChainLengthRejectedBeforeAllocating(t *testing.T) {
 	const pdf = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\nstartxref\n0\n%%EOF\n"
 	d := mustOpen(t, []byte(pdf))
@@ -597,8 +588,7 @@ func TestFilterChainLengthRejectedBeforeAllocating(t *testing.T) {
 	if _, err := d.StreamData(stream); err == nil {
 		t.Error("an over-long /Filter array decoded without error")
 	}
-	// The rejection is on length alone, so it costs nothing to reach: a huge array is refused without the []Name and
-	// []filter.Spec that used to be built first (16 bytes per name and more per spec, per call).
+	// A huge array is refused without building the []Name and []filter.Spec.
 	huge := make(cos.Array, 1<<20)
 	for i := range huge {
 		huge[i] = cos.Name("FlateDecode")

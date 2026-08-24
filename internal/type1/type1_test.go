@@ -21,10 +21,6 @@ import (
 )
 
 // ---- test font builder ----------------------------------------------------------------------------------------
-//
-// buildTestFont assembles a complete, spec-conformant Type 1 program from scratch (clear text, eexec-encrypted private
-// dict, encrypted charstrings) so the parser and interpreter are tested against known geometry. The corpus generator
-// used the same construction; only its output is committed (testfiles/corpus README pattern).
 
 // csNum encodes one charstring number (spec 6.2).
 func csNum(v int) []byte {
@@ -144,8 +140,8 @@ func testGlyphs() map[string][]byte {
 	}
 }
 
-// buildTestFont assembles the full program. hexForm selects PFA-style hex eexec data; pfb wraps the result in PFB
-// segments.
+// buildTestFont assembles a complete Type 1 program (clear text, eexec-encrypted private dict, encrypted charstrings)
+// with known geometry. hexForm selects PFA-style hex eexec data; pfb wraps the result in PFB segments.
 func buildTestFont(hexForm, pfb, stdEncoding bool) []byte {
 	var clearBuf bytes.Buffer
 	clearBuf.WriteString("%!PS-AdobeFont-1.0: TestT1 001.000\n")
@@ -490,15 +486,13 @@ func TestGlyphErrors(t *testing.T) {
 
 // ---- non-finite and out-of-range operands ---------------------------------------------------------------------
 //
-// Type 1's charstring number encoding carries int32s only, but div composes them into arbitrary float64s — including
-// ±Inf and NaN — and the scanner's numbers come from strconv.ParseFloat, which accepts "1e300", "inf" and "nan". Every
-// place either kind of value is converted to an int must reject it in float space, because Go leaves an out-of-range
-// float→int conversion implementation-defined and amd64 and arm64 disagree (amd64 wraps to the minimum integer, arm64
-// saturates and maps NaN to 0). These tests pin the converted results and the behavior that depends on them.
+// Type 1's number encoding carries int32s only, but div composes them into arbitrary float64s, including ±Inf and NaN,
+// and the scanner's numbers come from strconv.ParseFloat, which accepts "1e300", "inf" and "nan". Every conversion of
+// such a value to an int must reject it in float space, since amd64 and arm64 disagree on out-of-range conversions.
 
-// csScaleUp returns a charstring that pushes a seed of 2^30 and then multiplies the top of the stack by 2^30 k times:
-// each repetition of "1 2^30 div div" leaves 2^-30 on top and then divides the value beneath it by that. It is the
-// only way a charstring reaches a value the number encoding cannot express.
+// csScaleUp returns a charstring that pushes 2^30 and then multiplies the top of the stack by 2^30 k times: each
+// "1 2^30 div div" leaves 2^-30 on top and divides the value beneath it by that. It is the only way a charstring
+// reaches a value the number encoding cannot express.
 func csScaleUp(k int) []byte {
 	out := cs(1 << 30)
 	for range k {
@@ -792,10 +786,8 @@ func buildMetricsFont(matrix, bbox string) []byte {
 	return out.Bytes()
 }
 
-// TestParseRejectsNonFiniteMetrics verifies /FontMatrix and /FontBBox are rejected outright when any element does not
-// convert to a finite float32. scanner.next classifies numbers with strconv.ParseFloat, which accepts "inf", "nan" and
-// over-long digit strings, so without the guard the values were stored with HasMatrix/HasBBox set and flowed on to the
-// FontBBox-over-upem metrics (non-finite ascender/descender) and to the outline transform (non-finite path points).
+// TestParseRejectsNonFiniteMetrics pins toFloat32's guard on /FontMatrix and /FontBBox: a non-finite or over-long
+// element rejects the whole declaration and leaves HasMatrix/HasBBox clear, and the rest of the program still parses.
 func TestParseRejectsNonFiniteMetrics(t *testing.T) {
 	const (
 		goodMatrix = "[0.001 0 0 0.001 0 0]"
@@ -846,10 +838,9 @@ func TestParseRejectsNonFiniteMetrics(t *testing.T) {
 	}
 }
 
-// TestIndexToken pins the token-boundary rule the eexec split depends on. The scan runs through bytes.Index for speed,
-// so the cases that matter are the ones where a candidate hit must be rejected and the search resumed from the next
-// byte rather than abandoned: a keyword embedded in a longer name, and one whose only boundary-clean occurrence comes
-// after such a hit.
+// TestIndexToken pins the token-boundary rule the eexec split depends on. The cases that matter are the ones where a
+// bytes.Index hit must be rejected and the search resumed from the next byte: a keyword embedded in a longer name, and
+// one whose only boundary-clean occurrence comes after such a hit.
 func TestIndexToken(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -875,10 +866,8 @@ func TestIndexToken(t *testing.T) {
 
 func TestCallSubrRejectsNonFiniteIndex(t *testing.T) {
 	f := parseTestFont(t, false, false, false)
-	// Subr 0 is replaced with a harmless drawing fragment so a NaN index the CPU happens to map to 0 would produce a
-	// glyph rather than an error: that is exactly the divergence this rejects. Delegating the operand to
-	// psi.LocalSubr's raw int32() narrowing called subr 0 on arm64 (NaN saturates to 0) and errored on amd64 (NaN wraps
-	// to -2^31), so the same font drew different glyphs on different machines.
+	// Subr 0 is a harmless drawing fragment, so a NaN index the CPU maps to 0 would draw a glyph instead of erroring:
+	// psi.LocalSubr's raw int32() narrowing did exactly that on arm64 while amd64 errored.
 	f.Subrs[0] = cs(100, oHlineto, oReturn)
 	for _, tc := range []struct {
 		name string
@@ -911,7 +900,7 @@ func TestCallSubrRejectsNonFiniteIndex(t *testing.T) {
 }
 
 // buildSubrsFont assembles a program whose /Subrs entries end with the given binary-read terminator spelling. The
-// operator names are font-defined, so "NP", "|" and the two-token "noaccess put" are all legal — and the last costs the
+// operator names are font-defined, so "NP", "|" and the two-token "noaccess put" are all legal, and the last costs the
 // scan two tokens per entry.
 func buildSubrsFont(count int, terminator string) []byte {
 	var header bytes.Buffer
@@ -940,11 +929,8 @@ func buildSubrsFont(count int, terminator string) []byte {
 	return out.Bytes()
 }
 
-// TestParseSubrsTerminatorSpellings covers the /Subrs scan budget. The binary-read terminator's name is font-defined,
-// and a font spelling it "noaccess put" instead of the "NP" shorthand costs two tokens per entry: skipKeyword eats
-// "noaccess" and the leftover "put" burns another iteration. Budgeting one iteration per entry silently dropped roughly
-// the second half of such a font's /Subrs array — those slots stayed nil, callsubr on one drew nothing, and the glyphs
-// came out corrupted with no error at all.
+// TestParseSubrsTerminatorSpellings pins the /Subrs scan budget: a font spelling the terminator "noaccess put" costs
+// two tokens per entry, and a one-iteration-per-entry budget dropped the second half of its /Subrs array with no error.
 func TestParseSubrsTerminatorSpellings(t *testing.T) {
 	const count = 24
 	for _, terminator := range []string{"NP", "|", "noaccess put", "noaccess NP"} {

@@ -18,8 +18,8 @@ import (
 )
 
 // drawEdgeImage renders a samples x samples image split into a black half and a white half, without /Interpolate,
-// magnified onto a square device of the given size, and returns a middle row's red channel. The magnification is what
-// the sampling filter turns on: below 2x the oracle blends the sample boundary, at or above 2x it reproduces it hard.
+// magnified onto a square device of the given size, and returns a middle row's red channel. Up to 2x the oracle blends
+// the sample boundary; past 2x it reproduces it hard (see blendsSamples).
 func drawEdgeImage(t *testing.T, samples, deviceSize int) []byte {
 	t.Helper()
 	d, err := New(deviceSize, deviceSize)
@@ -61,8 +61,7 @@ func countIntermediate(row []byte) int {
 	return n
 }
 
-// An image magnified less than 2x has its sample boundary blended even without /Interpolate: the oracle turns
-// interpolation on for any magnification and only drops it again past 2x.
+// An image magnified less than 2x has its sample boundary blended even without /Interpolate.
 func TestImageBlendsBelowDoubleMagnification(t *testing.T) {
 	const samples = 8
 	row := drawEdgeImage(t, samples, samples*3/2) // 1.5x.
@@ -71,7 +70,7 @@ func TestImageBlendsBelowDoubleMagnification(t *testing.T) {
 	}
 }
 
-// At 2x magnification and beyond the oracle drops back to unfiltered sampling, so the boundary must stay hard.
+// Past 2x magnification the oracle drops back to unfiltered sampling, so the boundary must stay hard.
 func TestImageDoesNotBlendAtOrAboveDoubleMagnification(t *testing.T) {
 	const samples = 8
 	for _, size := range []int{samples * 5 / 2, samples * 4} { // 2.5x and 4x.
@@ -81,8 +80,8 @@ func TestImageDoesNotBlendAtOrAboveDoubleMagnification(t *testing.T) {
 	}
 }
 
-// blendsSamples is the whole predicate, so pin its per-axis behavior directly: either axis inside the band turns
-// blending on, either axis past 2x turns it back off, and minification never blends.
+// TestBlendsSamplesPredicate pins the per-axis behavior: either axis inside the band turns blending on, either axis
+// past 2x turns it back off, and minification never blends.
 func TestBlendsSamplesPredicate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -110,9 +109,9 @@ func TestBlendsSamplesPredicate(t *testing.T) {
 	}
 }
 
-// An alpha-carrying image must reach canvas premultiplied: the integer-translation sprite lane blits the bytes
-// unchanged onto the premultiplied surface, so a masked-out sample that kept its color would add that color to whatever
-// it covers.
+// TestMaskedOutSamplesDoNotTintTheBackground pins that an alpha-carrying image reaches canvas premultiplied: the
+// integer-translation sprite lane blits the bytes unchanged onto the premultiplied surface, so a masked-out sample that
+// kept its color would add that color to whatever it covers.
 func TestMaskedOutSamplesDoNotTintTheBackground(t *testing.T) {
 	const dim = 8
 	d, err := New(dim, dim)

@@ -16,9 +16,8 @@ import (
 	"testing"
 )
 
-// TestScalarWiring locks that the default build's dispatch variables still point at the scalar loops. Nothing in
-// this build should be able to reach a vector kernel — simd_on.go is not compiled into it at all — and this is the
-// test that says so out loud. The experiment build's TestSIMDWiring is the mirror of it.
+// TestScalarWiring locks that the default build's dispatch variables still point at the scalar loops: simd_on.go is
+// not compiled into this build, so nothing can reach a vector kernel. The experiment build's TestSIMDWiring mirrors it.
 func TestScalarWiring(t *testing.T) {
 	for name, pair := range map[string][2]any{
 		"applyRCTFn":      {applyRCTFn, applyRCTScalar},

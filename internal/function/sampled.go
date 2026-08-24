@@ -47,12 +47,12 @@ func parseSampled(d *cos.Document, stream *cos.Stream, c common) (Func, error) {
 	}
 	s.size = make([]int, m)
 	for i, v := range sizes {
-		// The per-dimension bound is applied in float space, BEFORE the conversion. narrowAll has only established that v
-		// is a finite float32, and a /Size entry of 1 followed by 30 zeros is finite yet far outside int64's range, where
-		// Go leaves the conversion implementation-defined and the platforms disagree: amd64 wraps to math.MinInt64, arm64
-		// saturates to math.MaxInt64. Testing the float keeps the rejection identical everywhere, as every peer
-		// conversion in the engine does (render.clampDim, function.psToInt32, type1.toInt64).
-		if !(v >= 1) || v > maxSampleSize { // The !(v >= 1) form catches NaN along with everything under one sample.
+		// The bound is applied in float space, BEFORE the conversion. narrowAll only established that v is a finite
+		// float32, and a /Size of 1 followed by 30 zeros is finite yet far outside int64, where Go leaves the conversion
+		// implementation-defined and the platforms disagree: amd64 wraps to math.MinInt64, arm64 saturates to
+		// math.MaxInt64. Testing the float keeps the rejection identical everywhere, as render.clampDim, psToInt32, and
+		// type1.toInt64 do.
+		if !(v >= 1) || v > maxSampleSize { // !(v >= 1) also catches NaN.
 			return nil, errBadSampled
 		}
 		s.size[i] = int(v)
@@ -172,7 +172,7 @@ func (s *sampled) readBits(index int) uint32 {
 	for got := 0; got < s.bps; {
 		byteIdx := bitPos >> 3
 		if byteIdx >= uint64(len(s.data)) {
-			return v << (s.bps - got) // Truncated data reads as zero bits (parse validated the size, so only hostile edits hit this).
+			return v << (s.bps - got) // Truncated data reads as zero bits.
 		}
 		bitOff := int(bitPos & 7)
 		avail := 8 - bitOff

@@ -21,14 +21,14 @@ import (
 
 // Soft masks (ISO 32000-2 11.6.5). The ExtGState /SMask entry installs a mask that gates every subsequent painting
 // operation's alpha until /SMask /None (or Q) clears it. The mask's coordinates are anchored to the CTM in effect when
-// the gs operator set it — NOT the CTM at paint time (oracle-pinned: a cm between gs and the paint does not move the
-// mask) — composed with the mask form's own /Matrix. For each wrapped painting operation the interpreter emits
+// the gs operator set it, NOT the CTM at paint time (oracle-pinned: a cm between gs and the paint does not move the
+// mask), composed with the mask form's own /Matrix. For each wrapped painting operation the interpreter emits
 // BeginMask, replays the mask form's content (as an isolated group: alpha, blend, and soft mask reset), then EndMask,
 // the operation itself (with its constant alpha and blend lifted into an enclosing BeginGroup so the mask gates alpha
-// BEFORE the blend composite — oracle-pinned by the blend-under-mask probe), then PopMask.
+// BEFORE the blend composite, oracle-pinned), then PopMask.
 
 // softMaskRes is one parsed ExtGState /SMask value (the CTM-independent part; the anchoring CTM is captured separately
-// in the graphics state, mirroring fillPattern/fillPatCTM).
+// in the graphics state, like fillPattern/fillPatCTM).
 type softMaskRes struct {
 	resources  cos.Dict
 	body       []byte
@@ -41,8 +41,8 @@ type softMaskRes struct {
 	luminosity bool
 }
 
-// parseSoftMask resolves an ExtGState /SMask entry: nil for /None (and anything unusable, the viewer-conventional
-// degrade — an unusable mask must not silently erase content).
+// parseSoftMask resolves an ExtGState /SMask entry: nil for /None and for anything unusable (the viewer-conventional
+// degrade; an unusable mask must not silently erase content).
 func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 	resolved := in.doc.Resolve(obj)
 	dict, ok := cos.AsDict(resolved)
@@ -77,7 +77,7 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 		// /BC is interpreted in the mask group's /CS color space; default black. The converted NRGBA is the mask
 		// surface's prefill, so areas outside the group's BBox take the backdrop's luminosity (oracle-pinned: /BC [1]
 		// with a small BBox leaves the outside fully unmasked).
-		space := pdfcolor.DeviceGray // Space-typed; the /CS default for luminosity masks.
+		space := pdfcolor.DeviceGray // The /CS default for luminosity masks.
 		if groupDict, has := in.doc.GetDict(stream.Dict, "Group"); has {
 			if csObj, hasCS := groupDict["CS"]; hasCS {
 				if parsed, csErr := pdfcolor.Parse(in.doc, csObj); csErr == nil {
@@ -85,14 +85,11 @@ func (in *interp) parseSoftMask(obj cos.Object) *softMaskRes {
 				}
 			}
 		}
-		// Each /BC entry overwrites the matching component of the space's initial color in place; an empty array, a
-		// short one, a non-numeric entry, a non-finite one, or a trailing surplus therefore leaves the untouched
-		// components at their defaults rather than reading as 0. Truncating first would turn a malformed /BC on a
-		// DeviceCMYK mask group from the correct black backdrop into white, which inverts what the area outside the
-		// group's BBox does. The finiteness test comes AFTER the narrowing, like every other narrowing site in the
-		// engine: a legal PDF number past float32's range (1e39) narrows to ±Inf, and this backdrop is the coverage
-		// every pixel outside the mask's bbox takes, so it must not reach the space's conversion for the consumers'
-		// clamps to absorb.
+		// Each /BC entry overwrites the matching component of the space's initial color in place, so an empty, short,
+		// non-numeric, non-finite, or surplus entry leaves the other components at their defaults rather than 0:
+		// truncating first would turn a malformed /BC on a DeviceCMYK mask group from the correct black backdrop into
+		// white (TestSoftMaskBackdropBC). The finiteness test comes AFTER the narrowing: a legal PDF number past
+		// float32's range narrows to ±Inf, and this backdrop is the coverage every pixel outside the mask's bbox takes.
 		comps := space.Initial()
 		if arr, has := in.doc.GetArray(dict, "BC"); has {
 			for i, entry := range arr {
@@ -187,16 +184,14 @@ func (in *interp) masked(alpha float64, body func()) {
 	}
 }
 
-// replayMask emits BeginMask, runs the mask form's content with the form-XObject discipline (depth cap, cycle set,
-// a per-replay body charge against the shared budget; the mask group renders as an isolated group: alpha 1, blend
-// Normal, no soft mask), and emits EndMask.
-// anchor is the CTM captured when the gs operator installed the mask. When the content cannot replay (recursion
-// limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
+// replayMask emits BeginMask, runs the mask form's content with the form-XObject discipline (depth cap, cycle set, a
+// per-replay body charge; the mask group renders as an isolated group: alpha 1, blend Normal, no soft mask), and emits
+// EndMask. anchor is the CTM captured when the gs operator installed the mask. When the content cannot replay
+// (recursion limits), the mask degrades to its backdrop alone; the Begin/End pairing always holds.
 func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
-	// Finite operands can still multiply to a NaN/Inf CTM (and a finite CTM against a large /BBox can overflow the
-	// mapped corners), so the bbox is validated before it crosses the device seam: an unusable one degrades to the empty
-	// rect rather than handing the device geometry it must re-check. The content replay below is skipped for the same
-	// reason.
+	// Finite operands can still multiply to a NaN/Inf CTM, and a finite CTM against a large /BBox can overflow the
+	// mapped corners, so the bbox is validated before it crosses the device seam: an unusable one degrades to the empty
+	// rect. The content replay below is skipped for the same reason.
 	ctm := sm.matrix.Mul(anchor)
 	bbox := gfx.Rect{}
 	if ctm.IsFinite() {
@@ -222,9 +217,8 @@ func (in *interp) replayMask(sm *softMaskRes, anchor gfx.Matrix) {
 	in.gs.ctm = ctm
 	in.gs.fillAlpha, in.gs.strokeAlpha, in.gs.blend, in.gs.softMask = 1, 1, device.BlendNormal, nil
 	clip := &gfx.Path{}
-	// Corner form for the same reason the device-space bbox above is re-validated: X1-X0 overflows to +Inf for a box
-	// spanning more than float32's range, and the non-finite corners Rect would emit lose the clip entirely — mask
-	// content that belongs inside the box would then paint everywhere.
+	// Corner form: X1-X0 overflows to +Inf for a box spanning more than float32's range, and the non-finite corners
+	// Rect would emit lose the clip entirely, so mask content that belongs inside the box would paint everywhere.
 	clip.RectCorners(sm.bbox.X0, sm.bbox.Y0, sm.bbox.X1, sm.bbox.Y1)
 	in.dev.ClipPath(clip, false, in.gs.ctm)
 	in.gs.clips++

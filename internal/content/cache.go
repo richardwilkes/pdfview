@@ -11,9 +11,9 @@ package content
 
 import "container/list"
 
-// lruCache is the count-bounded LRU backing the per-Run image and font caches when no budgeted store is wired. It keeps
-// the most-recently-used cap entries (negative entries included — a nil value caches a decode/load failure), so a
-// resource used once stays cached until cap newer distinct resources displace it.
+// lruCache is the count-bounded LRU behind the per-Run caches: runCaches always, and the image and font caches when no
+// budgeted store is wired. It keeps the most-recently-used cap entries (negative entries included: a nil value caches a
+// decode/load failure), so a resource used once stays cached until cap newer distinct resources displace it.
 type lruCache[K comparable, V any] struct {
 	entries map[K]*list.Element
 	order   *list.List // Front = most recently used.
@@ -26,7 +26,6 @@ type lruEntry[K comparable, V any] struct {
 	val V
 }
 
-// newLRUCache returns an lruCache holding at most capacity entries.
 func newLRUCache[K comparable, V any](capacity int) *lruCache[K, V] {
 	return &lruCache[K, V]{
 		entries: make(map[K]*list.Element),
@@ -36,8 +35,8 @@ func newLRUCache[K comparable, V any](capacity int) *lruCache[K, V] {
 }
 
 // get returns the cached value for key and marks it most recently used. The bool distinguishes a cached value
-// (including a nil negative entry) from a miss. A nil cache — what an interpreter with a budgeted store carries, since
-// the store replaces this fallback — reports a miss.
+// (including a nil negative entry) from a miss. A nil cache (what an interpreter with a budgeted store carries) reports
+// a miss.
 func (c *lruCache[K, V]) get(key K) (V, bool) {
 	if c == nil {
 		var zero V
@@ -53,8 +52,7 @@ func (c *lruCache[K, V]) get(key K) (V, bool) {
 	return zero, false
 }
 
-// put inserts or updates key, evicting the least-recently-used entry when the capacity would be exceeded. A nil cache
-// discards the value (see get).
+// put inserts or updates key, evicting the least recently used entry past cap. A nil cache discards the value.
 func (c *lruCache[K, V]) put(key K, val V) {
 	if c == nil {
 		return

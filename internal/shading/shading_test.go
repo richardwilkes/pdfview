@@ -316,11 +316,10 @@ func TestBitReader(t *testing.T) {
 	}
 }
 
-// TestOverRangeGeometryRejected covers isFinite, which was applied to the float64 while every caller stores float32(v).
-// "1" followed by 39 zeros is a legal PDF number and a finite float64, but ±Inf once narrowed — so /Coords, /Domain,
-// /Matrix, /BBox, and a mesh's /Decode could all hold ±Inf in what this package documents as a normalized form of pure
-// geometry. internal/render's withShadingBBox asserts the opposite: that rectFrom validates the four /BBox entries
-// "exactly as content.rectFrom does for a form's box", and content.rectFrom checks after narrowing.
+// TestOverRangeGeometryRejected pins isFinite's check on the narrowed float32: 1 followed by 39 zeros is a legal PDF
+// number and a finite float64 but ±Inf as a float32, and /Coords, /Domain, /Matrix, /BBox, and a mesh's /Decode all
+// store float32. internal/render's withShadingBBox relies on rectFrom rejecting such /BBox entries as content.rectFrom
+// does for a form's box.
 func TestOverRangeGeometryRejected(t *testing.T) {
 	d := testDoc(t)
 	huge := cos.Real(1e39) // Finite as a float64; +Inf once narrowed to float32.
@@ -414,9 +413,8 @@ func TestOverRangeGeometryRejected(t *testing.T) {
 	})
 }
 
-// TestGridSize pins the evaluation grid a device realizes a function-based shading on. It lives here rather than in the
-// device because the interpreter's work budget is charged for the same grid: a type 1 shading is re-realized per
-// painting operation, so the charge and the realization must agree on how many function evaluations one operation
+// TestGridSize pins the evaluation grid a device realizes a function-based shading on; the interpreter's work budget is
+// charged for the same grid, so the charge and the realization must agree on how many evaluations one operation
 // implies.
 func TestGridSize(t *testing.T) {
 	unit := func(m gfx.Matrix) *Shading {
@@ -436,8 +434,7 @@ func TestGridSize(t *testing.T) {
 			sh: unit(gfx.Matrix{A: 1e-6, D: 1e-6}), name: "a sub-pixel extent is one cell", m: gfx.Identity(),
 			w: 1, h: 1, ok: true,
 		},
-		// Over-range extents clamp in float space: an int-space clamp would read amd64's math.MinInt64 as "too small" and
-		// round the grid UP to a single flat-colored cell, while arm64 saturated the other way.
+		// Over-range extents clamp in float space (see clampGridDim).
 		{
 			sh: unit(gfx.Matrix{A: 1e30, D: 1e30}), name: "an over-range extent clamps", m: gfx.Identity(),
 			w: MaxGridDim, h: MaxGridDim, ok: true,
@@ -470,10 +467,8 @@ func TestGridSize(t *testing.T) {
 	}
 }
 
-// TestLatticeRowWidthBound pins the type 5 vertex budget. parseLattice needs a two-row floor (a lattice with one row
-// forms no triangles), so validating /VerticesPerRow only against maxMeshVertices let a row width above the halfway
-// point read — and allocate — two rows of up to maxMeshVertices vertices each, twice the documented cap. The row width
-// itself carries the bound now.
+// TestLatticeRowWidthBound pins /VerticesPerRow at maxMeshVertices/2: parseLattice reads at least two rows before any
+// triangle forms, so a wider row would let it read and allocate up to twice the vertex budget.
 func TestLatticeRowWidthBound(t *testing.T) {
 	d := testDoc(t)
 	for _, tc := range []struct {
@@ -494,7 +489,7 @@ func TestLatticeRowWidthBound(t *testing.T) {
 
 	// At the cap the reader stops after the two rows the floor allows, consuming exactly maxMeshVertices vertices even
 	// when the payload holds more. Three bits per vertex (1-bit coordinates, one 1-bit color value) keeps the payload
-	// small; the position after the read is what pins the consumption.
+	// small; the bit position after the read pins the consumption.
 	const perRow = maxMeshVertices / 2
 	m := meshDecode{
 		space:  pdfcolor.DeviceGray,
@@ -516,12 +511,10 @@ func TestLatticeRowWidthBound(t *testing.T) {
 // be16 appends one big-endian 16-bit raw field.
 func be16(v int) []byte { return []byte{byte(v >> 8), byte(v)} }
 
-// uniformTriMesh builds a type 4 free-form mesh of n independent single-component triangles with 16-bit coordinates and
-// 16-bit color values. Every vertex carries the edge flag 0, so each triple is its own triangle, and all three vertices
-// of a triangle share one color value — which makes the tessellation exact: a uniform triangle has zero color spread,
-// so it never subdivides and the output triangle count reports exactly how many the parse managed to read. With
-// distinct set, triangle k carries raw color k (n distinct tuples for the memo to miss on); otherwise every triangle
-// carries the same one.
+// uniformTriMesh builds a type 4 mesh of n independent single-component triangles with 16-bit coordinates and color
+// values. Every vertex carries edge flag 0 and all three vertices of a triangle share one color value, so no triangle
+// subdivides and the output count reports exactly how many the parse read. With distinct set, triangle k carries raw
+// color k (n distinct tuples for the memo to miss on); otherwise every triangle carries the same one.
 func uniformTriMesh(n int, distinct bool, extra cos.Dict) *cos.Stream {
 	dict := cos.Dict{
 		keyShadingType: cos.Integer(4),
@@ -553,12 +546,10 @@ func uniformTriMesh(n int, distinct bool, extra cos.Dict) *cos.Stream {
 	return &cos.Stream{Dict: dict, Raw: data}
 }
 
-// TestMeshColorEvalBudget pins the per-parse bound on the PDF function evaluations a mesh's colors can force. A mesh
-// declares its own vertex count through its payload, so a shading whose colors run a /Function — or whose space is a
-// /Separation or /DeviceN, whose ToNRGBA runs a tint transform per call — could force up to one evaluation per vertex,
-// ~131,072 of them, while internal/content prices the whole parse at the flat shadingParseCost on the documented
-// assumption that a shading parse evaluates a function 256 times. Pointed at an expensive type 4 function, a few
-// hundred kilobytes bought minutes of CPU.
+// TestMeshColorEvalBudget pins maxMeshColorEvals. A mesh declares its own vertex count through its payload, so colors
+// that run a /Function or a /Separation or /DeviceN tint transform could force one evaluation per vertex against a
+// parse priced at the flat shadingParseCost; pointed at an expensive type 4 function, a few hundred kilobytes bought
+// minutes of CPU.
 func TestMeshColorEvalBudget(t *testing.T) {
 	d := testDoc(t)
 	const n = maxMeshColorEvals + 100
@@ -609,9 +600,8 @@ func TestMeshColorEvalBudget(t *testing.T) {
 	}
 }
 
-// TestSingleFunctionArray covers the one-element /Function array. Table 78 asks for one 1-output function per color
-// component, but a single n-output function wrapped in a one-element array is common enough that MuPDF and pdf.js both
-// accept it; rejecting it on array length alone made an ordinary DeviceRGB gradient parse to nothing and paint nothing.
+// TestSingleFunctionArray pins the one-element /Function array: non-conforming per Table 78, but common in ordinary
+// DeviceRGB gradients and accepted by MuPDF and pdf.js.
 func TestSingleFunctionArray(t *testing.T) {
 	d := testDoc(t)
 	rgb := expFn(cos.Array{cos.Real(1), cos.Real(0), cos.Real(0)}, cos.Array{cos.Real(0), cos.Real(0), cos.Real(1)})
@@ -650,10 +640,8 @@ func TestSingleFunctionArray(t *testing.T) {
 	}
 }
 
-// TestMeshBitWidthsCheckedAsInt64 pins /BitsPerCoordinate, /BitsPerComponent and /BitsPerFlag to the value the file
-// declared rather than to its narrowing: only the widths the standard lists are legal, and a declared width far outside
-// int range (where Go leaves int(v) implementation-defined) has to be rejected before it is narrowed or decoded from.
-// /VerticesPerRow, /ShadingType and /hival are all checked as int64 already.
+// TestMeshBitWidthsCheckedAsInt64 pins /BitsPerCoordinate, /BitsPerComponent and /BitsPerFlag to the int64 the file
+// declared: a width that is legal only in its low 32 bits must be rejected before it is narrowed.
 func TestMeshBitWidthsCheckedAsInt64(t *testing.T) {
 	// validBits sees the declared int64: a value whose low 32 bits are legal is not.
 	for _, v := range []int64{1<<32 + 16, 1<<32 + 8, 1<<32 + 2} {
@@ -682,10 +670,9 @@ func TestMeshBitWidthsCheckedAsInt64(t *testing.T) {
 	}
 }
 
-// TestLatticeKeepsEveryTriangle pins the input-triangle budget against the shape a lattice actually produces. A
-// rows x perRow lattice within the vertex budget forms 2*(rows-1)*(perRow-1) triangles — nearly two per vertex — so
-// capping the builder's input at maxMeshVertices silently discarded the second half of a wholly legal type 5 stream:
-// a 256x256 lattice recorded 65536 of its 130050 triangles and the bottom of the shading was never painted.
+// TestLatticeKeepsEveryTriangle pins maxMeshInputTris against the shape a lattice produces: a rows x perRow lattice
+// within the vertex budget forms 2*(rows-1)*(perRow-1) triangles, nearly two per vertex, so a 256x256 lattice must
+// record all 130050 of them.
 func TestLatticeKeepsEveryTriangle(t *testing.T) {
 	const perRow = 256
 	const rows = maxMeshVertices / perRow

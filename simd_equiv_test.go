@@ -46,9 +46,8 @@ func diff(got, want []byte) int {
 	return -1
 }
 
-// TestUnpremultiplyWiring checks that the dispatch variable points where this architecture's preference constant says
-// it should: at the vector kernel where the kernel is preferred, and at the scalar loop where it is not. Everything
-// else in this file tests the kernel directly, so this is the one check that the kernel is what a render runs.
+// TestUnpremultiplyWiring pins that the dispatch variable points where preferUnpremultiply says: at the vector kernel
+// when preferred, else at the scalar loop. Everything else in this file tests the kernel directly.
 func TestUnpremultiplyWiring(t *testing.T) {
 	if !vecmath.KernelsSupported() {
 		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
@@ -64,12 +63,10 @@ func TestUnpremultiplyWiring(t *testing.T) {
 	}
 }
 
-// TestUnpremultiplySIMDExhaustive proves the kernel over every (component, alpha) pair there is, not a sample of
-// them. The reciprocal multiply the kernel divides with is not exact on its own — the whole reason the nudge and the
-// multiply-back correction exist — so nothing short of the full 256×256 grid is evidence that the correction lands on
-// the integer quotient every time. Each row of the grid also carries two derived components in the green and blue
-// channels, so the assembly of the three channels back into a pixel is proven alongside the arithmetic, and alpha 0
-// and 255 prove the pass-through arms.
+// TestUnpremultiplySIMDExhaustive proves the kernel over every (component, alpha) pair: the reciprocal multiply is not
+// exact on its own (hence the nudge and the multiply-back correction), so only the full 256×256 grid is evidence that
+// the correction lands on the integer quotient every time. The green and blue channels carry derived components, so
+// the reassembly of a pixel is proven alongside the arithmetic; alpha 0 and 255 prove the pass-through arms.
 func TestUnpremultiplySIMDExhaustive(t *testing.T) {
 	for a := range 256 {
 		pix := make([]byte, 256*4)
@@ -88,10 +85,9 @@ func TestUnpremultiplySIMDExhaustive(t *testing.T) {
 	}
 }
 
-// TestUnpremultiplySIMDMatchesScalar walks every buffer length from empty through four vectors plus a few bytes, so
-// each run covers the full-vector body, every tail length the LoadPart/StorePart pair has to handle, and the trailing
-// bytes that do not complete a pixel (which both arms must leave exactly as they found them). The data is random
-// rather than valid premultiplied pixels on purpose: components above their alpha are what exercise the clamp.
+// TestUnpremultiplySIMDMatchesScalar walks every buffer length from empty through four vectors plus a few bytes: the
+// full-vector body, every tail length LoadPart/StorePart handle, and trailing bytes that do not complete a pixel (which
+// both arms must leave as they found them). Random bytes rather than valid premultiplied pixels exercise the clamp.
 func TestUnpremultiplySIMDMatchesScalar(t *testing.T) {
 	wasMin := unpremultiplyMin
 	t.Cleanup(func() { unpremultiplyMin = wasMin })
@@ -110,10 +106,9 @@ func TestUnpremultiplySIMDMatchesScalar(t *testing.T) {
 	}
 }
 
-// TestUnpremultiplySIMDAlphaMixes runs buffers whose alphas mix the pass-through values with translucent ones inside
-// the same vector and the same chunk, which is what the mask-and-select half of the kernel and its whole-chunk skip
-// exist for: neighboring lanes take different arms, a lane that should have been left alone must come back
-// untouched, and a chunk that looks skippable must not be skipped when one pixel in it is not.
+// TestUnpremultiplySIMDAlphaMixes mixes pass-through alphas with translucent ones inside one vector and one chunk,
+// which is what the mask-and-select and the whole-chunk skip exist for: a lane that should be left alone must come
+// back untouched, and a chunk must not be skipped when one pixel in it needs work.
 func TestUnpremultiplySIMDAlphaMixes(t *testing.T) {
 	wasMin := unpremultiplyMin
 	t.Cleanup(func() { unpremultiplyMin = wasMin })

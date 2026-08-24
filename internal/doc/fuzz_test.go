@@ -22,10 +22,9 @@ import (
 // FuzzOpen drives the whole non-cryptographic engine surface with arbitrary bytes: document open (xref parsing and the
 // repair scan), the page-tree walk (including geometry capture), the navigation layer (outline walk, link annotations,
 // and through them destination arrays, named-destination lookup in both stores, and URI classification), the
-// /PageLabels number-tree flattener and every label style it can format, resolution of every cross-referenced object,
-// and stream decoding through the filter chain. Nothing here may panic or fail to
-// terminate; errors are expected and fine. Every committed corpus file is a seed, so the classic-xref, xref-stream,
-// object-stream, damaged, and encrypted shapes all mutate.
+// /PageLabels number-tree flattener and every label style, resolution of every cross-referenced object, and stream
+// decoding through the filter chain. Nothing here may panic or fail to terminate; errors are expected. Every committed
+// corpus file is a seed, so the classic-xref, xref-stream, object-stream, damaged, and encrypted shapes all mutate.
 func FuzzOpen(f *testing.F) {
 	corpusDir := filepath.Join("..", "..", "testfiles", "corpus")
 	entries, err := os.ReadDir(corpusDir)

@@ -13,14 +13,13 @@ package wavelet
 
 // Which sweeps this architecture prefers. A false constant leaves that dispatch variable on its scalar default, so a
 // kernel that loses its benchmark is switched off here rather than deleted — the code, its equivalence tests, and its
-// benchmark all stay, and the decision is one word.
+// benchmark all stay.
 //
-// These values are settled per architecture from simd-bench.sh benchstat results. Settled 2026-08-21 on an Intel
-// Xeon W-2191B (Skylake-X): the 5/3 vertical sweeps LOST 10-13% against the scalar loops there — the arm64 win does
-// not carry over — so both are off. The 9/7 scale sweep ran with its constant already false in that dataset, so its
-// on-state has no amd64 measurement; it stays off. Note from the same run: the whole wavelet package's scalar code
-// was a few percent slower under the experiment build on this box even with every kernel off, so any retest must
-// compare against the default build, not just in-binary A/B.
+// Settled from simd-bench.sh benchstat results on an Intel Xeon W-2191B (Skylake-X): the 5/3 vertical sweeps lost
+// 10-13% against the scalar loops there — the arm64 win does not carry over — so both are off. The 9/7 scale sweep
+// ran with its constant already false, so its on-state has no amd64 measurement; it stays off. The whole package's
+// scalar code was a few percent slower under the experiment build on that box even with every kernel off, so a retest
+// must compare against the default build, not only in-binary A/B.
 const (
 	preferSub53Sweep   = false
 	preferAdd53Sweep   = false

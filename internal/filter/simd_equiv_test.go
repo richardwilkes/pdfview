@@ -32,9 +32,9 @@ type wiring struct {
 }
 
 // TestSIMDWiring locks that init pointed every dispatch variable where simd_prefs_<arch>.go says it belongs: at the
-// vector kernel where this architecture prefers it, and at the scalar function where its benchmark did not earn the
-// swap. A refactor cannot silently leave the experiment build running the scalar code the rest of this file compares
-// against, nor silently switch on a kernel that was turned off deliberately.
+// vector kernel where this architecture prefers it, at the scalar function where its benchmark did not earn the swap.
+// A refactor can then neither leave the experiment build running the scalar code nor switch on a kernel that was turned
+// off deliberately.
 func TestSIMDWiring(t *testing.T) {
 	if !vecmath.KernelsSupported() {
 		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
@@ -52,13 +52,11 @@ func TestSIMDWiring(t *testing.T) {
 	}
 }
 
-// TestAddRowsSIMDMatchesScalar walks every row length from 0 through three vectors plus a few bytes, so each run
-// covers the full-vector body, every tail length the LoadPart/StorePart pair has to handle, and the empty row. Each
-// length runs with the gate open (the vector body) and shut (the kernel's own fallback to addRowsScalar), so both
-// sides of the gate are proven rather than just the one this machine's row lengths happen to reach.
-//
-// The data deliberately includes rows of 0xff against small values, since the whole point of the kernel using Add
-// rather than AddSaturated is what happens when a sum passes 255.
+// TestAddRowsSIMDMatchesScalar walks every row length from 0 through three vectors plus a few bytes, covering the
+// full-vector body, every tail length the LoadPart/StorePart pair handles, and the empty row. Each length runs with the
+// gate open (the vector body) and shut (the kernel's own fallback to addRowsScalar), so both sides of the gate are
+// proven. The data includes rows of 0xff against small values, since the whole point of Add over AddSaturated is what
+// happens when a sum passes 255.
 func TestAddRowsSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Uint8s
 	lanes := probe.Len()
@@ -94,9 +92,9 @@ func TestAddRowsSIMDMatchesScalar(t *testing.T) {
 }
 
 // TestPNGUpPredictorSIMDMatchesScalar drives the real dispatch site: the same payload runs through pngPredictor with
-// the dispatch variable pointed at the kernel and again with it pointed at the scalar function, and the two outputs
-// must be byte-identical. Row lengths straddle the vector width in both directions, and the payload mixes Up rows
-// with the serial filters so a regression cannot hide behind rows the kernel never sees.
+// addRowsFn pointed at the kernel and again at the scalar function, and the outputs must be byte-identical. Row lengths
+// straddle the vector width in both directions, and Up rows are mixed with the serial filters so a regression cannot
+// hide behind rows the kernel never sees.
 func TestPNGUpPredictorSIMDMatchesScalar(t *testing.T) {
 	var probe simd.Uint8s
 	lanes := probe.Len()

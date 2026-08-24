@@ -83,8 +83,8 @@ func loadType3(d *cos.Document, dict cos.Dict) (*Font, error) {
 		f.missingWidth = mw
 	}
 
-	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults. (No search
-	// needles pin Type 3 quads; the corpus probe pins pixels.)
+	// Quad metrics: the FontBBox y extent through the FontMatrix when usable, else the generic defaults (no oracle
+	// needle pins Type 3 quads).
 	f.ascender, f.descender = 0.8, -0.2
 	if arr, has := d.GetArray(dict, "FontBBox"); has && len(arr) >= 4 {
 		if y0, okY0 := cos.AsReal(d.Resolve(arr[1])); okY0 {

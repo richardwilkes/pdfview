@@ -9,8 +9,7 @@
 
 // Package testsupport loads the committed golden files (testfiles/goldens/<name>/truth.json plus rendered PNGs,
 // produced from testfiles/corpus by the oracle module's regen.sh) and provides the comparison helpers the parity tests
-// are built on. It is pure Go: the goldens are committed, so no cgo, MuPDF, or network access is ever needed to run the
-// tests.
+// use. It is pure Go: no cgo, MuPDF, or network access is needed to run the tests.
 package testsupport
 
 import (
@@ -24,18 +23,17 @@ import (
 	"path/filepath"
 )
 
-// The types below mirror the truth.json schema written by the oracle module (oracle/schema.go). The two modules
-// deliberately share no code — the oracle needs cgo and must never become a dependency of the library — so the schema
-// is maintained in both places; keep them in sync. LoadTruth rejects unknown fields, so drift between the two surfaces
-// as a test failure rather than silently ignored data.
+// The types below mirror the truth.json schema written by the oracle module (oracle/schema.go). The two modules share
+// no code, since the oracle needs cgo and must never become a dependency of the library, so keep the two copies in
+// sync.
 //
-// Coordinate spaces: all "raw" values are unscaled page-space floats exactly as MuPDF reports them — top-left origin,
+// Coordinate spaces: "raw" values are unscaled page-space floats exactly as MuPDF reports them: top-left origin,
 // y-down, in PDF points. All other geometry is in rendered-image pixel space for the DPI it is keyed under, produced by
-// the public API of the cgo binding (the behavioral contract this package's engine must match). Floats that MuPDF
+// the public API of the cgo binding (the behavioral contract this module's engine must match). Floats that MuPDF
 // reports as non-finite (a destination with no explicit coordinate, such as /Fit) are null in the JSON and nil here.
 
-// Truth is the top-level truth.json document, one per corpus file. (Field order here is dictated by fieldalignment; the
-// JSON field order truth.json is written with lives in oracle/schema.go.)
+// Truth is the top-level truth.json document, one per corpus file. Field order here is dictated by fieldalignment;
+// oracle/schema.go holds the order truth.json is written in.
 type Truth struct {
 	// TOC holds TableOfContents(dpi) from the public API, keyed by DPI rendered with strconv.Itoa.
 	TOC map[string][]*TOCEntry `json:"toc,omitempty"`
@@ -71,7 +69,7 @@ type AuthAttempt struct {
 
 // TOCRawEntry is one raw outline node.
 type TOCRawEntry struct {
-	X        *float32       `json:"x"` // nil when MuPDF reports a non-finite coordinate
+	X        *float32       `json:"x"`
 	Y        *float32       `json:"y"`
 	Title    string         `json:"title"`
 	URI      string         `json:"uri,omitempty"`
@@ -146,8 +144,8 @@ type Golden struct {
 	Dir string
 }
 
-// LoadTruth reads and decodes one truth.json. Unknown fields are rejected so schema drift between the oracle module and
-// this package cannot pass unnoticed.
+// LoadTruth reads and decodes one truth.json. Unknown fields are rejected so schema drift against oracle/schema.go
+// fails a test instead of passing unnoticed.
 func LoadTruth(path string) (*Truth, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -184,9 +182,9 @@ func LoadGoldens(dir string) ([]*Golden, error) {
 	return goldens, nil
 }
 
-// LoadImage decodes a golden PNG into straight-alpha NRGBA. The oracle encodes image.NRGBA data, but the PNG format
-// stores fully opaque images without an alpha channel, in which case the decoder hands back a different image type; the
-// conversion to NRGBA is exact for such opaque pixels.
+// LoadImage decodes a golden PNG into straight-alpha NRGBA. The oracle encodes image.NRGBA data, but PNG stores fully
+// opaque images without an alpha channel, so the decoder may hand back another image type; converting opaque pixels
+// to NRGBA is exact.
 func LoadImage(path string) (*image.NRGBA, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -266,9 +264,9 @@ func ComparePixels(got, want *image.NRGBA) (*PixelDiff, error) {
 }
 
 // Thresholds is one golden's pixel gate. Every file is compared against DefaultThresholds unless its golden directory
-// carries a thresholds.json override, the sanctioned mechanism for files whose measured, UNDERSTOOD divergence exceeds
-// the default (substitute-font letterform deltas, AA-model edge redistribution on small text). Overrides are a ratchet:
-// once set they may only ever tighten as rendering fidelity improves, and each must carry its justification.
+// carries a thresholds.json override, for files whose measured and understood divergence exceeds the default
+// (substitute-font letterform deltas, AA-model edge redistribution on small text). Overrides are a ratchet: they may
+// only tighten as rendering fidelity improves, and each must carry its justification.
 type Thresholds struct {
 	// Justification documents why this golden's gate differs from the default. Required in overrides.
 	Justification string `json:"justification"`
@@ -286,7 +284,7 @@ func DefaultThresholds() Thresholds {
 }
 
 // LoadThresholds returns the gate for a golden directory: the default unless <dir>/thresholds.json overrides it.
-// Unknown fields and malformed overrides are errors — a broken override must never silently widen (or narrow) a gate.
+// Unknown fields and malformed overrides are errors so a broken override cannot silently change a gate.
 func LoadThresholds(dir string) (Thresholds, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "thresholds.json"))
 	if err != nil {

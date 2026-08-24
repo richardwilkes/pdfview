@@ -41,7 +41,7 @@ func benchInt32Plane(n int, seed uint64) []int32 {
 	return out
 }
 
-// BenchmarkApplyRCTSIMD measures the inverse reversible colour transform through its public entry point, which calls
+// BenchmarkApplyRCTSIMD measures the inverse reversible color transform through its public entry point, which calls
 // the dispatch variable.
 func BenchmarkApplyRCTSIMD(b *testing.B) {
 	for _, size := range benchPlaneSizes {
@@ -92,8 +92,7 @@ func BenchmarkPaletteClampSIMD(b *testing.B) {
 }
 
 // BenchmarkClampPlaneSIMDBelowGate measures a plane one element short of the gate, where the vector kernel hands the
-// work straight back to the scalar loop. It is the drop rule's regression check: the vector build must not lose
-// measurable time on the inputs it deliberately declines to vectorize.
+// work straight back to the scalar loop: the vector build must not lose measurable time on inputs it declines.
 func BenchmarkClampPlaneSIMDBelowGate(b *testing.B) {
 	n := clampPlaneMin - 1
 	plane := benchInt32Plane(n, 6)

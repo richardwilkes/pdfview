@@ -16,9 +16,9 @@ import (
 	"testing"
 )
 
-// TestScalarWiring locks that the default build dispatches to the scalar implementations. Nothing repoints these
-// variables without the experiment — simd_on.go's init is the only thing that does, and it is not compiled here — so
-// a failure means someone wired a kernel in unconditionally and the pure-Go build stopped being pure.
+// TestScalarWiring locks that the default build dispatches to the scalar implementations. simd_on.go's init is the only
+// thing that repoints these variables and it is not compiled here, so a failure means a kernel was wired in
+// unconditionally and the pure-Go build stopped being pure.
 func TestScalarWiring(t *testing.T) {
 	for name, pair := range map[string][2]func(dst, src []byte){
 		"addRows": {addRowsFn, addRowsScalar},

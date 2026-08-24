@@ -382,12 +382,10 @@ func TestLinksPageRange(t *testing.T) {
 	}
 }
 
-// TestDegenerateLinkRectKeepsItsCoordinates pins the split contract linkRect depends on. rectFromObj reports ok ==
-// false for two very different things, and only one of them may collapse to the origin: a malformed /Rect degrades to
-// the empty rectangle there (MuPDF's lenient pdf_to_rect), but a well-formed rectangle with zero width or height is a
-// hairline link that must still be reported where its coordinates put it. Collapsing the degenerate case too would put
-// such links at the page corner — and off the page entirely, at negative coordinates, for an offset MediaBox — while
-// loadLinks still hands them to the caller, since it drops only unresolvable destinations.
+// TestDegenerateLinkRectKeepsItsCoordinates pins the split rectFromObj makes for linkRect: a malformed /Rect collapses
+// to the origin (MuPDF's lenient pdf_to_rect), but a well-formed zero-width or zero-height one is a hairline link
+// reported where its coordinates put it. The root package's loadLinks drops only unresolvable destinations, so a
+// collapsed hairline would reach the caller at the page corner.
 func TestDegenerateLinkRectKeepsItsCoordinates(t *testing.T) {
 	const dest = "/Dest [3 0 R /Fit]"
 	d := mustOpen(t, pdf(map[int]string{
@@ -460,13 +458,9 @@ func bigNameTreePDF(pairs int, dests []string) []byte {
 	return []byte(sb.String())
 }
 
-// TestNamedDestLookupsDoNotRescanTheTree covers the cost of resolving named destinations. Every lookup used to rescan
-// the whole /Names → /Dests tree, and a MISS scanned all of it, while the callers are per-node: Links resolves a
-// destination for each of up to maxPageLinks annotations and the outline walk for each of up to maxOutlineNodes items.
-// A file pairing a large flat name tree with that many missing names therefore bought a quadratic number of resolve-
-// and-compare steps — minutes to hours — from a single Links or TableOfContents call, and the public
-// OverallMaxLinks/OverallMaxTOCEntries caps cannot help because the engine-side walk finishes before they truncate.
-// The tree is flattened once per document now, so the same shape is linear.
+// TestNamedDestLookupsDoNotRescanTheTree pins that named-destination lookups flatten the /Names → /Dests tree once per
+// document. A per-lookup scan makes every miss cost the whole tree, and Links resolves one destination per annotation,
+// so a large flat tree paired with many missing names is quadratic (minutes from a single Links call).
 func TestNamedDestLookupsDoNotRescanTheTree(t *testing.T) {
 	const pairs = 20000
 	const misses = 20000
@@ -486,8 +480,8 @@ func TestNamedDestLookupsDoNotRescanTheTree(t *testing.T) {
 			t.Fatalf("link %d resolved to page %d, want -1 (its name is not in the tree)", i, l.Page)
 		}
 	}
-	// One flatten plus a map probe per link takes milliseconds; a rescan per miss is pairs x misses comparisons, which
-	// ran for minutes. The bound is loose enough that only the quadratic behavior can trip it.
+	// One flatten plus a map probe per link takes milliseconds; the bound is loose enough that only a quadratic rescan can
+	// trip it.
 	if limit := 10 * time.Second; elapsed > limit {
 		t.Fatalf("resolving %d missing names against a %d entry tree took %v, want under %v", misses, pairs, elapsed,
 			limit)

@@ -1,11 +1,9 @@
 #! /usr/bin/env bash
 
-# Benchmarks the goexperiment.simd kernels against the portable scalar code they replace. For every package named on
-# the command line (or the kernel packages listed below, when none are), this runs the benchmarks whose names contain
-# "SIMD" twice — once in the default build, once with GOEXPERIMENT=simd — and hands the pair to benchstat.
-#
-# Both arms run the same benchmark bodies; the only difference is which implementation the build tags selected, so a
-# benchstat delta is the kernel's contribution and nothing else. Results land in ./simd-bench-results.
+# Benchmarks the goexperiment.simd kernels against the scalar code they replace. For each package on the command line
+# (default: the kernel packages below), this runs the benchmarks whose names contain "SIMD" twice, once in the default
+# build and once with GOEXPERIMENT=simd, and hands the pair to benchstat. Both arms run the same benchmark bodies, so
+# the benchstat delta is the kernel's contribution alone. Results land in ./simd-bench-results.
 #
 # Usage: ./simd-bench.sh [package ...]
 
@@ -38,7 +36,7 @@ echo '*' >"$OUT/.gitignore"
 } >"$OUT/sysinfo.txt"
 cat "$OUT/sysinfo.txt"
 
-# Locate benchstat if it is around. The raw files are the data of record either way.
+# benchstat is optional; the raw files are the data of record.
 if command -v benchstat >/dev/null 2>&1; then
   BS=benchstat
 elif [ -x "$(go env GOPATH)/bin/benchstat" ]; then
@@ -48,8 +46,8 @@ else
   echo -e "\033[33mbenchstat not found; raw files only - or: go install golang.org/x/perf/cmd/benchstat@latest\033[0m"
 fi
 
-# run <output file> <package> [env prefix...] - a failure here is reported, not fatal: one package that will not build
-# should not throw away the numbers from the rest.
+# run <output file> <package> [env prefix...]. A failure is reported, not fatal, so one package that does not build
+# keeps the numbers from the rest.
 run() {
   local file=$1 pkg=$2
   shift 2
@@ -71,8 +69,7 @@ for pkg in "${PKGS[@]}"; do
   run "$OUT/${name}_simd.txt" "$pkg" env GOEXPERIMENT=simd || ok=0
   [ "$ok" = "1" ] || continue
 
-  # No kernels yet in this package, or none whose benchmark names match. Say so and move on rather than handing
-  # benchstat two files it cannot parse.
+  # No SIMD benchmarks in this package: skip it, because benchstat cannot parse empty files.
   if ! grep -qE '^Benchmark' "$OUT/${name}_default.txt" "$OUT/${name}_simd.txt"; then
     echo "  no SIMD benchmarks"
     EMPTY+=("$pkg")

@@ -8,11 +8,10 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // Package shading parses PDF shading dictionaries (ISO 32000-2 8.7.4, types 1-7) into a normalized form the raster
-// device can draw without consulting COS objects or PDF functions again: axial and radial shadings carry a sampled
-// color ramp (at most maxStops stops, the resolution MuPDF itself uses), function-based shadings carry their domain,
-// matrix, and a color-evaluation closure, and the mesh types (4-7) are tessellated at parse time into flat triangles
-// whose vertex-color deltas are below one 8-bit quantization step. All colors are resolved to the rendered RGB space
-// through internal/color, so a Shading is pure geometry + RGB.
+// device can draw without consulting COS objects again: axial and radial shadings carry a sampled color ramp,
+// function-based shadings carry their domain, matrix, and a color-evaluation closure, and the mesh types (4-7) are
+// tessellated at parse time into flat triangles whose color spread is below one 8-bit step. All colors resolve to the
+// rendered RGB space through internal/color.
 package shading
 
 import (
@@ -38,15 +37,14 @@ const (
 	KindTensor          = 7
 )
 
-// Limits. maxStops is the ramp resolution for axial/radial shadings (a function is sampled to at most 256 stops).
-// maxTriangles caps the tessellation output of one mesh shading; subdivision stops refining (emitting flat triangles at
-// the reached level) once the budget is hit, so hostile meshes degrade to banding, never to unbounded memory.
-// maxMeshVertices caps how many vertices or patches a mesh stream may declare through its payload. maxMeshInputTris
-// caps the input triangles those vertices form, before tessellation: a free-form (type 4) stream yields at most one
-// triangle per vertex, but a lattice (type 5) of rows x perRow vertices legitimately yields 2*(rows-1)*(perRow-1) of
-// them — just under twice the vertex budget — so sizing the triangle cap at the vertex cap would silently drop the
-// second half of a wholly legal lattice. maxSubdivDepth caps the recursive triangle split (4^8 = 65536 triangles from
-// one input triangle is beyond ΔRGB<1 for any color pair). maxPatchGrid caps the per-patch tessellation grid.
+// Limits. maxStops is the axial/radial ramp resolution, the 256 samples MuPDF uses. maxTriangles caps one mesh
+// shading's tessellation output; once it is hit, subdivision stops refining and emits flat triangles at the reached
+// level, so hostile meshes degrade to banding, never to unbounded memory. maxMeshVertices caps the vertices or patches
+// a mesh stream may declare through its payload. maxMeshInputTris caps the input triangles those vertices form before
+// tessellation: a type 4 stream yields at most one triangle per vertex, but a type 5 lattice of rows x perRow vertices
+// yields 2*(rows-1)*(perRow-1), just under twice the vertex budget, so a cap equal to the vertex cap would drop the
+// second half of a legal lattice. maxSubdivDepth caps the recursive triangle split; 8 halvings bring any color spread
+// under one 8-bit step. maxPatchGrid caps the per-patch tessellation grid.
 const (
 	maxStops         = 256
 	maxTriangles     = 1 << 19
@@ -54,15 +52,14 @@ const (
 	maxMeshInputTris = 2 * maxMeshVertices
 	maxSubdivDepth   = 8
 	maxPatchGrid     = 96
-	// maxMeshColorEvals bounds the PDF function evaluations ONE mesh parse may force to resolve its colors — its
-	// /Function, or its color space's tint transform when it is a /Separation or /DeviceN. A mesh declares its vertex
-	// and patch count through its payload, and the maxMeshVertices cap allows one evaluation per vertex and two per
-	// patch corner, so the ceiling was ~131,072 of them from a stream that compresses to a couple of hundred kilobytes —
-	// while internal/content charges the whole parse the flat shadingParseCost, priced on the documented assumption that
-	// a shading parse evaluates a function 256 times. At 1<<12 a mesh may still evaluate sixteen times what an
-	// axial/radial ramp does (real function-driven meshes run a few hundred patch corners), and a page naming hundreds
-	// of hostile shadings costs seconds rather than tens of minutes. maxMeshColorKeyBits is the widest raw color tuple
-	// the parse's memo can key on in a uint64; wider tuples still get the budget, just not the memo.
+	// maxMeshColorEvals bounds the PDF function evaluations one mesh parse may run to resolve its colors: its /Function,
+	// or the tint transform of a /Separation or /DeviceN space. A mesh declares its vertex and patch count through its
+	// payload, so the vertex cap alone allows one evaluation per vertex or up to four per patch (over 250,000 from a
+	// stream that compresses to a few hundred kilobytes), while internal/content charges the whole parse the flat
+	// shadingParseCost, priced on 256 evaluations. At 1<<12 a mesh may still evaluate sixteen times what a ramp does
+	// (real function-driven meshes run a few hundred patch corners), and a page naming hundreds of hostile shadings
+	// costs seconds rather than minutes. maxMeshColorKeyBits is the widest raw color tuple the parse's memo can key in a
+	// uint64; wider tuples still get the budget, just not the memo.
 	maxMeshColorEvals   = 1 << 12
 	maxMeshColorKeyBits = 64
 )
@@ -173,11 +170,8 @@ func parseFunctions(d *cos.Document, obj cos.Object, nComps int) []function.Func
 		if nComps <= 0 {
 			return nil
 		}
-		// A one-element array is non-conforming — Table 78 wants nComps 1-output functions — but it is common enough
-		// that MuPDF and pdf.js both accept it, so the single n-output function it wraps takes the single-function path
-		// below (which evalComps already handles, and which validates NOutputs() >= nComps). Rejecting it on length
-		// alone made an ordinary DeviceRGB gradient carrying one type 2 function with 3-entry /C0 and /C1 fail to parse
-		// and paint nothing at all.
+		// A one-element array is non-conforming (Table 78 wants nComps 1-output functions) but common enough that MuPDF
+		// and pdf.js both accept it: the single n-output function it wraps takes the single-function path below.
 		if len(arr) != 1 {
 			if len(arr) < nComps {
 				return nil
@@ -258,8 +252,7 @@ func parseGradient(d *cos.Document, dict cos.Dict, sh *Shading, space pdfcolor.S
 		sh.Extend[0], _ = cos.AsBool(d.Resolve(arr[0]))
 		sh.Extend[1], _ = cos.AsBool(d.Resolve(arr[1]))
 	}
-	// Sample the function over [t0, t1] into a uniform ramp. maxStops samples bound both the work and the ramp's
-	// memory; uniform sampling reproduces MuPDF's own 256-sample ramp behavior.
+	// Uniform sampling over [t0, t1] matches MuPDF's ramp.
 	nComps := space.NComponents()
 	sh.Stops = make([]Stop, maxStops)
 	in := make([]float32, 1)
@@ -320,21 +313,19 @@ func parseFunctionBased(d *cos.Document, dict cos.Dict, sh *Shading, space pdfco
 	return nil
 }
 
-// The grid caps for a function-based (type 1) shading's device realization. A device realizes one by evaluating the
-// shading's function once per grid cell over its domain, so the grid is where that work is bounded: MaxGridDim caps
-// either dimension and MaxGridArea their product. They live here rather than in the device because two packages need
-// the same numbers — internal/render sizes its evaluation grid with GridSize, and internal/content charges its work
-// budget for the evaluations that grid implies, since one painting operation can force a whole realization for its
-// single operator unit.
+// Grid caps for a function-based (type 1) shading's device realization, which evaluates the shading's function once
+// per grid cell over its domain: MaxGridDim caps either dimension and MaxGridArea their product. They live here rather
+// than in the device because internal/render sizes its evaluation grid with GridSize and internal/content charges its
+// work budget for the evaluations that grid implies.
 const (
 	MaxGridDim  = 512
 	MaxGridArea = 1 << 18
 )
 
-// GridSize reports the evaluation grid a device realizes this function-based shading on: the domain rectangle's extent
-// under m — the target CTM the realization is drawn through, which this shading's own /Matrix is composed with — at one
-// cell per target unit, clamped to the caps above. ok is false when nothing can be realized at all (an empty domain, or
-// corners that leave the finite range under m), the same cases a device paints nothing for and charges nothing for.
+// GridSize reports the evaluation grid a device realizes this function-based shading on: the extent of the domain
+// rectangle under m (the target CTM, composed with the shading's own /Matrix) at one cell per target unit, clamped to
+// MaxGridDim and MaxGridArea. ok is false when nothing can be realized (an empty domain, or corners that leave the
+// finite range under m); a device paints and charges nothing for those.
 func (s *Shading) GridSize(m gfx.Matrix) (w, h int, ok bool) {
 	x0, x1, y0, y1 := s.Domain[0], s.Domain[1], s.Domain[2], s.Domain[3]
 	if !(x1 > x0) || !(y1 > y0) {
@@ -363,11 +354,10 @@ func (s *Shading) GridSize(m gfx.Matrix) (w, h int, ok bool) {
 }
 
 // clampGridDim converts one target-space extent to a grid dimension in [1, MaxGridDim]. The bound is applied in float
-// space on purpose: Go leaves a float→int conversion implementation-defined when the value does not fit and the
-// platforms disagree — amd64 wraps to math.MinInt64 (which an int-space clamp reads as "too small" and rounds up to a
-// 1-cell grid, a shading rendered as one flat color) while arm64 saturates to math.MaxInt64 — so a /Matrix that blows
-// the domain up to a 1e30 extent must never reach the conversion unclamped. The !(v >= 1) form catches NaN along with
-// everything under a single cell.
+// space because Go leaves an out-of-range float-to-int conversion implementation-defined and the platforms disagree
+// (amd64 wraps to math.MinInt64, which an int-space clamp would round up to a 1-cell grid; arm64 saturates to
+// math.MaxInt64), so a /Matrix that blows the domain up to a 1e30 extent must never reach the conversion unclamped.
+// !(v >= 1) also catches NaN.
 func clampGridDim(v float32) int {
 	if !(v >= 1) {
 		return 1
@@ -395,12 +385,9 @@ func rectFrom(d *cos.Document, dict cos.Dict, key cos.Name) (gfx.Rect, bool) {
 	return gfx.Rect{X0: vals[0], Y0: vals[1], X1: vals[2], Y1: vals[3]}.Normalize(), true
 }
 
-// isFinite reports whether v survives the narrowing to float32 as a finite value. Every caller stores float32(v) — the
-// width this package's normalized geometry (/Coords, /Domain, /Matrix, /BBox, a mesh's /Decode) is kept in — and a legal
-// PDF number beyond float32's range, such as 1 followed by 39 zeros, is a finite float64 that narrows to ±Inf. Testing
-// the float64 alone would let those through, contradicting internal/render's withShadingBBox, which relies on
-// rectFrom validating the four /BBox entries "exactly as content.rectFrom does for a form's box" — and content.rectFrom
-// checks after narrowing.
+// isFinite reports whether v narrows to a finite float32, the width every caller stores. A legal PDF number beyond
+// float32's range (1 followed by 39 zeros) is a finite float64 that narrows to ±Inf; internal/render's withShadingBBox
+// relies on rectFrom rejecting such /BBox entries the way content.rectFrom does.
 func isFinite(v float64) bool {
 	f := float64(float32(v))
 	return !math.IsNaN(f) && !math.IsInf(f, 0)

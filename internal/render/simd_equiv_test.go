@@ -35,9 +35,9 @@ func fillWords(r *testrand.Rand, w []uint32) {
 	}
 }
 
-// TestRenderSIMDWiring checks that every dispatch variable points where this architecture's preference constants say
-// it should: at the vector kernel where that kernel is preferred, and at the scalar implementation where it is not.
-// Everything else in this file tests the kernels directly, so this is the one check that they are what a render runs.
+// TestRenderSIMDWiring checks that every dispatch variable points where this architecture's preference constants say:
+// at the vector kernel where preferred, at the scalar implementation where not. Everything else in this file tests
+// the kernels directly.
 func TestRenderSIMDWiring(t *testing.T) {
 	if !vecmath.KernelsSupported() {
 		t.Skip("this machine cannot run the vector kernels, so init deliberately leaves the scalar dispatch in place")
@@ -73,8 +73,7 @@ func TestRenderSIMDWiring(t *testing.T) {
 }
 
 // TestCompositeMaskSwitchArmsMatchFormula pins the claim the vector blit is built on: the scalar loop's c == 0 and
-// c == 255 arms are the general formula's answers, not different math. If that ever stopped holding, the branchless
-// kernel would silently diverge from the scalar path on exactly the two coverage values glyph edges produce most.
+// c == 255 arms are the general formula's answers, not different math.
 func TestCompositeMaskSwitchArmsMatchFormula(t *testing.T) {
 	formula := func(src, dst, c uint32) uint32 {
 		return (src*c + dst*(255-c) + 127) / 255
@@ -92,9 +91,8 @@ func TestCompositeMaskSwitchArmsMatchFormula(t *testing.T) {
 }
 
 // coveragePatterns returns the coverage runs the blit is exercised with: the two values with their own arm in the
-// scalar switch, a ramp that walks every value there is (0 and 255 included, at every lane offset), noise, and a run
-// that changes character from one group of the vector kernel's scan to the next, so a single span drives all three of
-// its branches and every boundary between them.
+// scalar switch, a ramp that walks every value at every lane offset, noise, and a run that changes character from one
+// scan group to the next, so a single span drives all three kernel branches and every boundary between them.
 func coveragePatterns(n int, rng *testrand.Rand) map[string][]byte {
 	zero := make([]byte, n)
 	full := make([]byte, n)
@@ -115,10 +113,9 @@ func coveragePatterns(n int, rng *testrand.Rand) map[string][]byte {
 	return map[string][]byte{"zero": zero, "full": full, "ramp": ramp, "noise": noise, "blocks": blocks}
 }
 
-// TestCompositeMaskSpanSIMDMatchesScalar walks every span length from empty through two of the kernel's scan groups
-// plus four vectors, so each run covers the full-vector body, every tail length the LoadPart/StorePart pair has to
-// handle, the group boundary, a partial final group, and the empty span. Each length runs against five coverage
-// patterns and a random destination.
+// TestCompositeMaskSpanSIMDMatchesScalar walks every span length from empty through two scan groups plus four vectors,
+// covering the full-vector body, every LoadPart/StorePart tail length, the group boundary, and a partial final group,
+// each against five coverage patterns and a random destination.
 func TestCompositeMaskSpanSIMDMatchesScalar(t *testing.T) {
 	wasMin := compositeMaskSpanMin
 	t.Cleanup(func() { compositeMaskSpanMin = wasMin })
@@ -180,8 +177,8 @@ func TestCompositeMaskSpanSIMDGate(t *testing.T) {
 }
 
 // TestCompositeMaskBlitMatchesScalar runs the whole blit — the row loop, the clipping either side of the surface, and
-// the dispatch variable the rest of the package calls — with the vector kernel wired in and again with the scalar one,
-// and compares the surfaces byte for byte. The span tests above prove one row; this proves the rows are the same rows.
+// the dispatch variable — with the vector kernel wired in and again with the scalar one, and compares the surfaces
+// byte for byte.
 func TestCompositeMaskBlitMatchesScalar(t *testing.T) {
 	was := compositeMaskSpanFn
 	t.Cleanup(func() { compositeMaskSpanFn = was })
@@ -223,9 +220,8 @@ func TestCompositeMaskBlitMatchesScalar(t *testing.T) {
 }
 
 // TestMaskLumaPlaneSIMDMatchesScalar walks plane lengths across the kernel's chunk boundary — every length from empty
-// through a chunk plus a few pixels, and a length past two chunks — so the chunked walk, its tail, and the handoff
-// between the vector pass and the scalar LUT pass are all covered. The neutral ramp is included because that is the
-// input the LUT was captured from and the one a mask actually carries.
+// through a chunk plus a few pixels, and lengths past two chunks — covering the chunked walk, its tail, and the handoff
+// to the scalar LUT pass. The neutral ramp is the input the LUT was captured from.
 func TestMaskLumaPlaneSIMDMatchesScalar(t *testing.T) {
 	wasMin := maskLumaMin
 	t.Cleanup(func() { maskLumaMin = wasMin })
@@ -262,8 +258,8 @@ func TestMaskLumaPlaneSIMDMatchesScalar(t *testing.T) {
 }
 
 // TestMaskLumaPlaneSIMDExhaustiveChannels pushes every value of every channel through the weighted sum with the other
-// two channels held at each end of their range, which is what proves the lane extraction is reading the channel it
-// thinks it is: a red/blue swap would survive a neutral ramp untouched.
+// two channels held at each end of their range, proving the lane extraction reads the channel it thinks it does: a
+// red/blue swap would survive a neutral ramp untouched.
 func TestMaskLumaPlaneSIMDExhaustiveChannels(t *testing.T) {
 	wasMin := maskLumaMin
 	t.Cleanup(func() { maskLumaMin = wasMin })
@@ -325,8 +321,8 @@ var nonFinite = []float32{
 }
 
 // TestAllFiniteSIMDMatchesScalar plants each non-finite value at each coordinate of each point in runs of every
-// length, so every lane position of every vector — and every tail position past the last full vector — is checked,
-// and the all-finite runs (including the extremes float32 can still represent) are checked to come back true.
+// length, so every lane and tail position is checked, and checks that all-finite runs (including float32's extremes)
+// come back true.
 func TestAllFiniteSIMDMatchesScalar(t *testing.T) {
 	wasMin := allFiniteMin
 	t.Cleanup(func() { allFiniteMin = wasMin })

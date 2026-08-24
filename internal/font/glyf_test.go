@@ -199,8 +199,8 @@ func TestGlyfFatContourTruncated(t *testing.T) {
 	}
 }
 
-// TestGlyfFatGlyphUnderBudgetIsWhole is the other side of TestGlyfFatContourTruncated: a glyph with far more points than
-// any real one, but still inside the budget, must come through complete. The per-point charge has to bound hostile
+// TestGlyfFatGlyphUnderBudgetIsWhole is the other side of TestGlyfFatContourTruncated: a glyph with far more points
+// than any real one, but still inside the budget, must come through complete. The per-point charge has to bound hostile
 // input without clipping legitimate outlines.
 func TestGlyfFatGlyphUnderBudgetIsWhole(t *testing.T) {
 	const points = 2048 // Well above any real glyph's point count, well below glyfWorkBudget.
@@ -214,9 +214,9 @@ func TestGlyfFatGlyphUnderBudgetIsWhole(t *testing.T) {
 	}
 }
 
-// TestGlyfCompositeCycleSkipped verifies the recursion-path set skips a component that references an ancestor beyond the
-// direct self-reference the older guard caught: GID 0 -> GID 1 -> {GID 0 (cycle), GID 2 (leaf)}. The cycle edge must be
-// dropped, leaving exactly the one leaf contour.
+// TestGlyfCompositeCycleSkipped verifies the recursion-path set skips a component that references an ancestor, not only
+// a direct self-reference: GID 0 -> GID 1 -> {GID 0 (cycle), GID 2 (leaf)}. The cycle edge must be dropped, leaving
+// exactly the one leaf contour.
 func TestGlyfCompositeCycleSkipped(t *testing.T) {
 	records := [][]byte{
 		compositeGlyph(1),    // GID 0 -> GID 1

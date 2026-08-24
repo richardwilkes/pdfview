@@ -47,7 +47,6 @@ func numsTree(nums string) map[int]string {
 	return map[int]string{10: "<< /Nums [" + nums + "] >>"}
 }
 
-// checkLabels compares PageLabels against want and, when wantHas is meaningful to the case, HasPageLabels too.
 func checkLabels(t *testing.T, d *doc.Document, want []string) {
 	t.Helper()
 	if got := d.PageLabels(); !slices.Equal(got, want) {
@@ -345,11 +344,9 @@ func encryptedPageLabelPDF(t *testing.T, userPw, ownerPw string) []byte {
 // encLabelPrefix is the plaintext /P prefix inside encryptedPageLabelPDF.
 const encLabelPrefix = "App-"
 
-// TestPageLabelsRebuiltAfterAuthentication is the page-label half of the stale-cache problem
-// TestNamedDestIndexRebuiltAfterAuthentication pins for named destinations. Nothing gates page labels on a password, so
-// a query made while the document is locked caches labels whose /P prefix is the ciphertext DecryptString passed
-// through untouched — and the page count the slice is sized to can change under it too. Authenticate must drop the
-// cache alongside the COS object caches.
+// TestPageLabelsRebuiltAfterAuthentication is the page-label half of TestNamedDestIndexRebuiltAfterAuthentication.
+// Nothing gates page labels on a password, so a query on the locked document caches labels whose /P prefix is
+// ciphertext; Authenticate must drop that cache.
 func TestPageLabelsRebuiltAfterAuthentication(t *testing.T) {
 	for _, password := range []string{pwUser, pwOwner} {
 		t.Run(password, func(t *testing.T) {

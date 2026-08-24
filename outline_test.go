@@ -15,17 +15,15 @@ import (
 	"github.com/richardwilkes/pdfview/internal/doc"
 )
 
-// TestConvertOutlineNextCycleTerminates verifies convertOutline does not loop forever when the engine hands back a
-// sibling chain whose Next pointer forms a cycle — the visited set must cut it.
+// TestConvertOutlineNextCycleTerminates pins that convertOutline's visited set cuts a Next cycle.
 func TestConvertOutlineNextCycleTerminates(t *testing.T) {
 	a := &doc.OutlineItem{Title: "a", Page: 0}
 	b := &doc.OutlineItem{Title: "b", Page: 1}
 	a.Next = b
-	b.Next = a // cycle back to the head
+	b.Next = a
 
 	root := convertOutline(a)
 
-	// Each distinct source node appears exactly once; the cycle is cut rather than repeated.
 	var titles []string
 	for node := root; node != nil; node = node.next {
 		titles = append(titles, node.title)
@@ -35,11 +33,10 @@ func TestConvertOutlineNextCycleTerminates(t *testing.T) {
 	}
 }
 
-// TestConvertOutlineDownCycleTerminates verifies a Down pointer that revisits an ancestor is cut instead of recursing
-// forever.
+// TestConvertOutlineDownCycleTerminates pins that a Down pointer revisiting an ancestor is cut.
 func TestConvertOutlineDownCycleTerminates(t *testing.T) {
 	a := &doc.OutlineItem{Title: "a", Page: 0}
-	a.Down = a // child points back at itself
+	a.Down = a
 
 	root := convertOutline(a)
 	if root == nil {
@@ -50,8 +47,8 @@ func TestConvertOutlineDownCycleTerminates(t *testing.T) {
 	}
 }
 
-// TestConvertOutlineDepthCapped verifies a pathologically deep Down chain is bounded by maxOutlineConvertDepth rather
-// than overflowing the stack. Each level is a fresh node (no cycle), so only the depth cap can stop it.
+// TestConvertOutlineDepthCapped pins that maxOutlineConvertDepth bounds a Down chain of fresh nodes, which no visited
+// set can cut.
 func TestConvertOutlineDepthCapped(t *testing.T) {
 	head := &doc.OutlineItem{Title: "0", Page: 0}
 	cur := head
@@ -76,13 +73,13 @@ func TestConvertOutlineDepthCapped(t *testing.T) {
 	}
 }
 
-// TestBuildTOCEntriesCyclicOutlineTerminates verifies buildTOCEntries stays bounded even if handed a cyclic outlineNode
-// tree directly: the maxAllowed budget must stop the walk instead of looping forever.
+// TestBuildTOCEntriesCyclicOutlineTerminates pins that the maxAllowed budget stops buildTOCEntries on a cyclic
+// outlineNode tree.
 func TestBuildTOCEntriesCyclicOutlineTerminates(t *testing.T) {
 	a := &outlineNode{title: "a"}
 	b := &outlineNode{title: "b"}
 	a.next = b
-	b.next = a // Next cycle
+	b.next = a
 
 	entries, _ := buildTOCEntries(a, 1, OverallMaxTOCEntries)
 	if len(entries) != OverallMaxTOCEntries {

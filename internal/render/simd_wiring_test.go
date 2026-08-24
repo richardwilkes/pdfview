@@ -16,9 +16,8 @@ import (
 	"testing"
 )
 
-// TestRenderScalarWiring checks that the default build renders through the scalar implementations and nothing else.
-// The vector kernels are not even compiled into this build, so what this really guards is the dispatch variables
-// themselves: each must start at its scalar implementation, since nothing here ever reassigns them.
+// TestRenderScalarWiring checks that the default build renders through the scalar implementations. The vector kernels
+// are not compiled into this build, so this guards the dispatch variables' initial values.
 func TestRenderScalarWiring(t *testing.T) {
 	for _, c := range []struct {
 		got  any

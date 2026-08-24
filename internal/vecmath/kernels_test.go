@@ -17,8 +17,8 @@ import (
 )
 
 // TestKernelsSupportedRefusesEmulation pins the half of KernelsSupported's contract every architecture shares: an
-// emulated simd package never gets the kernels, whatever the architecture's own floor says. GODEBUG=simd=0 forces the
-// emulated side of this on any machine.
+// emulated simd package never gets the kernels, whatever the architecture's own floor says. GODEBUG=simd=0 forces
+// emulation on any machine.
 func TestKernelsSupportedRefusesEmulation(t *testing.T) {
 	t.Logf("simd.Emulated=%v simd.VectorBitSize=%d KernelsSupported=%v", simd.Emulated(), simd.VectorBitSize(),
 		KernelsSupported())

@@ -22,10 +22,10 @@ import (
 const encDestName = "Chapter1"
 
 // encryptedNamedDestPDF builds a two-page document encrypted with the standard security handler at V1/R2, whose catalog
-// and page tree sit directly in the file (so both are readable before authentication, as they are in every real
-// encrypted document — only strings and streams are enciphered) and whose named destination lives in a /Names → /Dests
-// name tree. The tree's key and the /GoTo action's /D that names it are both encrypted strings, so a name tree
-// flattened before the file key arrives is keyed on ciphertext. Page 0 carries the link; page 1 is its target.
+// and page tree sit directly in the file (readable before authentication, since only strings and streams are
+// enciphered) and whose named destination lives in a /Names → /Dests name tree. The tree's key and the /GoTo action's
+// /D naming it are both encrypted strings, so a name tree flattened before the file key arrives is keyed on ciphertext.
+// Page 0 carries the link; page 1 is its target.
 func encryptedNamedDestPDF(t *testing.T, userPw, ownerPw string) []byte {
 	t.Helper()
 	id0 := []byte("0123456789abcdef")
@@ -63,12 +63,9 @@ func encryptedNamedDestPDF(t *testing.T, userPw, ownerPw string) []byte {
 	return buf.Bytes()
 }
 
-// TestNamedDestIndexRebuiltAfterAuthentication pins the fix for a stale destination index surviving authentication.
-// Nothing gates named-destination lookups on a password — the root package answers TableOfContents and Links on a
-// locked document — so a lookup made while the file was still locked flattened the /Names → /Dests tree with
-// DecryptString passing the key strings through as raw ciphertext. That index was cached for the life of the document,
-// so once the password arrived every named destination missed and resolved to page -1 forever. Authenticate must drop
-// it alongside the COS object caches.
+// TestNamedDestIndexRebuiltAfterAuthentication pins that Authenticate drops the named-destination index. Nothing gates
+// lookups on a password, so a lookup on the locked document flattens the /Names → /Dests tree keyed on ciphertext;
+// kept, that index would miss every name for the life of the document.
 func TestNamedDestIndexRebuiltAfterAuthentication(t *testing.T) {
 	for _, password := range []string{pwUser, pwOwner} {
 		t.Run(password, func(t *testing.T) {

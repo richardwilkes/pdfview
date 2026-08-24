@@ -27,10 +27,9 @@ func TestVectorCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "rotate90", "rotate90", true)
 }
 
-// TestTextCorpusPixels enforces EVERY text corpus file: files inside the default gate directly, and the files whose
-// divergence is measured and understood — substitute-font letterform deltas (Liberation vs the oracle's Nimbus) and
-// AA-model edge redistribution on small embedded-font text — through their goldens' thresholds.json ratchets. The six
-// encrypted files are text-std14 variants and must render identically to it once authenticated.
+// TestTextCorpusPixels enforces every text corpus file, each through its golden's thresholds.json ratchet where its
+// divergence is measured and understood (substitute-font letterforms, Liberation vs the oracle's Nimbus; AA-model edge
+// redistribution on small embedded-font text). The six encrypted files are text-std14 variants.
 func TestTextCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"text-std14", "hit-quad-split", "hit-quad-rise",
@@ -44,15 +43,10 @@ func TestTextCorpusPixels(t *testing.T) {
 	}
 }
 
-// TestImageCorpusPixels enforces the image corpus — content the imaging pipeline must reproduce — against the goldens
-// at every recorded DPI.
-//
-// The two damaged-codec files pin the blank-not-error contract. For images-jpx that is the golden itself: MuPDF's
-// openjpeg rejects the payload and MuPDF drops the image, so its golden is the page with a blank image area — exactly
-// what this engine paints when the vendored decoder rejects the same payload. For images-jbig2 MuPDF instead pads the
-// failed decode into a black square, a divergence this engine deliberately does not reproduce; its render is compared
-// against the images-jpx golden instead, which is byte-identical page content (same MediaBox, same vector marks, same
-// image placement) with the image correctly absent.
+// TestImageCorpusPixels enforces the image corpus at every recorded DPI. The two damaged-codec files pin the
+// blank-not-error contract: MuPDF drops the rejected JPX image, so images-jpx's golden is the page with a blank image
+// area, but pads the failed JBIG2 decode into a black square, which this engine does not reproduce; images-jbig2 is
+// compared against the images-jpx golden, whose page content is identical apart from the codec.
 func TestImageCorpusPixels(t *testing.T) {
 	for _, name := range []string{
 		"images-dct", "images-raw", "images-indexed", "images-imagemask", "images-inline",
@@ -89,7 +83,7 @@ func TestTransparencyCorpusPixels(t *testing.T) {
 // suppression (Invisible/Hidden/NoView), /AS state selection, the Link/Popup never-render gates, /CA-ignored, ISO
 // 32000-2 12.5.5 placement (Matrix rotation, BBox clipping, nonzero-origin BBox, reversed /Rect, degenerate skips),
 // z-order after page content, and page-resource inheritance for /Resources-less appearances — against the goldens at
-// every recorded DPI. All semantics were pinned by oracle probes before the corpus file was generated.
+// every recorded DPI.
 func TestAnnotationCorpusPixels(t *testing.T) {
 	comparePixelsToGolden(t, "annotations", "annotations", true)
 }

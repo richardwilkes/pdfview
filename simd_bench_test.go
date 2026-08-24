@@ -16,10 +16,9 @@ import (
 	"github.com/richardwilkes/pdfview/internal/testrand"
 )
 
-// benchPix builds a premultiplied page buffer of w×h pixels in which the given percentage of pixels are translucent
-// (a random alpha in 1..254, with components kept at or below it so the data is real premultiplied output) and the
-// rest are opaque. When banded, the translucent pixels are one contiguous run rather than scattered, which is the
-// shape a real page has — transparency arrives as a soft-masked image or a group covering an area, not as noise.
+// benchPix builds a premultiplied w×h buffer in which translucentPct percent of the pixels carry a random alpha in
+// 1..254 (components at or below it) and the rest are opaque. banded puts the translucent pixels in one contiguous run,
+// the shape a real page has: transparency arrives as a soft-masked image or a group covering an area, not as noise.
 func benchPix(w, h, translucentPct int, banded bool) []byte {
 	rng := testrand.Rand(0xf00d)
 	pix := make([]byte, w*h*4)
@@ -42,16 +41,13 @@ func benchPix(w, h, translucentPct int, banded bool) []byte {
 	return pix
 }
 
-// BenchmarkUnpremultiplySIMD measures the page-buffer unpremultiply through its dispatch variable, at the two page
-// sizes a letter page rasterizes to at 150 and 300 dpi and with the two alpha mixes that decide how much work the
-// scalar arm skips: a fully opaque page (every pixel takes the scalar arm's cheap case), a page with a fifth of its
-// pixels translucent in one contiguous band (a soft-masked image or a transparency group covering part of the page),
-// and the same fifth scattered pixel by pixel, which is the worst case for the kernel's whole-chunk skip and is here
-// as a floor rather than as a page anyone renders.
+// BenchmarkUnpremultiplySIMD measures the page-buffer unpremultiply through its dispatch variable at the two sizes a
+// letter page rasterizes to at 150 and 300 dpi, under three alpha mixes: fully opaque (the scalar arm's cheap case), a
+// fifth translucent in one band (a soft-masked image or transparency group), and the same fifth scattered pixel by
+// pixel, the worst case for the kernel's whole-chunk skip and a floor rather than a page anyone renders.
 //
-// The buffer is deliberately not restored between iterations. Unpremultiplying twice is not the same as doing it
-// once, but the cost of either arm depends only on the alpha channel — which this never touches — so the timing is
-// the same and the reset that would otherwise dominate a memory-bound benchmark stays out of the loop.
+// The buffer is not restored between iterations: the cost of either arm depends only on the alpha channel, which the
+// work never touches, so the timing is the same and the reset stays out of a memory-bound loop.
 func BenchmarkUnpremultiplySIMD(b *testing.B) {
 	for _, size := range [][2]int{{1275, 1650}, {2550, 3300}} {
 		for _, mix := range []struct {

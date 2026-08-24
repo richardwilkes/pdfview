@@ -17,12 +17,10 @@ import (
 	"github.com/richardwilkes/pdfview/internal/vecmath"
 )
 
-// init points the package's dispatch variables at the vector kernels this architecture prefers (see the
-// simd_prefs_<arch>.go files). Nothing is repointed unless vecmath.KernelsSupported says the machine can run the
-// kernels: that is false both where the simd package emulates every operation in scalar Go, which is slower than the
-// scalar code the kernels replace, and on an amd64 CPU with AVX but not AVX2, which the simd package drives in
-// hardware even though the kernels' broadcasts would fault there. Past that gate, each kernel is installed only where
-// its preference constant says its benchmarks earned it.
+// init points the dispatch variables at the kernels this architecture prefers (see simd_prefs_<arch>.go). Nothing is
+// repointed unless vecmath.KernelsSupported says the machine can run them: it is false where the simd package emulates
+// lanes in scalar Go, which is slower than the scalar code the kernels replace, and on an amd64 CPU with AVX but not
+// AVX2, where the kernels' broadcasts would fault.
 func init() {
 	if !vecmath.KernelsSupported() {
 		return
@@ -39,13 +37,9 @@ func init() {
 }
 
 // applyRCTSIMD is the vector form of the inverse Reversible Color Transform loop in ApplyRCT. The three slices have
-// the same length and do not overlap; ApplyRCT's callers always pass three distinct component planes.
-//
-// Per element, matching applyRCTScalar exactly: g = y0 - ((y1+y2)>>2), r = y2+g, b = y1+g, then y0=r, y1=g, y2=b.
-// Int32s.Add wraps like Go's int32 addition and Int32s.ShiftAllRight is arithmetic (both pinned by
-// internal/vecmath's tests), so the two operations the transform leans on carry over unchanged. Every lane is loaded
-// before any lane is stored, which is what makes the vector form see the same pre-transform snapshot the scalar loop
-// sees.
+// the same length and do not overlap. Per element, matching applyRCTScalar exactly: g = y0 - ((y1+y2)>>2), r = y2+g,
+// b = y1+g, then y0=r, y1=g, y2=b. Int32s.Add wraps like Go's int32 addition and Int32s.ShiftAllRight is arithmetic
+// (both pinned by internal/vecmath's tests), so the two operations the transform leans on carry over unchanged.
 func applyRCTSIMD(y0, y1, y2 []int32) {
 	if len(y0) < applyRCTMin {
 		applyRCTScalar(y0, y1, y2)
@@ -108,7 +102,7 @@ func clampPlaneSIMD(p []int32, lo, hi int32) {
 // Go's int32 addition, so an overflowing offset lands on the same value the scalar loop produces before the clamp.
 //
 // Unordered bounds go to the scalar loop for the reason clampPlaneSIMD gives, and so does a src shorter than dst: the
-// scalar loop's out-of-range panic is the documented behaviour there, and a partial vector load would silently
+// scalar loop's out-of-range panic is the documented behavior there, and a partial vector load would silently
 // substitute zeros for it.
 func addClampPlaneSIMD(dst, src []int32, offset, lo, hi int32) {
 	if len(dst) < addClampPlaneMin || lo > hi || len(src) < len(dst) {

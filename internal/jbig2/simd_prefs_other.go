@@ -12,8 +12,8 @@
 package jbig2
 
 // Whether each kernel is worth using on an architecture nobody has benchmarked it on. Nothing is: an unmeasured
-// kernel does not get to replace scalar code that works, so every architecture beyond amd64 and arm64 keeps the
-// scalar path until someone settles its values from simd-bench.sh benchstat results.
+// kernel does not replace scalar code that works, so every architecture beyond amd64 and arm64 keeps the scalar path
+// until someone settles its values from simd-bench.sh benchstat results.
 
 const (
 	// preferComposeBytes selects composeBytesSIMD for byte-aligned composition.

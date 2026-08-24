@@ -7,9 +7,10 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// Diagnostic scratch program: dump the font resources of one page, including how each font would load.
+// Diagnostic program: dump the font resources of one page, including how each font would load, or with the three
+// extra arguments dump one glyph's outline as JSON.
 //
-// Usage: go run ./testprog document.pdf pageNumber
+// Usage: go run ./testprog document.pdf pageNumber [fontName code outFile]
 package main
 
 import (
@@ -46,7 +47,6 @@ func main() {
 		log.Fatal("no resources")
 	}
 	c := d.COS()
-	// With five args, dump one glyph outline as JSON instead: document page fontName code outFile.
 	if len(os.Args) == 6 {
 		fonts, ok := c.GetDict(res, "Font")
 		if !ok {

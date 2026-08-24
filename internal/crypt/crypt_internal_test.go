@@ -21,7 +21,6 @@ import (
 	"github.com/richardwilkes/pdfview/internal/cos"
 )
 
-// Encryption dictionary keys and crypt filter names used throughout these tests.
 const (
 	filterKey = "Filter"
 	lengthKey = "Length"
@@ -31,9 +30,8 @@ const (
 	strFKey   = "StrF"
 )
 
-// TestConfigureCapsKeyLen checks that a hostile /Length beyond 128 bits is clamped to a 16-byte key for R<=4. The
-// RC4/AESV2 file key derives from a 16-byte MD5 digest, so an uncapped keyLen (up to 32 for /Length 256) would slice
-// that digest out of range and panic during the empty-password probe at document open.
+// TestConfigureCapsKeyLen pins the 16-byte cap on the R<=4 key length: the file key is sliced from a 16-byte MD5
+// digest, so an uncapped /Length 256 (keyLen 32) would panic in the empty-password probe at open.
 func TestConfigureCapsKeyLen(t *testing.T) {
 	for _, length := range []int64{256, 192, 136} {
 		h := &Handler{r: 4, o: make([]byte, 32), u: make([]byte, 32)}
@@ -44,7 +42,7 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 		if h.keyLen != 16 {
 			t.Errorf("/Length %d yields keyLen %d, want 16 (capped)", length, h.keyLen)
 		}
-		// Before the cap these derivations sliced the 16-byte digest with an out-of-range index and panicked.
+		// Must not panic.
 		h.deriveRC4([]byte(""))
 	}
 
@@ -65,11 +63,9 @@ func TestConfigureCapsKeyLen(t *testing.T) {
 	}
 }
 
-// TestConfigureUsesCryptFilterKeyLen checks that a V4 document's key length comes from the selected crypt filter when
-// the top-level /Length is absent or disagrees. /Length is optional there and defaults to 40 bits, so reading only the
-// top level gave a 5-byte key: with /CFM /AESV2 the 10-byte per-object key is one aes.NewCipher rejects, so the decrypt
-// reports failure and apply returns the CIPHERTEXT — the document authenticates and renders as garbage instead of
-// failing — and with /CFM /V2 the streams decrypt with 40-bit RC4 rather than the declared length.
+// TestConfigureUsesCryptFilterKeyLen pins that a V4 key length comes from the selected crypt filter when the top-level
+// /Length is absent or disagrees, and that /AESV2 always yields a 16-byte key: a 10-byte per-object key makes
+// aes.NewCipher fail and apply return the ciphertext unchanged, so the document renders as garbage instead of failing.
 func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
 	cf := func(cfm string, length cos.Object) cos.Dict {
 		filter := cos.Dict{cfmKey: cos.Name(cfm)}
@@ -114,9 +110,8 @@ func TestConfigureUsesCryptFilterKeyLen(t *testing.T) {
 	}
 }
 
-// TestConfigureLengthNeedsV2 checks that /Length is consulted only for V >= 2, the only versions that define it (ISO
-// 32000-1 Table 20); V 0 and V 1 fix the key at 40 bits. Honoring it regardless of /V gave an out-of-spec but real
-// `/V 1 /R 2 /Length 128` dictionary a 16-byte key where the writer used 5.
+// TestConfigureLengthNeedsV2 pins that /Length is read only for V >= 2 (ISO 32000-1 Table 20); V 0 and V 1 fix the key
+// at 40 bits.
 func TestConfigureLengthNeedsV2(t *testing.T) {
 	for _, tc := range []struct {
 		v       int
@@ -138,10 +133,8 @@ func TestConfigureLengthNeedsV2(t *testing.T) {
 	}
 }
 
-// TestNewV1IgnoresLength builds a genuine V1/R2 document — 40-bit key, per the version — that also carries a bogus
-// `/Length 128`, then checks the empty user password still unlocks it. Deriving a 16-byte key from that /Length makes
-// every candidate key mismatch /U, so the empty-password probe and both correct passwords fail and the document is
-// reported permanently locked.
+// TestNewV1IgnoresLength builds a V1/R2 document (40-bit key) that also carries a bogus `/Length 128` and checks the
+// empty user password still unlocks it; a 16-byte key derived from that /Length would match nothing.
 func TestNewV1IgnoresLength(t *testing.T) {
 	const perm uint32 = 0xFFFFFFFC
 	o := buildO(2, 5, []byte("owner-secret"), nil)
@@ -169,9 +162,9 @@ func TestNewV1IgnoresLength(t *testing.T) {
 	}
 }
 
-// TestConfigureV5CryptFilters checks that /StmF, /StrF, and /CF drive the V5 methods the way they drive the V4 ones
-// (ISO 32000-2 7.6.5 applies them to both versions, and both default to /Identity). The handler used to hardcode AESV3
-// for R5/R6, so a document that encrypts only its embedded files had its cleartext content decrypted anyway.
+// TestConfigureV5CryptFilters pins that /StmF, /StrF, and /CF drive the V5 methods as they drive the V4 ones (ISO
+// 32000-2 7.6.5), both defaulting to /Identity, so a document that encrypts only its embedded files keeps its cleartext
+// content.
 func TestConfigureV5CryptFilters(t *testing.T) {
 	aesCF := cos.Dict{stdCFName: cos.Dict{cfmKey: cos.Name("AESV3")}}
 	for _, tc := range []struct {
@@ -236,10 +229,10 @@ func TestConfigureV5CryptFilters(t *testing.T) {
 	}
 }
 
-// TestV5IdentityStreamsPassThrough builds a real R5 document that authenticates with the empty password, then checks
-// that `/StmF /Identity` leaves stream and string payloads alone while `/StmF /StdCF` with an AESV3 crypt filter does
-// not. aesCBCDecrypt succeeds on any payload of at least 32 bytes, so hardcoding AESV3 turned the cleartext content of
-// an "encrypt only file attachments" document into noise — every page blank or garbled — rather than failing loudly.
+// TestV5IdentityStreamsPassThrough builds an R5 document that authenticates with the empty password and checks that
+// `/StmF /Identity` leaves stream and string payloads alone while `/StmF /StdCF` with an AESV3 crypt filter does not.
+// aesCBCDecrypt succeeds on any payload of at least 32 bytes, so the wrong method turns cleartext into noise rather
+// than failing.
 func TestV5IdentityStreamsPassThrough(t *testing.T) {
 	fileKey := make([]byte, 32)
 	for i := range fileKey {
@@ -298,9 +291,8 @@ func TestV5IdentityStreamsPassThrough(t *testing.T) {
 	}
 }
 
-// TestNewRevisionRange pins the accepted /R range to 2-6, the revisions the standard security handler defines (ISO
-// 32000-2 7.6.4). Everything outside that range — including a missing, non-integer, or out-of-range revision — has to
-// be reported as errBadRevision rather than reaching configure with a revision no derivation implements.
+// TestNewRevisionRange pins the accepted /R range to 2-6 (ISO 32000-2 7.6.4). Anything else, including a missing or
+// non-integer /R, must be errBadRevision rather than reach configure with a revision no derivation implements.
 func TestNewRevisionRange(t *testing.T) {
 	for _, tc := range []struct {
 		entry cos.Object
@@ -320,8 +312,8 @@ func TestNewRevisionRange(t *testing.T) {
 		{name: "seven", entry: cos.Integer(7), want: false},
 		{name: "huge", entry: cos.Integer(1 << 40), want: false},
 	} {
-		// Sized for both branches of configure: R<=4 needs 32-byte /O and /U, R5/R6 need 48-byte /O and /U plus
-		// 32-byte /OE and /UE, so the revision is the only thing under test.
+		// Sized for both branches of configure (32-byte /O and /U for R<=4; 48-byte /O and /U plus 32-byte /OE and /UE
+		// for R5/R6), so the revision is the only thing under test.
 		encDict := cos.Dict{
 			filterKey: cos.Name("Standard"),
 			"V":       cos.Integer(2),
@@ -391,9 +383,9 @@ func TestPadPassword(t *testing.T) {
 	}
 }
 
-// buildO produces the /O entry for a pair of passwords exactly as ISO 32000-1 Algorithm 3 specifies, independently of
-// the derivation under test. Step (c) hashes the whole 16-byte digest each round; only the first keyLen bytes of the
-// final digest become the RC4 key in step (d).
+// buildO produces the /O entry for a pair of passwords as ISO 32000-1 Algorithm 3 specifies, independently of the
+// derivation under test. Step (c) hashes the whole 16-byte digest each round; only the first keyLen bytes of the final
+// digest become the RC4 key in step (d).
 func buildO(r, keyLen int, ownerPw, userPw []byte) []byte {
 	key := md5.Sum(padPassword(ownerPw))
 	if r >= 3 {
@@ -448,11 +440,9 @@ func buildU(r int, fileKey, id0 []byte) []byte {
 	return append(x, make([]byte, 32-len(x))...)
 }
 
-// TestDeriveRC4OwnerRoundTrip builds R2-R4 documents at several key lengths from the spec's own encryption-side
-// algorithms, then confirms both passwords authenticate. The owner-key loop of Algorithm 3 step (c) re-hashes the
-// entire 16-byte digest, unlike Algorithm 2 step (f); truncating it to keyLen agrees only at the 128-bit key length
-// every corpus document happens to use, and at any other length the correct owner password was rejected — leaving
-// OwnerAuthenticatedMask unset and a document whose owner password is the only one known permanently locked.
+// TestDeriveRC4OwnerRoundTrip builds R2-R4 documents at several key lengths from the spec's encryption-side algorithms
+// and confirms both passwords authenticate. Algorithm 3 step (c) re-hashes the entire 16-byte digest, unlike Algorithm
+// 2 step (f); truncating it to keyLen agrees only at the 128-bit length every corpus document uses.
 func TestDeriveRC4OwnerRoundTrip(t *testing.T) {
 	ownerPw := []byte("owner-secret")
 	userPw := []byte("user-secret")
@@ -506,10 +496,9 @@ func TestDeriveRC4OwnerRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDeriveAES256R5RoundTrip exercises the R5 path (plain SHA-256, no hardened hash), which the corpus — all R6 — does
-// not reach. It hand-builds a valid /U and /UE for a known file key and password, then confirms deriveAES256 recovers
-// the key for the right password as the user and rejects the wrong one. The owner slot is left as zeros, so the owner
-// check simply fails.
+// TestDeriveAES256R5RoundTrip exercises the R5 path (plain SHA-256, no hardened hash), which the all-R6 corpus never
+// reaches: a hand-built /U and /UE for a known key must authenticate the right password as the user and reject a wrong
+// one. The owner slot is zeros, so the owner check fails.
 func TestDeriveAES256R5RoundTrip(t *testing.T) {
 	fileKey := make([]byte, 32)
 	for i := range fileKey {
@@ -571,9 +560,8 @@ func TestObjectKeyLength(t *testing.T) {
 	}
 }
 
-// TestStripPKCS7 pins the padding leniency, including the empty-slice case. Nothing reaches stripPKCS7 with an empty
-// slice today (aesCBCDecrypt guarantees a whole block first), but the package promises hostile input yields errors or
-// pass-through data and never a panic, so the guard must not depend on that invariant holding.
+// TestStripPKCS7 pins the padding leniency, including the empty-slice case: aesCBCDecrypt never passes an empty slice,
+// but the no-panic promise must not depend on that.
 func TestStripPKCS7(t *testing.T) {
 	block := func(pad byte, n int) []byte {
 		out := make([]byte, aes.BlockSize)

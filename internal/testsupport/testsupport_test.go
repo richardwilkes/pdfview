@@ -19,9 +19,8 @@ import (
 )
 
 // TestGoldensSelfConsistent validates the committed goldens themselves: every truth.json loads under the strict schema,
-// agrees with its own page/DPI/needle structure, and every referenced PNG decodes to the recorded dimensions. This
-// guards the committed artifacts (for example against line-ending or encoding corruption) independently of the engine,
-// so a corrupted golden is reported here rather than as a mysterious parity failure.
+// agrees with its own page/DPI/needle structure, and every referenced PNG decodes to the recorded dimensions. A golden
+// corrupted in the tree (line endings, encoding) is reported here rather than as a parity failure elsewhere.
 func TestGoldensSelfConsistent(t *testing.T) {
 	goldens, err := testsupport.LoadGoldens(filepath.Join("..", "..", "testfiles", "goldens"))
 	if err != nil {

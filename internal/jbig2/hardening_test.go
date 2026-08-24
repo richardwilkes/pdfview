@@ -8,11 +8,10 @@
 // defined by the Mozilla Public License, version 2.0.
 
 // This file is pdfview-authored (MPL-2.0), not upstream code. It pins the DoS guards restored into the vendored JBIG2
-// decoder: each guard is a hard reject before an allocation or loop that hostile input could otherwise blow up. Every
-// case proves the reject fires, and — where a legitimate small value can be isolated from a full decode — proves that
-// value still passes. The legitimate-pass side of the guards buried inside the entropy decoders (text-region
-// instances, halftone grid, collective bitmap) is pinned end-to-end by the corpus goldens in pdfview_test.go and
-// internal/imaging; those are named in the comments below.
+// decoder: each is a hard reject before an allocation or loop that hostile input could otherwise blow up. Every case
+// proves the reject fires and, where a legitimate small value can be isolated from a full decode, that the value still
+// passes. The legitimate-pass side of the guards inside the entropy decoders (text-region instances, halftone grid,
+// collective bitmap) is pinned end-to-end by the corpus goldens in pdfview_test.go and internal/imaging, named below.
 
 package jbig2
 
@@ -41,8 +40,8 @@ func regionInfoBytes(w, h int32) []byte {
 	return b
 }
 
-// bitWriter accumulates a big-endian (MSB-first) bit stream, the order the Huffman and range readers consume, so a
-// hand-encoded symbol dictionary can drive the entropy decoders to the exact intermediate values a guard bounds.
+// bitWriter accumulates an MSB-first bit stream, the order the Huffman and range readers consume, so a hand-encoded
+// symbol dictionary can drive the entropy decoders to the exact intermediate values a guard bounds.
 type bitWriter struct {
 	bits []byte
 }
@@ -73,10 +72,10 @@ func (w *bitWriter) bytes() []byte {
 	return out
 }
 
-// TestGuardSymbolCounts pins guard 1: parseSymbolDict rejects SDNUMEXSYMS or SDNUMNEWSYMS over 65535 before either
-// sizes an allocation (PDFium jbig2_context.cpp:440-441). The stream is an arithmetic symbol dictionary header
-// (SDTEMPLATE 1 so only two SDAT bytes precede the two counts); at the cap and below the header decodes to an empty
-// dictionary, so the boundary and the small case are directly observable as success.
+// TestGuardSymbolCounts pins that parseSymbolDict rejects SDNUMEXSYMS or SDNUMNEWSYMS over 65535 before either sizes
+// an allocation (PDFium jbig2_context.cpp:440-441). The stream is an arithmetic symbol dictionary header (SDTEMPLATE 1,
+// so only two SDAT bytes precede the counts); at the cap and below it decodes to an empty dictionary, so the boundary
+// and the small case are observable as success.
 func TestGuardSymbolCounts(t *testing.T) {
 	build := func(exsyms, newsyms uint32) []byte {
 		b := append([]byte{}, be16(0x0400)...) // flags: SDHUFF=0, SDREFAGG=0, SDTEMPLATE=1
@@ -106,7 +105,7 @@ func TestGuardSymbolCounts(t *testing.T) {
 	}
 }
 
-// TestGuardRegionSize pins guard 4: ParseRegionInfo rejects a region rectangle outside (0, 65535] in either dimension
+// TestGuardRegionSize pins that ParseRegionInfo rejects a region rectangle outside (0, 65535] in either dimension
 // (PDFium IsValidImageSize, jbig2_image.cpp:127-129), the single site covering the text, halftone, generic, and
 // refinement paths. A value >= 2^31 reads back negative into int32 and is caught by the <= 0 test.
 func TestGuardRegionSize(t *testing.T) {
@@ -134,10 +133,10 @@ func TestGuardRegionSize(t *testing.T) {
 	}
 }
 
-// TestGuardTextInstances pins guard 2's reject: parseTextRegion rejects an SBNUMINSTANCES far past what the remaining
-// stream can code (32 per byte; PDFium jbig2_context.cpp:662-675). Without the bound the instance loop in
-// jbig2_trd_proc.go would spin on the 2^32-1 count instead of returning. A legitimate small SBNUMINSTANCES passing the
-// guard is pinned end-to-end by the symbol_text_arithmetic and symbol_text_huffman corpus goldens.
+// TestGuardTextInstances pins that parseTextRegion rejects an SBNUMINSTANCES past what the remaining stream can code
+// (32 per byte; PDFium jbig2_context.cpp:662-675); without it the instance loop in jbig2_trd_proc.go spins on the
+// 2^32-1 count. A legitimate SBNUMINSTANCES passing the guard is pinned by the symbol_text_arithmetic and
+// symbol_text_huffman corpus goldens.
 func TestGuardTextInstances(t *testing.T) {
 	b := append([]byte{}, regionInfoBytes(1, 1)...)
 	b = append(b, be16(0x0000)...)     // text-region flags: SBHUFF=0, SBREFINE=0
@@ -149,9 +148,9 @@ func TestGuardTextInstances(t *testing.T) {
 	}
 }
 
-// TestGuardHalftoneGrid pins guard 5's reject: parseHalftoneRegion rejects a grid dimension HGW/HGH outside
-// (0, 65535] (PDFium jbig2_context.cpp:933). HGW is what the halftone MMR path sizes make([]int, HGW+5) from. A
-// legitimate grid passing the guard is pinned by the pattern_halftone_mmr corpus golden.
+// TestGuardHalftoneGrid pins that parseHalftoneRegion rejects a grid dimension HGW/HGH outside (0, 65535] (PDFium
+// jbig2_context.cpp:933); the halftone MMR path sizes make([]int, HGW+5) from HGW. A legitimate grid passing the guard
+// is pinned by the pattern_halftone_mmr corpus golden.
 func TestGuardHalftoneGrid(t *testing.T) {
 	build := func(hgw, hgh uint32) []byte {
 		b := append([]byte{}, regionInfoBytes(1, 1)...)
@@ -180,9 +179,9 @@ func TestGuardHalftoneGrid(t *testing.T) {
 	}
 }
 
-// TestGuardMMRValidRowDecodes pins guard 7's other half: a well-formed MMR row still decodes. For a 1-wide image the
-// single 1-bit vertical-0 mode code (0x80) resolves the row against the reference edge and terminates it, so the
-// changing-element index never nears the buffer bound the guard checks.
+// TestGuardMMRValidRowDecodes pins that a well-formed MMR row still decodes under the changing-element bound. For a
+// 1-wide image the single 1-bit vertical-0 mode code (0x80) resolves the row against the reference edge and terminates
+// it, so the changing-element index never nears the buffer bound.
 func TestGuardMMRValidRowDecodes(t *testing.T) {
 	dec := NewMMRDecompressor(1, 1, NewBitStream([]byte{0x80, 0x00}, 0))
 	img, err := dec.Uncompress()
@@ -194,10 +193,10 @@ func TestGuardMMRValidRowDecodes(t *testing.T) {
 	}
 }
 
-// mmrRepeatedVL1 is the minimal byte sequence the audit describes: 0x49 0x24 0x92 packs the 3-bit VL1 mode code
-// ("010") eight times, and VL1 over the reference edge of a 1-wide image pins the changing position while appending a
-// changing element every code, so the current-row index outruns its width+5 buffer. It is repeated so the code reader
-// never runs short of bits before the index reaches the bound.
+// mmrRepeatedVL1 packs the 3-bit VL1 mode code ("010") eight times per 0x49 0x24 0x92 triple. VL1 over the reference
+// edge of a 1-wide image pins the changing position while appending a changing element every code, so the current-row
+// index outruns its width+5 buffer. The triple is repeated so the code reader never runs short of bits before the
+// index reaches the bound.
 func mmrRepeatedVL1() []byte {
 	out := []byte{}
 	for i := 0; i < 6; i++ {
@@ -206,10 +205,9 @@ func mmrRepeatedVL1() []byte {
 	return out
 }
 
-// TestGuardMMRPathologicalErrors pins guard 7's reject: the repeated-VL1 sequence that walks currIdx past the row
-// buffer now returns an error instead of panicking with an out-of-range write. Uncompress must not panic; the row loop
-// propagates the bound rejection. The generic_mmr and pattern_halftone_mmr corpus goldens pin that valid MMR still
-// decodes bit-for-bit.
+// TestGuardMMRPathologicalErrors pins that the repeated-VL1 sequence, which walks currIdx past the row buffer, returns
+// an error instead of panicking with an out-of-range write. The generic_mmr and pattern_halftone_mmr corpus goldens pin
+// that valid MMR still decodes bit-for-bit.
 func TestGuardMMRPathologicalErrors(t *testing.T) {
 	dec := NewMMRDecompressor(1, 4, NewBitStream(mmrRepeatedVL1(), 0))
 	img, err := dec.Uncompress()
@@ -218,11 +216,11 @@ func TestGuardMMRPathologicalErrors(t *testing.T) {
 	}
 }
 
-// TestGuardCollectiveBitmapWidth pins guard 6's reject in the Huffman symbol-dictionary path. The stream is hand-coded
-// against the standard DH/DW/BMSIZE tables to drive one height class to two symbols of width 65535, so the collective
-// bitmap's TOTWIDTH sums to 131070 — over the 65535 cap PDFium enforces (jbig2_sdd_proc.cpp:419-430) before the
-// wrapping-uint32 stride math. The specific guard error is asserted so the case cannot pass by failing earlier. The
-// legitimate collective-bitmap path (small TOTWIDTH) is pinned by the symbol_text_huffman corpus golden.
+// TestGuardCollectiveBitmapWidth pins the TOTWIDTH cap in the Huffman symbol-dictionary path. The stream is hand-coded
+// against the standard DH/DW/BMSIZE tables to drive one height class to two symbols of width 65535, so TOTWIDTH sums
+// to 131070 — over the 65535 cap PDFium enforces (jbig2_sdd_proc.cpp:419-430) before the wrapping-uint32 stride math.
+// The specific guard error is asserted so the case cannot pass by failing earlier. The legitimate path (small
+// TOTWIDTH) is pinned by the symbol_text_huffman corpus golden.
 func TestGuardCollectiveBitmapWidth(t *testing.T) {
 	w := &bitWriter{}
 	w.writeCode("0")       // HCDH via table 4 -> HCHEIGHT = 1
@@ -247,11 +245,11 @@ func TestGuardCollectiveBitmapWidth(t *testing.T) {
 	}
 }
 
-// TestGuardAggregateInstances pins guard 3's reject: the count of instances aggregated into one symbol, decoded inline
-// in the symbol dictionary, is bounded by 32 per remaining stream byte before it becomes SBNUMINSTANCES. The stream is
-// hand-coded to decode REFAGGNINST = 65808 from a handful of bytes, so it dwarfs 32*getByteLeft; the guard error is
-// asserted directly. This is hardening beyond PDFium (which decodes REFAGGNINST unguarded), so no corpus golden
-// exercises the aggregate path — the reject is the pin.
+// TestGuardAggregateInstances pins that REFAGGNINST, decoded inline in the symbol dictionary, is bounded by 32 per
+// remaining stream byte before it becomes SBNUMINSTANCES. The stream is hand-coded to decode REFAGGNINST = 65808 from
+// a handful of bytes, so it dwarfs 32*GetByteLeft; the guard error is asserted directly. This is hardening beyond
+// PDFium, which decodes REFAGGNINST unguarded, and no corpus golden exercises the aggregate path — the reject is the
+// pin.
 func TestGuardAggregateInstances(t *testing.T) {
 	w := &bitWriter{}
 	w.writeCode("0")   // HCDH via table 4 -> HCHEIGHT = 1

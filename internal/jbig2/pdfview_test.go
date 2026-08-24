@@ -7,9 +7,8 @@
 // This Source Code Form is "Incompatible With Secondary Licenses", as
 // defined by the Mozilla Public License, version 2.0.
 
-// This file and everything under testdata/ are pdfview-authored (MPL-2.0), not upstream code; the vendored tree
-// arrived with no tests at all, and these pin its behavior byte-for-byte so in-tree hardening cannot change a decode
-// result without saying so.
+// This file and everything under testdata/ are pdfview-authored (MPL-2.0), not upstream code. The pins hold the
+// vendored decoder's output byte-for-byte, so in-tree hardening cannot change a decode result without saying so.
 
 package jbig2
 
@@ -138,8 +137,8 @@ var undecodablePins = []corpusPin{
 }
 
 // TestCorpusPayloadsMatchPinnedBitmaps decodes every JBIG2 payload the corpus carries and compares the page against a
-// committed fixture, pixel for pixel. M1 established these decodes are bit-exact against the MuPDF oracle, so the
-// fixtures pin correct output, not merely current output.
+// committed fixture, pixel for pixel. The fixtures were established bit-exact against the MuPDF oracle, so they pin
+// correct output, not merely current output.
 func TestCorpusPayloadsMatchPinnedBitmaps(t *testing.T) {
 	found := corpusJBIG2Payloads(t)
 	covered := make(map[string]bool, len(found))
@@ -341,11 +340,10 @@ func TestEmbeddedEntryShape(t *testing.T) {
 	})
 }
 
-// TestCumulativeAreaCap pins the cap that Limits.MaxPixels names. Every corpus payload decodes under a cap generous
-// enough for its page and fails under one a fraction of the page's area, and the failure is reported as
-// ErrLimitExceeded rather than as a page. The cap is cumulative over every bitmap the decode allocates, so a payload
-// whose page alone fits can still exceed it — which is the whole point, symbol bitmaps being invisible to any scan of
-// the payload's headers.
+// TestCumulativeAreaCap pins the cap Limits.MaxPixels names: every corpus payload fails under a cap a fraction of its
+// page's area, and the failure is ErrLimitExceeded rather than a page. The cap is cumulative over every bitmap the
+// decode allocates, so a payload whose page alone fits can still exceed it — symbol bitmaps are invisible to any scan
+// of the payload's headers. The generous-cap side is pinLimits, which every other decode here runs under.
 func TestCumulativeAreaCap(t *testing.T) {
 	found := corpusJBIG2Payloads(t)
 	for _, pin := range corpusPins {
@@ -372,18 +370,16 @@ func TestCumulativeAreaCap(t *testing.T) {
 	}
 }
 
-// TestRefinementOptPathHandlesShiftedReference pins the dispatch this package deliberately leaves ungated where
-// PDFium gates it. PDFium takes its optimized refinement bodies only when GRREFERENCEDX == 0 and the region is
-// exactly as wide as the reference, because its bodies walk raw row pointers by whole bytes; the bodies here read
-// every reference pixel through bounds-checked row accessors instead, so they are claimed correct for any offset and
-// any reference width.
+// TestRefinementOptPathHandlesShiftedReference pins the dispatch this package deliberately leaves ungated where PDFium
+// gates it. PDFium takes its optimized refinement bodies only when GRREFERENCEDX == 0 and the region is exactly as wide
+// as the reference, because those bodies walk raw row pointers by whole bytes; the bodies here read every reference
+// pixel through bounds-checked row accessors, so they are claimed correct for any offset and reference width.
 //
 // The claim is checked without an oracle, by translation invariance: refining a W-wide region over a reference
-// narrower by dx at GRREFERENCEDX == dx must produce exactly what refining it over that same reference shifted right
-// by dx at GRREFERENCEDX == 0 produces — and the second configuration is the one PDFium's gate admits. Both decodes
-// read the same arithmetic stream, so any divergence in context formation shows up as differing pixels. Both
-// refinement templates are pinned, at several offsets, with TPGRON on and off (TPGRON exercises the typical-pixel
-// prediction, which reads the reference through a different path than the context does).
+// narrower by dx at GRREFERENCEDX == dx must produce exactly what refining it over that reference shifted right by dx
+// at GRREFERENCEDX == 0 produces — the configuration PDFium's gate admits. Both decodes read the same arithmetic
+// stream, so any divergence in context formation shows up as differing pixels. Both templates are pinned at several
+// offsets with TPGRON on and off, since typical-pixel prediction reads the reference through a different path.
 func TestRefinementOptPathHandlesShiftedReference(t *testing.T) {
 	const regionW, regionH = 37, 11
 	for _, template := range []bool{false, true} {
@@ -554,12 +550,9 @@ func pinBitmap(t *testing.T, pin corpusPin, page *Image) {
 }
 
 // pbmFor renders a decoded page as an ASCII PBM (netpbm P1): one line per row, one character per pixel, 1 meaning
-// black — PBM's convention and JBIG2's alike, a set page-bitmap pixel being ink. The text form is the point: a
-// hardening change that moves pixels shows up in a diff as the pixels it moved, and the fixture can be viewed as an
-// image or read directly.
-//
-// The page arrives packed one bit per pixel, MSB first, so this is a transcription rather than a threshold: the
-// fixtures pin the decoded bits themselves.
+// black — PBM's convention and JBIG2's alike. The text form makes a hardening change that moves pixels show up in a
+// diff as the pixels it moved, and the fixture can be viewed as an image or read directly. The page arrives packed one
+// bit per pixel, MSB first, so this is a transcription, not a threshold: the fixtures pin the decoded bits.
 func pbmFor(t *testing.T, page *Image) []byte {
 	t.Helper()
 	w, h := int(page.Width()), int(page.Height())

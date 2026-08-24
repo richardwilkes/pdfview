@@ -424,10 +424,10 @@ func TestWArrayIsSearchable(t *testing.T) {
 	}
 }
 
-// TestCMapRangesAreSearchable covers the sorted, non-overlapping form parseCMap leaves its code→CID and bf lists in so
-// that cid and bfRune can binary search: entries arriving out of code order must still resolve, and overlapping
-// entries must be trimmed — with the surviving tail re-based onto the right CID, bfrange increment or array element —
-// rather than left to shadow one another.
+// TestCMapRangesAreSearchable covers the sorted, non-overlapping form parseCMap leaves its cid and bf lists in so that
+// cid and bfRune can binary search: entries arriving out of code order must still resolve, and overlapping entries
+// must be trimmed, with the surviving tail re-based onto the right CID, bfrange increment or array element, rather
+// than left to shadow one another.
 func TestCMapRangesAreSearchable(t *testing.T) {
 	// Deliberately out of code order, with three kinds of overlap: [0010, 0013] partially covers the later-listed
 	// [0012, 0015], [0005, 0008] partially covers the later-listed [0007, 0009], and [0100, 0180] wholly covers
@@ -558,7 +558,7 @@ endcidchar`), 0, nil)
 		0x0020: 0, 0x0023: 0, // 65536 is one past the last addressable CID.
 		0x0040: 0, // The begincidchar form takes the same bound.
 		0x0050: 0,
-		0x0060: 0,                // Negative, as before.
+		0x0060: 0,                // Negative.
 		0x0030: 300, 0x0033: 303, // In range, so unaffected.
 		0x0051: 65535, // The largest addressable CID still maps.
 	} {
@@ -594,11 +594,9 @@ func TestCFFCIDCharset(t *testing.T) {
 	}
 }
 
-// TestCodespaceCountCapped covers the per-character cost of a CMap's codespace list. Codespaces are consulted for
-// every character code a show operator decodes — nextCode probes the list at each of the four code lengths and, for a
-// code inside none of them, walks it again for the longest prefix match — so accepting maxCMapRanges (65536) of them
-// made a hostile CMap cost hundreds of thousands of comparisons per byte, minutes of CPU for a page whose text is a
-// multi-megabyte Tj string. Real CMaps declare a handful.
+// TestCodespaceCountCapped pins maxCodespaces. Codespaces are consulted for every character code a show operator
+// decodes, so accepting maxCMapRanges of them would let a hostile CMap cost hundreds of thousands of comparisons per
+// byte: minutes of CPU for a page whose text is a multi-megabyte Tj string.
 func TestCodespaceCountCapped(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("begincmap\n")
@@ -627,9 +625,9 @@ func TestCodespaceCountCapped(t *testing.T) {
 	}
 }
 
-// TestCodespaceIndexMatchesLinearScan pins the merged per-length membership index against the list it replaced:
-// overlapping, adjacent, and disjoint ranges of assorted lengths must report exactly the codes the declaration order
-// covers, and no others.
+// TestCodespaceIndexMatchesLinearScan pins the merged per-length membership index against a linear scan of the
+// declaration list: overlapping, adjacent, and disjoint ranges of assorted lengths must report exactly the codes the
+// declaration order covers, and no others.
 func TestCodespaceIndexMatchesLinearScan(t *testing.T) {
 	content := `begincmap
 5 begincodespacerange
@@ -674,9 +672,9 @@ endcmap`
 
 // TestCMapEntriesAreScopedToTheirCodeLength covers ISO 32000-2 9.7.6.2: a cidrange (or bfrange) applies only to codes
 // of the length it was written with. A CMap declaring both a 1-byte and a 2-byte codespace can therefore carry two
-// entries whose code values coincide, and merging them into one value-keyed list let the wider entry shadow the
-// narrower one away entirely: 1-byte code 0x41 resolved through the 2-byte range and selected a glyph — and a ToUnicode
-// string — belonging to an unrelated code.
+// entries whose code values coincide, and one value-keyed list would let the wider entry shadow the narrower one away
+// entirely: 1-byte code 0x41 would resolve through the 2-byte range and select a glyph, and a ToUnicode string,
+// belonging to an unrelated code.
 func TestCMapEntriesAreScopedToTheirCodeLength(t *testing.T) {
 	cm := parseCMap([]byte(`2 begincodespacerange
 <20> <7f>
@@ -774,9 +772,9 @@ func TestCMapRangeCapCountsEveryLength(t *testing.T) {
 }
 
 // TestBFRuneDecodesOnlyTheLeadingUnit pins the lookup cost of /ToUnicode. parseBFRanges puts no cap on a bf target's
-// length — a hex string token carries up to the lexer's maxHexStringScan — while Font.Unicode keeps exactly one rune
-// per code. Decoding the whole target on every lookup allocated a []uint16 and a string proportional to it, so a
-// hostile /ToUnicode over a text-heavy page turned extraction into hundreds of gigabytes of churn for one rune a call.
+// length (a hex string token decodes up to ~512 KB) while Font.Unicode keeps exactly one rune per code, so decoding the
+// whole target on every lookup would allocate proportional to it and turn extraction over a text-heavy page into
+// gigabytes of churn for one rune a call.
 func TestBFRuneDecodesOnlyTheLeadingUnit(t *testing.T) {
 	const units = 1 << 16
 	target := make([]byte, 0, 2*units)
@@ -790,8 +788,7 @@ func TestBFRuneDecodesOnlyTheLeadingUnit(t *testing.T) {
 	if !ok || r != 'A' || !multi {
 		t.Fatalf("bfRune = %q, %v, %v; want 'A', true, true", r, multi, ok)
 	}
-	// The lookup's cost must not depend on the target's length: the old whole-target decode allocated a []uint16 and a
-	// string proportional to it on every call.
+	// The lookup's cost must not depend on the target's length.
 	small := &cmapPDF{}
 	small.bf[1] = []bfEntry{{lo: 0x20, hi: 0x20, dst: []byte{0x00, 0x41}}}
 	huge := testing.AllocsPerRun(100, func() { cm.bfRune(0x20, 2) })
@@ -911,10 +908,10 @@ func TestBFRunesAfterFirst(t *testing.T) {
 }
 
 // TestBFRunesAfterFirstCapped pins the bound on how many characters one glyph can spell out. parseBFRanges puts no cap
-// on a target's length — a hex string token reaches the lexer's maxHexStringScan of ~512 KB — so without this a single
-// glyph, shown once per page position a work budget allows, expands into a quarter-million recorded characters each.
-// MuPDF stops at the same place: its bfrange parser truncates a target to PDF_MRANGE_CAP code units and increments the
-// last unit that survives.
+// on a target's length (a hex string token decodes up to ~512 KB), so without this a single glyph, shown once per page
+// position a work budget allows, expands into a quarter-million recorded characters each. MuPDF stops at the same
+// place: its bfrange parser truncates a target to PDF_MRANGE_CAP code units and increments the last unit that
+// survives.
 func TestBFRunesAfterFirstCapped(t *testing.T) {
 	const units = 1 << 15
 	dst := make([]byte, 0, 2*units)

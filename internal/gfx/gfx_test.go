@@ -135,9 +135,8 @@ func TestPathRect(t *testing.T) {
 	}
 }
 
-// RectCorners must emit the same rectangle Rect does for an ordinary box, and — the reason it exists — must stay finite
-// for a box whose extent overflows float32. Every /BBox clip in the engine is built from validated corners, so the
-// origin-plus-extent spelling would hand ±Inf corners to the rasterizer for a box that is itself perfectly finite.
+// RectCorners must emit the same rectangle Rect does for an ordinary box and must stay finite for a box whose extent
+// overflows float32, which is what the /BBox clips built from validated corners rely on.
 func TestPathRectCorners(t *testing.T) {
 	var corners, extents Path
 	corners.RectCorners(10, 20, 40, 60)

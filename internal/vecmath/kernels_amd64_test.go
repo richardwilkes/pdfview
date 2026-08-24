@@ -17,10 +17,10 @@ import (
 	"testing"
 )
 
-// TestKernelsSupportedNeedsAVX2 pins the amd64 floor. The simd package drives an AVX-only CPU in hardware, and the
-// kernels' broadcasts would fault there, so KernelsSupported must say no whenever AVX2 is missing — and yes whenever
-// it is present and the simd package is not emulating, so that a later edit cannot quietly retreat to a stricter
-// floor (FMA, AVX-512) and switch the kernels off on hardware that runs them.
+// TestKernelsSupportedNeedsAVX2 pins the amd64 floor: KernelsSupported must say no whenever AVX2 is missing, since
+// the simd package drives an AVX-only CPU in hardware and the kernels' broadcasts would fault there, and yes whenever
+// AVX2 is present and the simd package is not emulating, so a later edit cannot retreat to a stricter floor (FMA,
+// AVX-512) and switch the kernels off on hardware that runs them.
 func TestKernelsSupportedNeedsAVX2(t *testing.T) {
 	want := !simd.Emulated() && archsimd.X86.AVX2()
 	if got := KernelsSupported(); got != want {

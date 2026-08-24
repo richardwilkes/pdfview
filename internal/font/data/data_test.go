@@ -48,8 +48,8 @@ func TestParseAGLLine(t *testing.T) {
 	}
 }
 
-// TestAGLHasNoReplacementChars guards the committed blob itself: no entry may carry U+FFFD, which is what a surrogate
-// (or any other unusable scalar) would have turned into before the guard.
+// TestAGLHasNoReplacementChars guards the committed blob itself: no entry may carry U+FFFD, the character an unusable
+// scalar would silently become.
 func TestAGLHasNoReplacementChars(t *testing.T) {
 	agl := AGL()
 	if len(agl) < 4000 {

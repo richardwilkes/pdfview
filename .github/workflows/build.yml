@@ -16,8 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pure Go: one runner per OS plus both architectures on Linux. The parity tests assert exact integer
-        # geometry, so keeping amd64 and arm64 in the matrix polices any floating-point divergence between them.
+        # One runner per OS plus both architectures on Linux. The parity tests assert exact integer geometry, so
+        # amd64 and arm64 together catch floating-point divergence between them.
         os: [ubuntu-22.04, ubuntu-22.04-arm, macos-26, windows-2022]
     defaults:
       run:
@@ -31,21 +31,17 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Lint via the official action rather than build.sh's --lint step: the
-      # latter downloads golangci-lint through its upstream install.sh, whose
-      # checksum verification fails for unauthenticated release downloads in CI.
+      # Lint through the official action rather than build.sh --lint: the script downloads golangci-lint through the
+      # upstream install.sh, whose checksum verification fails for unauthenticated release downloads in CI.
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
-      # The library must stay buildable without cgo. Enforce that explicitly,
-      # since the race-enabled test run below re-enables cgo internally (the
-      # race runtime requires it) and so cannot catch a cgo dependency creeping
-      # in.
+      # The library must build without cgo. The race-enabled test run below needs cgo, so it cannot catch a cgo
+      # dependency on its own.
       - name: Verify cgo-free build
         run: CGO_ENABLED=0 go build ./...
 
-      # build.sh builds and runs the tests with the race detector.
       - name: build.sh
         run: ./build.sh --race

@@ -98,8 +98,8 @@ func TestExtGStateMiterLimitGuarded(t *testing.T) {
 	}
 }
 
-// TestLineWidthGuarded verifies the w operator rejects a non-finite line width (a real that narrows to +Inf in float32),
-// keeping the default width of 1 so no infinite stroke width flows to StrokePath.
+// TestLineWidthGuarded verifies the w operator rejects a negative or non-finite line width (a real that narrows to +Inf
+// in float32), keeping the default width of 1 so no bad stroke width flows to StrokePath.
 func TestLineWidthGuarded(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39) // 1e39, which overflows float32 to +Inf
 	for _, tc := range []struct {
@@ -152,7 +152,6 @@ func TestExtGStateLineWidthGuarded(t *testing.T) {
 // default) in effect so no NaN/Inf offset reaches the stroker.
 func TestDashPhaseGuarded(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39) // 1e39, which overflows float32 to +Inf
-	// Valid: finite phase installs both the array and the phase.
 	rec := run(t, nil, nil, "[6 3] 1.5 d 0 0 m 1 1 l S")
 	wantOps(t, rec, opStroke)
 	if sp := rec.calls[0].sp; len(sp.Dash) != 2 || sp.DashPhase != 1.5 {
@@ -167,9 +166,8 @@ func TestDashPhaseGuarded(t *testing.T) {
 }
 
 // TestExtGStateDashEntriesResolved verifies the individual ExtGState /D dash lengths are resolved before opDash reads
-// them. Content-stream operands are always direct, so the d operator needs no resolution, but a /D array lives in the
-// object graph where `[[3 0 R 2] 0]` is legal; an unresolved entry fails cos.AsReal and would leave the previous dash
-// pattern in effect instead of the one the ExtGState asked for.
+// them. Content-stream operands are always direct, but a /D array lives in the object graph where `[[3 0 R 2] 0]` is
+// legal; an unresolved entry fails cos.AsReal and would leave the previous dash pattern in effect.
 func TestExtGStateDashEntriesResolved(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -295,9 +293,8 @@ func TestPatternMatrixNonFiniteRejected(t *testing.T) {
 	}
 }
 
-// TestImageCacheRetainsAfterCapReached verifies the no-store fallback image cache keeps a resource cached once decoded
-// even after the cap is reached, so a repeatedly drawn image is not re-decoded on every Do. Before the LRU, the
-// (maxCachedImages+1)-th distinct ref was never cached and each Do handed the device a freshly decoded image.
+// TestImageCacheRetainsAfterCapReached verifies the no-store fallback image cache still caches a newly decoded resource
+// once the cap is reached, so the (maxCachedImages+1)-th distinct image is not re-decoded on every Do.
 func TestImageCacheRetainsAfterCapReached(t *testing.T) {
 	const extra = maxCachedImages + 1
 	bodies := make([]string, extra)
@@ -334,10 +331,9 @@ func TestImageCacheRetainsAfterCapReached(t *testing.T) {
 	}
 }
 
-// TestLoadFontCachedFailureReportsMiss verifies that a font whose load fails, when cached as a negative entry in the
-// budgeted store, still reports a miss on subsequent lookups (like the no-store LRU path). Before the fix, the store
-// path returned the typed-nil *font.Font boxed in the cache as a success, so a repeated Tf would clear the current font
-// instead of aborting the operator and preserving the previous font.
+// TestLoadFontCachedFailureReportsMiss verifies a font whose load fails, cached as a negative entry in the budgeted
+// store, still reports a miss on later lookups: a typed-nil *font.Font boxed in the cache must not read as a success,
+// or a repeated Tf would clear the current font instead of keeping the previous one.
 func TestLoadFontCachedFailureReportsMiss(t *testing.T) {
 	// Object 1 is a plain integer, so it is not a font dictionary and font.Load never runs — loadFont fails.
 	d, err := cos.Open([]byte(minimalPDF("42")))
@@ -385,9 +381,8 @@ func TestLRUCache(t *testing.T) {
 }
 
 // TestSpacedShowKeepsOperandBacking verifies the " operator reads its string operand positionally instead of reslicing
-// the shared operand list. Reslicing advanced the list's base pointer permanently — exec's `operands[:0]` reset keeps
-// the shifted base — so every " shed two slots of capacity, eventually forcing the operand buffer to reallocate and
-// leaving the maxOperands sliding window working against an ever-shrinking buffer.
+// the shared operand list: exec's `operands[:0]` reset keeps a shifted base, so each reslice would shed two slots of
+// capacity for the rest of the stream.
 func TestSpacedShowKeepsOperandBacking(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF("<< >>")))
 	if err != nil {
@@ -404,10 +399,9 @@ func TestSpacedShowKeepsOperandBacking(t *testing.T) {
 	}
 }
 
-// TestInlineDictValuelessKeyBeforeID verifies parseInlineDict terminates the dictionary when a name key has no value and
-// runs straight into the ID marker. Before the fix, the ID keyword was handed to parseOperand, which failed and silently
-// consumed it; the loop then scanned into the binary payload, hit EOF, drew nothing, and left the lexer at end-of-stream
-// so all trailing page content was discarded. The image must still decode and the trailing fill must still paint.
+// TestInlineDictValuelessKeyBeforeID verifies parseInlineDict terminates the dictionary when a name key has no value
+// and runs straight into the ID marker, rather than consuming ID as the value and scanning into the payload: the image
+// must still decode and the trailing fill must still paint.
 func TestInlineDictValuelessKeyBeforeID(t *testing.T) {
 	// /Junk carries no value and is immediately followed by ID; the four gray samples decode as a 2x2 image.
 	rec := run(t, nil, nil, "BI /W 2 /H 2 /BPC 8 /CS /G /Junk ID \x00\x01\x02\x03 EI 0 0 1 1 re f")
@@ -460,9 +454,8 @@ func TestSpacedShowOperands(t *testing.T) {
 }
 
 // TestShortColorOperandsIgnored verifies sc/scn/SC/SCN leave the current color alone when the operand list carries
-// fewer numbers than the selected space needs. Before the fix the short (possibly empty) list was installed verbatim
-// and ToNRGBA padded it with zeroes, so a bare scn under DeviceCMYK silently repainted in white — while the sibling
-// operators g/rg/k, which demand the exact operand count, skipped the same malformed input.
+// fewer numbers than the selected space needs, as g/rg/k already do: installing a short list would let ToNRGBA pad it
+// with zeroes, so a bare scn under DeviceCMYK would repaint in white.
 func TestShortColorOperandsIgnored(t *testing.T) {
 	// (0, 0, 0.8, 0) is the CMYK anchor TestColorOperators pins: 255, 243, 79. All-zero CMYK would be white.
 	yellow := color.NRGBA{R: 255, G: 243, B: 79, A: 255}
@@ -540,8 +533,7 @@ const formDo = "/" + string(resFormName) + " Do"
 
 // TestTextMatrixSurvivesNonFiniteAdvance verifies appendGlyphs leaves the text matrix alone when folding in a glyph's
 // advance would make it non-finite. Two finite factors (a huge /Widths entry and a huge Tf size) can still multiply to
-// ±Inf, and before the guard that poisoned in.tm permanently: newRun then returned nil for every later show operator
-// until the next BT, so the rest of the text object silently disappeared.
+// ±Inf, and a poisoned in.tm makes newRun return nil for every later show operator until the next BT.
 func TestTextMatrixSurvivesNonFiniteAdvance(t *testing.T) {
 	// 1e30 glyph units is 1e27 in text space, and 1e27 * a 1e12 point size overflows float32's ~3.4e38 ceiling.
 	width := "1" + strings.Repeat("0", 30)
@@ -599,9 +591,9 @@ func wantFiniteClipCorners(t *testing.T, c *call, box gfx.Rect) {
 }
 
 // TestFormBBoxClipSurvivesOverRangeBox verifies execForm builds the form's /BBox clip from the box's corners rather
-// than from an origin plus a computed extent. rectFrom validates the four entries individually, but X1-X0 overflows to
-// +Inf for a box spanning more than float32's range, and Rect's x+w corners are then ±Inf — the clip degenerates and
-// the form paints nothing, when a box that large should clip nothing at all.
+// than from an origin plus a computed extent: rectFrom validates the four entries individually, but X1-X0 overflows to
+// +Inf for a box spanning more than float32's range, and a clip built from x+w would then degenerate and paint nothing
+// where a box that large should clip nothing at all.
 func TestFormBBoxClipSurvivesOverRangeBox(t *testing.T) {
 	body := "1 0 0 rg 0 0 100 100 re f"
 	for _, tc := range []struct {
@@ -701,9 +693,8 @@ func TestTilingStepFallbackFinite(t *testing.T) {
 }
 
 // TestTilingCellChildSharesParentState verifies the cell-replay interpreter shares the parent's cycle set, parse
-// caches, and image/font LRUs instead of allocating its own. A single fill replays up to 4096 cells, so a fresh set per
-// cell is pure garbage — and the two LRUs used to be unshared while everything else was, which would have let a cell's
-// decoded images escape the caches the parent's own lookups consult.
+// caches, and image/font LRUs instead of allocating its own: a single fill replays up to 4096 cells, so a fresh set per
+// cell is pure garbage, and an unshared LRU would let a cell's decoded images escape the parent's own lookups.
 func TestTilingCellChildSharesParentState(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF("<< >>")))
 	if err != nil {
@@ -739,9 +730,8 @@ func TestTilingCellChildSharesParentState(t *testing.T) {
 	}
 }
 
-// TestStoreBackedInterpSkipsFallbackCaches verifies the per-Run image/font LRUs are built only when they are the
-// caching path. With a budgeted store wired every image and font lookup goes to the store, so the LRUs are never
-// consulted — they were pure dead weight on every interpreter the engine built, since the public API always wires one.
+// TestStoreBackedInterpSkipsFallbackCaches verifies the per-Run image/font LRUs are built only without a store: with a
+// budgeted store wired every image and font lookup goes to the store, so the LRUs would never be consulted.
 func TestStoreBackedInterpSkipsFallbackCaches(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF("<< >>")))
 	if err != nil {
@@ -799,10 +789,9 @@ func parseOneOperand(t *testing.T, src string) cos.Object {
 	return obj
 }
 
-// TestOperandElementBudget covers the per-operand element cap. Nesting was bounded but width was not: an array is a
-// single operand consumed by a single operator, so neither the work budget (one unit for the whole TJ) nor maxOperands
-// (a bound on how many operands are kept, not on how large one is) charged for its elements, and a small flate-
-// compressed content stream could buy tens of millions of them — measured at 623 MB of live heap for one RenderPage.
+// TestOperandElementBudget covers the per-operand element cap. An array is a single operand consumed by a single
+// operator, so neither the work budget (one unit for the whole TJ) nor maxOperands (a bound on how many operands are
+// kept, not on how large one is) charges for its elements.
 func TestOperandElementBudget(t *testing.T) {
 	t.Run("flat", func(t *testing.T) {
 		obj := parseOneOperand(t, "["+strings.Repeat("1 ", maxOperandElements+64)+"]")
@@ -848,11 +837,9 @@ func TestOversizedOperandKeepsTokenizerInSync(t *testing.T) {
 	wantOps(t, rec, opStroke)
 }
 
-// TestOperandFloodKeepsTheOperatorsOwnOperands verifies the operand cap drops the NEWEST operands past it, keeping the
-// front of the list. Operators read positionally from the list's start, so the window must be invisible to them:
-// keeping the newest maxOperands instead shifted every operator's operands by the flood's length — after 70 stray
-// numbers, cm read pushes #7-#12 rather than the #1-#6 a windowless interpreter uses, a value that moves with the
-// flood's size.
+// TestOperandFloodKeepsTheOperatorsOwnOperands verifies the operand cap drops the newest operands past it, keeping the
+// front of the list: operators read positionally from the list's start, so keeping the newest maxOperands instead would
+// shift every operator's operands by the flood's length.
 func TestOperandFloodKeepsTheOperatorsOwnOperands(t *testing.T) {
 	for _, flood := range []int{0, 1, maxOperands, 4 * maxOperands} {
 		t.Run(fmt.Sprintf("flood %d", flood), func(t *testing.T) {
@@ -869,11 +856,9 @@ func TestOperandFloodKeepsTheOperatorsOwnOperands(t *testing.T) {
 	}
 }
 
-// TestSoftMaskBackdropNarrowingGuarded verifies a /BC entry is validated AFTER the narrowing to float32: a legal PDF
-// number past float32's range is ±Inf once narrowed, and the backdrop it forms is the mask coverage every pixel outside
-// the mask's bbox takes. Before the guard the ±Inf flowed into the space's conversion and only the consumers' clamps
-// contained it, turning what must be the /BC-absent black backdrop of a DeviceGray mask group into full white — the
-// inverse coverage — outside the box.
+// TestSoftMaskBackdropNarrowingGuarded verifies a /BC entry is validated after the narrowing to float32: a legal PDF
+// number past float32's range is ±Inf once narrowed, and the backdrop it forms is the mask coverage outside the mask's
+// bbox, so an unguarded ±Inf would turn a DeviceGray mask group's black backdrop into full white there.
 func TestSoftMaskBackdropNarrowingGuarded(t *testing.T) {
 	huge := "1" + strings.Repeat("0", 39) // 1e39: finite as a float64, +Inf as a float32
 	for _, tc := range []struct {
@@ -914,10 +899,9 @@ func TestSoftMaskBackdropNarrowingGuarded(t *testing.T) {
 	}
 }
 
-// TestFormCycleGuardIgnoresGeneration verifies that a form re-entering itself under a DIFFERENT generation number is
-// caught by the cycle set. Object lookup keys on the object number alone, so "1 0 R" and "1 1 R" are the same form;
-// keying the cycle set on the whole reference made them compare unequal, leaving only maxFormDepth to stop the
-// recursion — twelve decodes and twelve executions of the body per invocation instead of one.
+// TestFormCycleGuardIgnoresGeneration verifies the cycle set catches a form re-entering itself under a different
+// generation number: object lookup keys on the object number alone, so "1 0 R" and "1 1 R" are the same form, and a
+// whole-reference key would leave only maxFormDepth to stop the recursion.
 func TestFormCycleGuardIgnoresGeneration(t *testing.T) {
 	body := "0 0 1 1 re f /Fm1 Do"
 	d, err := cos.Open([]byte(minimalPDF(streamObj(
@@ -934,7 +918,7 @@ func TestFormCycleGuardIgnoresGeneration(t *testing.T) {
 }
 
 // TestFormCachesIgnoreGeneration verifies the reference-keyed per-Run caches treat two generations of one object as one
-// entry. Keying on the whole reference stored — and re-parsed — the same resource twice.
+// entry rather than decoding and storing the same body twice.
 func TestFormCachesIgnoreGeneration(t *testing.T) {
 	body := "0 0 1 1 re f"
 	d, err := cos.Open([]byte(minimalPDF(streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", body))))
@@ -962,10 +946,9 @@ func TestFormCachesIgnoreGeneration(t *testing.T) {
 	}
 }
 
-// TestAnnotRunSharesBudgetAcrossAppearances verifies that a page's annotation appearances are bounded AS A GROUP. Each
-// appearance used to get a fresh full budget and fresh caches, so a page naming tens of thousands of annotations that
-// all point at one appearance stream re-decoded and re-executed it that many times over — a few kilobytes of file
-// buying unbounded work, which is exactly what the package's bounded-work contract rules out.
+// TestAnnotRunSharesBudgetAcrossAppearances verifies a page's annotation appearances are bounded as a group: with a
+// fresh budget per appearance, a page naming tens of thousands of annotations that all point at one appearance stream
+// would re-execute it that many times over.
 func TestAnnotRunSharesBudgetAcrossAppearances(t *testing.T) {
 	const appearances = 1200
 	body := paddedBody("0 0 1 1 re f")
@@ -990,8 +973,7 @@ func TestAnnotRunSharesBudgetAcrossAppearances(t *testing.T) {
 }
 
 // TestAnnotRunSharesBodyCacheAcrossAppearances verifies the decoded-body cache spans the page's appearances too: the
-// second annotation naming a stream reuses the first's bytes rather than inflating it again (internal/filter allows one
-// stream to reach max(64 MB, 256x input), so a per-appearance cache made that decode repeat per annotation).
+// second annotation naming a stream reuses the first's bytes rather than inflating it again.
 func TestAnnotRunSharesBodyCacheAcrossAppearances(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF(streamObj("/Type /XObject /Subtype /Form /BBox [0 0 10 10]", "0 0 1 1 re f"))))
 	if err != nil {
@@ -1019,12 +1001,10 @@ func TestAnnotRunSharesBodyCacheAcrossAppearances(t *testing.T) {
 	}
 }
 
-// TestInlineDictElementBudget covers the inline-image dictionary's element cap. Every other container the interpreter
-// parses shares the maxOperandElements allowance, but the BI dictionary had none: a page stream may inflate to 64 MB,
-// so one BI followed by millions of distinct "/aN <</b 0>>" pairs — a few hundred kilobytes of flate — built a
-// cos.Dict of millions of entries, each holding its own Go map, for the single budget unit the BI operator costs.
-// Entries past the allowance are dropped, but parsing must still reach ID so the payload and the operators after it
-// stay in sync.
+// TestInlineDictElementBudget verifies the inline-image dictionary shares the maxOperandElements allowance every other
+// container the interpreter parses gets: one BI followed by millions of "/aN <</b 0>>" pairs costs a single budget
+// unit. Entries past the allowance are dropped, but parsing must still reach ID so the payload and the operators after
+// it stay in sync.
 func TestInlineDictElementBudget(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("BI /W 2 /H 2 /BPC 8 /CS /G ")
@@ -1048,12 +1028,10 @@ func TestInlineDictElementBudget(t *testing.T) {
 	wantOps(t, rec, opFillImage, opFill)
 }
 
-// TestImageCarriesBlendMode verifies an ordinary (non-stencil) image composites under the current blend mode. drawImage
-// hands the device a paint carrying /BM and the constant fill alpha; before the fix it passed the alpha alone, and
-// FillImage — the one marking call that could not carry a blend — built its paint with the default Normal, so
-// `/GS0 gs /Im0 Do` with /BM /Multiply composited Src-over while the identical construct on a path or an image MASK
-// multiplied. With a soft mask in scope the enclosing composite group carries the blend instead, so the image's own
-// paint must stay Normal/1 there — the blend must not apply twice.
+// TestImageCarriesBlendMode verifies an ordinary (non-stencil) image composites under the current blend mode: drawImage
+// hands the device a paint carrying /BM and the constant fill alpha, as a path or an image mask does. With a soft mask
+// in scope the enclosing composite group carries the blend instead, so the image's own paint must stay Normal/1 there —
+// the blend must not apply twice.
 func TestImageCarriesBlendMode(t *testing.T) {
 	pdf := minimalPDF(
 		"<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Length 6 >>\nstream\n\x10\x20\x30\x40\x50\x60\nendstream",
@@ -1111,10 +1089,8 @@ func simpleFontPDF(t *testing.T) *cos.Document {
 }
 
 // TestRunGlyphCountBounded verifies one show operator's run is capped at maxRunGlyphs. The per-glyph budget charge
-// bounds a Run's total glyph work but not one run's peak heap: a glyph costs a payload byte in the string operand and a
-// ~44-byte device.Glyph in the run, so before the cap a single Tj on a multi-megabyte string (a few kilobytes of flate)
-// built hundreds of megabytes of live entries before the device ever saw the run. A TJ array's strings compose ONE run,
-// so they share the allowance.
+// bounds a Run's total glyph work but not one run's peak heap: a glyph costs one payload byte in the string operand and
+// a whole device.Glyph in the run. A TJ array's strings compose one run, so they share the allowance.
 func TestRunGlyphCountBounded(t *testing.T) {
 	d := simpleFontPDF(t)
 	res := resourcesOf(t, d)
@@ -1141,10 +1117,8 @@ func TestRunGlyphCountBounded(t *testing.T) {
 }
 
 // TestFrameResourceCacheBounded verifies the per-frame name-keyed parse caches stop growing at maxFrameCacheEntries.
-// They cache NEGATIVE results, and content may name any number of resources the dictionary does not define, so
-// "/z0 sh /z1 sh ..." — one budget unit per operator — inserted one live map entry apiece with no cap, retained for the
-// frame's lifetime; cs/CS and scn had the identical path. The cap drops the memo, never the lookup: a defined name must
-// still resolve once the cache is full.
+// They cache negative results, and content may name any number of undefined resources at one budget unit per operator.
+// The cap drops the memo, never the lookup: a defined name must still resolve once the cache is full.
 func TestFrameResourceCacheBounded(t *testing.T) {
 	d, err := cos.Open([]byte(minimalPDF(
 		"<< /Shading << /Sh0 2 0 R >> /ColorSpace << /Cs0 3 0 R >> /Pattern << /P0 4 0 R >> >>",
@@ -1194,9 +1168,8 @@ func TestFrameResourceCacheBounded(t *testing.T) {
 }
 
 // TestTextMatrixSurvivesNonFiniteTJKick verifies opTJ leaves the text matrix alone when a TJ number's kick would make
-// it non-finite. The operand is range-checked, but float32(-n)/1000 still overflows against a large Tf size or Tz, and
-// before the guard the ±Inf matrix was stored unconditionally: newRun then returned nil for every later show operator
-// until the next BT/Tm/Td, so the rest of the text object silently disappeared.
+// it non-finite: the operand is range-checked, but float32(-n)/1000 still overflows against a large Tf size or Tz, and
+// a stored ±Inf would make newRun return nil for every later show operator until the next BT/Tm/Td.
 func TestTextMatrixSurvivesNonFiniteTJKick(t *testing.T) {
 	size := "1" + strings.Repeat("0", 20)  // 1e20
 	kick := "-1" + strings.Repeat("0", 38) // -1e38, finite on its own; /1000 against the size overflows float32
@@ -1215,9 +1188,9 @@ func TestTextMatrixSurvivesNonFiniteTJKick(t *testing.T) {
 }
 
 // TestTextLineMatrixSurvivesNonFiniteMove verifies textMove leaves the line matrix alone when the composed translation
-// would be non-finite. Td validates its operands but the composition still overflows once the operand and Tlm's own
-// translation are both near float32's ceiling, and since Tm is reset from Tlm a stored ±Inf was permanent for the text
-// object: Td/TD/T*/'/" all recompose from the poisoned Tlm, so only Tm or BT could recover.
+// would be non-finite: Td validates its operands, but the composition still overflows once the operand and Tlm's own
+// translation are both near float32's ceiling, and since Td/TD/T*/'/" all recompose from Tlm a stored ±Inf would
+// persist until the next Tm or BT.
 func TestTextLineMatrixSurvivesNonFiniteMove(t *testing.T) {
 	big := "3" + strings.Repeat("0", 38) // 3e38 is finite in float32; twice over is past the ~3.4e38 ceiling
 	d := simpleFontPDF(t)
@@ -1235,10 +1208,9 @@ func TestTextLineMatrixSurvivesNonFiniteMove(t *testing.T) {
 }
 
 // TestImageColorSpaceFromResourcesNotCached verifies an image whose /ColorSpace is a bare name resolved through the
-// resource frame is not served from the reference-keyed decode cache. imaging falls back to resources /ColorSpace[name]
+// resource frame is not served from the reference-keyed decode cache: imaging falls back to resources /ColorSpace[name]
 // for such an image, so the same XObject drawn under two forms that map /CS0 to different spaces decodes to different
-// colors; keyed on the reference alone, the second draw reused the first frame's palette (and with the document store
-// wired the stale entry crossed pages).
+// colors.
 func TestImageColorSpaceFromResourcesNotCached(t *testing.T) {
 	// One 1x1 8-bpc image whose three payload bytes read as red under DeviceRGB and as white under DeviceGray.
 	d, err := cos.Open([]byte(minimalPDF(

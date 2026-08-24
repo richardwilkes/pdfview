@@ -337,11 +337,10 @@ func TestDCTGrayAndRGB(t *testing.T) {
 	}
 }
 
-// TestDCTNonDeviceColorSpace pins the DCT path to the image's own /ColorSpace rather than the space inferred from the Go
-// type image/jpeg hands back. An all-zero 1-component JPEG in a /Separation space over DeviceCMYK must render white —
-// tint 0 lays down no ink — where inferring DeviceGray from *image.Gray renders it black, a fully inverted image. An
-// /Indexed space over the same payload has to reach the palette, which additionally requires the DCT /Decode default to
-// be that space's [0 2^bpc−1] rather than [0 1].
+// TestDCTNonDeviceColorSpace pins the DCT path to the image's own /ColorSpace rather than the space inferred from the
+// Go type image/jpeg hands back. An all-zero 1-component JPEG in a /Separation space over DeviceCMYK must render white
+// (tint 0 lays down no ink) where inferring DeviceGray from *image.Gray renders it black. An /Indexed space over the
+// same payload has to reach the palette, which also requires the DCT /Decode default to be that space's [0 2^bpc−1].
 func TestDCTNonDeviceColorSpace(t *testing.T) {
 	d := testDoc(t)
 	// A constant block quantized at quality 100 (every quantization value is 1) reconstructs its samples exactly.
@@ -424,10 +423,9 @@ func rgbFormJPEG(t *testing.T, img image.Image) []byte {
 	return append(out, encoded[2:]...)
 }
 
-// TestDCTRGBForm covers the *image.RGBA form image/jpeg returns for a 3-component payload it decides is already RGB.
-// That form used to land in decodeDCT's generic branch, which silently dropped both the /Decode array and color-key
-// /Mask support: a transform-0 JPEG decoded to identical pixels with and without /Decode [1 0 1 0 1 0], and a full-range
-// color key left every pixel opaque.
+// TestDCTRGBForm covers the *image.RGBA form image/jpeg returns for a 3-component payload it decides is already RGB,
+// which must carry the same /Decode and color-key /Mask support as the YCbCr form: a transform-0 JPEG must invert
+// under /Decode [1 0 1 0 1 0], and a full-range color key must key out every pixel.
 func TestDCTRGBForm(t *testing.T) {
 	d := testDoc(t)
 	// Flat 2×2 blocks: the encoder's 4:2:0 subsampling of the second and third components is then lossless.
@@ -547,10 +545,10 @@ func TestStencilMaskEntry(t *testing.T) {
 	}
 }
 
-// TestStencilMaskUnsupportedCodec covers a stencil /Mask stream coded with one of the codecs this package does not
-// implement. The still-compressed payload used to be unpacked as 1-bpc stencil samples, punching pseudo-random holes in
-// an otherwise correctly decoded base image — the single byte 0x5a below produced the alpha row [255 0 255 0 0 255 0
-// 255], the raw byte's own bits. Both the /SMask path and run() decline these codecs, so the mask must simply be ignored.
+// TestStencilMaskUnsupportedCodec covers a stencil /Mask stream whose payload cannot decode: JBIG2 with no page
+// segment, and JPX, which stencilPlane declines outright. The mask must be ignored, leaving the image opaque, rather
+// than having its still-compressed bytes unpacked as 1-bpc samples (the single byte 0x5a would punch the alpha row
+// [255 0 255 0 0 255 0 255] into a correct base image).
 func TestStencilMaskUnsupportedCodec(t *testing.T) {
 	d := testDoc(t)
 	for _, codec := range []cos.Name{"JBIG2Decode", "JPXDecode"} {
@@ -754,7 +752,7 @@ func TestCCITTWidthExceedsColumns(t *testing.T) {
 func TestCCITTStencilMaskWidthExceedsColumns(t *testing.T) {
 	d := testDoc(t)
 	// The same missing-column contract for a CCITT stencil /Mask. A zero stencil sample paints the base (visible); the
-	// all-white fill masks out every present column, so only the missing columns past /Columns — read as zero samples —
+	// all-white fill masks out every present column, so only the missing columns past /Columns, read as zero samples,
 	// stay visible.
 	const w, h, cols = 12, 2, 8
 	mask := &cos.Stream{
@@ -912,11 +910,10 @@ func TestMaskDimensionsBounded(t *testing.T) {
 	}
 }
 
-// TestUndecodableCodecs pins the degrade-to-blank contract for the two codecs the prototype glue now decodes: a
-// payload neither decoder can make sense of is declined outright, never partially decoded. /ImageMask on a JPXDecode
-// image is ignored rather than declining by name (the oracle's posture, pinned by images-jpx-stencil.pdf), so an
-// undecodable payload in that role fails as a malformed image like any other; ErrUnsupportedCodec survives only on the
-// /Mask stencil-stream path, which stencilPlane still refuses for the codec.
+// TestUndecodableCodecs pins the degrade-to-blank contract for JBIG2 and JPX: a payload neither decoder can make sense
+// of is declined outright, never partially decoded. /ImageMask on a JPXDecode image is ignored rather than declining
+// by name (the oracle's posture, pinned by images-jpx-stencil.pdf), so an undecodable payload in that role fails as a
+// malformed image like any other; ErrUnsupportedCodec survives only on the /Mask stencil-stream path.
 func TestUndecodableCodecs(t *testing.T) {
 	d := testDoc(t)
 	for _, codec := range []string{"JBIG2Decode", "JPXDecode"} {
@@ -947,7 +944,7 @@ func TestUndecodableCodecs(t *testing.T) {
 }
 
 // TestFilterAbbreviationScope pins /F and /DP to inline images: on an image XObject /F is a file specification, so it
-// must not be read as a filter chain (which turned an external-data stream into a "malformed image").
+// must not be read as a filter chain.
 func TestFilterAbbreviationScope(t *testing.T) {
 	d := testDoc(t)
 	// Inline: /F names the filter and /DP its parameters.
@@ -1008,9 +1005,9 @@ func TestInlineNamedColorSpace(t *testing.T) {
 }
 
 // TestSeparationNoneImageReportsAlpha verifies HasAlpha tracks the alpha actually emitted, not just the color-key and
-// mask paths. A /Separation /None space never marks the page — its ToNRGBA returns the zero NRGBA, alpha included — so
-// every pixel of such an image is transparent. Declaring that surface opaque violates HasAlpha's own contract, and a
-// consumer taking the declaration at its word paints a solid black rectangle.
+// mask paths. A /Separation /None space never marks the page (its ToNRGBA returns the zero NRGBA, alpha included), so
+// every pixel of such an image is transparent; a consumer taking an opaque declaration at its word would paint a
+// solid black rectangle.
 func TestSeparationNoneImageReportsAlpha(t *testing.T) {
 	d := testDoc(t)
 	sepNone := cos.Array{cos.Name("Separation"), cos.Name("None"), cos.Name("DeviceGray")}
@@ -1040,11 +1037,10 @@ func TestSeparationNoneImageReportsAlpha(t *testing.T) {
 	}
 }
 
-// TestOverRangeDecodeArrayIgnored covers decodeArray's finiteness check, which tested the float64 before narrowing to
-// the float32 the mapping is stored in. "1" followed by 39 zeros is a legal PDF number and a finite float64 but +Inf as
-// a float32, which makes decodeMapping's dmin/dscale non-finite and maps every sample to ±Inf/NaN. color.clamp01 and
-// alphaByte absorb that, but dctByteMapping and the lut tables take the same values, so the array must be rejected
-// here — falling back to the default [0 1] per component, as any other malformed /Decode does.
+// TestOverRangeDecodeArrayIgnored covers decodeArray's finiteness check, which must test the float32 the mapping is
+// stored in rather than the parsed float64: "1" followed by 39 zeros is a legal PDF number and a finite float64 but
+// +Inf as a float32, which would make decodeMapping's dmin/dscale non-finite. The array must be rejected, falling back
+// to the default [0 1] per component like any other malformed /Decode.
 func TestOverRangeDecodeArrayIgnored(t *testing.T) {
 	d := testDoc(t)
 	huge := cos.Real(1e39) // Finite as a float64; +Inf once narrowed to float32.

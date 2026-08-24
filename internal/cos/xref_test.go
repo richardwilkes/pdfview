@@ -118,12 +118,11 @@ func chainedXrefStreamPDF() []byte {
 }
 
 // TestXrefStreamRequiresDirectFilter covers both halves of the rule that a cross-reference stream's dictionary must be
-// self-contained. A direct /Filter decodes normally and the section's entries land in the table; an indirect one is
-// refused before StreamData can resolve it, because resolving it would read against the very table this section is
-// still defining — here through a stale entry from the newer classic table that points object 7 somewhere it is not.
-// The old behavior is visible in the object-2 assertion: resolving the reference failed, which pulled the document-wide
-// repair scan into the middle of the cross-reference load, and the rebuilt table it installed (later definition of a
-// number wins) replaced the classic table (newest increment wins) that had already been read.
+// self-contained: a direct /Filter decodes normally and the section's entries land in the table; an indirect one is
+// refused before StreamData can resolve it against the table this section is still defining — here through a stale
+// entry from the newer classic table that points object 7 somewhere it is not. The object-2 assertion catches a repair
+// scan pulled into the middle of the cross-reference load, whose rebuilt table (later definition wins) would replace
+// the classic table (newest increment wins) already read.
 func TestXrefStreamRequiresDirectFilter(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -162,12 +161,11 @@ func TestXrefStreamRequiresDirectFilter(t *testing.T) {
 	}
 }
 
-// hybridIndirectFilterPDF builds a hybrid-reference file whose /XRefStm cross-reference stream names its /Filter as
-// 7 0 R when indirect is set and as /FlateDecode directly when it is not. The classic table locates object 7 at an
-// offset that does not hold it, so resolving that reference fails — which, before the fix, ran the repair scan from
-// inside the cross-reference load. The table is complete and is the only thing distinguishing the file's two
-// definitions of object 2: it names the first, while a repair sweep names the last definition of each number. Object 4
-// appears only in the cross-reference stream's own /Index, so its presence reports whether that section was read.
+// hybridIndirectFilterPDF builds a hybrid-reference file whose /XRefStm stream names its /Filter as 7 0 R when indirect
+// is set and as /FlateDecode otherwise. The classic table locates object 7 at an offset that does not hold it, so
+// resolving the reference fails. The table is complete and names the first of the file's two definitions of object 2,
+// while a repair sweep names the last. Object 4 appears only in the stream's /Index, so its presence reports whether
+// that section was read.
 func hybridIndirectFilterPDF(indirect bool) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
@@ -265,12 +263,8 @@ func bigIndexXrefStreamPDF(rows int) []byte {
 	return buf.Bytes()
 }
 
-// TestXrefStreamRowBudget covers the bound on how many entries the cross-reference stream path may register. A classic
-// table pays 20 file bytes per entry, but a stream row costs rowLen bytes of decoded payload, and internal/filter lets
-// a stream decode to max(64 MB, 256x input): /W [1 1 1] with /Index [0 16777216] fits setEntry's whole object-number
-// range into a 49 KB file, and the resulting map is retained for the document's lifetime (measured: ~1.9 GB allocated
-// by Open alone, before any page is rendered). Rows past the budget are dropped like a truncated payload, keeping the
-// entries already read.
+// TestXrefStreamRowBudget covers the bound on entries the cross-reference stream path may register (see
+// minXrefStreamRows): rows past the budget are dropped like a truncated payload, keeping the entries already read.
 func TestXrefStreamRowBudget(t *testing.T) {
 	t.Run("within the budget nothing is dropped", func(t *testing.T) {
 		const rows = 64
@@ -358,12 +352,9 @@ func hybridFreeOverridePDF(newer bool) []byte {
 	return buf.Bytes()
 }
 
-// TestHybridXRefStmOverridesFreeEntry covers the precedence a hybrid file actually needs. A free classic entry is what
-// a hybrid producer writes for an object it can only express in the /XRefStm, but the stream is read after the table of
-// the same section and the first entry seen used to win outright, so the placeholder permanently shadowed the real
-// entry: the object read as Null and, when the number named an object stream, everything stored inside it went with it.
-// The override is narrow — only a free entry this section's own table installed, and only for a non-free stream entry —
-// so the table still beats the stream for in-use objects and a newer section still beats both.
+// TestHybridXRefStmOverridesFreeEntry covers the precedence a hybrid file needs: the free classic placeholder for an
+// object only the /XRefStm can express must not shadow the stream's real entry, while the table still beats the stream
+// for in-use objects and a newer section beats both (see setStreamEntry).
 func TestHybridXRefStmOverridesFreeEntry(t *testing.T) {
 	d, err := Open(hybridFreeOverridePDF(false))
 	if err != nil {
@@ -439,11 +430,9 @@ func repeatedXRefStmPDF(sections, rows int) []byte {
 	return buf.Bytes()
 }
 
-// TestHybridXRefStmReadOnce covers the work a hybrid file's /XRefStm can force. loadXref's visited set tracks the
-// /Prev chain's own offsets, so a file chaining N sixty-byte classic sections that all name one cross-reference stream
-// made readXrefStream re-parse and fully re-inflate that stream N times — the d.xrefStreamRows budget short-circuits
-// only the row loop, which runs after StreamData has already produced the whole payload. Measured before the fix: a
-// 133 KB file with 2000 sections and an 8 MB-decoding stream took about 6.5 seconds, scaling linearly.
+// TestHybridXRefStmReadOnce covers the work a hybrid file's /XRefStm can force: N classic sections naming one
+// cross-reference stream must inflate it once, not N times (see readXrefSection). Re-read per section, a 133 KB file
+// with 2000 sections and an 8 MB-decoding stream took about 6.5 seconds.
 func TestHybridXRefStmReadOnce(t *testing.T) {
 	const sections = 64
 	const rows = 1 << 14

@@ -18,8 +18,8 @@ import (
 
 // Charstring execution: go-text's psinterpreter supplies the Type1Charstring machine (number encodings, argument stack,
 // subroutine calls without bias) and the shared CharstringReader geometry helpers; this file contributes the Type 1
-// operator handler — hsbw/sbw, seac, the flex and hint-replacement othersubr protocol, and div/pop — per the Adobe Type
-// 1 Font Format specification chapter 6-8.
+// operator handler (hsbw/sbw, seac, the flex and hint-replacement othersubr protocol, div/pop) per the Adobe Type 1
+// Font Format specification, chapters 6-8.
 
 // Caps against hostile charstrings.
 const (
@@ -32,10 +32,10 @@ const (
 	maxSegments = 1 << 14
 )
 
-// Glyph interprets the named glyph's charstring, returning its outline segments (in glyph units, y up — the caller maps
+// Glyph interprets the named glyph's charstring, returning its outline segments (in glyph units, y up; the caller maps
 // them through FontMatrix) and its advance width from hsbw/sbw. Unknown names and execution failures return
-// ErrBadCharstring; hostile programs cannot panic (the machine and handler are bounds-checked throughout, and a recover
-// guard backstops them).
+// ErrBadCharstring; hostile programs cannot panic (the machine and handler are bounds-checked, and a recover guard
+// backstops them).
 func (f *Font) Glyph(name string) (segs []ot.Segment, advance float32, err error) {
 	defer func() {
 		if recover() != nil {
@@ -81,11 +81,11 @@ func (f *Font) run(name string, widthOnly bool) (*handler, error) {
 
 // handler implements psi.OperatorHandler for Type 1 charstrings.
 //
-// Path-state notes: CharstringReader implements Type 2 semantics, where contours close only implicitly (on the next
-// moveto or at the end). Type 1 adds the explicit closepath operator — which per its spec does NOT reposition the
-// current point — so the handler tracks contour state itself (contourStart, justClosed, needClose) to suppress the
-// duplicate closing segments the reader would otherwise emit, and folds the hsbw/sbw sidebearing origin into the first
-// path operation instead of faking a move.
+// CharstringReader implements Type 2 semantics, where contours close only implicitly (on the next moveto or at the
+// end). Type 1 adds the explicit closepath operator, which per its spec does not reposition the current point, so the
+// handler tracks contour state itself (contourStart, justClosed, needClose) to suppress the duplicate closing segments
+// the reader would otherwise emit, and folds the hsbw/sbw sidebearing origin into the first path operation instead of
+// faking a move.
 type handler struct {
 	font *Font
 	// psStack is the PostScript communication stack of the othersubr protocol: callothersubr pushes results (or
@@ -246,11 +246,9 @@ func (h *handler) Apply(state *psi.Machine, op psi.Operator) error {
 		h.needClose = false
 		h.justClosed = true
 	case opCallsubr:
-		// No stack clear: the subroutine consumes the remaining arguments. The index is popped here rather than through
-		// psi.LocalSubr, which narrows it with a raw int32() conversion — implementation-defined for a value that does
-		// not fit, and the platforms disagree: a NaN built by div (Inf/Inf) becomes 0 on arm64 (subr 0 runs and the
-		// glyph draws) but -2^31 on amd64 (the call errors and the glyph is dropped). csIndex makes the rejection
-		// identical everywhere, the way every other addressing operand in this file is validated.
+		// No stack clear: the subroutine consumes the remaining arguments. csIndex validates the index rather than
+		// psi.LocalSubr's raw int32() narrowing, which is implementation-defined for a value that does not fit: a NaN
+		// built by div (Inf/Inf) becomes 0 on arm64 (subr 0 runs) but -2^31 on amd64 (the call errors).
 		if state.ArgStack.Top < 1 {
 			return ErrBadCharstring
 		}
@@ -393,13 +391,11 @@ func (h *handler) flexMove(state *psi.Machine, op byte) error {
 	return nil
 }
 
-// csIndex converts a charstring operand that addresses something — an othersubr number, its argument count, a seac
-// component's StandardEncoding code — to an int, mapping anything that is not a finite value in [0, maxV] to -1 so the
-// caller's range check rejects it. The bounds are applied in float space on purpose: Go leaves a float→int conversion
-// implementation-defined when the value does not fit, and the platforms disagree — amd64 wraps every out-of-range
-// operand (and NaN) to the minimum integer while arm64 saturates to the nearest bound and maps NaN to 0. A hostile
-// charstring reaches such operands easily (a chain of div operators overflows to ±Inf, and dividing those yields NaN),
-// so clamping here makes the rejection identical on every architecture instead of leaving it to how the CPU converts.
+// csIndex converts a charstring operand that addresses something (a subr or othersubr number, an argument count, a
+// seac component's StandardEncoding code) to an int, mapping anything not finite and in [0, maxV] to -1 so the caller's
+// range check rejects it. The bounds are applied in float space because Go leaves an out-of-range float-to-int
+// conversion implementation-defined and the platforms disagree (amd64 wraps every out-of-range operand and NaN to the
+// minimum integer; arm64 saturates and maps NaN to 0), and a chain of div operators reaches ±Inf and NaN easily.
 func csIndex(v float64, maxV int) int {
 	if math.IsNaN(v) || v < 0 || v > float64(maxV) {
 		return -1
@@ -453,7 +449,7 @@ func (h *handler) pushPS(args []float64) {
 }
 
 // flexEnd assembles the two collected flex curves. The protocol collects exactly 7 points: the reference point
-// (discarded — it exists for the hint mechanism) and the 6 control/end points of the two Béziers. The end coordinates
+// (discarded; it serves the hint mechanism) and the 6 control/end points of the two Béziers. The end coordinates
 // duplicated in args feed the two pops that follow.
 func (h *handler) flexEnd(args []float64) error {
 	h.inFlex = false

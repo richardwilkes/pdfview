@@ -17,9 +17,8 @@ import (
 )
 
 // TestNextMatchesReferenceVector pins Next to the splitmix64 sequence for a zero state, computed independently of
-// this package from the algorithm's published constants. Every SIMD test in the repository seeds this generator and
-// compares against buffers it produced earlier, so the sequence itself is load-bearing: a change to a shift or a
-// constant fails here first, with a clear message, rather than as an opaque equivalence-test diff elsewhere.
+// this package from the algorithm's published constants. Every SIMD test seeds this generator, so a change to a shift
+// or a constant fails here first rather than as an opaque equivalence-test diff elsewhere.
 func TestNextMatchesReferenceVector(t *testing.T) {
 	want := []uint64{0xe220a8397b1dcdaf, 0x6e789e6aa1b965f4, 0x06c45d188009454f, 0xf88bb8a8724c81ec, 0x1b39896a51a8749b}
 	var r testrand.Rand
@@ -30,8 +29,8 @@ func TestNextMatchesReferenceVector(t *testing.T) {
 	}
 }
 
-// TestSeedIsState pins that Rand(seed) starts from exactly that state, with no scrambling of the seed on the way in:
-// the values below were computed independently for a state of 0x5eed.
+// TestSeedIsState pins that Rand(seed) starts from exactly that state, with no scrambling of the seed: the values were
+// computed independently for a state of 0x5eed.
 func TestSeedIsState(t *testing.T) {
 	want := []uint64{0x09f1fd9d03f0a9b4, 0x553274161bbf8475, 0x5d5bca4696b343b3}
 	r := testrand.Rand(0x5eed)
@@ -42,9 +41,8 @@ func TestSeedIsState(t *testing.T) {
 	}
 }
 
-// TestFillDerivesFromNext pins Fill's byte choice — bits 24..31 of each Next value — against a shadow generator with
-// the same seed. Next itself is pinned by the reference vector above, so together the two tests fix every byte Fill
-// can produce.
+// TestFillDerivesFromNext pins Fill's byte choice, bits 24..31 of each Next value, against a shadow generator with the
+// same seed.
 func TestFillDerivesFromNext(t *testing.T) {
 	r := testrand.Rand(0xf00d)
 	shadow := testrand.Rand(0xf00d)

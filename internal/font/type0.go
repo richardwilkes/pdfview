@@ -19,9 +19,9 @@ import (
 // Type0 (composite) fonts, ISO 32000-2 9.7: a CMap decodes the multi-byte string codes to CIDs, and one descendant
 // CIDFont supplies the glyphs — CIDFontType2 (TrueType: CID→GID via /CIDToGIDMap, outlines through the direct glyf
 // walker, never gated on go-text's cmap requirement) or CIDFontType0 (CFF: CID→GID via the program's own charset,
-// outlines through go-text's CFF loader, which handles FDSelect internally). Widths come from /W with /DW as the
-// default (1000 when absent); vertical mode adds /W2 and /DW2. The PDF /Widths rules for simple fonts do not apply
-// here.
+// outlines through the budgeted Type 2 interpreter in cff_charstring.go, which resolves FDSelect). Widths come from /W
+// with /DW as the default (1000 when absent); vertical mode adds /W2 and /DW2. The PDF /Widths rules for simple fonts
+// do not apply here.
 
 // type0Info carries the composite-font state hanging off Font.
 type type0Info struct {
@@ -31,7 +31,7 @@ type type0Info struct {
 	// cffCID maps CIDs to GIDs for CID-keyed CFF programs; nil for CIDFontType2 (and for non-CID-keyed CFF descendants,
 	// where CID = GID per ISO 32000-2 9.7.4.2).
 	cffCID *cffCID
-	// glyf is the outline source for CIDFontType2 (the descendant's sfnt info holds the parsed program).
+	// sfnt is the parsed CIDFontType2 program; its glyf walker is the outline source.
 	sfnt *sfntInfo
 	w    []wRange
 	w2   []w2Range
@@ -87,12 +87,11 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 	// Dispatch on which FontFile is actually present rather than trusting /Subtype: a font mislabeled "CIDFontType2"
 	// whose program really sits in FontFile3 (bare/Type1C CFF) must still be parsed from FontFile3, not routed into the
 	// SFNT arm with a nil stream and then substituted away (ISO 32000-2 9.7.4.2). Each entry is tried in turn and one
-	// that yields no usable program falls through to the next, so a descriptor carrying both a corrupt FontFile2 and a
-	// usable FontFile3 still renders its real glyphs — the same allowance loadSimple makes for simple fonts. For a
-	// composite font "usable" means a glyf walker specifically (cidGlyphs): Font.GlyphPath draws a CIDFontType2 only
-	// through that walker, so an sfnt that parsed its head table but carries no glyf/loca/maxp — a truncated FontFile2,
-	// or the mislabeled but real-world case of a CFF-flavored OpenType program placed in FontFile2 — would otherwise
-	// render nothing at all while suppressing the substitute that could have drawn it.
+	// that yields no usable program falls through to the next, so a corrupt FontFile2 beside a usable FontFile3 still
+	// renders its real glyphs — the same allowance loadSimple makes. For a composite font "usable" means a glyf walker
+	// (cidGlyphs): Font.GlyphPath draws a CIDFontType2 only through that walker, so an sfnt with a head table but no
+	// glyf/loca/maxp — a truncated FontFile2, or a CFF-flavored OpenType program placed in FontFile2 — would otherwise
+	// render nothing while suppressing the substitute that could have drawn it.
 	embedded := false
 	if desc.fontFile2 != nil {
 		if sfnt := parseSFNTStream(d, desc.fontFile2); sfnt.cidGlyphs() {
@@ -105,13 +104,9 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		}
 	}
 	if info.sfnt == nil && desc.fontFile3 != nil {
-		// ISO 32000-2 9.9 Table 126 permits /FontFile3 with /Subtype /OpenType for CIDFontType0 and CIDFontType2 alike,
-		// so an sfnt wrapper is tried before reading the stream as bare CFF — the same order loadSimple takes. Without
-		// it a composite font whose program is a real sfnt failed the OTTO/0x00010000 header check in the CFF reader
-		// and was substituted away: its ascender fell back to the standard-14 pin and its glyphs came from Liberation
-		// through /ToUnicode, or, with no /ToUnicode, nothing rendered at all. /Subtype is not consulted (loadType0
-		// dispatches on what is actually present, per the comment above); a stream that is not an sfnt fails the header
-		// check here and costs nothing.
+		// ISO 32000-2 9.9 permits /FontFile3 with /Subtype /OpenType for CIDFontType0 and CIDFontType2 alike, so an sfnt
+		// wrapper is tried before reading the stream as bare CFF, in the same order loadSimple takes. /Subtype is not
+		// consulted (see above); a stream that is not an sfnt fails the header check here and costs nothing.
 		if sfnt := parseSFNTStream(d, desc.fontFile3); sfnt.cidGlyphs() {
 			info.sfnt = sfnt
 			f.ascender, f.descender = sfnt.ascender, sfnt.descender
@@ -139,13 +134,13 @@ func loadType0(d *cos.Document, dict cos.Dict) (*Font, error) {
 		f.ascender, f.descender = substituteMetrics(&desc, std14)
 	}
 	// Shapes, like loadSimple: the substitute owns the glyphs exactly when no embedded program can draw one — Liberation
-	// shapes reached through Unicode (which needs ToUnicode; without one, nothing renders — accepted until a corpus file
+	// shapes reached through Unicode, which needs a /ToUnicode (without one nothing renders; accepted until a corpus file
 	// demands better). The test is "no glyph source exists", not "no metrics were recovered": a FontFile3 whose Top DICT
-	// yields a usable /FontBBox but whose program go-text's cff.Parse rejects (truncated after the Top DICT INDEX)
-	// records metrics and nothing else, and gating substitution on those metrics left every glyph of that font invisible
-	// while its widths still advanced. Conversely, a program that parsed keeps its own shapes even when its /FontBBox was
-	// unusable: substituting those would have Font.GID resolve codes through the substitute's cmap while Font.GlyphPath
-	// pulled the same indices out of the embedded charstrings, drawing arbitrary glyphs.
+	// yields a usable /FontBBox but whose program go-text's cff.Parse rejects (truncated after the Top DICT INDEX) has
+	// metrics and nothing else, and must still substitute or every glyph is invisible while its widths advance.
+	// Conversely, a program that parsed keeps its own shapes even when its /FontBBox was unusable: substituting would
+	// have Font.GID resolve codes through the substitute's cmap while Font.GlyphPath pulled the same indices out of the
+	// embedded charstrings, drawing arbitrary glyphs.
 	if info.sfnt == nil && f.cff == nil {
 		f.sub = loadSubstitute(std14)
 	}
@@ -314,10 +309,9 @@ func parseWArray(d *cos.Document, arr cos.Array) []wRange {
 }
 
 // disjointCIDRanges sorts /W, /W2 or CMap entries by starting CID (or character code) and trims away any overlap,
-// leaving a strictly increasing, non-overlapping list that cidWidth, cidVMetrics, cid and bfRune can binary search
-// rather than walking from the start for every glyph shown — a CJK CIDFont routinely carries thousands of entries, and
-// parsing accepts up to maxCMapRanges. span reports an entry's inclusive bounds and clipTo advances its start (dropping
-// the shadowed leading values).
+// leaving a strictly increasing, non-overlapping list that cidWidth, cidVMetrics, cid and bfRune can binary search — a
+// CJK CIDFont routinely carries thousands of entries, up to maxCMapRanges. span reports an entry's inclusive bounds and
+// clipTo advances its start (dropping the shadowed leading values).
 //
 // Overlap is malformed: ISO 32000-2 9.7.4.3 assigns each CID a single width. The contested span goes to the entry with
 // the lower starting CID, and the earlier array entry breaks a tie.
