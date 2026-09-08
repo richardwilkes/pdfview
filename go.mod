@@ -7,5 +7,3 @@ require (
 	github.com/richardwilkes/canvas v0.3.0
 	golang.org/x/image v0.45.0
 )
-
-replace github.com/richardwilkes/canvas => ../canvas
