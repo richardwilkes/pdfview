@@ -16,7 +16,6 @@ import (
 
 	otfont "github.com/go-text/typesetting/font"
 	"github.com/go-text/typesetting/font/opentype"
-	"github.com/go-text/typesetting/font/opentype/tables"
 
 	"github.com/richardwilkes/pdfview/internal/font/data"
 	"github.com/richardwilkes/pdfview/internal/gfx"
@@ -205,8 +204,9 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 	case f.sfnt != nil:
 		if f.sfnt.cff != nil {
 			// CFF-flavored OpenType: go-text's GlyphDataOutline would reach the same charstrings through its own
-			// unbudgeted cff.CFF.LoadGlyph, so the wrapped 'CFF ' table is interpreted here instead (cff_charstring.go).
-			// The scale is the head table's upem, not the CFF FontMatrix, since the wrapper's units govern.
+			// unbudgeted cff.CFF.LoadGlyph, so the wrapped 'CFF ' table is interpreted here instead
+			// (cff_charstring.go). The scale is the head table's upem, not the CFF FontMatrix, since the wrapper's
+			// units govern.
 			if f.sfnt.upem <= 0 {
 				return nil
 			}
@@ -217,7 +217,7 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 			return segmentsToPath(segs, gfx.Scale(1/f.sfnt.upem, 1/f.sfnt.upem))
 		}
 		if f.sfnt.face != nil {
-			outline, ok := f.sfnt.face.GlyphDataOutline(tables.GlyphID(gid))
+			outline, ok := f.sfnt.face.GlyphDataOutline(otfont.GID(gid))
 			if !ok || f.sfnt.upem <= 0 {
 				return nil
 			}
@@ -242,7 +242,7 @@ func (f *Font) GlyphPath(gid uint32) (p *gfx.Path) {
 			// original font never had (the embedded cases keep gid 0 — MuPDF draws an embedded program's own .notdef).
 			return nil
 		}
-		outline, ok := f.sub.face.GlyphDataOutline(tables.GlyphID(gid))
+		outline, ok := f.sub.face.GlyphDataOutline(otfont.GID(gid))
 		if !ok {
 			return nil
 		}

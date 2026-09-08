@@ -591,7 +591,7 @@ func TestOpenTypeCFFOutlineMatchesFace(t *testing.T) {
 	if f.sfnt.cff == nil {
 		t.Fatal("the wrapped 'CFF ' table was not prepared, so outlines still run unbudgeted through the face")
 	}
-	outline, ok := f.sfnt.face.GlyphDataOutline(tables.GlyphID(1))
+	outline, ok := f.sfnt.face.GlyphDataOutline(opentype.GID(1))
 	if !ok {
 		t.Fatal("go-text drew nothing for the wrapped CFF glyph")
 	}
